@@ -1,4 +1,4 @@
-ARG BUILD_FROM=ghcr.io/hassio-addons/debian-base/amd64:3.2.3
+ARG BUILD_FROM=ghcr.io/hassio-addons/debian-base/amd64:5.1.1
 FROM ${BUILD_FROM}
 
 # Set shell
