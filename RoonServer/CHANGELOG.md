@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
  - App Armor? 
  - Web Gui based on https://github.com/pluggemi/roon-web-controller/tree/alpha ?
 
+## [202110.1] 20 October 2021
+### Added
+ - Bumped debian to bullseye
+ - checked per Roon instruction of a lib for the new release was there (libicu67)
+
 ## [202104.6] 23 april 2021
 ### Added
  - DOC file
