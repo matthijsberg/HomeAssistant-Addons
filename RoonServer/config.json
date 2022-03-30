@@ -1,6 +1,6 @@
 {
   "name": "Roon Server",
-  "version": "202203.1",
+  "version": "202203.2",
   "slug": "roon_server",
   "description": "Roon Server to run in your HA config. Requires a Roon subscription! Configure via APP",
   "arch": ["amd64"],
