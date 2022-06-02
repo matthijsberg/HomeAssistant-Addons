@@ -11,5 +11,6 @@
   "options": {},
   "schema": {},
   "host_network": true,
-  "realtime": true
+  "realtime": true,
+  "init": false
 }
