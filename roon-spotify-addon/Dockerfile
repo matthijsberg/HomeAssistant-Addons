@@ -19,7 +19,8 @@ RUN apk add --no-cache \
     cifs-utils \
     bzip2 \
     alsa-utils \
-    jq
+    jq \
+    bash
 
 # Copy spotifyd from the build stage
 COPY --from=spotifyd-builder /spotifyd/target/release/spotifyd /usr/bin/spotifyd
