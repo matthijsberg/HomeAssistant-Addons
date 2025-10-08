@@ -7,7 +7,7 @@ if [ ! -d /data/roon/RoonServer ]; then
     mkdir -p /data/roon/RoonServer
     curl -O http://download.roonlabs.net/builds/roonserver-installer-linuxx64.sh && \
     chmod +x roonserver-installer-linuxx64.sh && \
-    ./roonserver-installer-linuxx64.sh && \
+    bash ./roonserver-installer-linuxx64.sh && \
     rm roonserver-installer-linuxx64.sh
     mv /opt/RoonServer /data/roon/
     if [ -d /var/roon ]; then
