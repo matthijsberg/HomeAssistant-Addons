@@ -1,7 +1,7 @@
 {
   "build_from": {
-    "aarch64": "ghcr.io/home-assistant/aarch64-base:latest",
-    "amd64": "ghcr.io/home-assistant/amd64-base:latest"
+    "aarch64": "ghcr.io/hassio-addons/debian-base/aarch64:latest",
+    "amd64": "ghcr.io/hassio-addons/debian-base/amd64:latest"
   },
   "args": {}
 }
