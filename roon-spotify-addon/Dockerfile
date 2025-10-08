@@ -2,14 +2,14 @@ ARG BUILD_FROM
 
 # Dockerfile for Roon Spotify Add-on
 
-# Build stage for spotifyd
-FROM rust:latest AS spotifyd-builder
+# Build stage for spotifyd (Using Debian Buster to match base image)
+FROM rust:1.73.0-buster AS spotifyd-builder
 RUN apt-get update && apt-get install -y libasound2-dev pkg-config build-essential git
 RUN git clone https://github.com/Spotifyd/spotifyd.git && \
     cd spotifyd && \
     cargo build --release
 
-# Main image - SWITCHED TO DEBIAN BASE
+# Main image
 FROM ${BUILD_FROM}
 
 # Install dependencies

@@ -1,20 +1,12 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
 
 # Install Roon Server if not already installed
-if [ ! -d /data/roon/RoonServer ]; then
-    echo "Installing Roon Server..."
-    mkdir -p /data/roon/RoonServer
-    curl -O http://download.roonlabs.net/builds/roonserver-installer-linuxx64.sh && \
-    chmod +x roonserver-installer-linuxx64.sh && \
-    bash ./roonserver-installer-linuxx64.sh && \
-    rm roonserver-installer-linuxx64.sh
-    mv /opt/RoonServer /data/roon/
-    if [ -d /var/roon ]; then
-        mv /var/roon/* /data/roon/
-        rm -rf /var/roon
-    fi
-    ln -s /data/roon /var/roon
+if [ ! -d /data/RoonServer ]; then
+    echo "Roon Server not found in /data, installing..."
+    curl -o RoonServer_linuxx64.tar.bz2 http://download.roonlabs.net/builds/RoonServer_linuxx64.tar.bz2
+    tar -xjf RoonServer_linuxx64.tar.bz2
+    rm RoonServer_linuxx64.tar.bz2
+    mv RoonServer /data/
 fi
 
 # Get options
@@ -38,12 +30,11 @@ spotifyd --no-daemon &
 
 # Start Roon Server
 echo "Starting Roon Server..."
-/data/roon/RoonServer/start.sh
-
-# Wait for the log file to be created
-while [ ! -f /data/roon/RoonServer/Logs/RoonServer_log.txt ]; do
-    sleep 1
-done
+/data/RoonServer/start.sh
 
 # Keep the container running by tailing the log file
-tail -f /data/roon/RoonServer/Logs/RoonServer_log.txt
+# The log file is created by Roon's start script inside the /data directory
+while [ ! -f /data/RoonServer/Logs/RoonServer_log.txt ]; do
+    sleep 1
+done
+tail -f /data/RoonServer/Logs/RoonServer_log.txt
