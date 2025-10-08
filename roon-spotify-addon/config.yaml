@@ -1,12 +1,12 @@
 name: "Roon Spotify Add-on"
-version: "0.1.4"
+version: "0.1.5"
 slug: "roon_spotify_addon"
 description: "Roon Server with a Spotify Connect endpoint"
 arch:
   - aarch64
   - amd64
 init: false
-hassio_api: true
+host_network: true
 map:
   - "data:rw"
 modules:
