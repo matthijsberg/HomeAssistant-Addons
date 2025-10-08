@@ -1,13 +1,14 @@
 # Dockerfile for Roon Spotify Add-on
 
 # Build stage for spotifyd
-FROM rust:latest as spotifyd-builder
+FROM rust:latest AS spotifyd-builder
 RUN apt-get update && apt-get install -y libasound2-dev pkg-config build-essential git
 RUN git clone https://github.com/Spotifyd/spotifyd.git && \
     cd spotifyd && \
     cargo build --release
 
 # Main image
+ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
 # Install dependencies
