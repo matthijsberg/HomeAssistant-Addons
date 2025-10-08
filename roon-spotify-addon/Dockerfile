@@ -1,3 +1,5 @@
+ARG BUILD_FROM
+
 # Dockerfile for Roon Spotify Add-on
 
 # Build stage for spotifyd
@@ -8,7 +10,6 @@ RUN git clone https://github.com/Spotifyd/spotifyd.git && \
     cargo build --release
 
 # Main image
-ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
 # Install dependencies
