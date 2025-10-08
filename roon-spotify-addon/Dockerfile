@@ -9,18 +9,19 @@ RUN git clone https://github.com/Spotifyd/spotifyd.git && \
     cd spotifyd && \
     cargo build --release
 
-# Main image
+# Main image - SWITCHED TO DEBIAN BASE
 FROM ${BUILD_FROM}
 
 # Install dependencies
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     cifs-utils \
     bzip2 \
     alsa-utils \
     jq \
-    bash
+    bash \
+    wget
 
 # Copy spotifyd from the build stage
 COPY --from=spotifyd-builder /spotifyd/target/release/spotifyd /usr/bin/spotifyd
