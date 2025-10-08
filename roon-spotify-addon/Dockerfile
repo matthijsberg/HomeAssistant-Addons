@@ -4,7 +4,7 @@ ARG BUILD_FROM
 
 # Build stage for spotifyd
 FROM rust:latest AS spotifyd-builder
-RUN apt-get update && apt-get install -y libasound2-dev pkg-config build-essential git
+RUN apk add --no-cache alsa-lib-dev pkgconfig build-base git
 RUN git clone https://github.com/Spotifyd/spotifyd.git && \
     cd spotifyd && \
     cargo build --release
@@ -13,7 +13,7 @@ RUN git clone https://github.com/Spotifyd/spotifyd.git && \
 FROM ${BUILD_FROM}
 
 # Install dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     ffmpeg \
     curl \
     cifs-utils \
