@@ -1,0 +1,19 @@
+pcm.!default {
+    type asym
+    playback.pcm "spotify_out"
+    capture.pcm "roon_in"
+}
+
+pcm.spotify_out {
+    type plug
+    slave.pcm {
+        pcm "hw:Loopback,0,0"
+    }
+}
+
+pcm.roon_in {
+    type plug
+    slave.pcm {
+        pcm "hw:Loopback,1,0"
+    }
+}
