@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Load the ALSA loopback module
+modprobe snd-aloop
+
 # Set Roon data directories to the persistent /data folder
 export ROON_DATAROOT=/data
 export ROON_ID_DIR=/data
