@@ -1,5 +1,5 @@
 name: "Roon Spotify Add-on"
-version: "0.2.7"
+version: "0.2.8"
 slug: "roon_spotify_addon"
 description: "Roon Server with a Spotify Connect endpoint"
 arch:
@@ -12,6 +12,7 @@ map:
 modules:
   - snd-aloop
 audio: true
+protection: false
 options:
   spotify_username: ""
   spotify_password: ""
