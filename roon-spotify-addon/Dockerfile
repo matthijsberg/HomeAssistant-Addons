@@ -5,8 +5,9 @@ ARG BUILD_FROM
 # Build stage for spotifyd (Using Debian Bullseye to match base image)
 FROM rust:bullseye AS spotifyd-builder
 RUN apt-get update && apt-get install -y libasound2-dev pkg-config build-essential git
-# Use cargo install for the latest stable version
-RUN cargo install spotifyd --locked
+RUN git clone https://github.com/Spotifyd/spotifyd.git && \
+    cd spotifyd && \
+    cargo build --release
 
 # Main image
 FROM ${BUILD_FROM}
@@ -23,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget
 
 # Copy spotifyd from the build stage
-COPY --from=spotifyd-builder /usr/local/cargo/bin/spotifyd /usr/bin/spotifyd
+COPY --from=spotifyd-builder /spotifyd/target/release/spotifyd /usr/bin/spotifyd
 
 # Copy the ALSA configuration
 COPY asoundrc /etc/asound.conf

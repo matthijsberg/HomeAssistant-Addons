@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Set Roon data directories to the persistent /data folder
+export ROON_DATAROOT=/data
+export ROON_ID_DIR=/data
+
 # Install Roon Server if not already installed
 if [ ! -d /data/RoonServer ]; then
     echo "Roon Server not found in /data, installing..."
