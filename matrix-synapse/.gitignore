@@ -1,0 +1,7 @@
+*.log
+*.sql.gz
+*.tar.gz
+__pycache__/
+.env
+data/
+postgres/

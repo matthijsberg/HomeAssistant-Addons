@@ -1,0 +1,42 @@
+name: "Matrix Synapse + Sliding Sync"
+slug: "matrix_synapse"
+version: "1.0.0"
+description: "High-performance Matrix Synapse Homeserver + PostgreSQL + Sliding Sync for Home Assistant"
+url: "https://github.com/matrix-org/synapse"
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+ingress: true
+ingress_port: 8008
+host_network: false
+map:
+  - "ssl:rw"
+  - "backup:rw"
+  - "config:rw"
+  - "share:rw"
+ports:
+  8008/tcp: 8008
+  8448/tcp: 8448
+  8009/tcp: 8009
+ports_description:
+  8008/tcp: "Matrix Client HTTP API"
+  8448/tcp: "Matrix Federation & Client HTTPS"
+  8009/tcp: "Sliding Sync Proxy (Element X)"
+options:
+  server_name: "matrix.local"
+  enable_sliding_sync: true
+  enable_ssl: true
+  ssl_cert: "fullchain.pem"
+  ssl_key: "privkey.pem"
+  backup_interval_hours: 24
+  registration_enabled: false
+schema:
+  server_name: str
+  enable_sliding_sync: bool
+  enable_ssl: bool
+  ssl_cert: str
+  ssl_key: str
+  backup_interval_hours: int
+  registration_enabled: bool
