@@ -13,8 +13,8 @@ RUN apk add --no-cache \
     libgcc \
     sqlite-dev
 
-# Copy conduit binary from official image
-COPY --from=conduit-source /srv/conduit/conduit /usr/local/bin/conduit
+# Copy conduit binary from official image (located at /conduit in official image)
+COPY --from=conduit-source /conduit /usr/local/bin/conduit
 RUN chmod +x /usr/local/bin/conduit
 
 # Copy rootfs/scripts
