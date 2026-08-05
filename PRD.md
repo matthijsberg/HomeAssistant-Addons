@@ -1,7 +1,7 @@
 # Product Requirements Document (PRD)
 
 ## Project Name: Home Assistant Matrix Server Add-on (`ha-addon-matrix`)
-**Version:** 0.1.0  
+**Version:** 0.1.1  
 **Status:** In Development  
 **Backend Engine:** Conduit (Rust-based Matrix Homeserver)
 

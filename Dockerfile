@@ -1,4 +1,4 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.20
+ARG BUILD_FROM=alpine:3.20
 FROM matrixconduit/matrix-conduit:v0.8.0 AS conduit-source
 
 FROM ${BUILD_FROM}
@@ -11,13 +11,14 @@ RUN apk add --no-cache \
     curl \
     ca-certificates \
     libgcc \
+    libstdc++ \
     sqlite-dev
 
-# Copy conduit binary from official image (located at /conduit in official image)
-COPY --from=conduit-source /conduit /usr/local/bin/conduit
+# Copy conduit binary from official image
+COPY --from=conduit-source /srv/conduit/conduit /usr/local/bin/conduit
 RUN chmod +x /usr/local/bin/conduit
 
-# Copy rootfs/scripts
+# Copy entrypoint script
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
