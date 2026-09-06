@@ -1,0 +1,100 @@
+# Open HEMS — Declarative Site Configuration Example
+# File: config/site_example.yaml
+#
+# Defines the topology of a residential or commercial site.
+# No hardcoded vendor code exists in the core engine; devices are dynamically
+# instantiated via their configured adapter and capabilities.
+
+site:
+  name: "Sample Residential Site"
+  timezone: "Europe/Amsterdam"
+  grid_connection:
+    phases: 3
+    max_current_per_phase_a: 25.0
+    voltage_v: 230.0
+
+tariffs:
+  provider: "energyzero"                # energyzero, entsoe, frank_energie, tibber, fixed
+  type: "dynamic_spot"                  # dynamic_spot, time_of_use, fixed
+  import_markup_eur_kwh: 0.01210
+  export_markup_eur_kwh: 0.01210
+  electricity_tax_eur_kwh: 0.11085
+  fixed_monthly_fee_eur: 6.25
+
+devices:
+  # 1. Main Grid Meter (P1 / DSMR)
+  - id: "main_grid_meter"
+    type: "grid_meter"
+    adapter: "p1_dsmr"
+    capabilities:
+      - "read_power"
+      - "read_energy"
+    connection:
+      protocol: "mqtt"
+      broker: "localhost"
+      topic: "sensors/power/p1"
+
+  # 2. Rooftop Solar Inverter
+  - id: "rooftop_solar"
+    type: "solar_inverter"
+    adapter: "sunspec_modbus"
+    capabilities:
+      - "read_power"
+      - "read_energy"
+      - "curtail_production"
+    parameters:
+      peak_power_kw: 5.5
+      tilt_deg: 40.0
+      azimuth_deg: 225.0               # Southwest
+    calibration:
+      enable_hourly_tilt_matrix: true
+      smoothing_factor: 0.20
+
+  # 3. Heat Pump (Space Heating & Cooling)
+  - id: "main_heat_pump"
+    type: "heat_pump"
+    adapter: "smart_grid_relay"
+    capabilities:
+      - "set_mode"
+      - "read_power"
+    safety_constraints:
+      min_run_time_minutes: 20
+      min_off_time_minutes: 15
+      isolate_space_heating_during_dhw: true
+    smart_grid_relay_map:
+      sg1_forced_off: {"s10s": "open", "s11s": "closed"}
+      sg2_normal: {"s10s": "open", "s11s": "open"}
+      sg3_recommended: {"s10s": "closed", "s11s": "open"}
+      sg4_forced_on: {"s10s": "closed", "s11s": "closed"}
+
+  # 4. Thermal Storage (DHW Boiler)
+  - id: "dhw_storage"
+    type: "dhw_boiler"
+    adapter: "temperature_sensor"
+    capabilities:
+      - "read_temperature"
+      - "read_energy"
+    parameters:
+      volume_liters: 350
+      emergency_threshold_c: 38.0
+      target_temperature_c: 50.0
+      boost_temperature_c: 60.0
+      reheat_deadband_c: 46.0
+
+  # 5. Hybrid Home Battery Storage
+  - id: "home_battery"
+    type: "home_battery"
+    adapter: "deye_modbus_tcp"
+    capabilities:
+      - "read_power"
+      - "read_soc"
+      - "set_power_limit"
+      - "set_mode"
+    parameters:
+      capacity_kwh: 10.0
+      max_charge_power_w: 5000
+      max_discharge_power_w: 5000
+      min_soc_pct: 10.0
+      max_soc_pct: 95.0
+      lcos_depreciation_eur_kwh: 0.0741
+      roundtrip_efficiency_pct: 87.0
