@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.3.1
+Version: 0.3.2
 Generic Energy Management Platform:
   - Clean slate framework with pluggable providers (EPEX Spot, Open-Meteo)
   - Decoupled Policy Engine with 3 Fundamental Policy Archetypes:
@@ -289,7 +289,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.3.1",
+                "version": "0.3.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -783,7 +783,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.3.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.3.2</strong></span>
             <span>Policy Decoupled</span>
         </div>
     </aside>

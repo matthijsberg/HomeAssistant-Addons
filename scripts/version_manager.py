@@ -71,6 +71,15 @@ def bump(level: str) -> str:
         content = re.sub(r'version:\s*"[^"]+"', f'version: "{new_v}"', content)
         CONFIG_FILE.write_text(content)
 
+    # Also update daemon.py version string if present
+    daemon_file = Path(__file__).resolve().parent.parent / "daemon.py"
+    if daemon_file.exists():
+        d_content = daemon_file.read_text()
+        d_content = re.sub(r'Version:\s*[\d\.\-a-z]+', f'Version: {new_v}', d_content)
+        d_content = re.sub(r'"version":\s*"[^"]+"', f'"version": "{new_v}"', d_content)
+        d_content = re.sub(r'v\d+\.\d+\.\d+[\-a-z\d\.]*', f'v{new_v}', d_content)
+        daemon_file.write_text(d_content)
+
     print(new_v)
     return new_v
 
