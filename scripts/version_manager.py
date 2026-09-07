@@ -71,7 +71,7 @@ def bump(level: str) -> str:
         content = re.sub(r'version:\s*"[^"]+"', f'version: "{new_v}"', content)
         CONFIG_FILE.write_text(content)
 
-    print(f"Version bumped: {curr} -> {new_v}")
+    print(new_v)
     return new_v
 
 

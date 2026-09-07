@@ -56,10 +56,12 @@ SECRET_PATTERNS = [
 ]
 
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 def check_staged_files():
     """Checks filenames of staged files."""
     try:
-        out = subprocess.check_output(["git", "diff", "--cached", "--name-only"], text=True)
+        out = subprocess.check_output(["git", "-C", str(REPO_ROOT), "diff", "--cached", "--name-only"], text=True)
         staged = [line.strip() for line in out.splitlines() if line.strip()]
     except Exception as e:
         print(f"Warning: Could not check git staged files: {e}")
@@ -83,7 +85,7 @@ def check_staged_files():
 def check_staged_diff():
     """Checks the actual diff (+ lines) for secrets."""
     try:
-        diff = subprocess.check_output(["git", "diff", "--cached", "-U0"], text=True)
+        diff = subprocess.check_output(["git", "-C", str(REPO_ROOT), "diff", "--cached", "-U0"], text=True)
     except Exception as e:
         print(f"Warning: Could not get git diff: {e}")
         return True
