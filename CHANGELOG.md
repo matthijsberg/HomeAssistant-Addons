@@ -10,7 +10,31 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.2.0] — 2026-09-06 (Public Release — Generic HEMS Foundation)
+## [0.3.0] — 2026-09-07 (Generic Framework & Chart.js Stacked Visualizer)
+
+### Added
+- **Clean Slate Generic Framework Architecture:**
+  - Removed all hardcoded site/device logic from core; all components are now dynamically instantiated entities.
+  - Standard pre-configured Open APIs: EPEX Spot (EnergyZero) for day-ahead/quarter-hourly pricing and Open-Meteo for solar/weather forecasts.
+- **Full CRUD for Energy Suppliers / Tariffs:**
+  - Pluggable tariff entities (Powerpeers, Tibber, NextEnergy, fixed/dynamic) with import/export markup, tax, and interval settings (`15m` / `1h`).
+- **Full CRUD for Devices & Consumers with Policies:**
+  - Dynamic device configuration with selectable operating policies: `solar_first`, `cheapest_hours`, `peak_avoidance`, `comfort_priority`, `arbitrage_and_solar`.
+  - **Home Assistant Entity Auto-Discovery & Dropdown Selector:** Direct integration with Home Assistant Core API (`/api/ha/entities`) to select live sensors (`sensor.*power*`, `sensor.*watt*`, `sensor.*temp*`) and switches (`switch.*`).
+- **Interactive 24-Hour Stacked Bar Chart (Chart.js):**
+  - Hour-by-hour stacked consumption bars: Baseload, Heat Pump / SWW Boiler, Battery Charging, EV.
+  - Overlay curves for Solar Production (kW) and Dynamic Electricity Price (€/kWh).
+  - Dynamic Recommendation Balloons / Callout Banners highlighting the cheapest hours of the day and peak solar surplus moments.
+- **Adopted Stitch Obsidian Dark-Mode Design System:**
+  - Deep `#080B11` / `#0E1422` theme, custom SVG icons, responsive layout.
+
+### Security
+- Automated pre-commit secret scan verified: 0 credentials.
+- Automatic snapshot v0.2.2 archived prior to upgrade.
+
+---
+
+## [0.2.2] — 2026-09-07 (Stitch Design System Integration)
 
 ### Added
 - **Canonical Data Model (`models/canonical.py`):**

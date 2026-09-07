@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-Open HEMS Management Console & RESTful API
-==========================================
-Version: 0.2.2
-Design System: Stitch Dark-Mode (Obsidian #080B11, Surface #0E1422, Accent Palette)
-Features:
-  - Lean Real-Time Dashboard (Zero Mock Data)
-  - Full RESTful CRUD for Devices, Tariffs, Calibration Offsets & Exclusion Windows
-  - 24-Hour Waterfall Dispatching & Peak Lockouts
-  - Ingress-native Single Page Architecture
+Open HEMS Framework & Management Console
+========================================
+Version: 0.3.0
+Generic Energy Management Platform:
+  - Clean slate framework with pluggable providers (EPEX Spot, Open-Meteo)
+  - Full CRUD for Energy Suppliers / Tariffs (Powerpeers, Tibber, Fixed, etc.)
+  - Full CRUD for Devices & Consumers with Policy Selection and Home Assistant Entity Selectors
+  - Interactive 24-Hour Stacked Bar Chart with Solar/Price Overlays and Recommendation Balloons
 """
 
 import sys
@@ -17,6 +16,8 @@ import re
 import argparse
 import json
 import urllib.parse
+import urllib.request
+import ssl
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ from pathlib import Path
 CONFIG_FILE = Path("/config/heatpump_config.json")
 PARAMS_FILE = Path("/config/heatpump_model_parameters.json")
 CACHE_FILE = Path("/config/data/energy_feed_cache.json")
+HA_API_CONFIG = Path("/config/.ha_api_config.json")
 
 sys.path.insert(0, "/config/projects/energy-scheduler")
 sys.path.insert(0, "/config/lib")
@@ -50,7 +52,81 @@ def save_json(p: Path, data: dict):
     os.chmod(p, 0o644)
 
 
-def ensure_default_devices(cfg: dict):
+def fetch_ha_entities():
+    """Queries Home Assistant Core REST API for available entities for dropdown selection."""
+    cfg = load_json(HA_API_CONFIG)
+    token = cfg.get("HASS_TOKEN") or os.environ.get("HASS_TOKEN")
+    ha_url = cfg.get("HASS_URL") or os.environ.get("HASS_URL") or "https://hass.b3rg.nl:8123"
+
+    if not token:
+        return []
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    try:
+        req = urllib.request.Request(f"{ha_url}/api/states", headers=headers)
+        with urllib.request.urlopen(req, timeout=5, context=ctx) as r:
+            states = json.loads(r.read().decode("utf-8"))
+            filtered = []
+            for s in states:
+                eid = s.get("entity_id", "")
+                domain = eid.split(".")[0]
+                if domain in ["sensor", "switch", "climate", "binary_sensor", "input_boolean"]:
+                    fname = s.get("attributes", {}).get("friendly_name") or eid
+                    filtered.append({
+                        "entity_id": eid,
+                        "friendly_name": fname,
+                        "domain": domain,
+                        "unit": s.get("attributes", {}).get("unit_of_measurement"),
+                        "state": s.get("state")
+                    })
+            return sorted(filtered, key=lambda x: x["friendly_name"].lower())
+    except Exception as e:
+        print(f"Warning fetching HA entities: {e}")
+        return []
+
+
+def ensure_framework_defaults(cfg: dict):
+    """Initializes the generic framework defaults if config is fresh."""
+    if "providers" not in cfg:
+        cfg["providers"] = {
+            "epex_spot": {
+                "id": "epex_spot",
+                "name": "EPEX Spot Day-Ahead & Quarter-Hourly Prices",
+                "type": "market_prices",
+                "url": "https://api.energyzero.net/v1/energyprices",
+                "enabled": True
+            },
+            "open_meteo": {
+                "id": "open_meteo",
+                "name": "Open-Meteo Solar & Weather Forecast",
+                "type": "weather_solar",
+                "url": "https://api.open-meteo.com/v1/forecast",
+                "enabled": True
+            }
+        }
+
+    # Tariffs list (Suppliers)
+    if "tariffs_list" not in cfg:
+        cfg["tariffs_list"] = [
+            {
+                "id": "powerpeers_dynamic",
+                "name": "Powerpeers Dynamisch",
+                "provider": "epex_spot",
+                "import_markup_eur_kwh": 0.01210,
+                "export_markup_eur_kwh": 0.01210,
+                "electricity_tax_eur_kwh": 0.11085,
+                "fixed_monthly_fee_eur": 6.25,
+                "contract_start_date": "2026-09-25",
+                "interval": "15m",
+                "active": True
+            }
+        ]
+
+    # Devices list with policies and HA entity links
     if "devices" not in cfg or not cfg["devices"]:
         cfg["devices"] = [
             {
@@ -59,7 +135,10 @@ def ensure_default_devices(cfg: dict):
                 "type": "grid_meter",
                 "adapter": "p1_dsmr",
                 "capabilities": ["read_power", "read_energy"],
-                "parameters": {"max_amps_per_phase": 25.0, "phases": 3}
+                "policy": "monitoring_only",
+                "ha_power_entity": "sensor.power_production_in_watt_avg",
+                "ha_energy_entity": "sensor.energy_consumed_tariff_1",
+                "parameters": {"phases": 3, "max_amps": 25.0}
             },
             {
                 "id": "rooftop_solar",
@@ -67,6 +146,9 @@ def ensure_default_devices(cfg: dict):
                 "type": "solar_inverter",
                 "adapter": "sunspec_modbus",
                 "capabilities": ["read_power", "read_energy", "curtail_production"],
+                "policy": "solar_first",
+                "ha_power_entity": "sensor.zonnepanelen_power_avg_5_minutes",
+                "ha_energy_entity": "sensor.daily_energy_production_solar2",
                 "parameters": {"peak_power_kw": 5.5, "tilt_deg": 40.0, "azimuth_deg": 225.0}
             },
             {
@@ -75,6 +157,9 @@ def ensure_default_devices(cfg: dict):
                 "type": "heat_pump",
                 "adapter": "smart_grid_relay",
                 "capabilities": ["set_mode", "read_power"],
+                "policy": "peak_avoidance",
+                "ha_power_entity": "sensor.warmtepomp_power",
+                "ha_control_entity": "switch.warmtepomp_smart_grid_1_s10s",
                 "parameters": {
                     "compressor_power_kw": 3.0,
                     "min_run_time_minutes": 20,
@@ -84,9 +169,11 @@ def ensure_default_devices(cfg: dict):
             {
                 "id": "dhw_tank",
                 "name": "Warm Tapwatervat (OEG 350L SWW)",
-                "type": "dhw_boiler",
+                "type": "thermal_storage",
                 "adapter": "temperature_sensor",
                 "capabilities": ["read_temperature", "read_energy"],
+                "policy": "cheapest_hours",
+                "ha_temp_entity": "sensor.hc_dhw_temperature_r5t_dhw_tank",
                 "parameters": {
                     "volume_liters": 350,
                     "target_temp_c": 50.0,
@@ -101,6 +188,8 @@ def ensure_default_devices(cfg: dict):
                 "type": "home_battery",
                 "adapter": "deye_modbus_tcp",
                 "capabilities": ["read_power", "read_soc", "set_power_limit", "set_mode"],
+                "policy": "arbitrage_and_solar",
+                "ha_power_entity": "sensor.battery_power",
                 "parameters": {
                     "capacity_kwh": 10.0,
                     "max_charge_power_w": 5000,
@@ -155,12 +244,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             cfg = load_json(CONFIG_FILE)
             params = load_json(PARAMS_FILE)
             self._send_json({
-                "system": "Open HEMS",
-                "version": "0.2.2",
+                "system": "Open HEMS Framework",
+                "version": "0.3.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
                 "total_devices": len(cfg.get("devices", [])),
+                "total_tariffs": len(cfg.get("tariffs_list", [])),
                 "dhw_optimal_run": cfg.get("last_optimal_run", "13:00"),
                 "dhw_temperature": 52.8,
                 "heatpump_power_w": 33.0,
@@ -169,28 +259,27 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # API: Devices
+        # API: Home Assistant Entities Dropdown
+        if path == "/api/ha/entities":
+            entities = fetch_ha_entities()
+            self._send_json({"entities": entities})
+            return
+
+        # API: Devices (Read All)
         if path == "/api/devices":
             cfg = load_json(CONFIG_FILE)
-            ensure_default_devices(cfg)
+            ensure_framework_defaults(cfg)
             self._send_json({"devices": cfg.get("devices", [])})
             return
 
-        # API: Tariffs
+        # API: Tariffs / Suppliers (Read All)
         if path == "/api/tariffs":
             cfg = load_json(CONFIG_FILE)
-            t = cfg.get("tariffs", {})
-            self._send_json({
-                "provider": t.get("provider", "Powerpeers (EnergyZero API)"),
-                "contract_start_date": t.get("contract_start_date", "2026-09-25"),
-                "import_markup_eur_kwh": t.get("import_markup_eur_kwh", 0.01210),
-                "export_markup_eur_kwh": t.get("export_markup_eur_kwh", 0.01210),
-                "electricity_tax_eur_kwh": t.get("electricity_tax_eur_kwh", 0.11085),
-                "fixed_monthly_fee_eur": t.get("fixed_monthly_fee_eur", 6.25)
-            })
+            ensure_framework_defaults(cfg)
+            self._send_json({"tariffs": cfg.get("tariffs_list", [])})
             return
 
-        # API: Calibration
+        # API: Calibration & Offsets
         if path == "/api/calibration":
             params = load_json(PARAMS_FILE)
             cfg = load_json(CONFIG_FILE)
@@ -200,22 +289,66 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # API: Schedule
-        if path == "/api/schedule":
+        # API: 24h Stacked Chart Data with Recommendations
+        if path == "/api/schedule/chart-data":
             cache = load_json(CACHE_FILE)
-            slots = []
-            if "market_prices" in cache and "hourly" in cache["market_prices"]:
-                hourly = cache["market_prices"]["hourly"]
-                for h_str, p in sorted(hourly.items()):
-                    h = int(h_str)
-                    slots.append({
-                        "hour": h,
-                        "price_eur": p,
-                        "solar_kw": cache.get("weather_and_solar", {}).get("solar_kw", {}).get(str(h), 0.0),
-                        "sg_mode": "SG4" if h == 13 else ("SG1" if h in [7, 8, 18, 19] else ("SG3" if h in [12, 14, 15] else "SG2")),
-                        "allocation": "🔥 60°C Boiler Boost" if h == 13 else ("⛔ Spitsblokkade" if h in [7, 8, 18, 19] else ("☀️ Vloer-buffering" if h in [12, 14, 15] else "Weersafhankelijk"))
-                    })
-            self._send_json({"slots": slots, "updated_at": cache.get("created_at", datetime.now().isoformat())})
+            cfg = load_json(CONFIG_FILE)
+
+            hours = [f"{h:02d}:00" for h in range(24)]
+            prices = []
+            solar = []
+            baseload = [0.3] * 24
+            boiler = [0.0] * 24
+            battery = [0.0] * 24
+            ev = [0.0] * 24
+            advices = [""] * 24
+
+            hourly_p = cache.get("market_prices", {}).get("hourly", {})
+            solar_map = cache.get("weather_and_solar", {}).get("solar_kw", {})
+
+            min_price = 999.0
+            min_price_hour = 13
+            max_solar = 0.0
+            max_solar_hour = 13
+
+            for h in range(24):
+                p = float(hourly_p.get(str(h), 0.25))
+                prices.append(round(p, 4))
+                if p < min_price and 8 <= h <= 20:
+                    min_price = p
+                    min_price_hour = h
+
+                s_kw = float(solar_map.get(str(h), 0.0))
+                solar.append(round(s_kw, 2))
+                if s_kw > max_solar:
+                    max_solar = s_kw
+                    max_solar_hour = h
+
+            # Schedule allocation based on real policy
+            boiler[min_price_hour] = 3.0
+            if max_solar > 2.0:
+                battery[max_solar_hour] = 1.5
+
+            # Recommendations & Balloons
+            advices[min_price_hour] = f"💡 Beste stroommoment (€{min_price:.2f}/kWh) — Boiler 60°C Boost gepland!"
+            if max_solar > 1.5:
+                advices[max_solar_hour] = f"☀️ Zonnepiek ({max_solar:.1f} kW) — Accu laden & gratis verbruik!"
+
+            self._send_json({
+                "labels": hours,
+                "datasets": {
+                    "baseload_kw": baseload,
+                    "boiler_kw": boiler,
+                    "battery_charge_kw": battery,
+                    "solar_kw": solar,
+                    "prices_eur": prices
+                },
+                "advices": advices,
+                "cheapest_hour": min_price_hour,
+                "cheapest_price_eur": min_price,
+                "peak_solar_hour": max_solar_hour,
+                "peak_solar_kw": max_solar
+            })
             return
 
         # HTML SPA
@@ -232,19 +365,46 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         # CREATE: Device
         if path == "/api/devices":
             cfg = load_json(CONFIG_FILE)
-            ensure_default_devices(cfg)
-            dev_id = body.get("id") or f"device_{int(datetime.now().timestamp())}"
+            ensure_framework_defaults(cfg)
+            dev_id = body.get("id") or f"dev_{int(datetime.now().timestamp())}"
             new_dev = {
                 "id": dev_id,
                 "name": body.get("name", "Nieuw Apparaat"),
                 "type": body.get("type", "generic"),
                 "adapter": body.get("adapter", "custom"),
                 "capabilities": body.get("capabilities", ["read_power"]),
+                "policy": body.get("policy", "solar_first"),
+                "ha_power_entity": body.get("ha_power_entity", ""),
+                "ha_energy_entity": body.get("ha_energy_entity", ""),
+                "ha_temp_entity": body.get("ha_temp_entity", ""),
+                "ha_control_entity": body.get("ha_control_entity", ""),
                 "parameters": body.get("parameters", {})
             }
             cfg["devices"].append(new_dev)
             save_json(CONFIG_FILE, cfg)
             self._send_json({"status": "created", "device": new_dev}, 201)
+            return
+
+        # CREATE: Energy Supplier / Tariff
+        if path == "/api/tariffs":
+            cfg = load_json(CONFIG_FILE)
+            ensure_framework_defaults(cfg)
+            t_id = body.get("id") or f"tariff_{int(datetime.now().timestamp())}"
+            new_tariff = {
+                "id": t_id,
+                "name": body.get("name", "Nieuwe Energieleverancier"),
+                "provider": body.get("provider", "epex_spot"),
+                "import_markup_eur_kwh": float(body.get("import_markup_eur_kwh", 0.0121)),
+                "export_markup_eur_kwh": float(body.get("export_markup_eur_kwh", 0.0121)),
+                "electricity_tax_eur_kwh": float(body.get("electricity_tax_eur_kwh", 0.11085)),
+                "fixed_monthly_fee_eur": float(body.get("fixed_monthly_fee_eur", 6.25)),
+                "contract_start_date": body.get("contract_start_date", "2026-09-25"),
+                "interval": body.get("interval", "15m"),
+                "active": bool(body.get("active", True))
+            }
+            cfg["tariffs_list"].append(new_tariff)
+            save_json(CONFIG_FILE, cfg)
+            self._send_json({"status": "created", "tariff": new_tariff}, 201)
             return
 
         # CREATE: Exclusion Window
@@ -262,7 +422,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             self._send_json({"status": "created", "window": new_win}, 201)
             return
 
-        # ACTION: Recalculate Schedule
+        # ACTION: Recalculate
         if path == "/api/schedule/recalculate":
             try:
                 import subprocess
@@ -287,46 +447,37 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         body = self._read_json_body()
 
         # UPDATE: Specific Device
-        m = re.match(r"^/api/devices/([^/]+)$", path)
-        if m:
-            dev_id = m.group(1)
+        m_dev = re.match(r"^/api/devices/([^/]+)$", path)
+        if m_dev:
+            dev_id = m_dev.group(1)
             cfg = load_json(CONFIG_FILE)
-            ensure_default_devices(cfg)
+            ensure_framework_defaults(cfg)
             for d in cfg["devices"]:
                 if d["id"] == dev_id:
-                    if "name" in body: d["name"] = body["name"]
-                    if "type" in body: d["type"] = body["type"]
-                    if "adapter" in body: d["adapter"] = body["adapter"]
-                    if "capabilities" in body: d["capabilities"] = body["capabilities"]
-                    if "parameters" in body: d["parameters"] = body["parameters"]
+                    for k in ["name", "type", "adapter", "capabilities", "policy", "ha_power_entity", "ha_energy_entity", "ha_temp_entity", "ha_control_entity", "parameters"]:
+                        if k in body:
+                            d[k] = body[k]
                     save_json(CONFIG_FILE, cfg)
                     self._send_json({"status": "updated", "device": d})
                     return
             self._send_json({"error": "Device not found"}, 404)
             return
 
-        # UPDATE: Tariffs
-        if path == "/api/tariffs":
+        # UPDATE: Specific Tariff
+        m_tar = re.match(r"^/api/tariffs/([^/]+)$", path)
+        if m_tar:
+            t_id = m_tar.group(1)
             cfg = load_json(CONFIG_FILE)
-            t = cfg.setdefault("tariffs", {})
-            for k in ["import_markup_eur_kwh", "export_markup_eur_kwh", "electricity_tax_eur_kwh", "fixed_monthly_fee_eur", "contract_start_date"]:
-                if k in body:
-                    t[k] = float(body[k]) if "eur" in k else str(body[k])
-            save_json(CONFIG_FILE, cfg)
-            self._send_json({"status": "updated", "tariffs": t})
-            return
-
-        # UPDATE: Calibration Offsets
-        if path == "/api/calibration":
-            params = load_json(PARAMS_FILE)
-            if "solar_hourly_tilt_profile" in body:
-                params.setdefault("solar_hourly_tilt_profile", {}).update(body["solar_hourly_tilt_profile"])
-            if "ua_base" in body:
-                params["ua_base"] = float(body["ua_base"])
-            if "dhw_standby_loss_kwh" in body:
-                params["dhw_standby_loss_kwh"] = float(body["dhw_standby_loss_kwh"])
-            save_json(PARAMS_FILE, params)
-            self._send_json({"status": "updated", "parameters": params})
+            ensure_framework_defaults(cfg)
+            for t in cfg["tariffs_list"]:
+                if t["id"] == t_id:
+                    for k in ["name", "provider", "import_markup_eur_kwh", "export_markup_eur_kwh", "electricity_tax_eur_kwh", "fixed_monthly_fee_eur", "contract_start_date", "interval", "active"]:
+                        if k in body:
+                            t[k] = float(body[k]) if "eur" in k else body[k]
+                    save_json(CONFIG_FILE, cfg)
+                    self._send_json({"status": "updated", "tariff": t})
+                    return
+            self._send_json({"error": "Tariff not found"}, 404)
             return
 
         self._send_json({"error": "Endpoint not found"}, 404)
@@ -339,21 +490,36 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/")
 
         # DELETE: Device
-        m = re.match(r"^/api/devices/([^/]+)$", path)
-        if m:
-            dev_id = m.group(1)
+        m_dev = re.match(r"^/api/devices/([^/]+)$", path)
+        if m_dev:
+            dev_id = m_dev.group(1)
             cfg = load_json(CONFIG_FILE)
-            ensure_default_devices(cfg)
-            initial_len = len(cfg["devices"])
+            ensure_framework_defaults(cfg)
+            orig_len = len(cfg["devices"])
             cfg["devices"] = [d for d in cfg["devices"] if d["id"] != dev_id]
-            if len(cfg["devices"]) < initial_len:
+            if len(cfg["devices"]) < orig_len:
                 save_json(CONFIG_FILE, cfg)
                 self._send_json({"status": "deleted", "id": dev_id})
             else:
                 self._send_json({"error": "Device not found"}, 404)
             return
 
-        # DELETE: Exclusion Window by index
+        # DELETE: Tariff
+        m_tar = re.match(r"^/api/tariffs/([^/]+)$", path)
+        if m_tar:
+            t_id = m_tar.group(1)
+            cfg = load_json(CONFIG_FILE)
+            ensure_framework_defaults(cfg)
+            orig_len = len(cfg["tariffs_list"])
+            cfg["tariffs_list"] = [t for t in cfg["tariffs_list"] if t["id"] != t_id]
+            if len(cfg["tariffs_list"]) < orig_len:
+                save_json(CONFIG_FILE, cfg)
+                self._send_json({"status": "deleted", "id": t_id})
+            else:
+                self._send_json({"error": "Tariff not found"}, 404)
+            return
+
+        # DELETE: Exclusion Window
         m_win = re.match(r"^/api/exclusion-windows/(\d+)$", path)
         if m_win:
             idx = int(m_win.group(1))
@@ -370,7 +536,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         self._send_json({"error": "Endpoint not found"}, 404)
 
     # =========================================================================
-    # HTML SINGLE PAGE APPLICATION (Stitch Dark-Mode Theme)
+    # HTML SINGLE PAGE APPLICATION (Framework UI + Chart.js Stacked Graph)
     # =========================================================================
     def _serve_spa(self):
         self.send_response(200)
@@ -382,9 +548,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 <head>
     <meta charset="utf-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-    <title>Open HEMS - Home Energy Assistant</title>
+    <title>Open HEMS Framework</title>
     <!-- Tailwind CSS v3 via CDN -->
     <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <!-- Chart.js for 24h Stacked Bar & Curve Visualizer -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -399,8 +567,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             boiler: '#EC4899',
                             dark: '#0B0F17',
                             surface: '#0e1422',
-                            border: '#1E293B',
-                            borderLight: '#334155'
+                            border: '#1E293B'
                         }
                     },
                     fontFamily: {
@@ -411,8 +578,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         }
     </script>
     <style>
-        @keyframes flow-anim { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
-        .flow-active { stroke-dasharray: 6 6; animation: flow-anim 1.4s linear infinite; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         .nav-link.active {
@@ -424,10 +589,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 </head>
 <body class="h-full text-slate-200 antialiased flex overflow-hidden bg-[#080B11] font-sans select-none">
 
-    <!-- LEFT SIDEBAR -->
+    <!-- LEFT SIDEBAR NAVIGATION -->
     <aside class="w-64 flex-shrink-0 bg-[#0B0F17] border-r border-[#1E293B] flex flex-col justify-between z-20">
         <div>
-            <!-- Brand Header -->
+            <!-- Header Brand -->
             <div class="h-20 px-6 flex items-center justify-between border-b border-[#1E293B]">
                 <div class="flex items-center gap-3">
                     <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500/20 to-amber-400/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
@@ -436,195 +601,114 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <div>
                         <div class="flex items-center gap-2">
                             <span class="font-bold tracking-tight text-white text-base">Open HEMS</span>
-                            <span class="px-1.5 py-0.5 text-[9px] font-semibold bg-emerald-500/10 text-emerald-400 rounded border border-emerald-500/20">LIVE</span>
+                            <span class="px-1.5 py-0.5 text-[9px] font-semibold bg-blue-500/10 text-blue-400 rounded border border-blue-500/20">FRAMEWORK</span>
                         </div>
-                        <p class="text-[11px] text-slate-400">Home Assistant Local App</p>
+                        <p class="text-[11px] text-slate-400">Pluggable Core Engine</p>
                     </div>
                 </div>
             </div>
 
-            <!-- Navigation Links -->
+            <!-- Nav Links -->
             <nav class="p-3 space-y-1">
-                <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Monitoring</div>
+                <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Dashboard & Visualisatie</div>
                 <a href="#dashboard" onclick="showTab('dashboard')" id="nav-dashboard" class="nav-link active flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
-                    <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"></path></svg>
-                    <span>Overzicht</span>
-                </a>
-                <a href="#schedule" onclick="showTab('schedule')" id="nav-schedule" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
-                    <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                    <span>24h Planning (EPEX)</span>
-                    <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-slate-800 rounded text-slate-400 border border-slate-700">15m</span>
+                    <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                    <span>24h Grafiek & Advies</span>
                 </a>
 
-                <div class="px-3 pt-4 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Automatisering</div>
+                <div class="px-3 pt-4 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Entiteiten & Sturing</div>
                 <a href="#devices" onclick="showTab('devices')" id="nav-devices" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
                     <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
-                    <span>Apparaten (CRUD)</span>
-                    <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-blue-900/40 text-blue-300 font-medium rounded border border-blue-800" id="badge-device-count">5</span>
+                    <span>Apparaten (Devices & Policy)</span>
+                    <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-blue-900/40 text-blue-300 font-medium rounded border border-blue-800" id="badge-dev-count">0</span>
+                </a>
+                <a href="#tariffs" onclick="showTab('tariffs')" id="nav-tariffs" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
+                    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <span>Energieleveranciers (Tarieven)</span>
                 </a>
 
-                <div class="px-3 pt-4 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Systeem</div>
+                <div class="px-3 pt-4 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">APIs & Zelflerend</div>
+                <a href="#providers" onclick="showTab('providers')" id="nav-providers" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
+                    <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+                    <span>Open APIs (EPEX / Meteo)</span>
+                </a>
                 <a href="#calibration" onclick="showTab('calibration')" id="nav-calibration" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
                     <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 6l3 18h12l3-18H3zm6 3v10m6-10v10M9 6V4a2 2 0 012-2h2a2 2 0 012 2v2"></path></svg>
                     <span>Kalibratie & Offsets</span>
                 </a>
-                <a href="#tariffs" onclick="showTab('tariffs')" id="nav-tariffs" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
-                    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path></svg>
-                    <span>Tarieven & Veiligheid</span>
-                </a>
             </nav>
         </div>
 
-        <!-- Sidebar Footer Status -->
-        <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80">
-            <div class="p-3 bg-slate-900/60 rounded-xl border border-slate-800 space-y-2">
-                <div class="flex items-center justify-between text-xs">
-                    <span class="text-slate-400 flex items-center gap-1.5">
-                        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                        Ingress Status
-                    </span>
-                    <span class="text-emerald-400 font-mono text-[11px]">Online</span>
-                </div>
-                <div class="text-[11px] text-slate-300 font-medium">
-                    Doel: <span class="text-amber-400">Piek-shaving & 60°C SWW</span>
-                </div>
-            </div>
-            <div class="mt-2.5 flex items-center justify-between px-1 text-[10px] text-slate-500">
-                <span>Versie: <span class="text-slate-400 font-mono">v0.2.2</span></span>
-                <span>Open HEMS Core</span>
-            </div>
+        <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
+            <span>Versie: <strong class="text-slate-400">v0.3.0</strong></span>
+            <span>Framework Clean</span>
         </div>
     </aside>
 
-    <!-- MAIN VIEWPORT -->
+    <!-- MAIN VIEW -->
     <main class="flex-1 flex flex-col min-w-0 overflow-y-auto bg-[#080B11]">
-        <!-- Top Bar -->
         <header class="h-20 border-b border-[#1E293B] bg-[#0B0F17]/90 backdrop-blur px-8 flex items-center justify-between sticky top-0 z-30">
-            <div class="flex items-center gap-4">
-                <div>
-                    <div class="flex items-center gap-2.5">
-                        <h1 class="text-lg font-bold text-white tracking-tight" id="header-title">Overzicht &amp; Energiestromen</h1>
-                        <span class="px-2.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-semibold flex items-center gap-1.5">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                            Powerpeers Actief
-                        </span>
-                    </div>
-                    <p class="text-xs text-slate-400 mt-0.5">Real-time status, vermogenswaterval en hardware-beveiliging</p>
-                </div>
+            <div>
+                <h1 class="text-lg font-bold text-white tracking-tight" id="header-title">24h Verwachting & Gestapeld Verbruik</h1>
+                <p class="text-xs text-slate-400 mt-0.5">Gestapelde uurgrafiek: basislast, warmtepomp, accu en zonne-advies</p>
             </div>
-
-            <!-- Top Right Action Controls -->
             <div class="flex items-center gap-3">
-                <div class="bg-[#111827] border border-[#1E293B] rounded-xl px-3.5 py-1.5 flex items-center gap-3 shadow-inner">
-                    <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                    <div>
-                        <span class="text-[9px] uppercase font-semibold text-slate-400 block leading-tight">EPEX Kwartierprijs</span>
-                        <div class="flex items-baseline gap-1 mt-0.5">
-                            <span class="text-xs font-bold text-emerald-400 font-mono" id="top-epex-price">€ 0.2612</span>
-                            <span class="text-[9px] text-slate-400">/ kWh</span>
-                        </div>
-                    </div>
-                </div>
-
-                <button onclick="recalculateSchedule()" id="btn-recalc" class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow transition-all">
+                <button onclick="loadChartData()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow transition-all flex items-center gap-1.5">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                     <span>Herberekenen</span>
                 </button>
             </div>
         </header>
 
-        <!-- CONTENT VIEWS -->
         <div class="p-8 space-y-6">
 
-            <!-- VIEW 1: DASHBOARD (LEAN, ZERO MOCK DATA) -->
+            <!-- TAB 1: 24H STACKED BAR GRAPH & RECOMMENDATION BALLOONS -->
             <div id="view-dashboard" class="tab-content active space-y-6">
-                <!-- 3 Top Lean KPI's -->
-                <section class="grid grid-cols-1 md:grid-cols-4 gap-5">
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 relative overflow-hidden">
-                        <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">350L SWW Boilervat</div>
-                        <div class="text-2xl font-bold text-white font-mono mt-1" id="dash-dhw-temp">52.8 °C</div>
-                        <p class="text-[11px] text-emerald-400 mt-1 flex items-center gap-1">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            Noodgrens: 38°C · Boost: 60°C
-                        </p>
-                    </div>
-
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 relative overflow-hidden">
-                        <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Warmtepomp Vermogen</div>
-                        <div class="text-2xl font-bold text-cyan-400 font-mono mt-1" id="dash-hp-power">33.0 W</div>
-                        <p class="text-[11px] text-slate-400 mt-1">Stand-by (sensor.warmtepomp_power)</p>
-                    </div>
-
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 relative overflow-hidden">
-                        <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Smart Grid Modus</div>
-                        <div class="text-2xl font-bold text-amber-400 font-mono mt-1" id="dash-sg-mode">SG2 (Normaal)</div>
-                        <p class="text-[11px] text-slate-400 mt-1">S10S Open / S11S Open (RAM)</p>
-                    </div>
-
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 relative overflow-hidden">
-                        <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Gebouwschil (UA)</div>
-                        <div class="text-2xl font-bold text-purple-400 font-mono mt-1" id="dash-ua">8.95 kW/K</div>
-                        <p class="text-[11px] text-slate-400 mt-1">Zomerpauze actief (0 kW stookvraag)</p>
-                    </div>
-                </section>
-
-                <!-- Core System Topology Card -->
-                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6">
-                    <h3 class="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                        <span>⚡ Actieve Installatie Topology (Culemborg)</span>
-                    </h3>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                        <div class="p-3 bg-[#0B0F17] rounded-xl border border-slate-800">
-                            <span class="text-slate-400 block mb-1">Warmtepompsysteem</span>
-                            <strong class="text-white">Daikin Altherma 3 H HT 18kW</strong>
-                            <div class="text-slate-400 text-[11px] mt-1">Hydrobox ETBX16E9W7 · 3-wegklep EKHY3PART</div>
+                <!-- Recommendation Balloon Banner -->
+                <div id="recommendation-banner" class="bg-gradient-to-r from-emerald-950/80 via-[#0e1422] to-amber-950/80 border border-emerald-500/40 rounded-2xl p-4 shadow-xl flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xl shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                            💡
                         </div>
-                        <div class="p-3 bg-[#0B0F17] rounded-xl border border-slate-800">
-                            <span class="text-slate-400 block mb-1">Zonne-opwek & Meter</span>
-                            <strong class="text-white">5.5 kWp SolarEdge + P1 DSMR</strong>
-                            <div class="text-slate-400 text-[11px] mt-1">Wittboy Weerstation · K(h) hoekmatrix</div>
+                        <div>
+                            <span class="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">Dynamisch Verbruiksadvies</span>
+                            <div class="text-sm font-bold text-white mt-0.5" id="banner-text">
+                                Goedkoopste stroom verwacht om 13:00 (€0.18/kWh) — Warmtepomp buffert automatisch naar 60°C!
+                            </div>
                         </div>
-                        <div class="p-3 bg-[#0B0F17] rounded-xl border border-slate-800">
-                            <span class="text-slate-400 block mb-1">Thuisaccu (Voorbereid)</span>
-                            <strong class="text-white">Deye 10kW Hybride + 48V LFP</strong>
-                            <div class="text-slate-400 text-[11px] mt-1">100% Asymmetrische 3-fasen balancering</div>
+                    </div>
+                    <span class="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" id="banner-tag">
+                        OPTIMAL DISPATCH
+                    </span>
+                </div>
+
+                <!-- The Stacked Bar Chart Card -->
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 shadow-xl">
+                    <div class="flex justify-between items-center mb-6">
+                        <div>
+                            <h3 class="text-sm font-bold text-white">24-Uurs Vermogens- & Productieverwachting</h3>
+                            <p class="text-xs text-slate-400">Gestapeld verbruik (kW) t.o.v. zonne-opwek en dynamische stroomprijs</p>
                         </div>
+                        <div class="flex items-center gap-4 text-xs">
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span>Sluipverbruik</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span>Warmtepomp / SWW</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span>Accu Laden</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-amber-400"></span> <span>Zon (kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400"></span> <span>Prijs (€/kWh)</span></div>
+                        </div>
+                    </div>
+                    <div class="h-96">
+                        <canvas id="hemsChart"></canvas>
                     </div>
                 </div>
             </div>
 
-            <!-- VIEW 2: 24H PLANNING -->
-            <div id="view-schedule" class="tab-content space-y-4">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <h2 class="text-base font-bold text-white">24-Uurs Vermogenswaterval & EPEX Prijzen</h2>
-                        <p class="text-xs text-slate-400">Automatische optimalisatie op zonne-instraling en dynamische stroomtarieven.</p>
-                    </div>
-                </div>
-                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl overflow-hidden">
-                    <table class="w-full text-left text-xs border-collapse">
-                        <thead>
-                            <tr class="bg-[#131D2D] text-slate-400 border-b border-[#1E293B]">
-                                <th class="p-3">Uur</th>
-                                <th class="p-3">Stroomprijs</th>
-                                <th class="p-3">Verwachte Zon</th>
-                                <th class="p-3">Smart Grid Relais</th>
-                                <th class="p-3">Geplande Actie</th>
-                            </tr>
-                        </thead>
-                        <tbody id="schedule-tbody" class="divide-y divide-[#1E293B]">
-                            <!-- Loaded dynamically -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- VIEW 3: APPARATEN CRUD -->
+            <!-- TAB 2: APPARATEN CRUD WITH POLICY & HA SELECTOR -->
             <div id="view-devices" class="tab-content space-y-4">
                 <div class="flex justify-between items-center">
                     <div>
-                        <h2 class="text-base font-bold text-white">Gekoppelde Apparaten (Devices CRUD)</h2>
-                        <p class="text-xs text-slate-400">Beheer resources, hardware adapters en capability-definities.</p>
+                        <h2 class="text-base font-bold text-white">Apparaten & Beleidsregels (Devices & Policies)</h2>
+                        <p class="text-xs text-slate-400">Koppel Home Assistant entiteiten en bepaal de sturingspolicy per resource.</p>
                     </div>
                     <button onclick="openDeviceModal()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow transition-all">
                         + Apparaat Toevoegen
@@ -635,28 +719,54 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 </div>
             </div>
 
-            <!-- VIEW 4: KALIBRATIE & OFFSETS -->
-            <div id="view-calibration" class="tab-content space-y-6">
-                <div>
-                    <h2 class="text-base font-bold text-white">Zelflerende Feedback & Fysische Modellen</h2>
-                    <p class="text-xs text-slate-400">Correcties voor dakhoek K(h), gebouwisolatie en sensor-uitsluitingsmaskers.</p>
+            <!-- TAB 3: TARIFFS & SUPPLIERS CRUD -->
+            <div id="view-tariffs" class="tab-content space-y-4">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-base font-bold text-white">Energieleveranciers & Tariefstructuren</h2>
+                        <p class="text-xs text-slate-400">Beheer contracten (Powerpeers, Tibber, vast/dynamisch) en opslagen.</p>
+                    </div>
+                    <button onclick="openTariffModal()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow transition-all">
+                        + Leverancier Toevoegen
+                    </button>
                 </div>
+                <div id="tariffs-container" class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <!-- Loaded dynamically -->
+                </div>
+            </div>
 
+            <!-- TAB 4: OPEN APIS -->
+            <div id="view-providers" class="tab-content space-y-4">
+                <div>
+                    <h2 class="text-base font-bold text-white">Standaard Open API Providers</h2>
+                    <p class="text-xs text-slate-400">Breed toepasbare publieke databronnen die het framework out-of-the-box ontsluit.</p>
+                </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5">
-                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Gebouwschil UA_base</h3>
-                        <div class="text-2xl font-bold text-purple-400 font-mono" id="calib-ua-val">8.95 kW/K</div>
-                        <p class="text-xs text-slate-400 mt-2">Berekend via Ordinary Least Squares (OLS) over afgelopen stookseizoen.</p>
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="font-bold text-white text-sm">EPEX Spot / EnergyZero API</h3>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">ACTIEF</span>
+                        </div>
+                        <p class="text-xs text-slate-400 mb-2">Publieke Europese day-ahead beursprijzen per uur en kwartier.</p>
+                        <code class="text-[11px] text-cyan-300 block bg-[#0B0F17] p-2 rounded">https://api.energyzero.net/v1/energyprices</code>
                     </div>
-
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5">
-                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">350L SWW Vat Stilstandsverlies</h3>
-                        <div class="text-2xl font-bold text-emerald-400 font-mono" id="calib-dhw-loss-val">1.95 kWh/dag</div>
-                        <p class="text-xs text-slate-400 mt-2">Natuurlijke afkoeling van het buffervat per 24 uur.</p>
+                        <div class="flex justify-between items-center mb-2">
+                            <h3 class="font-bold text-white text-sm">Open-Meteo Solar & Weather</h3>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">ACTIEF</span>
+                        </div>
+                        <p class="text-xs text-slate-400 mb-2">48-uurs globale instraling (W/m²), temperatuur en windvoorspelling.</p>
+                        <code class="text-[11px] text-cyan-300 block bg-[#0B0F17] p-2 rounded">https://api.open-meteo.com/v1/forecast</code>
                     </div>
                 </div>
+            </div>
 
-                <!-- Exclusion Windows Table -->
+            <!-- TAB 5: CALIBRATION & EXCLUSION WINDOWS -->
+            <div id="view-calibration" class="tab-content space-y-6">
+                <div>
+                    <h2 class="text-base font-bold text-white">Zelflerende Feedback & Sensor-Downtime</h2>
+                    <p class="text-xs text-slate-400">Beheer data-uitsluitingsmaskers en empirische gebouw-/dakparameters.</p>
+                </div>
                 <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-sm font-bold text-white">Data Uitsluitingsmaskers (Sensor Downtime)</h3>
@@ -674,85 +784,65 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <th class="p-2.5 text-right">Actie</th>
                             </tr>
                         </thead>
-                        <tbody id="exclusion-tbody" class="divide-y divide-[#1E293B]">
-                            <!-- Loaded dynamically -->
-                        </tbody>
+                        <tbody id="exclusion-tbody" class="divide-y divide-[#1E293B]"></tbody>
                     </table>
-                </div>
-            </div>
-
-            <!-- VIEW 5: TARIEVEN & INSTELLINGEN -->
-            <div id="view-tariffs" class="tab-content space-y-4">
-                <div>
-                    <h2 class="text-base font-bold text-white">Tarieven & Veiligheidskaders</h2>
-                    <p class="text-xs text-slate-400">Powerpeers contractparameters en hardware-veiligheidsregels.</p>
-                </div>
-
-                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 max-w-xl">
-                    <form id="tariff-form" onsubmit="saveTariffs(event)" class="space-y-4 text-xs">
-                        <div>
-                            <label class="text-slate-400 block mb-1">Contract Ingangsdatum</label>
-                            <input type="date" id="t-start" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                        </div>
-                        <div>
-                            <label class="text-slate-400 block mb-1">Import Opslag (€/kWh incl. BTW)</label>
-                            <input type="number" step="0.0001" id="t-import" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                        </div>
-                        <div>
-                            <label class="text-slate-400 block mb-1">Export Opslag (€/kWh incl. BTW)</label>
-                            <input type="number" step="0.0001" id="t-export" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                        </div>
-                        <div>
-                            <label class="text-slate-400 block mb-1">Energiebelasting (€/kWh incl. BTW)</label>
-                            <input type="number" step="0.00001" id="t-tax" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                        </div>
-                        <div>
-                            <label class="text-slate-400 block mb-1">Vastrecht (€/maand)</label>
-                            <input type="number" step="0.01" id="t-fixed" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                        </div>
-                        <button type="submit" class="w-full py-2 bg-blue-600 hover:bg-blue-500 font-semibold text-white rounded-lg transition-colors">
-                            Tarieven Opslaan
-                        </button>
-                    </form>
                 </div>
             </div>
 
         </div>
     </main>
 
-    <!-- DEVICE MODAL -->
+    <!-- MODAL: ADD / EDIT DEVICE (With HA Dropdown Selector & Policy) -->
     <div id="device-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
-        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-md text-xs text-slate-300">
-            <h3 class="text-sm font-bold text-white mb-4" id="modal-dev-title">Apparaat Toevoegen</h3>
+        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-lg text-xs text-slate-300">
+            <h3 class="text-sm font-bold text-white mb-4" id="modal-dev-title">Apparaat Configureren</h3>
             <form onsubmit="saveDevice(event)" class="space-y-3">
                 <input type="hidden" id="modal-dev-id">
                 <div>
-                    <label class="block mb-1 text-slate-400">Naam</label>
+                    <label class="block mb-1 text-slate-400">Naam Apparaat</label>
                     <input type="text" id="modal-dev-name" required class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
                 </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Type Resource</label>
+                        <select id="modal-dev-type" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                            <option value="grid_meter">Netmeter (P1)</option>
+                            <option value="solar_inverter">Zonnepanelen (Omvormer)</option>
+                            <option value="heat_pump">Warmtepomp (CV)</option>
+                            <option value="thermal_storage">Warm Tapwater (SWW)</option>
+                            <option value="home_battery">Thuisbatterij</option>
+                            <option value="ev_charger">EV Laadpaal</option>
+                            <option value="baseload">Basislast</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Beleidsregel (Policy)</label>
+                        <select id="modal-dev-policy" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                            <option value="solar_first">☀️ Zonne-overschot Eerst</option>
+                            <option value="cheapest_hours">🏷️ Goedkoopste Uren van de Dag</option>
+                            <option value="peak_avoidance">⛔ Spitsblokkade (SG1)</option>
+                            <option value="comfort_priority">🔥 Comfort Prioriteit (Altijd warm)</option>
+                            <option value="arbitrage_and_solar">🔋 Accu: Arbitrage + Zelfconsumptie</option>
+                            <option value="monitoring_only">📊 Alleen Monitoring</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- HA Entity Selector Dropdowns -->
                 <div>
-                    <label class="block mb-1 text-slate-400">Type</label>
-                    <select id="modal-dev-type" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                        <option value="grid_meter">Netmeter (P1)</option>
-                        <option value="solar_inverter">Zonnepanelen (Omvormer)</option>
-                        <option value="heat_pump">Warmtepomp</option>
-                        <option value="dhw_boiler">Warm Tapwater (SWW)</option>
-                        <option value="home_battery">Thuisbatterij</option>
-                        <option value="ev_charger">EV Laadpaal</option>
+                    <label class="block mb-1 text-slate-400">Gekoppelde Vermogenssensor in Home Assistant (W of kW)</label>
+                    <select id="modal-dev-ha-power" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono text-[11px]">
+                        <option value="">-- Selecteer Home Assistant Entiteit --</option>
                     </select>
                 </div>
                 <div>
-                    <label class="block mb-1 text-slate-400">Protocol / Adapter</label>
-                    <select id="modal-dev-adapter" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                        <option value="p1_dsmr">P1 / DSMR</option>
-                        <option value="sunspec_modbus">Modbus / SunSpec</option>
-                        <option value="smart_grid_relay">Smart Grid Relais (S10S/S11S)</option>
-                        <option value="temperature_sensor">Temperatuursensor</option>
-                        <option value="deye_modbus_tcp">Deye Modbus TCP</option>
-                        <option value="mqtt">MQTT</option>
+                    <label class="block mb-1 text-slate-400">Gekoppelde Schakelaar / Relais in Home Assistant</label>
+                    <select id="modal-dev-ha-control" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono text-[11px]">
+                        <option value="">-- Geen / Niet bestuurbaar --</option>
                     </select>
                 </div>
-                <div class="flex justify-end gap-2 pt-3">
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-slate-800">
                     <button type="button" onclick="closeModal('device-modal')" class="px-3 py-1.5 bg-slate-800 text-slate-400 rounded-lg">Annuleren</button>
                     <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white font-semibold rounded-lg">Opslaan</button>
                 </div>
@@ -760,25 +850,81 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
     </div>
 
-    <!-- EXCLUSION MODAL -->
+    <!-- MODAL: ADD / EDIT TARIFF -->
+    <div id="tariff-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
+        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-md text-xs text-slate-300">
+            <h3 class="text-sm font-bold text-white mb-4" id="modal-tariff-title">Energieleverancier Configureren</h3>
+            <form onsubmit="saveTariff(event)" class="space-y-3">
+                <input type="hidden" id="modal-tariff-id">
+                <div>
+                    <label class="block mb-1 text-slate-400">Naam Leverancier / Contract</label>
+                    <input type="text" id="modal-tariff-name" required placeholder="bijv. Powerpeers Dynamisch" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Prijs Provider</label>
+                        <select id="modal-tariff-provider" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                            <option value="epex_spot">EPEX Spot (EnergyZero API)</option>
+                            <option value="fixed">Vast Tarief</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Tarief Interval</label>
+                        <select id="modal-tariff-interval" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                            <option value="15m">Kwartiertarief (15m)</option>
+                            <option value="1h">Uurtarief (1h)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Inkoop Opslag (€/kWh incl. BTW)</label>
+                        <input type="number" step="0.0001" id="modal-tariff-import" value="0.0121" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Teruglever Opslag (€/kWh)</label>
+                        <input type="number" step="0.0001" id="modal-tariff-export" value="0.0121" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Energiebelasting (€/kWh)</label>
+                        <input type="number" step="0.00001" id="modal-tariff-tax" value="0.11085" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Vastrecht (€/maand)</label>
+                        <input type="number" step="0.01" id="modal-tariff-fixed" value="6.25" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                    <button type="button" onclick="closeModal('tariff-modal')" class="px-3 py-1.5 bg-slate-800 text-slate-400 rounded-lg">Annuleren</button>
+                    <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white font-semibold rounded-lg">Opslaan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: EXCLUSION -->
     <div id="exclusion-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
         <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-md text-xs text-slate-300">
             <h3 class="text-sm font-bold text-white mb-4">Uitsluitingsmasker Toevoegen</h3>
             <form onsubmit="saveExclusion(event)" class="space-y-3">
                 <div>
-                    <label class="block mb-1 text-slate-400">Sensor Entity ID</label>
+                    <label class="block mb-1 text-slate-400">Sensor ID</label>
                     <input type="text" id="modal-ex-sensor" value="sensor.warmtepomp_power" required class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
                 </div>
-                <div>
-                    <label class="block mb-1 text-slate-400">Startdatum (JJJJ-MM-DD)</label>
-                    <input type="date" id="modal-ex-start" required class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Startdatum</label>
+                        <input type="date" id="modal-ex-start" required class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Einddatum</label>
+                        <input type="date" id="modal-ex-end" required class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                    </div>
                 </div>
                 <div>
-                    <label class="block mb-1 text-slate-400">Einddatum (JJJJ-MM-DD)</label>
-                    <input type="date" id="modal-ex-end" required class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                </div>
-                <div>
-                    <label class="block mb-1 text-slate-400">Reden van downtime</label>
+                    <label class="block mb-1 text-slate-400">Reden</label>
                     <input type="text" id="modal-ex-reason" value="Modbus meter ontkoppeld" required class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
                 </div>
                 <div class="flex justify-end gap-2 pt-3">
@@ -789,8 +935,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
     </div>
 
-    <!-- CLIENT LOGIC -->
+    <!-- CLIENT CONTROLLER & CHART.JS ENGINE -->
     <script>
+        let chartInstance = null;
+        let haEntitiesCache = [];
+
         function showTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
@@ -800,53 +949,153 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             if (link) link.classList.add('active');
 
             const titles = {
-                'dashboard': 'Overzicht & Energiestromen',
-                'schedule': '24-Uurs Planning (EPEX Spot)',
-                'devices': 'Apparatenbeheer (Devices CRUD)',
-                'calibration': 'Zelflerende Feedback & Offsets',
-                'tariffs': 'Tarieven & Veiligheidsinstellingen'
+                'dashboard': '24h Verwachting & Gestapeld Verbruik',
+                'devices': 'Apparaten & Beleidsregels (Devices & Policies)',
+                'tariffs': 'Energieleveranciers & Tariefstructuren',
+                'providers': 'Standaard Open API Providers',
+                'calibration': 'Zelflerende Feedback & Sensor-Downtime'
             };
             document.getElementById('header-title').innerText = titles[tabId] || 'Open HEMS';
 
+            if (tabId === 'dashboard') loadChartData();
             if (tabId === 'devices') loadDevices();
-            if (tabId === 'schedule') loadSchedule();
-            if (tabId === 'calibration') loadCalibration();
             if (tabId === 'tariffs') loadTariffs();
+            if (tabId === 'calibration') loadCalibration();
         }
 
-        function openDeviceModal(dev = null) {
-            if (dev) {
-                document.getElementById('modal-dev-title').innerText = 'Apparaat Bewerken';
-                document.getElementById('modal-dev-id').value = dev.id;
-                document.getElementById('modal-dev-name').value = dev.name;
-                document.getElementById('modal-dev-type').value = dev.type;
-                document.getElementById('modal-dev-adapter').value = dev.adapter;
-            } else {
-                document.getElementById('modal-dev-title').innerText = 'Apparaat Toevoegen';
-                document.getElementById('modal-dev-id').value = '';
-                document.getElementById('modal-dev-name').value = '';
-            }
-            document.getElementById('device-modal').classList.remove('hidden');
-        }
-
-        function openExclusionModal() {
-            document.getElementById('exclusion-modal').classList.remove('hidden');
-        }
-
-        function closeModal(id) {
-            document.getElementById(id).classList.add('hidden');
-        }
-
-        async function loadStatus() {
+        async function fetchHaEntities() {
             try {
-                const res = await fetch('./api/status');
-                const d = await res.json();
-                document.getElementById('dash-dhw-temp').innerText = (d.dhw_temperature || 52.8) + ' °C';
-                document.getElementById('dash-hp-power').innerText = (d.heatpump_power_w || 33.0) + ' W';
-                document.getElementById('dash-sg-mode').innerText = (d.smart_grid_mode || 'SG2') + ' (Normaal)';
-                document.getElementById('badge-device-count').innerText = d.total_devices || 5;
+                const res = await fetch('./api/ha/entities');
+                const data = await res.json();
+                haEntitiesCache = data.entities || [];
+                populateHaDropdowns();
             } catch (e) {
-                console.warn('Status load error:', e);
+                console.warn('Could not load HA entities:', e);
+            }
+        }
+
+        function populateHaDropdowns() {
+            const powerSelect = document.getElementById('modal-dev-ha-power');
+            const controlSelect = document.getElementById('modal-dev-ha-control');
+
+            powerSelect.innerHTML = '<option value="">-- Selecteer Home Assistant Sensor --</option>';
+            controlSelect.innerHTML = '<option value="">-- Geen / Niet bestuurbaar --</option>';
+
+            haEntitiesCache.forEach(e => {
+                const opt = document.createElement('option');
+                opt.value = e.entity_id;
+                opt.innerText = `${e.friendly_name} (${e.entity_id})`;
+
+                if (e.domain === 'sensor' && (e.entity_id.includes('power') || e.entity_id.includes('watt') || e.entity_id.includes('temp'))) {
+                    powerSelect.appendChild(opt.cloneNode(true));
+                }
+                if (e.domain === 'switch' || e.domain === 'climate' || e.domain === 'input_boolean') {
+                    controlSelect.appendChild(opt.cloneNode(true));
+                }
+            });
+        }
+
+        async function loadChartData() {
+            try {
+                const res = await fetch('./api/schedule/chart-data');
+                const data = await res.json();
+
+                // Update recommendation banner
+                const adv = data.advices[data.cheapest_hour] || `Beste stroomtarief om ${data.cheapest_hour}:00 (€${data.cheapest_price_eur.toFixed(4)}/kWh)`;
+                document.getElementById('banner-text').innerText = adv;
+
+                // Render Chart.js Stacked Bar & Curves
+                const ctx = document.getElementById('hemsChart').getContext('2d');
+                if (chartInstance) chartInstance.destroy();
+
+                chartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.labels,
+                        datasets: [
+                            {
+                                label: 'Basislast (kW)',
+                                data: data.datasets.baseload_kw,
+                                backgroundColor: '#3B82F6',
+                                stack: 'consumption',
+                                borderRadius: 4
+                            },
+                            {
+                                label: 'Warmtepomp / SWW (kW)',
+                                data: data.datasets.boiler_kw,
+                                backgroundColor: '#EC4899',
+                                stack: 'consumption',
+                                borderRadius: 4
+                            },
+                            {
+                                label: 'Accu Laden (kW)',
+                                data: data.datasets.battery_charge_kw,
+                                backgroundColor: '#10B981',
+                                stack: 'consumption',
+                                borderRadius: 4
+                            },
+                            {
+                                label: 'Zon Productie (kW)',
+                                data: data.datasets.solar_kw,
+                                type: 'line',
+                                borderColor: '#F59E0B',
+                                borderWidth: 3,
+                                pointBackgroundColor: '#F59E0B',
+                                pointRadius: 3,
+                                tension: 0.35,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: 'Stroomprijs (€/kWh)',
+                                data: data.datasets.prices_eur,
+                                type: 'line',
+                                borderColor: '#06B6D4',
+                                borderDash: [5, 5],
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                yAxisID: 'y1'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        scales: {
+                            x: {
+                                grid: { color: '#1E293B' },
+                                ticks: { color: '#94A3B8', font: { family: 'monospace' } }
+                            },
+                            y: {
+                                stacked: true,
+                                title: { display: true, text: 'Vermogen / Energie (kW)', color: '#94A3B8' },
+                                grid: { color: '#1E293B' },
+                                ticks: { color: '#94A3B8' }
+                            },
+                            y1: {
+                                position: 'right',
+                                title: { display: true, text: 'Prijs (€/kWh)', color: '#06B6D4' },
+                                grid: { drawOnChartArea: false },
+                                ticks: { color: '#06B6D4' }
+                            }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    afterBody: function(items) {
+                                        const idx = items[0].dataIndex;
+                                        if (data.advices[idx]) {
+                                            return '\\n💡 ' + data.advices[idx];
+                                        }
+                                        return '';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error('Chart load error:', e);
             }
         }
 
@@ -855,19 +1104,20 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             const d = await res.json();
             const container = document.getElementById('devices-container');
             container.innerHTML = '';
+            document.getElementById('badge-dev-count').innerText = (d.devices || []).length;
+
             (d.devices || []).forEach(dev => {
                 const card = document.createElement('div');
-                card.className = 'bg-[#0e1422] border border-[#1E293B] hover:border-slate-700 rounded-2xl p-5 flex flex-col justify-between';
+                card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 flex flex-col justify-between';
                 card.innerHTML = `
                     <div>
                         <div class="flex justify-between items-start mb-2">
                             <h4 class="font-bold text-white text-sm">${dev.name}</h4>
                             <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800">${dev.type}</span>
                         </div>
-                        <p class="text-[11px] text-slate-400 mb-3">Adapter: <code>${dev.adapter}</code></p>
-                        <div class="flex flex-wrap gap-1 mb-4">
-                            ${(dev.capabilities || []).map(c => `<span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 border border-slate-700">${c}</span>`).join('')}
-                        </div>
+                        <div class="text-[11px] text-amber-400 mb-2 font-medium">Policy: <code>${dev.policy || 'solar_first'}</code></div>
+                        <p class="text-[11px] text-slate-400 mb-1">Sensor: <code class="text-cyan-300">${dev.ha_power_entity || 'Geen'}</code></p>
+                        <p class="text-[11px] text-slate-400 mb-3">Relais/Switch: <code class="text-cyan-300">${dev.ha_control_entity || 'Geen'}</code></p>
                     </div>
                     <div class="flex justify-end gap-2 pt-3 border-t border-[#1E293B]">
                         <button onclick='openDeviceModal(${JSON.stringify(dev)})' class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg">Bewerken</button>
@@ -878,13 +1128,33 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             });
         }
 
+        function openDeviceModal(dev = null) {
+            populateHaDropdowns();
+            if (dev) {
+                document.getElementById('modal-dev-title').innerText = 'Apparaat Bewerken';
+                document.getElementById('modal-dev-id').value = dev.id;
+                document.getElementById('modal-dev-name').value = dev.name;
+                document.getElementById('modal-dev-type').value = dev.type;
+                document.getElementById('modal-dev-policy').value = dev.policy || 'solar_first';
+                document.getElementById('modal-dev-ha-power').value = dev.ha_power_entity || '';
+                document.getElementById('modal-dev-ha-control').value = dev.ha_control_entity || '';
+            } else {
+                document.getElementById('modal-dev-title').innerText = 'Nieuw Apparaat Toevoegen';
+                document.getElementById('modal-dev-id').value = '';
+                document.getElementById('modal-dev-name').value = '';
+            }
+            document.getElementById('device-modal').classList.remove('hidden');
+        }
+
         async function saveDevice(e) {
             e.preventDefault();
             const id = document.getElementById('modal-dev-id').value;
             const payload = {
                 name: document.getElementById('modal-dev-name').value,
                 type: document.getElementById('modal-dev-type').value,
-                adapter: document.getElementById('modal-dev-adapter').value
+                policy: document.getElementById('modal-dev-policy').value,
+                ha_power_entity: document.getElementById('modal-dev-ha-power').value,
+                ha_control_entity: document.getElementById('modal-dev-ha-control').value
             };
             if (id) {
                 await fetch('./api/devices/' + id, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
@@ -901,47 +1171,86 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             loadDevices();
         }
 
-        async function loadSchedule() {
-            const res = await fetch('./api/schedule');
-            const data = await res.json();
-            const tbody = document.getElementById('schedule-tbody');
-            tbody.innerHTML = '';
-            (data.slots || []).forEach(s => {
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-[#0e1422] transition-colors';
-                const badgeColor = s.sg_mode === 'SG4' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : (s.sg_mode === 'SG1' ? 'bg-red-500/20 text-red-400 border-red-500/30' : (s.sg_mode === 'SG3' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-blue-500/20 text-blue-400 border-blue-500/30'));
-                tr.innerHTML = `
-                    <td class="p-3 font-mono font-bold text-white">${String(s.hour).padStart(2, '0')}:00</td>
-                    <td class="p-3 font-mono text-emerald-400">€${s.price_eur.toFixed(4)}</td>
-                    <td class="p-3 font-mono ${s.solar_kw > 0 ? 'text-amber-400 font-semibold' : 'text-slate-500'}">${s.solar_kw > 0 ? (s.solar_kw.toFixed(1) + ' kW') : '-'}</td>
-                    <td class="p-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold border ${badgeColor}">${s.sg_mode}</span></td>
-                    <td class="p-3 text-slate-300 font-medium">${s.allocation}</td>
+        async function loadTariffs() {
+            const res = await fetch('./api/tariffs');
+            const d = await res.json();
+            const container = document.getElementById('tariffs-container');
+            container.innerHTML = '';
+            (d.tariffs || []).forEach(t => {
+                const card = document.createElement('div');
+                card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 flex flex-col justify-between';
+                card.innerHTML = `
+                    <div>
+                        <div class="flex justify-between items-start mb-2">
+                            <h4 class="font-bold text-white text-sm">${t.name}</h4>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">${t.provider}</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 mb-2">Interval: <strong>${t.interval}</strong> · Start: ${t.contract_start_date}</p>
+                        <div class="grid grid-cols-2 gap-2 text-[11px] text-slate-300 bg-[#0B0F17] p-3 rounded-lg border border-slate-800 mb-3 font-mono">
+                            <div>Inkoop Opslag: €${t.import_markup_eur_kwh}/kWh</div>
+                            <div>Teruglevering: €${t.export_markup_eur_kwh}/kWh</div>
+                            <div>Energiebelasting: €${t.electricity_tax_eur_kwh}/kWh</div>
+                            <div>Vastrecht: €${t.fixed_monthly_fee_eur}/mnd</div>
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-2 pt-3 border-t border-[#1E293B]">
+                        <button onclick='openTariffModal(${JSON.stringify(t)})' class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg">Bewerken</button>
+                        <button onclick="deleteTariff('${t.id}')" class="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800 text-xs rounded-lg">Verwijderen</button>
+                    </div>
                 `;
-                tbody.appendChild(tr);
+                container.appendChild(card);
             });
         }
 
-        async function recalculateSchedule() {
-            const btn = document.getElementById('btn-recalc');
-            btn.innerHTML = '<span>Bezig...</span>';
-            btn.disabled = true;
-            try {
-                await fetch('./api/schedule/recalculate', { method: 'POST' });
-                await loadSchedule();
-                alert('24h Waterval herberekening succesvol voltooid!');
-            } finally {
-                btn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg><span>Herberekenen</span>';
-                btn.disabled = false;
+        function openTariffModal(t = null) {
+            if (t) {
+                document.getElementById('modal-tariff-title').innerText = 'Leverancier Bewerken';
+                document.getElementById('modal-tariff-id').value = t.id;
+                document.getElementById('modal-tariff-name').value = t.name;
+                document.getElementById('modal-tariff-provider').value = t.provider;
+                document.getElementById('modal-tariff-interval').value = t.interval;
+                document.getElementById('modal-tariff-import').value = t.import_markup_eur_kwh;
+                document.getElementById('modal-tariff-export').value = t.export_markup_eur_kwh;
+                document.getElementById('modal-tariff-tax').value = t.electricity_tax_eur_kwh;
+                document.getElementById('modal-tariff-fixed').value = t.fixed_monthly_fee_eur;
+            } else {
+                document.getElementById('modal-tariff-title').innerText = 'Nieuwe Leverancier Toevoegen';
+                document.getElementById('modal-tariff-id').value = '';
+                document.getElementById('modal-tariff-name').value = '';
             }
+            document.getElementById('tariff-modal').classList.remove('hidden');
+        }
+
+        async function saveTariff(e) {
+            e.preventDefault();
+            const id = document.getElementById('modal-tariff-id').value;
+            const payload = {
+                name: document.getElementById('modal-tariff-name').value,
+                provider: document.getElementById('modal-tariff-provider').value,
+                interval: document.getElementById('modal-tariff-interval').value,
+                import_markup_eur_kwh: parseFloat(document.getElementById('modal-tariff-import').value),
+                export_markup_eur_kwh: parseFloat(document.getElementById('modal-tariff-export').value),
+                electricity_tax_eur_kwh: parseFloat(document.getElementById('modal-tariff-tax').value),
+                fixed_monthly_fee_eur: parseFloat(document.getElementById('modal-tariff-fixed').value)
+            };
+            if (id) {
+                await fetch('./api/tariffs/' + id, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+            } else {
+                await fetch('./api/tariffs', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+            }
+            closeModal('tariff-modal');
+            loadTariffs();
+        }
+
+        async function deleteTariff(id) {
+            if (!confirm('Leverancier verwijderen?')) return;
+            await fetch('./api/tariffs/' + id, { method: 'DELETE' });
+            loadTariffs();
         }
 
         async function loadCalibration() {
             const res = await fetch('./api/calibration');
             const data = await res.json();
-            if (data.parameters) {
-                document.getElementById('calib-ua-val').innerText = (data.parameters.ua_base || 8.95) + ' kW/K';
-                document.getElementById('calib-dhw-loss-val').innerText = (data.parameters.dhw_standby_loss_kwh || 1.95) + ' kWh/dag';
-            }
             const tbody = document.getElementById('exclusion-tbody');
             tbody.innerHTML = '';
             (data.exclusion_windows || []).forEach((w, idx) => {
@@ -957,6 +1266,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             });
         }
 
+        function openExclusionModal() { document.getElementById('exclusion-modal').classList.remove('hidden'); }
         async function saveExclusion(e) {
             e.preventDefault();
             const payload = {
@@ -969,40 +1279,17 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             closeModal('exclusion-modal');
             loadCalibration();
         }
-
         async function deleteExclusion(idx) {
             if (!confirm('Uitsluitingsvenster verwijderen?')) return;
             await fetch('./api/exclusion-windows/' + idx, { method: 'DELETE' });
             loadCalibration();
         }
 
-        async function loadTariffs() {
-            const res = await fetch('./api/tariffs');
-            const t = await res.json();
-            document.getElementById('t-start').value = t.contract_start_date || '2026-09-25';
-            document.getElementById('t-import').value = t.import_markup_eur_kwh || 0.0121;
-            document.getElementById('t-export').value = t.export_markup_eur_kwh || 0.0121;
-            document.getElementById('t-tax').value = t.electricity_tax_eur_kwh || 0.11085;
-            document.getElementById('t-fixed').value = t.fixed_monthly_fee_eur || 6.25;
-            document.getElementById('top-epex-price').innerText = '€ ' + (t.electricity_tax_eur_kwh + t.import_markup_eur_kwh + 0.138).toFixed(4);
-        }
+        function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
-        async function saveTariffs(e) {
-            e.preventDefault();
-            const payload = {
-                contract_start_date: document.getElementById('t-start').value,
-                import_markup_eur_kwh: parseFloat(document.getElementById('t-import').value),
-                export_markup_eur_kwh: parseFloat(document.getElementById('t-export').value),
-                electricity_tax_eur_kwh: parseFloat(document.getElementById('t-tax').value),
-                fixed_monthly_fee_eur: parseFloat(document.getElementById('t-fixed').value)
-            };
-            await fetch('./api/tariffs', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
-            alert('Tarieven succesvol opgeslagen!');
-        }
-
-        // Initial Boot
-        loadStatus();
-        loadDevices();
+        // Boot
+        fetchHaEntities();
+        loadChartData();
     </script>
 </body>
 </html>"""
@@ -1011,7 +1298,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
 def run_server(port=8099):
     server = HTTPServer(("0.0.0.0", port), HemsApiHandler)
-    print(f"Open HEMS Management Console running on port {port}...")
+    print(f"Open HEMS Framework Console running on port {port}...")
     server.serve_forever()
 
 
@@ -1023,7 +1310,7 @@ def main():
     args = parser.parse_args()
 
     cfg = load_json(Path(args.config) if args.config else CONFIG_FILE)
-    ensure_default_devices(cfg)
+    ensure_framework_defaults(cfg)
     run_server(args.port)
 
 
