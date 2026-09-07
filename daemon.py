@@ -2,12 +2,16 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.3.0
+Version: 0.3.1
 Generic Energy Management Platform:
   - Clean slate framework with pluggable providers (EPEX Spot, Open-Meteo)
-  - Full CRUD for Energy Suppliers / Tariffs (Powerpeers, Tibber, Fixed, etc.)
-  - Full CRUD for Devices & Consumers with Policy Selection and Home Assistant Entity Selectors
-  - Interactive 24-Hour Stacked Bar Chart with Solar/Price Overlays and Recommendation Balloons
+  - Decoupled Policy Engine with 3 Fundamental Policy Archetypes:
+      1. ShiftableConsumerPolicy (Verbruik zonder opslag: vaatwasser, wasmachine)
+      2. ThermalBufferPolicy (Buffer zonder teruggave: 350L SWW, CV vloer)
+      3. BatteryArbitragePolicy (Accu met teruggave & economische dode zone / deadband)
+  - Full CRUD for Policies, Tariffs, and Devices
+  - Home Assistant Entity Dropdowns for Zero-Manual-Typing Setup
+  - Interactive 24-Hour Stacked Bar Chart (Chart.js) with Recommendation Balloons
 """
 
 import sys
@@ -91,6 +95,8 @@ def fetch_ha_entities():
 
 def ensure_framework_defaults(cfg: dict):
     """Initializes the generic framework defaults if config is fresh."""
+    dirty = False
+
     if "providers" not in cfg:
         cfg["providers"] = {
             "epex_spot": {
@@ -108,8 +114,8 @@ def ensure_framework_defaults(cfg: dict):
                 "enabled": True
             }
         }
+        dirty = True
 
-    # Tariffs list (Suppliers)
     if "tariffs_list" not in cfg:
         cfg["tariffs_list"] = [
             {
@@ -125,8 +131,63 @@ def ensure_framework_defaults(cfg: dict):
                 "active": True
             }
         ]
+        dirty = True
 
-    # Devices list with policies and HA entity links
+    # Decoupled Policies
+    if "policies" not in cfg or not cfg["policies"]:
+        cfg["policies"] = [
+            {
+                "id": "dhw_thermal_buffer_policy",
+                "name": "350L SWW Boiler Buffer Beleid",
+                "type": "thermal_buffer",
+                "target_devices": ["daikin_heat_pump", "dhw_tank"],
+                "parameters": {
+                    "storage_volume_liters": 350,
+                    "emergency_threshold_c": 38.0,
+                    "deadband_reheat_c": 46.0,
+                    "target_temperature_c": 50.0,
+                    "solar_boost_temperature_c": 60.0,
+                    "morning_peak_lockout": True,
+                    "evening_peak_lockout": True,
+                    "isolate_space_heating_during_dhw": True,
+                    "min_run_time_minutes": 20
+                }
+            },
+            {
+                "id": "deye_battery_arbitrage_policy",
+                "name": "Deye Accu Arbitrage & Zelfconsumptie",
+                "type": "battery_arbitrage",
+                "target_devices": ["deye_home_battery"],
+                "parameters": {
+                    "capacity_kwh": 10.0,
+                    "roundtrip_efficiency": 0.87,
+                    "lcos_depreciation_eur_kwh": 0.0741,
+                    "min_price_spread_eur_kwh": 0.115,
+                    "solar_surplus_priority": True,
+                    "min_soc_pct": 10.0,
+                    "max_soc_pct": 95.0,
+                    "peak_shaving_threshold_amps": 20.0
+                }
+            },
+            {
+                "id": "dishwasher_shiftable_policy",
+                "name": "Vaatwasser Dal- & Zonnestart",
+                "type": "shiftable_consumer",
+                "target_devices": [],
+                "parameters": {
+                    "duration_minutes": 90,
+                    "power_watts": 1200,
+                    "can_interrupt": False,
+                    "window_start_hour": 8,
+                    "window_end_hour": 20,
+                    "prefer_solar_surplus": True,
+                    "min_solar_surplus_watts": 1500
+                }
+            }
+        ]
+        dirty = True
+
+    # Devices (pure hardware)
     if "devices" not in cfg or not cfg["devices"]:
         cfg["devices"] = [
             {
@@ -135,7 +196,6 @@ def ensure_framework_defaults(cfg: dict):
                 "type": "grid_meter",
                 "adapter": "p1_dsmr",
                 "capabilities": ["read_power", "read_energy"],
-                "policy": "monitoring_only",
                 "ha_power_entity": "sensor.power_production_in_watt_avg",
                 "ha_energy_entity": "sensor.energy_consumed_tariff_1",
                 "parameters": {"phases": 3, "max_amps": 25.0}
@@ -146,7 +206,6 @@ def ensure_framework_defaults(cfg: dict):
                 "type": "solar_inverter",
                 "adapter": "sunspec_modbus",
                 "capabilities": ["read_power", "read_energy", "curtail_production"],
-                "policy": "solar_first",
                 "ha_power_entity": "sensor.zonnepanelen_power_avg_5_minutes",
                 "ha_energy_entity": "sensor.daily_energy_production_solar2",
                 "parameters": {"peak_power_kw": 5.5, "tilt_deg": 40.0, "azimuth_deg": 225.0}
@@ -157,14 +216,9 @@ def ensure_framework_defaults(cfg: dict):
                 "type": "heat_pump",
                 "adapter": "smart_grid_relay",
                 "capabilities": ["set_mode", "read_power"],
-                "policy": "peak_avoidance",
                 "ha_power_entity": "sensor.warmtepomp_power",
                 "ha_control_entity": "switch.warmtepomp_smart_grid_1_s10s",
-                "parameters": {
-                    "compressor_power_kw": 3.0,
-                    "min_run_time_minutes": 20,
-                    "isolate_space_heating_during_dhw": True
-                }
+                "parameters": {"compressor_power_kw": 3.0, "min_run_time_minutes": 20}
             },
             {
                 "id": "dhw_tank",
@@ -172,15 +226,8 @@ def ensure_framework_defaults(cfg: dict):
                 "type": "thermal_storage",
                 "adapter": "temperature_sensor",
                 "capabilities": ["read_temperature", "read_energy"],
-                "policy": "cheapest_hours",
                 "ha_temp_entity": "sensor.hc_dhw_temperature_r5t_dhw_tank",
-                "parameters": {
-                    "volume_liters": 350,
-                    "target_temp_c": 50.0,
-                    "boost_temp_c": 60.0,
-                    "emergency_reheat_c": 38.0,
-                    "deadband_reheat_c": 46.0
-                }
+                "parameters": {"volume_liters": 350}
             },
             {
                 "id": "deye_home_battery",
@@ -188,17 +235,13 @@ def ensure_framework_defaults(cfg: dict):
                 "type": "home_battery",
                 "adapter": "deye_modbus_tcp",
                 "capabilities": ["read_power", "read_soc", "set_power_limit", "set_mode"],
-                "policy": "arbitrage_and_solar",
                 "ha_power_entity": "sensor.battery_power",
-                "parameters": {
-                    "capacity_kwh": 10.0,
-                    "max_charge_power_w": 5000,
-                    "max_discharge_power_w": 5000,
-                    "min_soc_pct": 10.0,
-                    "max_soc_pct": 95.0
-                }
+                "parameters": {"capacity_kwh": 10.0, "max_charge_power_w": 5000, "max_discharge_power_w": 5000}
             }
         ]
+        dirty = True
+
+    if dirty:
         save_json(CONFIG_FILE, cfg)
 
 
@@ -243,13 +286,15 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         if path == "/api/status":
             cfg = load_json(CONFIG_FILE)
             params = load_json(PARAMS_FILE)
+            ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.3.0",
+                "version": "0.3.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
                 "total_devices": len(cfg.get("devices", [])),
+                "total_policies": len(cfg.get("policies", [])),
                 "total_tariffs": len(cfg.get("tariffs_list", [])),
                 "dhw_optimal_run": cfg.get("last_optimal_run", "13:00"),
                 "dhw_temperature": 52.8,
@@ -263,6 +308,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         if path == "/api/ha/entities":
             entities = fetch_ha_entities()
             self._send_json({"entities": entities})
+            return
+
+        # API: Policies (Read All)
+        if path == "/api/policies":
+            cfg = load_json(CONFIG_FILE)
+            ensure_framework_defaults(cfg)
+            self._send_json({"policies": cfg.get("policies", [])})
             return
 
         # API: Devices (Read All)
@@ -289,18 +341,19 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # API: 24h Stacked Chart Data with Recommendations
+        # API: 24h Stacked Chart Data with Decoupled Policy Evaluation
         if path == "/api/schedule/chart-data":
             cache = load_json(CACHE_FILE)
             cfg = load_json(CONFIG_FILE)
+            ensure_framework_defaults(cfg)
 
             hours = [f"{h:02d}:00" for h in range(24)]
             prices = []
             solar = []
             baseload = [0.3] * 24
             boiler = [0.0] * 24
-            battery = [0.0] * 24
-            ev = [0.0] * 24
+            battery_charge = [0.0] * 24
+            battery_discharge = [0.0] * 24
             advices = [""] * 24
 
             hourly_p = cache.get("market_prices", {}).get("hourly", {})
@@ -308,6 +361,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             min_price = 999.0
             min_price_hour = 13
+            max_price = -999.0
+            max_price_hour = 18
             max_solar = 0.0
             max_solar_hour = 13
 
@@ -317,6 +372,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 if p < min_price and 8 <= h <= 20:
                     min_price = p
                     min_price_hour = h
+                if p > max_price:
+                    max_price = p
+                    max_price_hour = h
 
                 s_kw = float(solar_map.get(str(h), 0.0))
                 solar.append(round(s_kw, 2))
@@ -324,22 +382,49 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     max_solar = s_kw
                     max_solar_hour = h
 
-            # Schedule allocation based on real policy
-            boiler[min_price_hour] = 3.0
-            if max_solar > 2.0:
-                battery[max_solar_hour] = 1.5
+            # Evaluate Policy 2: ThermalBufferPolicy (DHW Boiler)
+            dhw_pol = next((p for p in cfg.get("policies", []) if p["type"] == "thermal_buffer"), None)
+            dhw_hour = min_price_hour
+            if dhw_pol:
+                params = dhw_pol.get("parameters", {})
+                # Check morning/evening peak lockouts
+                if params.get("evening_peak_lockout") and 17 <= dhw_hour <= 20:
+                    dhw_hour = 14
+                if params.get("morning_peak_lockout") and 7 <= dhw_hour <= 8:
+                    dhw_hour = 13
+            boiler[dhw_hour] = 3.0
 
-            # Recommendations & Balloons
-            advices[min_price_hour] = f"💡 Beste stroommoment (€{min_price:.2f}/kWh) — Boiler 60°C Boost gepland!"
+            # Evaluate Policy 3: BatteryArbitragePolicy (Accu & Deadband)
+            bat_pol = next((p for p in cfg.get("policies", []) if p["type"] == "battery_arbitrage"), None)
+            delta_price = max_price - min_price
+            deadband_threshold = 0.115
+            if bat_pol:
+                deadband_threshold = bat_pol.get("parameters", {}).get("min_price_spread_eur_kwh", 0.115)
+
+            battery_status_msg = ""
+            if delta_price >= deadband_threshold:
+                battery_charge[min_price_hour] = 2.0
+                battery_discharge[max_price_hour] = -2.0
+                battery_status_msg = f"🔋 Accu-Arbitrage Actief: Laden om {min_price_hour}:00 (€{min_price:.2f}), Ontladen om {max_price_hour}:00 (€{max_price:.2f}) [Delta €{delta_price:.3f} > €{deadband_threshold:.3f}]"
+            else:
+                battery_status_msg = f"⏸️ Accu Rust (Deadband): Delta €{delta_price:.3f}/kWh is te klein (< €{deadband_threshold:.3f}/kWh). Geen net-arbitrage."
+                # Solar buffering only if surplus exists
+                if max_solar > 1.5:
+                    battery_charge[max_solar_hour] = round(min(2.0, max_solar - 0.5), 2)
+                    battery_status_msg += f" Wel zonne-buffer om {max_solar_hour}:00."
+
+            # Set Advice Callout Banners
+            advices[dhw_hour] = f"♨️ Boiler 350L Boost naar 60°C op laagste stroomtarief (€{min_price:.2f}/kWh)"
             if max_solar > 1.5:
-                advices[max_solar_hour] = f"☀️ Zonnepiek ({max_solar:.1f} kW) — Accu laden & gratis verbruik!"
+                advices[max_solar_hour] = f"☀️ Zonnepiek ({max_solar:.1f} kW) — Gratis stroom van eigen dak!"
+            advices[max_price_hour] = f"⛔ Prijspiek (€{max_price:.2f}/kWh) — Zware verbruikers blokkeren!"
 
             self._send_json({
                 "labels": hours,
                 "datasets": {
                     "baseload_kw": baseload,
                     "boiler_kw": boiler,
-                    "battery_charge_kw": battery,
+                    "battery_charge_kw": battery_charge,
                     "solar_kw": solar,
                     "prices_eur": prices
                 },
@@ -347,7 +432,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "cheapest_hour": min_price_hour,
                 "cheapest_price_eur": min_price,
                 "peak_solar_hour": max_solar_hour,
-                "peak_solar_kw": max_solar
+                "peak_solar_kw": max_solar,
+                "max_price_hour": max_price_hour,
+                "max_price_eur": max_price,
+                "battery_status_msg": battery_status_msg
             })
             return
 
@@ -362,6 +450,23 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/")
         body = self._read_json_body()
 
+        # CREATE: Policy
+        if path == "/api/policies":
+            cfg = load_json(CONFIG_FILE)
+            ensure_framework_defaults(cfg)
+            pol_id = body.get("id") or f"pol_{int(datetime.now().timestamp())}"
+            new_pol = {
+                "id": pol_id,
+                "name": body.get("name", "Nieuw Beleid"),
+                "type": body.get("type", "shiftable_consumer"),
+                "target_devices": body.get("target_devices", []),
+                "parameters": body.get("parameters", {})
+            }
+            cfg["policies"].append(new_pol)
+            save_json(CONFIG_FILE, cfg)
+            self._send_json({"status": "created", "policy": new_pol}, 201)
+            return
+
         # CREATE: Device
         if path == "/api/devices":
             cfg = load_json(CONFIG_FILE)
@@ -373,7 +478,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "type": body.get("type", "generic"),
                 "adapter": body.get("adapter", "custom"),
                 "capabilities": body.get("capabilities", ["read_power"]),
-                "policy": body.get("policy", "solar_first"),
                 "ha_power_entity": body.get("ha_power_entity", ""),
                 "ha_energy_entity": body.get("ha_energy_entity", ""),
                 "ha_temp_entity": body.get("ha_temp_entity", ""),
@@ -446,6 +550,23 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/")
         body = self._read_json_body()
 
+        # UPDATE: Specific Policy
+        m_pol = re.match(r"^/api/policies/([^/]+)$", path)
+        if m_pol:
+            pol_id = m_pol.group(1)
+            cfg = load_json(CONFIG_FILE)
+            ensure_framework_defaults(cfg)
+            for p in cfg.get("policies", []):
+                if p["id"] == pol_id:
+                    for k in ["name", "type", "target_devices", "parameters"]:
+                        if k in body:
+                            p[k] = body[k]
+                    save_json(CONFIG_FILE, cfg)
+                    self._send_json({"status": "updated", "policy": p})
+                    return
+            self._send_json({"error": "Policy not found"}, 404)
+            return
+
         # UPDATE: Specific Device
         m_dev = re.match(r"^/api/devices/([^/]+)$", path)
         if m_dev:
@@ -454,7 +575,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             for d in cfg["devices"]:
                 if d["id"] == dev_id:
-                    for k in ["name", "type", "adapter", "capabilities", "policy", "ha_power_entity", "ha_energy_entity", "ha_temp_entity", "ha_control_entity", "parameters"]:
+                    for k in ["name", "type", "adapter", "capabilities", "ha_power_entity", "ha_energy_entity", "ha_temp_entity", "ha_control_entity", "parameters"]:
                         if k in body:
                             d[k] = body[k]
                     save_json(CONFIG_FILE, cfg)
@@ -488,6 +609,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
+
+        # DELETE: Policy
+        m_pol = re.match(r"^/api/policies/([^/]+)$", path)
+        if m_pol:
+            pol_id = m_pol.group(1)
+            cfg = load_json(CONFIG_FILE)
+            ensure_framework_defaults(cfg)
+            orig_len = len(cfg.get("policies", []))
+            cfg["policies"] = [p for p in cfg.get("policies", []) if p["id"] != pol_id]
+            if len(cfg["policies"]) < orig_len:
+                save_json(CONFIG_FILE, cfg)
+                self._send_json({"status": "deleted", "id": pol_id})
+            else:
+                self._send_json({"error": "Policy not found"}, 404)
+            return
 
         # DELETE: Device
         m_dev = re.match(r"^/api/devices/([^/]+)$", path)
@@ -536,7 +672,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         self._send_json({"error": "Endpoint not found"}, 404)
 
     # =========================================================================
-    # HTML SINGLE PAGE APPLICATION (Framework UI + Chart.js Stacked Graph)
+    # HTML SINGLE PAGE APPLICATION (Framework UI + Policies & Stacked Graph)
     # =========================================================================
     def _serve_spa(self):
         self.send_response(200)
@@ -603,23 +739,30 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <span class="font-bold tracking-tight text-white text-base">Open HEMS</span>
                             <span class="px-1.5 py-0.5 text-[9px] font-semibold bg-blue-500/10 text-blue-400 rounded border border-blue-500/20">FRAMEWORK</span>
                         </div>
-                        <p class="text-[11px] text-slate-400">Pluggable Core Engine</p>
+                        <p class="text-[11px] text-slate-400">Decoupled Policy Engine</p>
                     </div>
                 </div>
             </div>
 
             <!-- Nav Links -->
             <nav class="p-3 space-y-1">
-                <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Dashboard & Visualisatie</div>
+                <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Visualisatie & Status</div>
                 <a href="#dashboard" onclick="showTab('dashboard')" id="nav-dashboard" class="nav-link active flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
                     <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
                     <span>24h Grafiek & Advies</span>
                 </a>
 
-                <div class="px-3 pt-4 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Entiteiten & Sturing</div>
+                <div class="px-3 pt-4 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Orchestratie & Regels</div>
+                <a href="#policies" onclick="showTab('policies')" id="nav-policies" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
+                    <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                    <span>Beleid & Policies</span>
+                    <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-purple-900/40 text-purple-300 font-medium rounded border border-purple-800" id="badge-pol-count">3</span>
+                </a>
+
+                <div class="px-3 pt-4 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Entiteiten & Bronnen</div>
                 <a href="#devices" onclick="showTab('devices')" id="nav-devices" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
                     <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
-                    <span>Apparaten (Devices & Policy)</span>
+                    <span>Apparaten (Hardware Links)</span>
                     <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-blue-900/40 text-blue-300 font-medium rounded border border-blue-800" id="badge-dev-count">0</span>
                 </a>
                 <a href="#tariffs" onclick="showTab('tariffs')" id="nav-tariffs" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
@@ -633,15 +776,15 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <span>Open APIs (EPEX / Meteo)</span>
                 </a>
                 <a href="#calibration" onclick="showTab('calibration')" id="nav-calibration" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
-                    <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 6l3 18h12l3-18H3zm6 3v10m6-10v10M9 6V4a2 2 0 012-2h2a2 2 0 012 2v2"></path></svg>
+                    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 6l3 18h12l3-18H3zm6 3v10m6-10v10M9 6V4a2 2 0 012-2h2a2 2 0 012 2v2"></path></svg>
                     <span>Kalibratie & Offsets</span>
                 </a>
             </nav>
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.3.0</strong></span>
-            <span>Framework Clean</span>
+            <span>Versie: <strong class="text-slate-400">v0.3.1</strong></span>
+            <span>Policy Decoupled</span>
         </div>
     </aside>
 
@@ -650,7 +793,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         <header class="h-20 border-b border-[#1E293B] bg-[#0B0F17]/90 backdrop-blur px-8 flex items-center justify-between sticky top-0 z-30">
             <div>
                 <h1 class="text-lg font-bold text-white tracking-tight" id="header-title">24h Verwachting & Gestapeld Verbruik</h1>
-                <p class="text-xs text-slate-400 mt-0.5">Gestapelde uurgrafiek: basislast, warmtepomp, accu en zonne-advies</p>
+                <p class="text-xs text-slate-400 mt-0.5" id="header-sub">Gestapelde uurgrafiek: basislast, warmtepomp, accu en zonne-advies</p>
             </div>
             <div class="flex items-center gap-3">
                 <button onclick="loadChartData()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow transition-all flex items-center gap-1.5">
@@ -682,6 +825,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </span>
                 </div>
 
+                <!-- Battery Economic Status Banner -->
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-xl p-3.5 flex items-center gap-3 text-xs text-slate-300">
+                    <span class="text-base">🔋</span>
+                    <span id="battery-status-banner" class="font-mono text-emerald-400">Accu-beleid wordt geëvalueerd...</span>
+                </div>
+
                 <!-- The Stacked Bar Chart Card -->
                 <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 shadow-xl">
                     <div class="flex justify-between items-center mb-6">
@@ -703,12 +852,28 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 </div>
             </div>
 
-            <!-- TAB 2: APPARATEN CRUD WITH POLICY & HA SELECTOR -->
+            <!-- TAB 2: POLICIES CRUD (The Core Orchestration Rules) -->
+            <div id="view-policies" class="tab-content space-y-4">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-base font-bold text-white">Beleidsregels & Orchestratie (Policy Engine)</h2>
+                        <p class="text-xs text-slate-400">Definieer overkoepelend beleid op basis van kosten, zonne-opwek en comfortguardrails.</p>
+                    </div>
+                    <button onclick="openPolicyModal()" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-xl shadow transition-all">
+                        + Nieuwe Policy Aanmaken
+                    </button>
+                </div>
+                <div id="policies-container" class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                    <!-- Loaded dynamically -->
+                </div>
+            </div>
+
+            <!-- TAB 3: APPARATEN CRUD (Pure Hardware Links) -->
             <div id="view-devices" class="tab-content space-y-4">
                 <div class="flex justify-between items-center">
                     <div>
-                        <h2 class="text-base font-bold text-white">Apparaten & Beleidsregels (Devices & Policies)</h2>
-                        <p class="text-xs text-slate-400">Koppel Home Assistant entiteiten en bepaal de sturingspolicy per resource.</p>
+                        <h2 class="text-base font-bold text-white">Apparaten & Hardware (Physical Resources)</h2>
+                        <p class="text-xs text-slate-400">Koppel Home Assistant entiteiten en technische limieten (vermogen, capaciteit).</p>
                     </div>
                     <button onclick="openDeviceModal()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow transition-all">
                         + Apparaat Toevoegen
@@ -719,7 +884,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 </div>
             </div>
 
-            <!-- TAB 3: TARIFFS & SUPPLIERS CRUD -->
+            <!-- TAB 4: TARIFFS & SUPPLIERS CRUD -->
             <div id="view-tariffs" class="tab-content space-y-4">
                 <div class="flex justify-between items-center">
                     <div>
@@ -735,7 +900,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 </div>
             </div>
 
-            <!-- TAB 4: OPEN APIS -->
+            <!-- TAB 5: OPEN APIS -->
             <div id="view-providers" class="tab-content space-y-4">
                 <div>
                     <h2 class="text-base font-bold text-white">Standaard Open API Providers</h2>
@@ -761,7 +926,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 </div>
             </div>
 
-            <!-- TAB 5: CALIBRATION & EXCLUSION WINDOWS -->
+            <!-- TAB 6: CALIBRATION & EXCLUSION WINDOWS -->
             <div id="view-calibration" class="tab-content space-y-6">
                 <div>
                     <h2 class="text-base font-bold text-white">Zelflerende Feedback & Sensor-Downtime</h2>
@@ -792,40 +957,59 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
     </main>
 
-    <!-- MODAL: ADD / EDIT DEVICE (With HA Dropdown Selector & Policy) -->
+    <!-- MODAL: ADD / EDIT POLICY -->
+    <div id="policy-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
+        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-lg text-xs text-slate-300 max-h-[90vh] overflow-y-auto">
+            <h3 class="text-sm font-bold text-white mb-4" id="modal-pol-title">Policy Configureren</h3>
+            <form onsubmit="savePolicy(event)" class="space-y-3">
+                <input type="hidden" id="modal-pol-id">
+                <div>
+                    <label class="block mb-1 text-slate-400">Naam van het Beleid</label>
+                    <input type="text" id="modal-pol-name" required class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                </div>
+                <div>
+                    <label class="block mb-1 text-slate-400">Archetype (Type Beleid)</label>
+                    <select id="modal-pol-type" onchange="renderPolicyFields()" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        <option value="thermal_buffer">♨️ Buffer Zonder Teruggave (Warmtepomp & SWW)</option>
+                        <option value="battery_arbitrage">🔋 Accu Met Teruggave (Arbitrage & Dode Zone)</option>
+                        <option value="shiftable_consumer">🧺 Verbruik Zonder Opslag (Vaatwasser, Wasmachine)</option>
+                    </select>
+                </div>
+
+                <!-- Dynamic Parameters Container -->
+                <div id="pol-params-container" class="space-y-3 pt-2 border-t border-slate-800">
+                    <!-- Fields injected based on type -->
+                </div>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                    <button type="button" onclick="closeModal('policy-modal')" class="px-3 py-1.5 bg-slate-800 text-slate-400 rounded-lg">Annuleren</button>
+                    <button type="submit" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-lg">Opslaan</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: ADD / EDIT DEVICE (Hardware & HA Selectors Only) -->
     <div id="device-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
         <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-lg text-xs text-slate-300">
-            <h3 class="text-sm font-bold text-white mb-4" id="modal-dev-title">Apparaat Configureren</h3>
+            <h3 class="text-sm font-bold text-white mb-4" id="modal-dev-title">Apparaat Configureren (Hardware)</h3>
             <form onsubmit="saveDevice(event)" class="space-y-3">
                 <input type="hidden" id="modal-dev-id">
                 <div>
                     <label class="block mb-1 text-slate-400">Naam Apparaat</label>
                     <input type="text" id="modal-dev-name" required class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
                 </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block mb-1 text-slate-400">Type Resource</label>
-                        <select id="modal-dev-type" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                            <option value="grid_meter">Netmeter (P1)</option>
-                            <option value="solar_inverter">Zonnepanelen (Omvormer)</option>
-                            <option value="heat_pump">Warmtepomp (CV)</option>
-                            <option value="thermal_storage">Warm Tapwater (SWW)</option>
-                            <option value="home_battery">Thuisbatterij</option>
-                            <option value="ev_charger">EV Laadpaal</option>
-                            <option value="baseload">Basislast</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block mb-1 text-slate-400">Beleidsregel (Policy)</label>
-                        <select id="modal-dev-policy" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                            <option value="solar_first">☀️ Zonne-overschot Eerst</option>
-                            <option value="cheapest_hours">🏷️ Goedkoopste Uren van de Dag</option>
-                            <option value="peak_avoidance">⛔ Spitsblokkade (SG1)</option>
-                            <option value="comfort_priority">🔥 Comfort Prioriteit (Altijd warm)</option>
-                            <option value="arbitrage_and_solar">🔋 Accu: Arbitrage + Zelfconsumptie</option>
-                            <option value="monitoring_only">📊 Alleen Monitoring</option>
-                        </select>
-                    </div>
+                <div>
+                    <label class="block mb-1 text-slate-400">Type Resource</label>
+                    <select id="modal-dev-type" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        <option value="grid_meter">Netmeter (P1 DSMR)</option>
+                        <option value="solar_inverter">Zonnepanelen (Omvormer)</option>
+                        <option value="heat_pump">Warmtepomp (CV)</option>
+                        <option value="thermal_storage">Warm Tapwatervat (SWW)</option>
+                        <option value="home_battery">Thuisbatterij</option>
+                        <option value="ev_charger">EV Laadpaal</option>
+                        <option value="baseload">Basislast / Sluipverbruik</option>
+                    </select>
                 </div>
 
                 <!-- HA Entity Selector Dropdowns -->
@@ -939,6 +1123,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
     <script>
         let chartInstance = null;
         let haEntitiesCache = [];
+        let currentPolicyParams = {};
 
         function showTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -949,15 +1134,19 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             if (link) link.classList.add('active');
 
             const titles = {
-                'dashboard': '24h Verwachting & Gestapeld Verbruik',
-                'devices': 'Apparaten & Beleidsregels (Devices & Policies)',
-                'tariffs': 'Energieleveranciers & Tariefstructuren',
-                'providers': 'Standaard Open API Providers',
-                'calibration': 'Zelflerende Feedback & Sensor-Downtime'
+                'dashboard': ['24h Verwachting & Gestapeld Verbruik', 'Gestapelde uurgrafiek: basislast, warmtepomp, accu en zonne-advies'],
+                'policies': ['Beleidsregels & Orchestratie (Policy Engine)', 'Definieer overkoepelend beleid op basis van kosten, zonne-opwek en comfortguardrails.'],
+                'devices': ['Apparaten & Hardware (Physical Resources)', 'Koppel Home Assistant entiteiten en technische limieten.'],
+                'tariffs': ['Energieleveranciers & Tariefstructuren', 'Beheer contracten (Powerpeers, Tibber, vast/dynamisch) en opslagen.'],
+                'providers': ['Standaard Open API Providers', 'Breed toepasbare publieke databronnen die het framework out-of-the-box ontsluit.'],
+                'calibration': ['Zelflerende Feedback & Sensor-Downtime', 'Beheer data-uitsluitingsmaskers en empirische gebouw-/dakparameters.']
             };
-            document.getElementById('header-title').innerText = titles[tabId] || 'Open HEMS';
+            const t = titles[tabId] || ['Open HEMS', ''];
+            document.getElementById('header-title').innerText = t[0];
+            document.getElementById('header-sub').innerText = t[1];
 
             if (tabId === 'dashboard') loadChartData();
+            if (tabId === 'policies') loadPolicies();
             if (tabId === 'devices') loadDevices();
             if (tabId === 'tariffs') loadTariffs();
             if (tabId === 'calibration') loadCalibration();
@@ -1003,6 +1192,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 // Update recommendation banner
                 const adv = data.advices[data.cheapest_hour] || `Beste stroomtarief om ${data.cheapest_hour}:00 (€${data.cheapest_price_eur.toFixed(4)}/kWh)`;
                 document.getElementById('banner-text').innerText = adv;
+                document.getElementById('battery-status-banner').innerText = data.battery_status_msg;
 
                 // Render Chart.js Stacked Bar & Curves
                 const ctx = document.getElementById('hemsChart').getContext('2d');
@@ -1099,6 +1289,243 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             }
         }
 
+        // =========================================================================
+        // POLICIES CONTROLLER
+        // =========================================================================
+        async function loadPolicies() {
+            const res = await fetch('./api/policies');
+            const d = await res.json();
+            const container = document.getElementById('policies-container');
+            container.innerHTML = '';
+            document.getElementById('badge-pol-count').innerText = (d.policies || []).length;
+
+            (d.policies || []).forEach(pol => {
+                const card = document.createElement('div');
+                card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 flex flex-col justify-between shadow-lg';
+                
+                let detailsHtml = '';
+                let typeBadge = '';
+
+                if (pol.type === 'thermal_buffer') {
+                    typeBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-pink-950 text-pink-300 border border-pink-800">Buffer Zonder Teruggave</span>';
+                    detailsHtml = `
+                        <div class="space-y-1 text-[11px] text-slate-300 bg-[#0B0F17] p-3 rounded-lg border border-slate-800 mb-3">
+                            <div>🚨 Nood-comfort: <strong>< ${pol.parameters.emergency_threshold_c || 38}°C</strong> (Prioriteit 1)</div>
+                            <div>⚡ Economische drempel: <strong>< ${pol.parameters.deadband_reheat_c || 46}°C</strong></div>
+                            <div>🎯 Doeltemp: <strong>${pol.parameters.target_temperature_c || 50}°C</strong> · ☀️ Boost: <strong>${pol.parameters.solar_boost_temperature_c || 60}°C</strong></div>
+                            <div>🛡️ Spitsblokkades: ${pol.parameters.morning_peak_lockout ? 'Ochtend ✓' : ''} ${pol.parameters.evening_peak_lockout ? 'Avond ✓' : ''}</div>
+                        </div>
+                    `;
+                } else if (pol.type === 'battery_arbitrage') {
+                    typeBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">Accu Arbitrage & Dode Zone</span>';
+                    detailsHtml = `
+                        <div class="space-y-1 text-[11px] text-slate-300 bg-[#0B0F17] p-3 rounded-lg border border-slate-800 mb-3 font-mono">
+                            <div>⏸️ Dode Zone (Deadband): <strong>ΔP < €${pol.parameters.min_price_spread_eur_kwh || 0.115}/kWh</strong></div>
+                            <div>⚡ Conversie-efficiëntie: <strong>${Math.round((pol.parameters.roundtrip_efficiency || 0.87)*100)}%</strong> (13% verlies)</div>
+                            <div>📉 Cel-afschrijving (LCOS): <strong>€${pol.parameters.lcos_depreciation_eur_kwh || 0.0741}/kWh</strong></div>
+                            <div>🔋 SoC Grenzen: <strong>${pol.parameters.min_soc_pct || 10}% - ${pol.parameters.max_soc_pct || 95}%</strong></div>
+                        </div>
+                    `;
+                } else {
+                    typeBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-950 text-purple-300 border border-purple-800">Verbruik Zonder Opslag</span>';
+                    detailsHtml = `
+                        <div class="space-y-1 text-[11px] text-slate-300 bg-[#0B0F17] p-3 rounded-lg border border-slate-800 mb-3">
+                            <div>⏱️ Duur: <strong>${pol.parameters.duration_minutes || 90} min</strong> @ <strong>${pol.parameters.power_watts || 1200} W</strong></div>
+                            <div>🕒 Venster: <strong>${pol.parameters.window_start_hour || 8}:00 - ${pol.parameters.window_end_hour || 20}:00</strong></div>
+                            <div>☀️ Zonne-drempel: <strong>${pol.parameters.min_solar_surplus_watts || 1500} W</strong></div>
+                        </div>
+                    `;
+                }
+
+                card.innerHTML = `
+                    <div>
+                        <div class="flex justify-between items-start mb-2">
+                            <h4 class="font-bold text-white text-sm">${pol.name}</h4>
+                            ${typeBadge}
+                        </div>
+                        <p class="text-[11px] text-slate-400 mb-2">Target Devices: <code class="text-cyan-300">${(pol.target_devices || []).join(', ') || 'Niet gekoppeld'}</code></p>
+                        ${detailsHtml}
+                    </div>
+                    <div class="flex justify-end gap-2 pt-3 border-t border-[#1E293B]">
+                        <button onclick='openPolicyModal(${JSON.stringify(pol)})' class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg">Bewerken</button>
+                        <button onclick="deletePolicy('${pol.id}')" class="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800 text-xs rounded-lg">Verwijderen</button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function renderPolicyFields() {
+            const type = document.getElementById('modal-pol-type').value;
+            const container = document.getElementById('pol-params-container');
+            container.innerHTML = '';
+
+            if (type === 'thermal_buffer') {
+                container.innerHTML = `
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block mb-1 text-slate-400">Nood-comfort Drempel (°C)</label>
+                            <input type="number" step="0.5" id="param_emergency_threshold_c" value="${currentPolicyParams.emergency_threshold_c || 38.0}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                        <div>
+                            <label class="block mb-1 text-slate-400">Economische Drempel (°C)</label>
+                            <input type="number" step="0.5" id="param_deadband_reheat_c" value="${currentPolicyParams.deadband_reheat_c || 46.0}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block mb-1 text-slate-400">Standaard Doeltemp (°C)</label>
+                            <input type="number" step="1" id="param_target_temperature_c" value="${currentPolicyParams.target_temperature_c || 50.0}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                        <div>
+                            <label class="block mb-1 text-slate-400">Zon/Dal Boost Doeltemp (°C)</label>
+                            <input type="number" step="1" id="param_solar_boost_temperature_c" value="${currentPolicyParams.solar_boost_temperature_c || 60.0}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                    </div>
+                    <div class="space-y-1 pt-2">
+                        <label class="flex items-center gap-2">
+                            <input type="checkbox" id="param_morning_peak_lockout" ${currentPolicyParams.morning_peak_lockout !== false ? 'checked' : ''} class="rounded bg-slate-900 text-purple-600 border-slate-700">
+                            <span class="text-slate-300 text-xs">Ochtendspits blokkade (07:00 - 08:30 SG1)</span>
+                        </label>
+                        <label class="flex items-center gap-2">
+                            <input type="checkbox" id="param_evening_peak_lockout" ${currentPolicyParams.evening_peak_lockout !== false ? 'checked' : ''} class="rounded bg-slate-900 text-purple-600 border-slate-700">
+                            <span class="text-slate-300 text-xs">Avondspits blokkade (17:30 - 20:30 SG1)</span>
+                        </label>
+                        <label class="flex items-center gap-2">
+                            <input type="checkbox" id="param_isolate_space_heating_during_dhw" ${currentPolicyParams.isolate_space_heating_during_dhw !== false ? 'checked' : ''} class="rounded bg-slate-900 text-purple-600 border-slate-700">
+                            <span class="text-slate-300 text-xs">CV uitschakelen tijdens SWW (voorkomt 9kW BUH)</span>
+                        </label>
+                    </div>
+                `;
+            } else if (type === 'battery_arbitrage') {
+                container.innerHTML = `
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block mb-1 text-slate-400">Dode Zone (Min. Prijsdelta €/kWh)</label>
+                            <input type="number" step="0.001" id="param_min_price_spread_eur_kwh" value="${currentPolicyParams.min_price_spread_eur_kwh || 0.115}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                        <div>
+                            <label class="block mb-1 text-slate-400">Rondgang-Efficiëntie (bijv. 0.87)</label>
+                            <input type="number" step="0.01" id="param_roundtrip_efficiency" value="${currentPolicyParams.roundtrip_efficiency || 0.87}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block mb-1 text-slate-400">Cel-Afschrijving (LCOS €/kWh)</label>
+                            <input type="number" step="0.001" id="param_lcos_depreciation_eur_kwh" value="${currentPolicyParams.lcos_depreciation_eur_kwh || 0.0741}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                        <div>
+                            <label class="block mb-1 text-slate-400">Piekstroombeveiliging (Amps/fase)</label>
+                            <input type="number" step="1" id="param_peak_shaving_threshold_amps" value="${currentPolicyParams.peak_shaving_threshold_amps || 20.0}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block mb-1 text-slate-400">Minimale SoC Reserve (%)</label>
+                            <input type="number" step="1" id="param_min_soc_pct" value="${currentPolicyParams.min_soc_pct || 10.0}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                        <div>
+                            <label class="block mb-1 text-slate-400">Maximale SoC (%)</label>
+                            <input type="number" step="1" id="param_max_soc_pct" value="${currentPolicyParams.max_soc_pct || 95.0}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = `
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block mb-1 text-slate-400">Cyclusduur (minuten)</label>
+                            <input type="number" step="5" id="param_duration_minutes" value="${currentPolicyParams.duration_minutes || 90}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                        <div>
+                            <label class="block mb-1 text-slate-400">Gemiddeld Vermogen (Watt)</label>
+                            <input type="number" step="50" id="param_power_watts" value="${currentPolicyParams.power_watts || 1200}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block mb-1 text-slate-400">Venster Start (Uur)</label>
+                            <input type="number" step="1" id="param_window_start_hour" value="${currentPolicyParams.window_start_hour || 8}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                        <div>
+                            <label class="block mb-1 text-slate-400">Venster Eind (Uur)</label>
+                            <input type="number" step="1" id="param_window_end_hour" value="${currentPolicyParams.window_end_hour || 20}" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function openPolicyModal(pol = null) {
+            if (pol) {
+                document.getElementById('modal-pol-title').innerText = 'Policy Bewerken';
+                document.getElementById('modal-pol-id').value = pol.id;
+                document.getElementById('modal-pol-name').value = pol.name;
+                document.getElementById('modal-pol-type').value = pol.type;
+                currentPolicyParams = pol.parameters || {};
+            } else {
+                document.getElementById('modal-pol-title').innerText = 'Nieuwe Policy Aanmaken';
+                document.getElementById('modal-pol-id').value = '';
+                document.getElementById('modal-pol-name').value = '';
+                document.getElementById('modal-pol-type').value = 'thermal_buffer';
+                currentPolicyParams = {};
+            }
+            renderPolicyFields();
+            document.getElementById('policy-modal').classList.remove('hidden');
+        }
+
+        async function savePolicy(e) {
+            e.preventDefault();
+            const id = document.getElementById('modal-pol-id').value;
+            const type = document.getElementById('modal-pol-type').value;
+            const params = {};
+
+            if (type === 'thermal_buffer') {
+                params.emergency_threshold_c = parseFloat(document.getElementById('param_emergency_threshold_c').value);
+                params.deadband_reheat_c = parseFloat(document.getElementById('param_deadband_reheat_c').value);
+                params.target_temperature_c = parseFloat(document.getElementById('param_target_temperature_c').value);
+                params.solar_boost_temperature_c = parseFloat(document.getElementById('param_solar_boost_temperature_c').value);
+                params.morning_peak_lockout = document.getElementById('param_morning_peak_lockout').checked;
+                params.evening_peak_lockout = document.getElementById('param_evening_peak_lockout').checked;
+                params.isolate_space_heating_during_dhw = document.getElementById('param_isolate_space_heating_during_dhw').checked;
+            } else if (type === 'battery_arbitrage') {
+                params.min_price_spread_eur_kwh = parseFloat(document.getElementById('param_min_price_spread_eur_kwh').value);
+                params.roundtrip_efficiency = parseFloat(document.getElementById('param_roundtrip_efficiency').value);
+                params.lcos_depreciation_eur_kwh = parseFloat(document.getElementById('param_lcos_depreciation_eur_kwh').value);
+                params.peak_shaving_threshold_amps = parseFloat(document.getElementById('param_peak_shaving_threshold_amps').value);
+                params.min_soc_pct = parseFloat(document.getElementById('param_min_soc_pct').value);
+                params.max_soc_pct = parseFloat(document.getElementById('param_max_soc_pct').value);
+            } else {
+                params.duration_minutes = parseInt(document.getElementById('param_duration_minutes').value);
+                params.power_watts = parseFloat(document.getElementById('param_power_watts').value);
+                params.window_start_hour = parseInt(document.getElementById('param_window_start_hour').value);
+                params.window_end_hour = parseInt(document.getElementById('param_window_end_hour').value);
+            }
+
+            const payload = {
+                name: document.getElementById('modal-pol-name').value,
+                type: type,
+                parameters: params
+            };
+
+            if (id) {
+                await fetch('./api/policies/' + id, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+            } else {
+                await fetch('./api/policies', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+            }
+            closeModal('policy-modal');
+            loadPolicies();
+        }
+
+        async function deletePolicy(id) {
+            if (!confirm('Weet je zeker dat je deze policy wilt verwijderen?')) return;
+            await fetch('./api/policies/' + id, { method: 'DELETE' });
+            loadPolicies();
+        }
+
+        // =========================================================================
+        // DEVICES CONTROLLER
+        // =========================================================================
         async function loadDevices() {
             const res = await fetch('./api/devices');
             const d = await res.json();
@@ -1108,14 +1535,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             (d.devices || []).forEach(dev => {
                 const card = document.createElement('div');
-                card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 flex flex-col justify-between';
+                card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 flex flex-col justify-between shadow-lg';
                 card.innerHTML = `
                     <div>
                         <div class="flex justify-between items-start mb-2">
                             <h4 class="font-bold text-white text-sm">${dev.name}</h4>
                             <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800">${dev.type}</span>
                         </div>
-                        <div class="text-[11px] text-amber-400 mb-2 font-medium">Policy: <code>${dev.policy || 'solar_first'}</code></div>
                         <p class="text-[11px] text-slate-400 mb-1">Sensor: <code class="text-cyan-300">${dev.ha_power_entity || 'Geen'}</code></p>
                         <p class="text-[11px] text-slate-400 mb-3">Relais/Switch: <code class="text-cyan-300">${dev.ha_control_entity || 'Geen'}</code></p>
                     </div>
@@ -1135,7 +1561,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 document.getElementById('modal-dev-id').value = dev.id;
                 document.getElementById('modal-dev-name').value = dev.name;
                 document.getElementById('modal-dev-type').value = dev.type;
-                document.getElementById('modal-dev-policy').value = dev.policy || 'solar_first';
                 document.getElementById('modal-dev-ha-power').value = dev.ha_power_entity || '';
                 document.getElementById('modal-dev-ha-control').value = dev.ha_control_entity || '';
             } else {
@@ -1152,7 +1577,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             const payload = {
                 name: document.getElementById('modal-dev-name').value,
                 type: document.getElementById('modal-dev-type').value,
-                policy: document.getElementById('modal-dev-policy').value,
                 ha_power_entity: document.getElementById('modal-dev-ha-power').value,
                 ha_control_entity: document.getElementById('modal-dev-ha-control').value
             };
@@ -1171,6 +1595,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             loadDevices();
         }
 
+        // =========================================================================
+        // TARIFFS CONTROLLER
+        // =========================================================================
         async function loadTariffs() {
             const res = await fetch('./api/tariffs');
             const d = await res.json();
@@ -1178,7 +1605,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             container.innerHTML = '';
             (d.tariffs || []).forEach(t => {
                 const card = document.createElement('div');
-                card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 flex flex-col justify-between';
+                card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 flex flex-col justify-between shadow-lg';
                 card.innerHTML = `
                     <div>
                         <div class="flex justify-between items-start mb-2">
@@ -1248,6 +1675,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             loadTariffs();
         }
 
+        // =========================================================================
+        // CALIBRATION & EXCLUSIONS
+        // =========================================================================
         async function loadCalibration() {
             const res = await fetch('./api/calibration');
             const data = await res.json();

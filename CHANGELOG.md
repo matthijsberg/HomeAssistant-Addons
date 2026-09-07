@@ -10,6 +10,25 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.3.1] — 2026-09-07 (Decoupled Policy Engine & 3 Policy Archetypes)
+
+### Added
+- **Decoupled Policy Engine from Device Hardware:**
+  - Devices are now strictly physical resources (HA entity links, power ratings, capacity).
+  - Policies are independent orchestrators controlling multiple resources based on economics, comfort, and safety.
+- **Three Fundamental Policy Archetypes:**
+  1. `ShiftableConsumerPolicy` (Verbruik zonder opslag): For dishwashers, washing machines, dryers, EV chargers. Configurable window, duration, power rating, interruptibility, and solar threshold.
+  2. `ThermalBufferPolicy` (Buffer zonder teruggave): For 350L DHW boilers and space heating. Enforces Priority 1 emergency comfort threshold (< 38°C overrules everything), economic reheat threshold (< 46°C prevents unneeded cycling), standard 50°C target, 60°C solar/dal boost, morning/evening peak lockouts (SG1), and CV isolation during DHW runs to eliminate 9kW BUH resistance heaters.
+  3. `BatteryArbitragePolicy` (Accu met teruggave): For hybrid inverters and home batteries. Introduces the **Economic Deadband (Dode Zone)**: evaluates round-trip conversion loss (13%) and LCOS cell degradation (€0.0741/kWh). If $\Delta P < €0.115/\text{kWh}$, the battery enters `HOLD / STANDBY` to avoid loss-making cycles. Free solar surplus charges the battery before grid arbitrage.
+- **RESTful Policies CRUD API:** `/api/policies` with `GET`, `POST`, `PUT`, and `DELETE`.
+- **Ingress UI Navigation & Modals:** Dedicated "Beleid & Policies" tab with archetype-specific modal editors.
+
+### Security & Deployment
+- Automated pre-commit secret scan verified: 0 credentials.
+- Automatic snapshot v0.3.0 archived prior to upgrade.
+
+---
+
 ## [0.3.0] — 2026-09-07 (Generic Framework & Chart.js Stacked Visualizer)
 
 ### Added
