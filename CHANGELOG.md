@@ -10,6 +10,21 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.3.2] — 2026-09-07 (Policy-to-Device Multi-Selector & Bidirectional Mapping)
+
+### Added
+- **Bidirectional Policy-to-Device Selector:**
+  - Added multi-checkbox device selector to the Policy editor modal (`modal-pol-devices-list`), dynamically listing all configured HEMS devices with their resource type.
+  - Target device assignments (`target_devices`) are persisted via RESTful API (`POST` / `PUT /api/policies/<id>`).
+  - Policies UI now displays friendly device badges (e.g. `Daikin Altherma 3 H HT`, `Warm Tapwatervat 350L SWW`) rather than raw IDs.
+  - Devices UI now explicitly indicates which policy or policies currently control each physical device (e.g. `Beleid: 350L SWW Boiler Buffer Beleid` or `Geen beleid gekoppeld (stand-by)`).
+
+### Security & Deployment
+- Automated pre-commit secret scan verified: 0 credentials.
+- Automatic snapshot v0.3.1 archived prior to upgrade.
+
+---
+
 ## [0.3.1] — 2026-09-07 (Decoupled Policy Engine & 3 Policy Archetypes)
 
 ### Added

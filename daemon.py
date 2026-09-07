@@ -976,6 +976,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </select>
                 </div>
 
+                <!-- Device Selector for Policy Binding -->
+                <div>
+                    <label class="block mb-1 text-slate-400">Gekoppelde HEMS Apparaten (Selecteer één of meer)</label>
+                    <div id="modal-pol-devices-list" class="bg-[#0B0F17] border border-slate-800 rounded-lg p-2.5 max-h-36 overflow-y-auto space-y-1.5 font-sans text-xs">
+                        <span class="text-slate-500 italic">Apparaten laden...</span>
+                    </div>
+                </div>
+
                 <!-- Dynamic Parameters Container -->
                 <div id="pol-params-container" class="space-y-3 pt-2 border-t border-slate-800">
                     <!-- Fields injected based on type -->
@@ -1293,13 +1301,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         // POLICIES CONTROLLER
         // =========================================================================
         async function loadPolicies() {
-            const res = await fetch('./api/policies');
-            const d = await res.json();
+            const [polRes, devRes] = await Promise.all([fetch('./api/policies'), fetch('./api/devices')]);
+            const polData = await polRes.json();
+            const devData = await devRes.json();
+
+            const devMap = {};
+            (devData.devices || []).forEach(d => { devMap[d.id] = d.name; });
+
             const container = document.getElementById('policies-container');
             container.innerHTML = '';
-            document.getElementById('badge-pol-count').innerText = (d.policies || []).length;
+            document.getElementById('badge-pol-count').innerText = (polData.policies || []).length;
 
-            (d.policies || []).forEach(pol => {
+            (polData.policies || []).forEach(pol => {
                 const card = document.createElement('div');
                 card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 flex flex-col justify-between shadow-lg';
                 
@@ -1337,13 +1350,20 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     `;
                 }
 
+                // Render friendly device badges
+                const targetBadges = (pol.target_devices && pol.target_devices.length > 0)
+                    ? pol.target_devices.map(id => `<span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-900/40 text-blue-300 border border-blue-800 font-medium">${devMap[id] || id}</span>`).join(' ')
+                    : '<span class="text-slate-500 italic">Geen apparaten gekoppeld</span>';
+
                 card.innerHTML = `
                     <div>
                         <div class="flex justify-between items-start mb-2">
                             <h4 class="font-bold text-white text-sm">${pol.name}</h4>
                             ${typeBadge}
                         </div>
-                        <p class="text-[11px] text-slate-400 mb-2">Target Devices: <code class="text-cyan-300">${(pol.target_devices || []).join(', ') || 'Niet gekoppeld'}</code></p>
+                        <div class="text-[11px] text-slate-400 mb-2.5 flex items-center gap-1.5 flex-wrap">
+                            <span>Gekoppeld:</span> ${targetBadges}
+                        </div>
                         ${detailsHtml}
                     </div>
                     <div class="flex justify-end gap-2 pt-3 border-t border-[#1E293B]">
@@ -1353,6 +1373,33 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 `;
                 container.appendChild(card);
             });
+        }
+
+        async function populatePolicyDeviceSelector(selectedDeviceIds = []) {
+            try {
+                const res = await fetch('./api/devices');
+                const data = await res.json();
+                const container = document.getElementById('modal-pol-devices-list');
+                container.innerHTML = '';
+                const devices = data.devices || [];
+                if (devices.length === 0) {
+                    container.innerHTML = '<span class="text-slate-500 italic">Geen apparaten geconfigureerd. Voeg eerst een apparaat toe in het menu Apparaten.</span>';
+                    return;
+                }
+                devices.forEach(d => {
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center gap-2 p-1.5 rounded hover:bg-slate-800/40 cursor-pointer';
+                    const isChecked = selectedDeviceIds.includes(d.id);
+                    label.innerHTML = `
+                        <input type="checkbox" name="policy_target_device" value="${d.id}" ${isChecked ? 'checked' : ''} class="rounded bg-slate-900 text-purple-600 border-slate-700">
+                        <span class="text-slate-200 font-medium">${d.name}</span>
+                        <span class="ml-auto text-[10px] text-slate-500 font-mono">${d.type}</span>
+                    `;
+                    container.appendChild(label);
+                });
+            } catch (e) {
+                console.error('Error fetching devices for policy:', e);
+            }
         }
 
         function renderPolicyFields() {
@@ -1457,6 +1504,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         }
 
         function openPolicyModal(pol = null) {
+            const selectedDevs = pol ? (pol.target_devices || []) : [];
+            populatePolicyDeviceSelector(selectedDevs);
             if (pol) {
                 document.getElementById('modal-pol-title').innerText = 'Policy Bewerken';
                 document.getElementById('modal-pol-id').value = pol.id;
@@ -1478,6 +1527,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             e.preventDefault();
             const id = document.getElementById('modal-pol-id').value;
             const type = document.getElementById('modal-pol-type').value;
+            const selectedDevices = Array.from(document.querySelectorAll('input[name="policy_target_device"]:checked')).map(cb => cb.value);
             const params = {};
 
             if (type === 'thermal_buffer') {
@@ -1505,6 +1555,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             const payload = {
                 name: document.getElementById('modal-pol-name').value,
                 type: type,
+                target_devices: selectedDevices,
                 parameters: params
             };
 
@@ -1527,13 +1578,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         // DEVICES CONTROLLER
         // =========================================================================
         async function loadDevices() {
-            const res = await fetch('./api/devices');
-            const d = await res.json();
+            const [devRes, polRes] = await Promise.all([fetch('./api/devices'), fetch('./api/policies')]);
+            const devData = await devRes.json();
+            const polData = await polRes.json();
+
+            const policies = polData.policies || [];
             const container = document.getElementById('devices-container');
             container.innerHTML = '';
-            document.getElementById('badge-dev-count').innerText = (d.devices || []).length;
+            document.getElementById('badge-dev-count').innerText = (devData.devices || []).length;
 
-            (d.devices || []).forEach(dev => {
+            (devData.devices || []).forEach(dev => {
+                const boundPolicies = policies.filter(p => (p.target_devices || []).includes(dev.id));
+                const policyBadge = boundPolicies.length > 0
+                    ? boundPolicies.map(p => `<span class="px-1.5 py-0.5 rounded text-[10px] bg-purple-900/40 text-purple-300 border border-purple-800 font-medium">${p.name}</span>`).join(' ')
+                    : '<span class="text-slate-500 italic">Geen beleid gekoppeld (stand-by)</span>';
+
                 const card = document.createElement('div');
                 card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 flex flex-col justify-between shadow-lg';
                 card.innerHTML = `
@@ -1541,6 +1600,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <div class="flex justify-between items-start mb-2">
                             <h4 class="font-bold text-white text-sm">${dev.name}</h4>
                             <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-900/40 text-blue-300 border border-blue-800">${dev.type}</span>
+                        </div>
+                        <div class="text-[11px] text-slate-400 mb-2 flex items-center gap-1.5 flex-wrap">
+                            <span>Beleid:</span> ${policyBadge}
                         </div>
                         <p class="text-[11px] text-slate-400 mb-1">Sensor: <code class="text-cyan-300">${dev.ha_power_entity || 'Geen'}</code></p>
                         <p class="text-[11px] text-slate-400 mb-3">Relais/Switch: <code class="text-cyan-300">${dev.ha_control_entity || 'Geen'}</code></p>
