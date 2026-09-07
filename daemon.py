@@ -993,10 +993,12 @@ def run_server(port=8099):
 
 def main():
     parser = argparse.ArgumentParser(description="Open HEMS Daemon")
+    parser.add_argument("--config", default=str(CONFIG_FILE))
+    parser.add_argument("--interval", type=int, default=15)
     parser.add_argument("--port", type=int, default=8099)
     args = parser.parse_args()
 
-    cfg = load_json(CONFIG_FILE)
+    cfg = load_json(Path(args.config) if args.config else CONFIG_FILE)
     ensure_default_devices(cfg)
     run_server(args.port)
 
