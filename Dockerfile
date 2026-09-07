@@ -1,20 +1,21 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.11
+ARG BUILD_FROM=alpine:3.20
 FROM ${BUILD_FROM}
 
 ENV LANG=C.UTF-8
 
-# Install build dependencies
+# Install python and runtime dependencies
 RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    py3-requests \
+    py3-yaml \
     curl \
-    jq
+    jq \
+    bash
 
 WORKDIR /opt/open-hems
 
-# Install python dependencies
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-# Copy HEMS application layers and models
+# Copy HEMS codebase
 COPY . /opt/open-hems/
 
 # Copy and prepare entrypoint
