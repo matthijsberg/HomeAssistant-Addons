@@ -65,8 +65,8 @@ def bump(level: str) -> str:
     # Write to VERSION
     VERSION_FILE.write_text(new_v + "\n")
 
-    # Update config.yaml version field if not a -dev build
-    if CONFIG_FILE.exists() and "-dev" not in new_v:
+    # Always update config.yaml version field
+    if CONFIG_FILE.exists():
         content = CONFIG_FILE.read_text()
         content = re.sub(r'version:\s*"[^"]+"', f'version: "{new_v}"', content)
         CONFIG_FILE.write_text(content)
