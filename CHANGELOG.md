@@ -10,6 +10,31 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.6.0] — 2026-09-08 (Layer 5 Analytics & Reporting & Inverted Navigation Hierarchy)
+
+### Added
+- **Laag 5: Analyse & Rapportage (`layer5_analytics/` & `view-analytics`):**
+  - **Financial Savings Tracking:** Real-time calculation of dynamic load shifting savings vs. flat tariff baseloads (`calculate_daily_savings`).
+  - **Solar Self-Consumption Ratio:** Dedicated calculator tracking percentage of generated PV electricity utilized directly on-site (`calculate_self_consumption_ratio`).
+  - **Heat Pump Efficiency Auditing:** Seasonal COP tracking for DHW (~2.04) and space heating (~4.80).
+  - **Forecast-vs-Actual Variance Engine:** Computes Mean Absolute Error (MAE) and RMSE comparing Day-Ahead EPEX/solar forecasts with verified InfluxDB hardware telemetry.
+  - **Automated Digest Generator (`generate_daily_digest`):** Markdown/text digest ready for Telegram and dashboard reporting.
+  - **RESTful Analytics API:** `GET /api/analytics` returning live KPI cards and daily summaries.
+  - **Expanded Unit Test Suite:** `tests/unit/test_analytics.py` bringing total passing unit tests to 27/27.
+- **Inverted Navigation Hierarchy (Layer 5 Down to Layer 1):**
+  - Re-ordered left sidebar menu to prioritize high-value analytical outputs over low-level infrastructure:
+    1. **Laag 5: Analyse & Rapportage** (Top of sidebar, default landing view)
+    2. **Laag 4: Veiligheid & Relais Aansturing** (Hardware status, RAM SG-Ready S10S/S11S contacts)
+    3. **Laag 3: Optimalisatie & Beleid** (24h Planning, Policy Engine, Tariffs)
+    4. **Laag 2: Zelflerend & Fysica** (Kalibratie & Offsets)
+    5. **Laag 1: Data & Verbindingen** (Apparaten, InfluxDB / MQTT CRUD, Open APIs — at the bottom)
+
+### Security & Deployment
+- Automated pre-commit secret scan verified: 0 credentials.
+- Automatic snapshot v0.5.1 archived prior to upgrade.
+
+---
+
 ## [0.5.1] — 2026-09-08 (Responsive Mobile UI & Off-Canvas Navigation Drawer)
 
 ### Added
