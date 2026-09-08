@@ -10,6 +10,22 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.10.0] — 2026-09-08 (Dedicated Open HEMS InfluxDB & Background Collector Engine)
+
+### Added
+- **Dedicated `openhems` InfluxDB Database & Credentials:**
+  - Configured dedicated database `openhems` and user `openhems` in InfluxDB 1.8 with isolated credentials safely vaulted in `/config/open_hems_secrets.json` (chmod 0600).
+- **Canonical Time-Series Datamodel:**
+  - `energy_telemetry`: Standardized device-level streams (`main_grid_meter`, `rooftop_solar`, `daikin_heat_pump`, `dhw_tank`, `deye_battery`) with vector, flow polarity (`IMPORT`, `EXPORT`, `GENERATION`, `CONSUMPTION`, `STORAGE`), and units.
+  - `market_tariffs`: Day-ahead/intraday electricity prices per provider.
+  - `weather_forecast`: Solar irradiance and ambient weather metrics.
+- **Layer 1 Background Telemetry Collector Engine (`HemsBackgroundCollector`):**
+  - Runs in the daemon background (every 30s) to continuously poll configured devices, format canonical Line Protocol points, and stream real-time batches to `openhems`.
+- **Hybrid Analytics Engine:**
+  - The Power Producers dashboard queries `openhems` as primary datastore, with automatic backfill logic from `hassio` during the initial 24h bootstrap window.
+
+---
+
 ## [0.9.0] — 2026-09-08 (Grafana-Style Power Producers Dual-Polarity Analytics)
 
 ### Added

@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.9.0
+Version: 0.10.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -254,7 +254,7 @@ def ensure_framework_defaults(cfg: dict):
         cfg["influxdb_connections"] = [
             {
                 "id": "local_ha_influxdb",
-                "name": "Lokale Home Assistant InfluxDB (1.8)",
+                "name": "Lokale Open HEMS InfluxDB (1.8)",
                 "type": "influx_v1",
                 "url": cfg.get("influxdb", {}).get("url", "http://a0d7b954-influxdb:8086"),
                 "database": cfg.get("influxdb", {}).get("database", "hermes"),
@@ -523,18 +523,57 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/analytics/power_producers"):
             try:
                 sec = load_secrets()
-                pwd = sec.get("influxdb", {}).get("local_ha_influxdb", "")
+                cfg = load_json(CONFIG_FILE)
+                active_conn = cfg.get("influxdb_connections", [{}])[0]
                 
-                # Fetch 24h of 10-minute buckets for solar, import, and export
-                q = """
-                SELECT mean("value") * 1000 as afname_w FROM "kW" WHERE "entity_id" = 'power_consumption' AND time > now() - 24h GROUP BY time(10m) fill(linear);
-                SELECT mean("value") * 1000 as teruglevering_w FROM "kW" WHERE "entity_id" = 'power_production' AND time > now() - 24h GROUP BY time(10m) fill(linear);
-                SELECT mean("value") as solar_w FROM "W" WHERE "entity_id" = 'zonnepanelen_power' AND time > now() - 24h GROUP BY time(10m) fill(linear);
-                """
-                url = "http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
-                    "u": "hermes",
+                db_name = active_conn.get("database", "openhems")
+                db_user = active_conn.get("username", "openhems")
+                pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
+                
+                # Check if openhems has enough points (> 10 points)
+                q_check = 'SELECT count("power_w") FROM "energy_telemetry" WHERE time > now() - 24h'
+                url_chk = f"http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
+                    "u": db_user,
                     "p": pwd,
-                    "db": "hassio",
+                    "db": db_name,
+                    "q": q_check
+                })
+                
+                has_enough_openhems = False
+                try:
+                    with urllib.request.urlopen(urllib.request.Request(url_chk), timeout=4) as r:
+                        chk_res = json.loads(r.read().decode())
+                        vals = chk_res.get("results", [{}])[0].get("series", [{}])[0].get("values", [])
+                        if vals and vals[0][1] >= 20:
+                            has_enough_openhems = True
+                except Exception:
+                    has_enough_openhems = False
+
+                if has_enough_openhems:
+                    # Query canonical openhems database!
+                    q = """
+                    SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time > now() - 24h GROUP BY time(10m) fill(linear);
+                    SELECT mean("power_w") as teruglevering_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time > now() - 24h GROUP BY time(10m) fill(linear);
+                    SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time > now() - 24h GROUP BY time(10m) fill(linear);
+                    """
+                    query_user = db_user
+                    query_pwd = pwd
+                    query_db = db_name
+                else:
+                    # Graceful fallback to hassio for historical backfill
+                    q = """
+                    SELECT mean("value") * 1000 as afname_w FROM "kW" WHERE "entity_id" = 'power_consumption' AND time > now() - 24h GROUP BY time(10m) fill(linear);
+                    SELECT mean("value") * 1000 as teruglevering_w FROM "kW" WHERE "entity_id" = 'power_production' AND time > now() - 24h GROUP BY time(10m) fill(linear);
+                    SELECT mean("value") as solar_w FROM "W" WHERE "entity_id" = 'zonnepanelen_power' AND time > now() - 24h GROUP BY time(10m) fill(linear);
+                    """
+                    query_user = "hermes"
+                    query_pwd = sec.get("influxdb", {}).get("local_ha_influxdb_old", "iu32dp§2g3dpuiy§g23pd9h23")
+                    query_db = "hassio"
+
+                url = "http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
+                    "u": query_user,
+                    "p": query_pwd,
+                    "db": query_db,
                     "q": q
                 })
                 
@@ -701,7 +740,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.9.0",
+                "version": "0.10.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1486,7 +1525,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.9.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.10.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
