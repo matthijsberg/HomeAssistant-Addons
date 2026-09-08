@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.17.1
+Version: 0.18.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.17.1",
+                "version": "0.18.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1174,6 +1174,30 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 advices[peak_solar_it["idx"]] = f"☀️ Zonnepiek ({peak_solar_it['solar']:.1f} kW) — Gratis stroom van eigen dak!"
             advices[max_item["idx"]] = f"⛔ Prijspiek (€{max_item['price']:.2f}/kWh) — Accu ontlaadt om netafname te voorkomen!"
 
+            # 7. Compute Unplanned Solar Surplus (Vrij Zonne-overschot voor niet-slimme apparaten)
+            surplus_kwh_tot = 0.0
+            surplus_peak_kw = 0.0
+            surplus_peak_time = ""
+            surplus_kw_list = []
+
+            for it in timeline_items:
+                idx = it["idx"]
+                s_gen = it["solar"]
+                sched_load = baseload[idx] + boiler[idx] + heating[idx] + battery_charge[idx]
+                surp = round(max(0.0, s_gen - sched_load), 2)
+                surplus_kw_list.append(surp)
+                if surp >= 0.15:
+                    surplus_kwh_tot += surp
+                    if surp > surplus_peak_kw:
+                        surplus_peak_kw = surp
+                        surplus_peak_time = it["label"]
+
+            solar_recommendation = ""
+            if surplus_kwh_tot >= 0.8:
+                solar_recommendation = f"🧺 Huishoudelijk Zonne-Advies: Circa {surplus_kwh_tot:.1f} kWh vrij zonne-overschot voorspeld (piek {surplus_peak_kw:.1f} kW om {surplus_peak_time}). Ideaal moment om niet-slimme verbruikers (wasmachine, droger, vaatwasser of EV) handmatig aan te zetten!"
+            else:
+                solar_recommendation = "☀️ Geen significant zonne-overschot verwacht; alle opwek wordt direct door basislast en SWW benut."
+
             self._send_json({
                 "hours": labels,
                 "labels": labels,
@@ -1184,6 +1208,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     "battery_charge_kw": battery_charge,
                     "solar_kw_neg": solar_neg,
                     "battery_discharge_kw_neg": bat_discharge_neg,
+                    "surplus_kw": surplus_kw_list,
                     "net_power_kw": net_power,
                     "prices_eur": prices
                 },
@@ -1192,7 +1217,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "cheapest_price_eur": cheapest_price,
                 "battery_status_msg": bat_msg,
                 "banner_text": banner_adv,
-                "baseload_watts": baseload_w
+                "baseload_watts": baseload_w,
+                "surplus_total_kwh": round(surplus_kwh_tot, 1),
+                "solar_recommendation": solar_recommendation
             })
             return
 
@@ -1811,7 +1838,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.17.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.18.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3321,6 +3348,46 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     ds_net.push(Math.round(c * 100) / 100);
                 }
 
+                // Populate recommendation banner & surplus badge
+                if (document.getElementById('solar-recommendation-text')) {
+                    document.getElementById('solar-recommendation-text').innerText = data.solar_recommendation || "☀️ Geen significant overschot";
+                }
+                if (document.getElementById('prediction-surplus-badge')) {
+                    document.getElementById('prediction-surplus-badge').innerText = `☀️ Vrij Overschot: ${data.surplus_total_kwh || 0.0} kWh`;
+                }
+
+                // Compute Unconsumed Solar Surplus floating bar: from c up to 0 (when c < 0)
+                const ds_surplus = [];
+                for (let i = 0; i < labels.length; i++) {
+                    const netVal = ds_net[i];
+                    if (netVal < -0.05) {
+                        // Unconsumed free solar surplus between top of stack (netVal) and 0 line
+                        ds_surplus.push([netVal, 0]);
+                    } else {
+                        ds_surplus.push(null);
+                    }
+                }
+
+                // === SYNCHRONIZE 0 LINE ON BOTH Y (kW) AND Y1 (€/kWh) AXES ===
+                let allNetVals = ds_net.filter(v => v !== null && !isNaN(v));
+                let minY = Math.min(-2.5, ...allNetVals, ...(data.datasets.solar_kw_neg || []));
+                let maxY = Math.max(1.0, ...allNetVals, ...(data.datasets.baseload_kw || []));
+                minY = Math.floor(minY * 2) / 2; // Clean 0.5 steps
+                maxY = Math.ceil(maxY * 2) / 2;
+
+                let maxP = Math.max(...pricesArr, 0.35);
+                let minP = Math.min(0, ...pricesArr);
+                maxP = Math.ceil(maxP * 20) / 20; // Clean 0.05 steps
+
+                // Zero ratio from bottom on left axis
+                const zeroRatio = Math.abs(minY) / (maxY - minY);
+                // Align right axis so 0 is at exact same percentage
+                let syncdMinP = -(zeroRatio / (1.0 - zeroRatio)) * maxP;
+                if (minP < syncdMinP) {
+                    syncdMinP = Math.floor(minP * 20) / 20;
+                    maxP = -syncdMinP * ((1.0 - zeroRatio) / zeroRatio);
+                }
+
                 const chartConfig = {
                     type: 'bar',
                     data: {
@@ -3330,26 +3397,39 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             {
                                 label: 'Zon Opwek (Pool)',
                                 data: ds_solar,
-                                backgroundColor: 'rgba(245, 158, 11, 0.35)',
+                                backgroundColor: 'rgba(245, 158, 11, 0.30)',
                                 borderColor: '#F59E0B',
                                 borderWidth: 1.5,
                                 borderRadius: 3,
                                 grouped: false,
                                 barPercentage: 0.85,
-                                order: 5
+                                order: 6
                             },
                             {
                                 label: 'Accu Ontladen (Pool)',
                                 data: ds_bat_dis,
-                                backgroundColor: 'rgba(20, 184, 166, 0.35)',
+                                backgroundColor: 'rgba(20, 184, 166, 0.30)',
                                 borderColor: '#14B8A6',
                                 borderWidth: 1.5,
                                 borderRadius: 3,
                                 grouped: false,
                                 barPercentage: 0.85,
+                                order: 6
+                            },
+                            // 2. Unconsumed Solar Surplus (Free for non-smart appliances)
+                            {
+                                label: 'Vrij Zonne-Overschot',
+                                data: ds_surplus,
+                                backgroundColor: 'rgba(34, 197, 94, 0.35)',
+                                borderColor: '#22C55E',
+                                borderWidth: 1.5,
+                                borderDash: [2, 2],
+                                borderRadius: 2,
+                                grouped: false,
+                                barPercentage: 0.70,
                                 order: 5
                             },
-                            // 2. Consumers Stacked from -tot_gen Upward
+                            // 3. Consumers Stacked from -tot_gen Upward
                             {
                                 label: 'Basislast',
                                 data: ds_base,
@@ -3357,7 +3437,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 borderRadius: 2,
                                 grouped: false,
                                 barPercentage: 0.55,
-                                order: 3
+                                order: 4
                             },
                             {
                                 label: 'SWW Tapwater (350L)',
@@ -3386,7 +3466,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 barPercentage: 0.55,
                                 order: 3
                             },
-                            // 3. Expected Net Power Line (>0 Grid Import, <0 Grid Export)
+                            // 4. Expected Net Power Line (>0 Grid Import, <0 Grid Export)
                             {
                                 label: 'Verwacht Netto Verbruik (kW)',
                                 data: ds_net,
@@ -3400,7 +3480,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 yAxisID: 'y',
                                 order: 1
                             },
-                            // 4. Dynamic Electricity Tariff (€/kWh)
+                            // 5. Dynamic Electricity Tariff (€/kWh)
                             {
                                 label: 'Stroomprijs (€/kWh)',
                                 data: pricesArr,
@@ -3421,13 +3501,23 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         plugins: {
                             legend: { display: false },
                             tooltip: {
+                                enabled: true,
+                                filter: function(tooltipItem) {
+                                    const raw = tooltipItem.raw;
+                                    if (raw === null || raw === undefined) return false;
+                                    if (Array.isArray(raw)) {
+                                        return Math.abs(raw[1] - raw[0]) > 0.02; // Filter out 0 kW rows!
+                                    }
+                                    if (tooltipItem.dataset.yAxisID === 'y1') return true;
+                                    return Math.abs(Number(raw)) > 0.02; // Filter out 0 kW rows!
+                                },
                                 callbacks: {
                                     label: function(context) {
                                         const label = context.dataset.label || '';
                                         const raw = context.raw;
                                         if (Array.isArray(raw)) {
                                             const diff = Math.abs(raw[1] - raw[0]).toFixed(2);
-                                            return `${label}: ${diff} kW [${raw[0].toFixed(2)} tot ${raw[1].toFixed(2)}]`;
+                                            return `${label}: ${diff} kW`;
                                         } else if (context.dataset.yAxisID === 'y1') {
                                             return `${label}: €${Number(raw).toFixed(4)}/kWh`;
                                         } else {
@@ -3443,9 +3533,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 ticks: { color: '#94A3B8', font: { family: 'monospace', size: 10 } }
                             },
                             y: {
+                                min: minY,
+                                max: maxY,
                                 title: { display: true, text: 'Vermogen (kW) — Opwek < 0 < Netafname', color: '#94A3B8' },
                                 grid: {
-                                    color: (ctx) => ctx.tick && ctx.tick.value === 0 ? '#64748B' : '#1E293B',
+                                    color: (ctx) => ctx.tick && ctx.tick.value === 0 ? '#94A3B8' : '#1E293B',
                                     lineWidth: (ctx) => ctx.tick && ctx.tick.value === 0 ? 2 : 1
                                 },
                                 ticks: {
@@ -3455,13 +3547,33 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             },
                             y1: {
                                 position: 'right',
+                                min: syncdMinP,
+                                max: maxP,
                                 title: { display: true, text: 'Prijs (€/kWh)', color: '#06B6D4' },
                                 grid: { drawOnChartArea: false },
-                                ticks: { color: '#06B6D4' }
+                                ticks: {
+                                    color: '#06B6D4',
+                                    callback: function(v) { return v >= 0 ? '€' + v.toFixed(2) : ''; }
+                                }
                             }
                         }
                     }
                 };
+
+                // Add document tap/click listener to dismiss tooltip when clicking outside canvas
+                if (!window.__tooltipDismissAttached) {
+                    window.__tooltipDismissAttached = true;
+                    const dismissFn = (e) => {
+                        if (!e.target.closest('canvas')) {
+                            if (window.analyticsChartInstance && window.analyticsChartInstance.tooltip) {
+                                window.analyticsChartInstance.tooltip.setActiveElements([], { x: 0, y: 0 });
+                                window.analyticsChartInstance.update('none');
+                            }
+                        }
+                    };
+                    document.addEventListener('click', dismissFn);
+                    document.addEventListener('touchstart', dismissFn, { passive: true });
+                }
 
                 // Render on Analytics Tab
                 const canvasAnalytics = document.getElementById('hemsChartAnalytics');

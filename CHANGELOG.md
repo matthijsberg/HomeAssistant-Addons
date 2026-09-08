@@ -10,6 +10,22 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.18.0] — 2026-09-08 (Synchronized Zero Axis, Solar Surplus Appliance Advice & Touch Dismiss)
+
+### Added
+- **Synchronized Zero Horizontal Axis:**
+  - Mathematically locked the zero-line position of both the Left Y-axis (Power in kW) and Right Y1-axis (Price in €/kWh) using an exact linear ratio `zeroRatio = |minY| / (maxY - minY)`. Both metrics now share the exact same horizontal grid line at $Y = 0$.
+- **Solar Surplus Appliance Window & Recommendation (Wasmachine / Vaatwasser / EV):**
+  - **Visual:** Rendered unconsumed free solar surplus (`Vrij Zonne-Overschot`) as a distinct green floating bar between the top of the scheduled consumer stack and the 0-line.
+  - **Callout Banner:** Dedicated appliance advice banner above the chart computing total surplus energy (e.g. ~5.3 kWh free solar, peak 1.4 kW) to advise running non-smart household appliances during sunny windows.
+  - **Daily Report:** Integrated predictive solar surplus recommendations into `/api/analytics` `daily_digest`.
+  - **Badge:** Added `☀️ Vrij Overschot: X.X kWh` summary badge to the prediction card header.
+- **Enhanced Mobile Touch & Tooltip Dismissal:**
+  - Tapping anywhere outside the chart canvas immediately dismisses stuck hover tooltips.
+  - Tooltip filter automatically hides zero-value lines (`SWW: 0`, `CV: 0`, `Accu: 0`), keeping touch popups clean and concise.
+
+---
+
 ## [0.17.0] — 2026-09-08 (Solar-Prioritized Dispatch & Floating Baseline Consumption Architecture)
 
 ### Added
