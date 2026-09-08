@@ -10,6 +10,25 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.13.0] — 2026-09-08 (EPEX Electricity Prices & Configurable Solar Cost Chart)
+
+### Added
+- **EPEX Stroomtarieven & Zonnestroom Kostprijs Grafiek (Laag 4):**
+  - Nieuw interactief paneel in de analyse-weergave met live day-ahead beursstroomtarieven uit EnergyZero / EPEX Spot.
+  - **Resolutie Selector:** Schakel naadloos tussen **Kwartiertarieven (15m, 96 datapunten)** en **Uurtarieven (1h, 24 datapunten)**.
+  - **Instelbare Zonnestroom Kostprijs (LCOE):** Direct bewerkbaar in de GUI (standaard €0,060/kWh / 6 cent) en opgeslagen in `heatpump_config.json`.
+  - **Gecombineerde Grafiek:**
+    - EPEX All-in stroomtarief curve (stepped line met blauwe fill).
+    - Gestippelde referentielijn voor zonnestroom kostprijs (€0,060/kWh).
+    - Interactieve tooltip toont direct de netto besparing van zonnestroom t.o.v. het actuele beurstarief.
+  - **Statistieken Chips:**
+    - Laagste tarief van de dag (bijv. €0,1935/kWh om 13:00)
+    - Hoogste tarief van de dag (bijv. €0,4390/kWh om 19:45)
+    - Gemiddeld dagtarief (bijv. €0,3180/kWh)
+    - Zonnestroom besparingsmarge (+€0,2580/kWh voordeel t.o.v. netstroom)
+
+---
+
 ## [0.12.0] — 2026-09-08 (Timeframe Selector & Energy Integrals kWh Totals)
 
 ### Added

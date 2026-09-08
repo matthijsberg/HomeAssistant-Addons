@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.12.0
+Version: 0.13.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -535,6 +535,75 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             return
 
         # API: Status
+        # ANALYTICS: EPEX Spot Market Electricity Rates (15m & 1h) & Configurable Solar Cost
+        if path.startswith("/api/analytics/electricity_prices"):
+            try:
+                cfg = load_json(CONFIG_FILE)
+                solar_cost = float(cfg.get("solar_cost_eur_kwh", 0.06))
+
+                parsed_url = urllib.parse.urlparse(self.path)
+                qp = urllib.parse.parse_qs(parsed_url.query)
+                res_mode = qp.get("resolution", ["15m"])[0]
+                interval_api = "INTERVAL_QUARTER" if res_mode == "15m" else "INTERVAL_HOUR"
+
+                today_str = datetime.now(AMS_TZ).strftime("%d-%m-%Y")
+                url = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={today_str}&interval={interval_api}"
+                req = urllib.request.Request(url, headers={"User-Agent": "OpenHEMS/1.0"})
+                
+                with urllib.request.urlopen(req, timeout=6) as r:
+                    api_data = json.loads(r.read().decode())
+
+                items_all_in = api_data.get("all_in_with_vat", [])
+                items_base = api_data.get("base", [])
+
+                today_date = datetime.now(AMS_TZ).date()
+                labels = []
+                prices_all_in = []
+                prices_base = []
+
+                for it in items_all_in:
+                    dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
+                    if dt.date() == today_date:
+                        labels.append(dt.strftime("%H:%M"))
+                        prices_all_in.append(round(float(it.get("price", {}).get("value", 0.0)), 4))
+
+                for it in items_base:
+                    dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
+                    if dt.date() == today_date:
+                        prices_base.append(round(float(it.get("price", {}).get("value", 0.0)), 4))
+
+                min_p = min(prices_all_in) if prices_all_in else 0.0
+                max_p = max(prices_all_in) if prices_all_in else 0.0
+                avg_p = (sum(prices_all_in) / len(prices_all_in)) if prices_all_in else 0.0
+                min_time = labels[prices_all_in.index(min_p)] if prices_all_in else "--:--"
+                max_time = labels[prices_all_in.index(max_p)] if prices_all_in else "--:--"
+
+                res = {
+                    "status": "success",
+                    "resolution": res_mode,
+                    "labels": labels,
+                    "epex_prices": prices_all_in,
+                    "epex_base_prices": prices_base,
+                    "solar_cost": solar_cost,
+                    "stats": {
+                        "min_price": f"€{min_p:.4f}/kWh",
+                        "min_time": min_time,
+                        "max_price": f"€{max_p:.4f}/kWh",
+                        "max_time": max_time,
+                        "avg_price": f"€{avg_p:.4f}/kWh",
+                        "solar_savings_avg": f"€{max(0.0, avg_p - solar_cost):.4f}/kWh"
+                    }
+                }
+                self._send_json(res)
+                return
+            except Exception as e:
+                self._send_json({"status": "error", "message": f"Fout bij ophalen EPEX tarieven: {str(e)}"}, 500)
+                return
+
+        if path == "/api/analytics/solar_cost" and self.command == "POST":
+            # Handled in do_POST
+            pass
+
         # ANALYTICS: Pure openhems Power Producers Telemetry with Timeframe Selector & Energy Integrals
         if path.startswith("/api/analytics/power_producers"):
             try:
@@ -787,7 +856,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.12.0",
+                "version": "0.13.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1030,6 +1099,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             return
 
         # INFRASTRUCTURE: Save / Upsert InfluxDB Connection Profile
+        if path == "/api/analytics/solar_cost":
+            try:
+                new_cost = float(body.get("solar_cost_eur_kwh", 0.06))
+                cfg = load_json(CONFIG_FILE)
+                cfg["solar_cost_eur_kwh"] = round(new_cost, 4)
+                save_json(CONFIG_FILE, cfg)
+                self._send_json({"status": "success", "solar_cost_eur_kwh": cfg["solar_cost_eur_kwh"]})
+                return
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)}, 400)
+                return
+
         if path == "/api/infrastructure/influxdb":
             cfg = load_json(CONFIG_FILE)
             ensure_framework_defaults(cfg)
@@ -1576,7 +1657,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.12.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.13.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1645,6 +1726,71 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <span class="text-[10px] uppercase font-bold text-slate-400 block">Prognose Validatie</span>
                         <div class="text-xl font-bold text-purple-400 mt-1" id="kpi-accuracy">92.6%</div>
                         <span class="text-[10px] text-slate-500">MAE: 0.18 kW</span>
+                    </div>
+                </div>
+
+                <!-- EPEX ELECTRICITY RATES & SOLAR LCOE CHART -->
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-2xl space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-2.5">
+                            <span class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></span>
+                            <div>
+                                <h3 class="text-sm font-bold text-white tracking-wide">EPEX Stroomprijzen & Zonnestroom Kostprijs</h3>
+                                <p class="text-[11px] text-slate-400">Europese day-ahead beurstarieven per kwartier of uur t.o.v. eigen zonnestroom.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-xs flex-wrap">
+                            <!-- Resolution Selector -->
+                            <div class="flex items-center gap-1.5">
+                                <label for="epex-res-select" class="text-slate-400 text-xs hidden sm:inline font-mono">Resolutie:</label>
+                                <select id="epex-res-select" onchange="loadElectricityPricesChart()" class="bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-medium focus:outline-none focus:border-blue-500 font-mono">
+                                    <option value="15m" selected>Kwartiertarieven (15m)</option>
+                                    <option value="1h">Uurtarieven (1h)</option>
+                                </select>
+                            </div>
+                            <!-- Configurable Solar Cost Input -->
+                            <div class="flex items-center gap-1.5 bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1">
+                                <label for="solar-cost-input" class="text-slate-400 text-xs font-mono">Zonnestroom:</label>
+                                <span class="text-yellow-400 font-mono text-xs">€</span>
+                                <input type="number" step="0.005" min="0" max="0.5" id="solar-cost-input" value="0.060" onchange="saveSolarCost()" class="w-16 bg-transparent border-0 p-0 text-white font-mono text-xs font-bold focus:ring-0 focus:outline-none">
+                                <span class="text-slate-500 font-mono text-[10px]">/kWh</span>
+                            </div>
+                            <button onclick="loadElectricityPricesChart()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                <span>Verversen</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Price Chart Canvas -->
+                    <div class="relative w-full h-64 sm:h-72">
+                        <canvas id="electricityPricesChart"></canvas>
+                    </div>
+
+                    <!-- Price Stats Cards -->
+                    <div class="pt-2 border-t border-slate-800/80">
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-mono">
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                <div class="text-[10px] text-slate-500 uppercase">Laagste Tarief</div>
+                                <div class="text-sm font-bold text-emerald-400 mt-0.5" id="stat-epex-min">--</div>
+                                <div class="text-[10px] text-slate-400" id="stat-epex-min-time">om --:--</div>
+                            </div>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                <div class="text-[10px] text-slate-500 uppercase">Hoogste Tarief</div>
+                                <div class="text-sm font-bold text-red-400 mt-0.5" id="stat-epex-max">--</div>
+                                <div class="text-[10px] text-slate-400" id="stat-epex-max-time">om --:--</div>
+                            </div>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                <div class="text-[10px] text-slate-500 uppercase">Gemiddeld Dagtarief</div>
+                                <div class="text-sm font-bold text-blue-400 mt-0.5" id="stat-epex-avg">--</div>
+                                <div class="text-[10px] text-slate-400">All-in incl. belasting</div>
+                            </div>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                <div class="text-[10px] text-slate-500 uppercase">Zon Besparingsmarge</div>
+                                <div class="text-sm font-bold text-yellow-400 mt-0.5" id="stat-epex-solar-margin">--</div>
+                                <div class="text-[10px] text-emerald-400">Voordeel t.o.v. net</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -3457,7 +3603,159 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
         function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
-                let powerProducersChartInstance = null;
+                let electricityPricesChartInstance = null;
+
+        async function saveSolarCost() {
+            const inp = document.getElementById('solar-cost-input');
+            if (!inp) return;
+            const val = parseFloat(inp.value) || 0.06;
+            try {
+                await fetch('./api/analytics/solar_cost', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ solar_cost_eur_kwh: val })
+                });
+                loadElectricityPricesChart();
+            } catch (err) {
+                console.error('Error saving solar cost:', err);
+            }
+        }
+
+        async function loadElectricityPricesChart() {
+            const canvas = document.getElementById('electricityPricesChart');
+            if (!canvas) return;
+
+            try {
+                const resSelect = document.getElementById('epex-res-select');
+                const resVal = resSelect ? resSelect.value : '15m';
+                const res = await fetch('./api/analytics/electricity_prices?resolution=' + encodeURIComponent(resVal));
+                const data = await res.json();
+                if (data.status !== 'success') {
+                    console.error('EPEX prices load error:', data.message);
+                    return;
+                }
+
+                // Update input if not focused
+                const costInp = document.getElementById('solar-cost-input');
+                if (costInp && document.activeElement !== costInp) {
+                    costInp.value = Number(data.solar_cost || 0.06).toFixed(3);
+                }
+
+                // Update stats chips
+                const s = data.stats || {};
+                document.getElementById('stat-epex-min').innerText = s.min_price || '--';
+                document.getElementById('stat-epex-min-time').innerText = `om ${s.min_time || '--:--'}`;
+                document.getElementById('stat-epex-max').innerText = s.max_price || '--';
+                document.getElementById('stat-epex-max-time').innerText = `om ${s.max_time || '--:--'}`;
+                document.getElementById('stat-epex-avg').innerText = s.avg_price || '--';
+                document.getElementById('stat-epex-solar-margin').innerText = `+${s.solar_savings_avg || '--'}`;
+
+                // Destroy old instance
+                if (electricityPricesChartInstance) electricityPricesChartInstance.destroy();
+
+                const solarLine = data.labels.map(() => data.solar_cost);
+
+                const ctx = canvas.getContext('2d');
+                electricityPricesChartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.labels,
+                        datasets: [
+                            // 1. EPEX All-in Price Stepped Line
+                            {
+                                label: 'EPEX Stroomtarief (All-in)',
+                                data: data.epex_prices,
+                                borderColor: '#3B82F6',
+                                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                fill: true,
+                                borderWidth: 2,
+                                stepped: 'before',
+                                pointRadius: 0,
+                                tension: 0,
+                                order: 1
+                            },
+                            // 2. Configurable Solar Cost Constant Line
+                            {
+                                label: `Zonnestroom Kostprijs (€${Number(data.solar_cost).toFixed(3)}/kWh)`,
+                                data: solarLine,
+                                borderColor: '#EAB308',
+                                borderWidth: 2,
+                                borderDash: [6, 4],
+                                pointRadius: 0,
+                                fill: false,
+                                order: 2
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                position: 'top',
+                                labels: {
+                                    color: '#94A3B8',
+                                    font: { family: 'monospace', size: 11 },
+                                    boxWidth: 12
+                                }
+                            },
+                            tooltip: {
+                                backgroundColor: 'rgba(11, 15, 23, 0.95)',
+                                borderColor: '#1E293B',
+                                borderWidth: 1,
+                                titleFont: { family: 'monospace', size: 12 },
+                                bodyFont: { family: 'monospace', size: 11 },
+                                callbacks: {
+                                    label: function(context) {
+                                        const val = context.raw || 0;
+                                        return `${context.dataset.label}: €${Number(val).toFixed(4)}/kWh`;
+                                    },
+                                    afterBody: function(items) {
+                                        if (items.length >= 2) {
+                                            const ep = items[0].raw || 0;
+                                            const sc = items[1].raw || 0;
+                                            const diff = ep - sc;
+                                            const sign = diff >= 0 ? '+' : '';
+                                            return `Besparing Zonnestroom: ${sign}€${diff.toFixed(4)}/kWh`;
+                                        }
+                                        return '';
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: 'rgba(30, 41, 59, 0.4)' },
+                                ticks: {
+                                    color: '#94A3B8',
+                                    font: { family: 'monospace', size: 10 },
+                                    maxTicksLimit: 12
+                                }
+                            },
+                            y: {
+                                grid: { color: 'rgba(30, 41, 59, 0.6)' },
+                                ticks: {
+                                    color: '#94A3B8',
+                                    font: { family: 'monospace', size: 10 },
+                                    callback: function(val) {
+                                        return '€' + Number(val).toFixed(2);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (err) {
+                console.error('Failed to load electricity prices chart:', err);
+            }
+        }
+
+        let powerProducersChartInstance = null;
 
         async function loadPowerProducersChart() {
             const canvas = document.getElementById('powerProducersChart');
