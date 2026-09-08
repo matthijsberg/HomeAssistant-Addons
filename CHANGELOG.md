@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.15.2] — 2026-09-08 (Declare Chart Variables Globally & Deep-Clone Multi-Canvas Configurations)
+
+### Fixed
+- **Global Declaration of `analyticsChartInstance`:**
+  - Resolved `ReferenceError: analyticsChartInstance is not defined` by hoisting all Chart.js instances (`analyticsChartInstance`, `chartInstance`, `powerProducersChartInstance`, `electricityPricesChartInstance`) to the top of the client controller script.
+- **Deep-Cloned Canvas Configuration:**
+  - Prevented Chart.js runtime mutation conflicts between `hemsChartAnalytics` (Laag 4) and `hemsChart` (Laag 3) by passing deep-cloned JSON configuration objects.
+  - Verified live rendering of all charts.
+
+---
+
 ## [0.15.1] — 2026-09-08 (Fix JS Syntax Error & Synchronize Analytics All-Chart Loader)
 
 ### Fixed

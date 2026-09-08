@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.15.1
+Version: 0.15.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.15.1",
+                "version": "0.15.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1756,7 +1756,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.15.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.15.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2701,7 +2701,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
     <!-- CLIENT CONTROLLER & CHART.JS ENGINE -->
     <script>
-        let chartInstance = null;
+        var chartInstance = null;
+        var analyticsChartInstance = null;
+        var powerProducersChartInstance = null;
+        var electricityPricesChartInstance = null;
         let haEntitiesCache = [];
         let currentPolicyParams = {};
         let activeTabId = 'analytics';
@@ -3273,14 +3276,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const canvasAnalytics = document.getElementById('hemsChartAnalytics');
                 if (canvasAnalytics) {
                     if (analyticsChartInstance) analyticsChartInstance.destroy();
-                    analyticsChartInstance = new Chart(canvasAnalytics.getContext('2d'), chartConfig);
+                    analyticsChartInstance = new Chart(canvasAnalytics.getContext('2d'), JSON.parse(JSON.stringify(chartConfig)));
                 }
 
                 // Render on Dashboard Tab
                 const canvasDash = document.getElementById('hemsChart');
                 if (canvasDash) {
                     if (chartInstance) chartInstance.destroy();
-                    chartInstance = new Chart(canvasDash.getContext('2d'), chartConfig);
+                    chartInstance = new Chart(canvasDash.getContext('2d'), JSON.parse(JSON.stringify(chartConfig)));
                 }
             } catch (e) {
                 console.error('Chart load error:', e);
@@ -3826,8 +3829,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
         function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
-                let electricityPricesChartInstance = null;
-
+                
         async function saveSolarCostFromTab() {
             const inp = document.getElementById('tab-solar-cost-input');
             if (!inp) return;
@@ -4003,8 +4005,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             }
         }
 
-        let powerProducersChartInstance = null;
-
+        
         async function loadPowerProducersChart() {
             const canvas = document.getElementById('powerProducersChart');
             if (!canvas) return;
