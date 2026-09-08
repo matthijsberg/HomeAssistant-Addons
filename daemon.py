@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.22.1
+Version: 0.23.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.22.1",
+                "version": "0.23.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1888,7 +1888,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.22.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.23.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2311,22 +2311,37 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <span id="battery-status-banner" class="font-mono text-emerald-400">Accu-beleid wordt geëvalueerd...</span>
                 </div>
 
-                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 shadow-xl">
-                    <div class="flex justify-between items-center mb-6">
-                        <div>
-                            <h3 class="text-sm font-bold text-white">24-Uurs Vermogens- & Productieverwachting</h3>
-                            <p class="text-xs text-slate-400">Gestapeld verbruik (kW) t.o.v. zonne-opwek en dynamische stroomprijs</p>
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-2.5">
+                            <span class="w-3 h-3 rounded-full bg-purple-500 animate-pulse"></span>
+                            <div>
+                                <h3 class="text-sm font-bold text-white tracking-wide">24-Uurs Vermogens- & Verbruiksprognose</h3>
+                                <p class="text-[11px] text-slate-400">Gestapeld verbruik (kW) t.o.v. zonne-opwek en dynamische stroomprijs</p>
+                            </div>
                         </div>
-                        <div class="flex items-center gap-4 text-xs">
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span>Sluipverbruik</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span>Warmtepomp / SWW</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span>Accu Laden</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-amber-400"></span> <span>Zon (kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400"></span> <span>Prijs (€/kWh)</span></div>
+                        <div class="flex items-center gap-1.5 text-xs flex-wrap">
+                            <span class="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2 py-0.5 rounded-md border border-blue-500/40" id="dash-prediction-unallocated-badge">Ongedefinieerd: 7x24</span>
+                            <span class="text-[10px] text-indigo-300 font-mono bg-indigo-950/70 px-2 py-0.5 rounded-md border border-indigo-500/40 font-bold" id="dash-prediction-total-kwh-badge">⚡ Verbruik: -- kWh</span>
+                            <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950/70 px-2 py-0.5 rounded-md border border-emerald-500/40 font-bold" id="dash-prediction-total-cost-badge">💶 Netto: €--</span>
+                            <span class="text-[10px] text-amber-400 font-mono bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-500/30 font-bold" id="dash-prediction-surplus-badge">☀️ Overschot: -- kWh</span>
                         </div>
                     </div>
-                    <div class="h-96">
+
+                    <div class="relative w-full h-[380px] sm:h-[420px]">
                         <canvas id="hemsChart"></canvas>
+                    </div>
+
+                    <!-- Clean Wrapping Legend Underneath Canvas (Never overflows on mobile!) -->
+                    <div class="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-start gap-2.5 text-xs font-mono">
+                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-blue-500"></span> <span class="text-slate-300">Ongedefinieerd (+kW)</span></div>
+                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-pink-500"></span> <span class="text-slate-300">SWW (+kW)</span></div>
+                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-indigo-500"></span> <span class="text-slate-300">CV (+kW)</span></div>
+                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden (+kW)</span></div>
+                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-amber-400"></span> <span class="text-slate-300">Zon (-kW)</span></div>
+                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-teal-400"></span> <span class="text-slate-300">Accu Ontladen (-kW)</span></div>
+                        <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-red-500"></span> <span class="text-red-400 font-bold">Netto Lijn</span></div>
+                        <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400">Prijs (€/kWh)</span></div>
                     </div>
                 </div>
             </div>
@@ -3345,19 +3360,23 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const pricesArr = data.datasets.prices_eur || [];
                 const netPowerArr = data.datasets.net_power_kw || [];
 
-                // Populate totals, costs, recommendation banner & surplus badge
-                if (document.getElementById('prediction-total-kwh-badge')) {
-                    document.getElementById('prediction-total-kwh-badge').innerText = `⚡ Verbruik: ${(data.total_consumption_kwh || 0.0).toFixed(1)} kWh`;
-                }
-                if (document.getElementById('prediction-total-cost-badge')) {
-                    const costVal = Number(data.total_net_cost_eur || 0.0);
-                    document.getElementById('prediction-total-cost-badge').innerText = `💶 Netto Kosten: €${costVal.toFixed(2)}`;
-                }
+                // Populate totals, costs, recommendation banner & surplus badge for BOTH tabs
+                const kwhText = `⚡ Verbruik: ${(data.total_consumption_kwh || 0.0).toFixed(1)} kWh`;
+                const costVal = Number(data.total_net_cost_eur || 0.0);
+                const costText = `💶 Netto: €${costVal.toFixed(2)}`;
+                const surplusText = `☀️ Overschot: ${data.surplus_total_kwh || 0.0} kWh`;
+
+                if (document.getElementById('prediction-total-kwh-badge')) document.getElementById('prediction-total-kwh-badge').innerText = kwhText;
+                if (document.getElementById('dash-prediction-total-kwh-badge')) document.getElementById('dash-prediction-total-kwh-badge').innerText = kwhText;
+
+                if (document.getElementById('prediction-total-cost-badge')) document.getElementById('prediction-total-cost-badge').innerText = costText;
+                if (document.getElementById('dash-prediction-total-cost-badge')) document.getElementById('dash-prediction-total-cost-badge').innerText = costText;
+
+                if (document.getElementById('prediction-surplus-badge')) document.getElementById('prediction-surplus-badge').innerText = surplusText;
+                if (document.getElementById('dash-prediction-surplus-badge')) document.getElementById('dash-prediction-surplus-badge').innerText = surplusText;
+
                 if (document.getElementById('solar-recommendation-text')) {
                     document.getElementById('solar-recommendation-text').innerText = data.solar_recommendation || "☀️ Geen overschot";
-                }
-                if (document.getElementById('prediction-surplus-badge')) {
-                    document.getElementById('prediction-surplus-badge').innerText = `☀️ Vrij Overschot: ${data.surplus_total_kwh || 0.0} kWh`;
                 }
 
                 // === SYNCHRONIZE 0 LINE ON BOTH Y (kW) AND Y1 (€/kWh) AXES ===

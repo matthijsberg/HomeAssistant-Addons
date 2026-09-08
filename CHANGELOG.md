@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.23.0] — 2026-09-08 (Fix Mobile Legend Overflow on Dashboard Tab)
+
+### Fixed & Enhanced
+- **Mobile Legend Overflow on Dashboard Tab (`view-dashboard`):**
+  - Resolved root cause shown in user screenshot where the legend on Tab 1 was placed on the same line as the title, squeezing and overflowing off the right screen edge on mobile.
+  - Moved the legend **below the canvas** into a dedicated wrapping container (`flex-wrap gap-2.5`) with updated labels (`Ongedefinieerd (+kW)`, `SWW (+kW)`, `CV (+kW)`, `Accu Laden (+kW)`, `Zon (-kW)`, `Accu Ontladen (-kW)`, `Netto Lijn`, `Prijs (€/kWh)`).
+  - Synchronized metrics badges (`⚡ Verbruik`, `💶 Netto`, `☀️ Overschot`) across both Dashboard and Analytics tabs.
+
+---
+
 ## [0.22.1] — 2026-09-08 (Calibrate 7x24 Load Profile directly from Canonical HA Energy Database)
 
 ### Added & Calibrated
