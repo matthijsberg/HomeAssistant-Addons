@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.14.0
+Version: 0.15.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -31,7 +31,7 @@ import base64
 import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 AMS_TZ = ZoneInfo('Europe/Amsterdam')
 from pathlib import Path
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.14.0",
+                "version": "0.15.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -993,96 +993,151 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             })
             return
 
-        # API: 24h Stacked Chart Data
+                # API: 24h Rolling Ahead Power Consumption Prediction Engine
         if path == "/api/schedule/chart-data":
-            cache = load_json(CACHE_FILE)
             cfg = load_json(CONFIG_FILE)
             ensure_framework_defaults(cfg)
 
-            hours = [f"{h:02d}:00" for h in range(24)]
+            baseload_w = float(cfg.get("baseload_watts", 300.0))
+            baseload_kw = round(baseload_w / 1000.0, 3)
+
+            now_ams = datetime.now(AMS_TZ)
+            today_str = now_ams.strftime("%d-%m-%Y")
+            tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
+
+            # 1. Fetch EPEX prices for today & tomorrow
+            prices_map = {}
+            for d_str in [today_str, tomorrow_str]:
+                try:
+                    url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval=INTERVAL_HOUR"
+                    req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
+                    with urllib.request.urlopen(req_p, timeout=5) as r_p:
+                        res_p = json.loads(r_p.read().decode())
+                        for it in res_p.get("all_in_with_vat", []):
+                            dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
+                            prices_map[dt.strftime("%Y-%m-%d %H:00")] = round(float(it.get("price", {}).get("value", 0.25)), 4)
+                except Exception as e_p:
+                    print(f"Warning fetching EPEX {d_str}: {e_p}")
+
+            # 2. Fetch Open-Meteo Solar & Weather for Culemborg
+            solar_map = {}
+            temp_map = {}
+            try:
+                url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation&timezone=Europe%2FAmsterdam&forecast_days=2"
+                req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
+                with urllib.request.urlopen(req_m, timeout=5) as r_m:
+                    m_data = json.loads(r_m.read().decode())
+                    m_times = m_data.get("hourly", {}).get("time", [])
+                    m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
+                    m_temps = m_data.get("hourly", {}).get("temperature_2m", [])
+                    for t, rad, tmp in zip(m_times, m_rads, m_temps):
+                        k_t = t[:13] + ":00"
+                        solar_map[k_t] = round((rad / 1000.0) * 5.5 * 0.90, 2)
+                        temp_map[k_t] = round(float(tmp), 1)
+            except Exception as e_m:
+                print(f"Warning fetching Open-Meteo forecast: {e_m}")
+
+            # 3. Build rolling 24-hour timeline from current wall-clock hour
+            labels = []
             prices = []
             solar = []
-            baseload = [0.3] * 24
-            boiler = [0.0] * 24
-            battery_charge = [0.0] * 24
-            advices = [""] * 24
+            baseload = []
+            boiler = []
+            heating = []
+            battery_charge = []
+            advices = []
 
-            hourly_p = cache.get("market_prices", {}).get("hourly", {})
-            solar_map = cache.get("weather_and_solar", {}).get("solar_kw", {})
+            timeline_items = []
+            for i in range(24):
+                dt_h = now_ams.replace(minute=0, second=0, microsecond=0) + timedelta(hours=i)
+                k = dt_h.strftime("%Y-%m-%d %H:00")
+                if i == 0:
+                    lbl = dt_h.strftime("Nu (%H:00)")
+                elif dt_h.day != now_ams.day and dt_h.hour == 0:
+                    lbl = dt_h.strftime("Morgen %H:00")
+                else:
+                    lbl = dt_h.strftime("%H:00")
 
-            min_price = 999.0
-            min_price_hour = 13
-            max_price = -999.0
-            max_price_hour = 18
-            max_solar = 0.0
-            max_solar_hour = 13
+                p_val = prices_map.get(k, 0.28)
+                s_val = solar_map.get(k, 0.0)
+                t_val = temp_map.get(k, 18.0)
 
-            for h in range(24):
-                p = float(hourly_p.get(str(h), 0.25))
-                prices.append(round(p, 4))
-                if p < min_price and 8 <= h <= 20:
-                    min_price = p
-                    min_price_hour = h
-                if p > max_price:
-                    max_price = p
-                    max_price_hour = h
+                labels.append(lbl)
+                prices.append(p_val)
+                solar.append(s_val)
+                baseload.append(baseload_kw)
+                boiler.append(0.0)
+                heating.append(0.0)
+                battery_charge.append(0.0)
+                advices.append("")
+                timeline_items.append({"idx": i, "dt": dt_h, "key": k, "label": lbl, "price": p_val, "solar": s_val, "temp": t_val})
 
-                s_kw = float(solar_map.get(str(h), 0.0))
-                solar.append(round(s_kw, 2))
-                if s_kw > max_solar:
-                    max_solar = s_kw
-                    max_solar_hour = h
+            # 4. Plan Space Heating (CV) if in active heating demand
+            for it in timeline_items:
+                i = it["idx"]
+                if it["temp"] < 15.5:
+                    # Space heating demand needed (delta T * UA / COP)
+                    cop = 4.2
+                    heat_kw = round(max(0.0, (19.5 - it["temp"]) * 0.18 / cop), 2)
+                    heating[i] = heat_kw
 
-            # Evaluate Policy 2: ThermalBufferPolicy (DHW Boiler)
-            dhw_pol = next((p for p in cfg.get("policies", []) if p["type"] == "thermal_buffer"), None)
-            dhw_hour = min_price_hour
-            if dhw_pol:
-                params = dhw_pol.get("parameters", {})
-                if params.get("evening_peak_lockout") and 17 <= dhw_hour <= 20:
-                    dhw_hour = 14
-                if params.get("morning_peak_lockout") and 7 <= dhw_hour <= 8:
-                    dhw_hour = 13
-            boiler[dhw_hour] = 3.0
-
-            # Evaluate Policy 3: BatteryArbitragePolicy (Accu & Deadband)
-            bat_pol = next((p for p in cfg.get("policies", []) if p["type"] == "battery_arbitrage"), None)
-            delta_price = max_price - min_price
-            deadband_threshold = 0.115
-            if bat_pol:
-                deadband_threshold = bat_pol.get("parameters", {}).get("min_price_spread_eur_kwh", 0.115)
-
-            battery_status_msg = ""
-            if delta_price >= deadband_threshold:
-                battery_charge[min_price_hour] = 2.0
-                battery_status_msg = f"🔋 Accu-Arbitrage Actief: Laden om {min_price_hour}:00 (€{min_price:.2f}), Ontladen om {max_price_hour}:00 (€{max_price:.2f}) [Delta €{delta_price:.3f} > €{deadband_threshold:.3f}]"
+            # 5. Plan Hot Water Generation (SWW Boiler) on cheapest/solar peak slot
+            daylight_slots = [it for it in timeline_items if 9 <= it["dt"].hour <= 17]
+            best_sww_slot = None
+            if daylight_slots:
+                # Prioritize high solar or lowest price
+                best_sww_slot = min(daylight_slots, key=lambda x: (x["price"] - (x["solar"] * 0.1)))
             else:
-                battery_status_msg = f"⏸️ Accu Rust (Deadband): Delta €{delta_price:.3f}/kWh is te klein (< €{deadband_threshold:.3f}/kWh). Geen net-arbitrage."
-                if max_solar > 1.5:
-                    battery_charge[max_solar_hour] = round(min(2.0, max_solar - 0.5), 2)
-                    battery_status_msg += f" Wel zonne-buffer om {max_solar_hour}:00."
+                best_sww_slot = min(timeline_items, key=lambda x: x["price"])
 
-            advices[dhw_hour] = f"♨️ Boiler 350L Boost naar 60°C op laagste stroomtarief (€{min_price:.2f}/kWh)"
-            if max_solar > 1.5:
-                advices[max_solar_hour] = f"☀️ Zonnepiek ({max_solar:.1f} kW) — Gratis stroom van eigen dak!"
-            advices[max_price_hour] = f"⛔ Prijspiek (€{max_price:.2f}/kWh) — Zware verbruikers blokkeren!"
+            if best_sww_slot:
+                sww_idx = best_sww_slot["idx"]
+                boiler[sww_idx] = 1.2  # 1.2 kW heat pump electrical power (~3.6 kW thermal for 350L tank)
+                advices[sww_idx] = f"♨️ SWW Boiler 350L Run: Laagste tarief (€{best_sww_slot['price']:.3f}/kWh) & {best_sww_slot['solar']} kW zon"
+
+            # 6. Plan Battery Arbitrage & Solar Buffering
+            min_item = min(timeline_items, key=lambda x: x["price"])
+            max_item = max(timeline_items, key=lambda x: x["price"])
+            price_delta = max_item["price"] - min_item["price"]
+            deadband = float(cfg.get("battery_deadband_eur_kwh", 0.115))
+
+            bat_msg = ""
+            peak_solar_it = max(timeline_items, key=lambda x: x["solar"])
+            if price_delta >= deadband and min_item["idx"] < max_item["idx"]:
+                battery_charge[min_item["idx"]] = 2.0
+                bat_msg = f"🔋 Accu-Arbitrage: Laden om {min_item['label']} (€{min_item['price']:.2f}), Ontladen om {max_item['label']} (€{max_item['price']:.2f}) [Spread €{price_delta:.3f} > €{deadband:.3f}]"
+            else:
+                # Solar buffer mode
+                if peak_solar_it["solar"] > 1.2:
+                    battery_charge[peak_solar_it["idx"]] = round(min(2.5, peak_solar_it["solar"] - 0.5), 2)
+                    bat_msg = f"☀️ Zonne-Buffer: Accu absorbeert overtollige zonnestroom om {peak_solar_it['label']} ({peak_solar_it['solar']} kW)."
+                else:
+                    bat_msg = f"⏸️ Accu Stand-by (Deadband): Prijsdelta €{price_delta:.3f}/kWh is onder drempel (€{deadband:.3f}/kWh)."
+
+            cheapest_hour_lbl = min_item["label"]
+            cheapest_price = min_item["price"]
+            banner_adv = f"Beste stroomtarief om {cheapest_hour_lbl} (€{cheapest_price:.4f}/kWh)"
+            if peak_solar_it["solar"] > 1.0:
+                advices[peak_solar_it["idx"]] = f"☀️ Zonnepiek ({peak_solar_it['solar']:.1f} kW) — Gratis stroom van eigen dak!"
+            advices[max_item["idx"]] = f"⛔ Prijspiek (€{max_item['price']:.2f}/kWh) — Zware verbruikers blokkeren!"
 
             self._send_json({
-                "labels": hours,
+                "hours": labels,
+                "labels": labels,
                 "datasets": {
                     "baseload_kw": baseload,
                     "boiler_kw": boiler,
+                    "heating_kw": heating,
                     "battery_charge_kw": battery_charge,
                     "solar_kw": solar,
                     "prices_eur": prices
                 },
                 "advices": advices,
-                "cheapest_hour": min_price_hour,
-                "cheapest_price_eur": min_price,
-                "peak_solar_hour": max_solar_hour,
-                "peak_solar_kw": max_solar,
-                "max_price_hour": max_price_hour,
-                "max_price_eur": max_price,
-                "battery_status_msg": battery_status_msg
+                "cheapest_hour": cheapest_hour_lbl,
+                "cheapest_price_eur": cheapest_price,
+                "battery_status_msg": bat_msg,
+                "banner_text": banner_adv,
+                "baseload_watts": baseload_w
             })
             return
 
@@ -1124,7 +1179,26 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             return
 
         # INFRASTRUCTURE: Save / Upsert InfluxDB Connection Profile
-        if path == "/api/analytics/solar_cost":
+        # SETTINGS: Update baseload & solar cost parameters
+        if path == "/api/settings" or path == "/api/analytics/solar_cost":
+            try:
+                cfg = load_json(CONFIG_FILE)
+                if "baseload_watts" in body:
+                    cfg["baseload_watts"] = float(body["baseload_watts"])
+                if "solar_cost_eur_kwh" in body:
+                    cfg["solar_cost_eur_kwh"] = round(float(body["solar_cost_eur_kwh"]), 4)
+                save_json(CONFIG_FILE, cfg)
+                self._send_json({
+                    "status": "success",
+                    "baseload_watts": cfg.get("baseload_watts", 300),
+                    "solar_cost_eur_kwh": cfg.get("solar_cost_eur_kwh", 0.06)
+                })
+                return
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)}, 400)
+                return
+
+        if False and path == "/api/analytics/solar_cost":
             try:
                 new_cost = float(body.get("solar_cost_eur_kwh", 0.06))
                 cfg = load_json(CONFIG_FILE)
@@ -1682,7 +1756,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.14.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.15.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1804,6 +1878,52 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <div class="text-sm font-bold text-yellow-400 mt-0.5" id="stat-epex-solar-margin">--</div>
                                 <div class="text-[10px] text-emerald-400">Voordeel t.o.v. net</div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 24-HOUR AHEAD POWER CONSUMPTION PREDICTION STACKED CHART -->
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-2xl space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-2.5">
+                            <span class="w-3 h-3 rounded-full bg-purple-500 animate-pulse"></span>
+                            <div>
+                                <h3 class="text-sm font-bold text-white tracking-wide">24-Uurs Vermogens- & Verbruiksprognose (Vooruit)</h3>
+                                <p class="text-[11px] text-slate-400">Gestapelde planning: Basislast + Warm Tapwater (SWW) + Verwarming (CV) + Accu t.o.v. zonne-opwek.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-xs flex-wrap">
+                            <span class="text-[10px] text-slate-400 font-mono bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800" id="prediction-baseload-badge">Basislast: 300 W</span>
+                            <button onclick="loadChartData()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                <span>Herberekenen</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Dispatch Banner -->
+                    <div class="bg-gradient-to-r from-purple-950/60 via-[#0B0F17] to-indigo-950/60 p-3 rounded-xl border border-purple-500/30 flex items-center justify-between gap-2 text-xs">
+                        <div class="flex items-center gap-2">
+                            <span>💡</span>
+                            <span class="text-slate-200 font-medium" id="analytics-banner-text">Planning wordt geladen...</span>
+                        </div>
+                        <span class="text-[10px] text-purple-300 font-mono font-bold px-2 py-0.5 rounded bg-purple-900/50 border border-purple-800 hidden sm:inline">24H ROLLING OPTIMIZER</span>
+                    </div>
+
+                    <!-- Stacked Bar Chart Canvas -->
+                    <div class="relative w-full h-72 sm:h-80">
+                        <canvas id="hemsChartAnalytics"></canvas>
+                    </div>
+
+                    <!-- Prediction Legend Chips -->
+                    <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                        <div class="flex items-center gap-3 flex-wrap">
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Basislast</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW Tapwater (350L)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV Verwarming</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-amber-400"></span> <span class="text-slate-300">Zon (kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400"></span> <span class="text-slate-300">Prijs (€/kWh)</span></div>
                         </div>
                     </div>
                 </div>
@@ -2144,10 +2264,27 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">INSTELLINGEN</span>
                     </div>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <!-- Baseload Setting -->
                         <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800 space-y-2">
                             <div class="flex justify-between items-center">
-                                <label for="tab-solar-cost-input" class="text-xs font-semibold text-slate-200">Zonnestroom Kostprijs / LCOE</label>
+                                <label for="tab-baseload-input" class="text-xs font-semibold text-slate-200">Continue Basislast (Sluip)</label>
+                                <span class="text-[10px] text-blue-400 font-mono">Standaard 300 W</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400">Continu achtergrondverbruik (router, koelkast, standby) gebruikt in 24h prognose.</p>
+                            <div class="flex items-center gap-2 pt-1">
+                                <input type="number" step="10" min="50" max="2000" id="tab-baseload-input" value="300" class="w-28 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs font-bold focus:border-blue-500 focus:outline-none">
+                                <span class="text-slate-400 font-mono text-xs">Watt</span>
+                                <button onclick="saveSettingsFromTab()" class="ml-auto px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow transition">
+                                    Opslaan
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Solar LCOE Setting -->
+                        <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800 space-y-2">
+                            <div class="flex justify-between items-center">
+                                <label for="tab-solar-cost-input" class="text-xs font-semibold text-slate-200">Zonnestroom Kostprijs</label>
                                 <span class="text-[10px] text-amber-400 font-mono">Standaard €0,060</span>
                             </div>
                             <p class="text-[11px] text-slate-400">Interne afschrijvingsprijs per opgewekte kWh van je zonnepanelen.</p>
@@ -2155,7 +2292,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span class="text-slate-400 font-mono text-sm">€</span>
                                 <input type="number" step="0.005" min="0" max="0.5" id="tab-solar-cost-input" value="0.060" class="w-28 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white font-mono text-xs font-bold focus:border-amber-500 focus:outline-none">
                                 <span class="text-slate-400 font-mono text-xs">/ kWh</span>
-                                <button onclick="saveSolarCostFromTab()" class="ml-auto px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg shadow transition">
+                                <button onclick="saveSettingsFromTab()" class="ml-auto px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg shadow transition">
                                     Opslaan
                                 </button>
                             </div>
@@ -3043,10 +3180,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 document.getElementById('banner-text').innerText = adv;
                 document.getElementById('battery-status-banner').innerText = data.battery_status_msg;
 
-                const ctx = document.getElementById('hemsChart').getContext('2d');
-                if (chartInstance) chartInstance.destroy();
+                // Render on Analytics Tab
+                const canvasAnalytics = document.getElementById('hemsChartAnalytics');
+                if (canvasAnalytics) {
+                    if (analyticsChartInstance) analyticsChartInstance.destroy();
+                    analyticsChartInstance = new Chart(canvasAnalytics.getContext('2d'), chartConfig);
+                }
 
-                chartInstance = new Chart(ctx, {
+                // Render on Dashboard Tab
+                const canvasDash = document.getElementById('hemsChart');
+                if (canvasDash) {
+                    if (chartInstance) chartInstance.destroy();
+                    chartInstance = new Chart(canvasDash.getContext('2d'), chartConfig);
+                }
+                return;
+                const dummyCtx = null;
                     type: 'bar',
                     data: {
                         labels: data.labels,
@@ -3677,6 +3825,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 });
                 alert('Zonnestroom kostprijs succesvol opgeslagen: €' + val.toFixed(3) + '/kWh');
                 loadElectricityPricesChart();
+                loadChartData();
             } catch (err) {
                 console.error('Error saving solar cost:', err);
             }

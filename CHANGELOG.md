@@ -10,6 +10,23 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.15.0] — 2026-09-08 (24h Ahead Rolling Power Prediction & Baseload Settings)
+
+### Added
+- **24-Uurs Vermogens- & Verbruiksprognose (Rolling 24h Prediction):**
+  - Gestapelde prognosegrafiek die 24 uur vooruit kijkt vanaf het huidige wandklokuur (`Nu (18:00)` t/m `Morgen 17:00`) gebaseerd op echte EPEX beurstijden (EnergyZero) en Open-Meteo zonnestraling.
+  - **Gestapelde Verbruikscomponenten:**
+    - **Continue Basislast:** Standaard 300 W (instelbaar).
+    - **Warm Tapwater (SWW Boiler 350L):** Gepland op het voordeligste dag- of zonnepiekmoment (~1,2 kW stroomopname).
+    - **Woningverwarming (CV):** Dynamisch berekend op basis van buitentemperatuur ($T_{\text{buiten}} < 15,5^\circ\text{C}$) en warmteverlies.
+    - **Thuisaccu Laden:** Gepland bij economische prijsarbitrage ($\Delta P \ge €0,115/\text{kWh}$) of zonne-absorptie.
+  - **Overlays:** Zonneproductie verwachting (kW) en EPEX stroomtarief (€/kWh).
+- **Instelbare Continue Basislast in de GUI:**
+  - Onder *Tarieven & Leveranciers* toegevoegd: **Continue Basislast Woning** (standaard `300 Watt`).
+  - Eenvoudig aanpasbaar en direct opgeslagen in `heatpump_config.json` via het nieuwe `POST /api/settings` endpoint.
+
+---
+
 ## [0.14.0] — 2026-09-08 (Dual-Axis Solar Forecast & Clean Settings Architecture)
 
 ### Added & Enhanced
