@@ -10,6 +10,24 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.17.0] — 2026-09-08 (Solar-Prioritized Dispatch & Floating Baseline Consumption Architecture)
+
+### Added
+- **Floating Baseline Consumption Architecture:**
+  - Placed local energy production (Solar PV + Battery discharge) as an underlying negative energy pool below $Y = 0$ ($[-P_{\text{gen}}, 0]$).
+  - Consumers (Baseload, SWW boiler, space heating, and battery charging) dynamically stack **upwards starting from $-P_{\text{gen}}$**:
+    - If total consumption $\le P_{\text{gen}}$, all consumers fit completely inside the negative zone under $Y=0$; remaining space to 0 represents exported solar/battery surplus.
+    - If total consumption $> P_{\text{gen}}$, the stack crosses above $Y=0$ into positive territory, visually highlighting actual required grid import.
+- **Solar Priority Dispatch Logic:**
+  - SWW boiler run is strictly scheduled on peak solar generation hours ($\ge 1.0$ kW) for 100% self-consumption before falling back to lowest tariff.
+  - Battery charging is prioritized on daytime solar surplus ($P_{\text{solar}} - P_{\text{load}}$) instead of buying from grid when sunny.
+  - Battery discharge activates during evening peak tariff hours (€0.38 - €0.44/kWh) to displace expensive grid import.
+- **Taller Visual Canvas & Unified Legend:**
+  - Expanded chart container height to 420px (mobile) and 460px (desktop) so low baseloads (e.g. 300 W) are distinctly visible.
+  - Removed duplicate Chart.js legend; retained clean, descriptive HTML legend chips below.
+
+---
+
 ## [0.16.0] — 2026-09-08 (Dual-Polarity 24h Prediction & Battery Discharge Optimization)
 
 ### Added

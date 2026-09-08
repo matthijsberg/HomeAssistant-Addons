@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.16.1
+Version: 0.17.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.16.1",
+                "version": "0.17.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1081,53 +1081,77 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     heat_kw = round(max(0.0, (19.5 - it["temp"]) * 0.18 / cop), 2)
                     heating[i] = heat_kw
 
-            # 5. Plan Hot Water Generation (SWW Boiler) on cheapest/solar peak slot
+            # 5. Plan Hot Water Generation (SWW Boiler 350L) with Solar Priority
             daylight_slots = [it for it in timeline_items if 9 <= it["dt"].hour <= 17]
+            solar_rich_slots = [it for it in daylight_slots if it["solar"] >= 1.0]
             best_sww_slot = None
-            if daylight_slots:
-                # Prioritize high solar or lowest price
-                best_sww_slot = min(daylight_slots, key=lambda x: (x["price"] - (x["solar"] * 0.1)))
+            if solar_rich_slots:
+                # Prioritize peak solar production for free self-consumption
+                best_sww_slot = max(solar_rich_slots, key=lambda x: x["solar"])
+                sww_idx = best_sww_slot["idx"]
+                boiler[sww_idx] = 1.2  # 1.2 kW electrical (~3.6 kW thermal for 350L tank)
+                advices[sww_idx] = f"♨️ SWW Boiler 350L Run: 100% Zonne-opwek ({best_sww_slot['solar']:.1f} kW zon) om {best_sww_slot['label']}"
+            elif daylight_slots:
+                # Shoulder day: pick slot with best combination of solar and price
+                best_sww_slot = min(daylight_slots, key=lambda x: (x["price"] - (x["solar"] * 0.15)))
+                sww_idx = best_sww_slot["idx"]
+                boiler[sww_idx] = 1.2
+                advices[sww_idx] = f"♨️ SWW Boiler 350L Run: Laag tarief (€{best_sww_slot['price']:.3f}/kWh) & {best_sww_slot['solar']:.1f} kW zon"
             else:
                 best_sww_slot = min(timeline_items, key=lambda x: x["price"])
-
-            if best_sww_slot:
                 sww_idx = best_sww_slot["idx"]
-                boiler[sww_idx] = 1.2  # 1.2 kW heat pump electrical power (~3.6 kW thermal for 350L tank)
-                advices[sww_idx] = f"♨️ SWW Boiler 350L Run: Laagste tarief (€{best_sww_slot['price']:.3f}/kWh) & {best_sww_slot['solar']} kW zon"
+                boiler[sww_idx] = 1.2
+                advices[sww_idx] = f"♨️ SWW Boiler 350L Run: Laagste EPEX tarief (€{best_sww_slot['price']:.3f}/kWh)"
 
-            # 6. Plan Battery Arbitrage, Solar Buffering & Battery Discharge
+            # 6. Plan Battery Dispatch: Solar Surplus Charging & Peak Tariff Discharging
             battery_discharge = [0.0] * 24
             min_item = min(timeline_items, key=lambda x: x["price"])
             max_item = max(timeline_items, key=lambda x: x["price"])
             price_delta = max_item["price"] - min_item["price"]
             deadband = float(cfg.get("battery_deadband_eur_kwh", 0.115))
-
-            bat_msg = ""
             peak_solar_it = max(timeline_items, key=lambda x: x["solar"])
-            
-            # Sort timeline items by price to find evening peaks
-            expensive_slots = sorted(timeline_items, key=lambda x: x["price"], reverse=True)
-            
-            if price_delta >= deadband:
-                # Charge on cheapest hour
+            bat_msg = ""
+
+            # Check if there is significant solar surplus available tomorrow
+            if peak_solar_it["solar"] >= 1.5:
+                # Mode A: Solar Buffer Priority — charge exclusively from free solar surplus
+                # Find daylight slot with surplus above baseload and SWW
+                surplus_candidates = [
+                    it for it in daylight_slots
+                    if (it["solar"] - (baseload[it["idx"]] + boiler[it["idx"]])) >= 0.5
+                ]
+                if surplus_candidates:
+                    charge_slot = max(surplus_candidates, key=lambda x: (x["solar"] - (baseload[x["idx"]] + boiler[x["idx"]])))
+                    avail_surplus = charge_slot["solar"] - (baseload[charge_slot["idx"]] + boiler[charge_slot["idx"]])
+                    charge_kw = round(min(2.5, max(1.0, avail_surplus)), 2)
+                else:
+                    charge_slot = peak_solar_it
+                    charge_kw = 2.0
+
+                battery_charge[charge_slot["idx"]] = charge_kw
+
+                # Discharge during expensive evening peak (18:00 - 23:00 or morning)
+                evening_slots = [it for it in timeline_items if (18 <= it["dt"].hour <= 23 or 0 <= it["dt"].hour <= 1)]
+                if evening_slots:
+                    best_discharge = max(evening_slots, key=lambda x: x["price"])
+                    battery_discharge[best_discharge["idx"]] = 2.0
+                    other_evening = [it for it in evening_slots if it["idx"] != best_discharge["idx"]]
+                    if other_evening:
+                        second_dis = max(other_evening, key=lambda x: x["price"])
+                        battery_discharge[second_dis["idx"]] = 1.5
+                    bat_msg = f"☀️ Zonne-Buffer: Accu laadt op gratis zonne-overschot om {charge_slot['label']} ({charge_kw} kW) en ontlaadt in de avondpiek ({best_discharge['label']}, €{best_discharge['price']:.2f}/kWh)."
+                else:
+                    bat_msg = f"☀️ Zonne-Buffer: Accu laadt op gratis zonne-overschot om {charge_slot['label']} ({charge_kw} kW)."
+            elif price_delta >= deadband:
+                # Mode B: Winter/Cloudy Tariff Arbitrage — charge from grid at lowest price, discharge at highest
                 battery_charge[min_item["idx"]] = 2.0
-                # Discharge on most expensive hour(s)
                 battery_discharge[max_item["idx"]] = 2.0
+                expensive_slots = sorted(timeline_items, key=lambda x: x["price"], reverse=True)
                 if len(expensive_slots) > 1 and expensive_slots[1]["idx"] != min_item["idx"]:
                     battery_discharge[expensive_slots[1]["idx"]] = 1.5
-                bat_msg = f"🔋 Accu-Arbitrage: Laden om {min_item['label']} (€{min_item['price']:.2f}), Ontladen om {max_item['label']} (€{max_item['price']:.2f}) [Spread €{price_delta:.3f} > €{deadband:.3f}]"
+                bat_msg = f"🔋 Accu-Arbitrage (Bewolkt/Winter): Laden om {min_item['label']} (€{min_item['price']:.2f}), Ontladen om {max_item['label']} (€{max_item['price']:.2f}) [Spread €{price_delta:.3f} > €{deadband:.3f}]."
             else:
-                # Solar buffer mode: charge during solar surplus peak, discharge during evening peak
-                if peak_solar_it["solar"] > 1.2:
-                    battery_charge[peak_solar_it["idx"]] = round(min(2.5, peak_solar_it["solar"] - 0.5), 2)
-                    # Discharge during evening dinner/relaxation peak (19:00 - 21:00)
-                    evening_slots = [it for it in timeline_items if 18 <= it["dt"].hour <= 22]
-                    if evening_slots:
-                        best_discharge = max(evening_slots, key=lambda x: x["price"])
-                        battery_discharge[best_discharge["idx"]] = 1.8
-                    bat_msg = f"☀️ Zonne-Buffer: Accu laadt om {peak_solar_it['label']} ({peak_solar_it['solar']} kW) en ontlaadt in de avondpiek."
-                else:
-                    bat_msg = f"⏸️ Accu Stand-by (Deadband): Prijsdelta €{price_delta:.3f}/kWh is onder drempel (€{deadband:.3f}/kWh)."
+                bat_msg = f"⏸️ Accu Stand-by: Onvoldoende zonne-overschot en prijsdelta €{price_delta:.3f} onder drempel."
 
             # Calculate Dual-Polarity Datasets
             # Negative stack: Solar generation and Battery discharge (< 0 kW)
@@ -1787,7 +1811,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.16.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.17.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1942,23 +1966,23 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </div>
 
                     <!-- Stacked Bar Chart Canvas -->
-                    <div class="relative w-full h-72 sm:h-80">
+                    <div class="relative w-full h-[420px] sm:h-[460px]">
                         <canvas id="hemsChartAnalytics"></canvas>
                     </div>
 
-                    <!-- Dual Polarity Prediction Legend Chips -->
+                    <!-- Floating Baseline Energy Architecture Legend Chips -->
                     <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
                         <div class="flex items-center gap-3 flex-wrap">
-                            <!-- Positive Stack (Verbruikers) -->
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Basislast (+kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW Tapwater (+kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV (+kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden (+kW)</span></div>
-                            <!-- Negative Stack (Opwek & Ontladen) -->
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-slate-300">Zon (-kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-teal-400"></span> <span class="text-slate-300">Accu Ontladen (-kW)</span></div>
-                            <!-- Overlay Lines -->
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-orange-400"></span> <span class="text-orange-400 font-bold">Verwacht Netto Verbruik (kW)</span></div>
+                            <!-- Local Energy Sources (Negative Baseline) -->
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400/40 border border-amber-400"></span> <span class="text-slate-300">Zon Opwek</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-teal-400/40 border border-teal-400"></span> <span class="text-slate-300">Accu Ontladen</span></div>
+                            <!-- Consumer Stack (Starts at Negative Baseline & Rises Upward) -->
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Basislast</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW Tapwater (350L)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV Verwarming</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden</span></div>
+                            <!-- Net Balance & Price Lines -->
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-orange-400"></span> <span class="text-orange-400 font-bold">Netto Netvermogen (&gt;0 Netafname, &lt;0 Teruglevering)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400">Prijs (€/kWh)</span></div>
                         </div>
                     </div>
