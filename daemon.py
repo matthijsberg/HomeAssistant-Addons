@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.7.0
+Version: 0.7.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -120,7 +120,7 @@ def fetch_ha_entities():
             for s in states:
                 eid = s.get("entity_id", "")
                 domain = eid.split(".")[0]
-                if domain in ["sensor", "switch", "climate", "binary_sensor", "input_boolean"]:
+                if domain in ["sensor", "switch", "climate", "binary_sensor", "input_boolean", "weather"]:
                     fname = s.get("attributes", {}).get("friendly_name") or eid
                     filtered.append({
                         "entity_id": eid,
@@ -133,6 +133,11 @@ def fetch_ha_entities():
     except Exception as e:
         print(f"Warning fetching HA entities: {e}")
         return []
+
+
+def get_ha_states_map():
+    """Returns a dict mapping entity_id -> state dict from HA Core."""
+    return {e["entity_id"]: e for e in fetch_ha_entities()}
 
 
 def test_influxdb_connection(url, database, username="", password="", retention="autogen"):
@@ -514,13 +519,71 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             return
 
         # API: Status
+        if path == "/api/providers":
+            cfg = load_json(CONFIG_FILE)
+            providers_cfg = cfg.get("providers", {})
+            
+            # Fetch live HA states if available
+            epex_price = None
+            outdoor_temp = None
+            weather_state = None
+            
+            epex_entity = providers_cfg.get("epex_spot", {}).get("ha_sensor_entity", "sensor.energyzero_today_energy_current_hour_price")
+            temp_entity = providers_cfg.get("open_meteo", {}).get("ha_temp_sensor", "sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature")
+            weather_entity = providers_cfg.get("open_meteo", {}).get("ha_weather_entity", "weather.weidhuis")
+            
+            ha_states = get_ha_states_map()
+            if epex_entity in ha_states:
+                try:
+                    epex_price = round(float(ha_states[epex_entity].get("state", 0)), 4)
+                except (ValueError, TypeError):
+                    pass
+            if temp_entity in ha_states:
+                try:
+                    outdoor_temp = round(float(ha_states[temp_entity].get("state", 0)), 1)
+                except (ValueError, TypeError):
+                    pass
+            if weather_entity in ha_states:
+                weather_state = ha_states[weather_entity].get("state")
+                
+            res = {
+                "providers": [
+                    {
+                        "id": "epex_spot",
+                        "name": "EPEX Spot / EnergyZero API",
+                        "type": "market_prices",
+                        "endpoint": providers_cfg.get("epex_spot", {}).get("url", "https://api.energyzero.net/v1/energyprices"),
+                        "ha_entity": epex_entity,
+                        "current_value": epex_price,
+                        "unit": "€/kWh",
+                        "status": "active" if epex_price is not None else "connected",
+                        "description": "Publieke Europese day-ahead en intraday beursprijzen per uur en kwartier."
+                    },
+                    {
+                        "id": "open_meteo",
+                        "name": "Open-Meteo & Weidhuis Weersvoorspelling",
+                        "type": "weather_solar",
+                        "endpoint": providers_cfg.get("open_meteo", {}).get("url", "https://api.open-meteo.com/v1/forecast"),
+                        "ha_entity": weather_entity,
+                        "ha_temp_entity": temp_entity,
+                        "current_value": outdoor_temp,
+                        "weather_state": weather_state,
+                        "unit": "°C",
+                        "status": "active" if outdoor_temp is not None else "connected",
+                        "description": "48-uurs globale zonnestraling (GHI W/m²), buitentemperatuur en windvoorspelling."
+                    }
+                ]
+            }
+            self._send_json(res)
+            return
+
         if path == "/api/status":
             cfg = load_json(CONFIG_FILE)
             params = load_json(PARAMS_FILE)
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.7.0",
+                "version": "0.7.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1314,7 +1377,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.7.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.7.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1625,30 +1688,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 <div id="tariffs-container" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
             </div>
 
-            <!-- TAB 5: OPEN APIS -->
+            <!-- TAB 5: OPEN APIS & FEEDS -->
             <div id="view-providers" class="tab-content space-y-4">
-                <div>
-                    <h2 class="text-base font-bold text-white">Standaard Open API Providers</h2>
-                    <p class="text-xs text-slate-400">Breed toepasbare publieke databronnen die het framework out-of-the-box ontsluit.</p>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5">
-                        <div class="flex justify-between items-center mb-2">
-                            <h3 class="font-bold text-white text-sm">EPEX Spot / EnergyZero API</h3>
-                            <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">ACTIEF</span>
-                        </div>
-                        <p class="text-xs text-slate-400 mb-2">Publieke Europese day-ahead beursprijzen per uur en kwartier.</p>
-                        <code class="text-[11px] text-cyan-300 block bg-[#0B0F17] p-2 rounded">https://api.energyzero.net/v1/energyprices</code>
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-base font-bold text-white">Open API Providers & Omgevingsfeeds</h2>
+                        <p class="text-xs text-slate-400">Publieke en lokale databronnen voor beursprijzen, zonnestraling en weerscondities.</p>
                     </div>
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5">
-                        <div class="flex justify-between items-center mb-2">
-                            <h3 class="font-bold text-white text-sm">Open-Meteo Solar & Weather</h3>
-                            <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800">ACTIEF</span>
-                        </div>
-                        <p class="text-xs text-slate-400 mb-2">48-uurs globale instraling (W/m²), temperatuur en windvoorspelling.</p>
-                        <code class="text-[11px] text-cyan-300 block bg-[#0B0F17] p-2 rounded">https://api.open-meteo.com/v1/forecast</code>
-                    </div>
+                    <button onclick="loadProviders()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs rounded-lg font-medium">
+                        🔄 Verversen
+                    </button>
                 </div>
+                <div id="providers-container" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
             </div>
 
             <!-- TAB 6: CALIBRATION & EXCLUSION WINDOWS -->

@@ -10,6 +10,21 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.7.1] — 2026-09-08 (Live EPEX, P1 DSMR & Weather Ingestion)
+
+### Added & Connected
+- **EPEX Spot / EnergyZero Provider:**
+  - Fully mapped to live Home Assistant sensor `sensor.energyzero_today_energy_current_hour_price` (actueel €0.2520/kWh) and direct EnergyZero Day-Ahead REST API.
+  - Interactive status card with live rate readout and API endpoint inspection.
+- **Open-Meteo & Weidhuis Weather Provider:**
+  - Fully mapped to `weather.weidhuis` and local Wittboy GW2000A weather station `sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature` (actueel 19.3°C).
+  - 48-hour global solar irradiance (GHI W/m²) forecast pipeline connected.
+- **P1 DSMR Hoofdmeter:**
+  - Connected as active physical Grid Meter device with `sensor.power_consumption` (actueel verbruik) and `sensor.power_production` (teruglevering).
+  - Configured with 3x25A grid parameters for peak-shaving guardrails.
+
+---
+
 ## [0.7.0] — 2026-09-08 (MQTT Device Source Adapters & Direct Bus Ingestion)
 
 ### Added
