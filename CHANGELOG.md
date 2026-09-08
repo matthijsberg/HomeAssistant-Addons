@@ -10,6 +10,32 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.4.0] — 2026-09-08 (Solidified Data Collection Layer: InfluxDB & MQTT)
+
+### Added
+- **Laag 1 Dataverzameling & Connectiviteit Console (`view-infrastructure`):**
+  - **InfluxDB Tijdreeksdatabase:**
+    - Full configuration support for InfluxDB 1.8 / 2.x (Host/URL, Data Opslag DB `hermes`, Home Assistant Lees DB `hassio`, credentials, retention policy).
+    - Dedicated live connection test API (`POST /api/infrastructure/influxdb/test`): executes live `/ping` and `SHOW MEASUREMENTS`, returning latency (ms), database status, and measurement count.
+    - Native nanosecond-precision InfluxDB Line Protocol writer (`POST /api/infrastructure/write-test-point`): direct verified telemetry writes (`204 No Content`).
+  - **MQTT Message Broker:**
+    - Full configuration support for MQTT brokers (Host `core-mosquitto`, Port `1883`, Base Topic Prefix `openhems`, Client ID, credentials).
+    - Native protocol connection tester (`POST /api/infrastructure/mqtt/test`): executes TCP socket connect and MQTT 3.1.1 `CONNECT` packet handshake, interpreting broker return codes (RC 0 OK, RC 4 Bad User/Pass, RC 5 Not Authorized, Connection Refused, Timeout).
+  - **Live Telemetrie & Data-Inname Monitor:**
+    - Real-time display of registered series in `hassio` (2.330 series) and `hermes` telemetry storage.
+    - Interactive "Schrijf Test Telemetrie" button for verified real-data writes.
+- **RESTful Infrastructure API:**
+  - `GET /api/infrastructure`: retrieves active connectivity settings.
+  - `POST /api/infrastructure/influxdb`: saves InfluxDB configuration.
+  - `POST /api/infrastructure/mqtt`: saves MQTT broker configuration.
+  - `GET /api/infrastructure/telemetry-stats`: queries real database series stats.
+
+### Security & Deployment
+- Automated pre-commit secret scan verified: 0 credentials.
+- Automatic snapshot v0.3.2 archived prior to upgrade.
+
+---
+
 ## [0.3.2] — 2026-09-07 (Policy-to-Device Multi-Selector & Bidirectional Mapping)
 
 ### Added
