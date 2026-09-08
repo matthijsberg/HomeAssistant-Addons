@@ -10,6 +10,25 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.5.0] — 2026-09-08 (4-Layer Modular Monorepo Architecture & Agent Scoping)
+
+### Added
+- **4-Layer Contract-First Modular Monorepo Architecture:**
+  - **Overarching Architecture (`ARCHITECTURE.md`):** Comprehensive blueprint defining system boundaries, data flows, and layer responsibilities.
+  - **Per-Layer Agent Specifications (`AGENT_SPEC.md`):** Explicit rules and scopes so AI agents can develop on a single layer without side effects.
+    1. **`layer1_data_collection/` (Ingestion & Connectivity):** Network I/O, InfluxDB Line Protocol, MQTT brokers, feed fetchers. Strictly isolated from optimization and actuation.
+    2. **`layer2_calibration/` (Physics & Empirical Modeling):** Pure Python/NumPy statistics, solar matrix $K(h)$, building $UA_{\text{base}}$, defrost penalty, 80/20 EMA damping, physical clamping. Zero network I/O.
+    3. **`layer3_scheduling/` (Optimization & Policies):** Multi-vector solver evaluating `ShiftableConsumerPolicy`, `ThermalBufferPolicy`, and `BatteryArbitragePolicy` (with economic deadband $\Delta P \ge €0.115/\text{kWh}$). Generates `ScheduleSlot` dispatches.
+    4. **`layer4_control/` (Actuation & Hardware Safety Guard):** Translates dispatches into volatile RAM Smart Grid contact states (S10S/S11S), enforces 20-minute compressor dwell-time locks, guarantees hydraulic exclusivity (disabling space heating switch during DHW boost to eliminate 9 kW BUH), and Priority 1 emergency comfort ($< 38^\circ\text{C}$).
+- **Formal Interfaces (`interfaces.py`):** Abstract contracts per layer decoupling implementation from interfaces.
+- **Automated Unit Test Suite Expanded:** Added `tests/unit/test_controller.py` bringing test coverage to 23/23 passing unit tests.
+
+### Security & Deployment
+- Automated pre-commit secret scan verified: 0 credentials.
+- Automatic snapshot v0.4.1 archived prior to upgrade.
+
+---
+
 ## [0.4.1] — 2026-09-08 (Multi-Instance InfluxDB & MQTT CRUD Console)
 
 ### Added
