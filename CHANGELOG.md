@@ -10,6 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.20.2] — 2026-09-08 (Resolve Path to Learned Profile via `__file__`)
+
+### Fixed
+- Added `Path(__file__).parent / "data" / "unallocated_load_profile.json"` and `/config/unallocated_load_profile.json` so the learned 7x24 model loads directly in container environments.
+
+---
+
 ## [0.20.1] — 2026-09-08 (Fix Variable Naming for Unallocated Load in Battery Optimization)
 
 ### Fixed

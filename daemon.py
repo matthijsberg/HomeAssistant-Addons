@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.20.1
+Version: 0.20.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.20.1",
+                "version": "0.20.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1040,8 +1040,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             # 3. Load 7x24 Learned Hourly Unallocated Consumption Profile (P1 - Solar - Heatpump)
             profile_matrix = {}
             for prof_cand in [
+                Path(__file__).parent / "data" / "unallocated_load_profile.json",
+                Path("/config/unallocated_load_profile.json"),
                 Path("/config/addons/open-hems/data/unallocated_load_profile.json"),
                 Path("/config/projects/energy-scheduler/data/unallocated_load_profile.json"),
+                Path("/opt/open-hems/data/unallocated_load_profile.json"),
                 Path("/data/unallocated_load_profile.json")
             ]:
                 if prof_cand.exists():
@@ -1860,7 +1863,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.20.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.20.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
