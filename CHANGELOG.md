@@ -10,6 +10,21 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.9.0] — 2026-09-08 (Grafana-Style Power Producers Dual-Polarity Analytics)
+
+### Added
+- **Power Producers & Realtime Netstromen Visualisatie (Laag 4):**
+  - Geïntegreerde Grafana-stijl tijdreeks-grafiek met **dubbele polariteit** direct gevoed vanuit InfluxDB (`hassio` database):
+    - **Positieve as ($>0\text{ W}$):** Afname van het net (Crimson area fill `#EF4444`) en Totaal Verbruik (Oranje lijn `#F97316`) plus Opgewekt Gebruikt (Teal fill `#14B8A6`).
+    - **Negatieve as ($<0\text{ W}$):** Zonnepanelen productie (Gele/olijf area fill `#EAB308`) en Teruglevering aan het net (Groene area fill `#10B981`).
+  - **Identieke Grafana Legenda & Live Statistieken:**
+    - Live compacte kaarten onder de grafiek voor alle 6 meetstromen met **Last \***, **Min**, en **Max** waarden (automatisch geformatteerd in W of kW).
+  - **Backend Endpoint `/api/analytics/power_producers`:**
+    - Haalt 144 intervallen (10-minuten resolutie over 24 uur) op via InfluxDB Line Query met authenticatie via de veilige kluis (`/config/open_hems_secrets.json`).
+    - Berekent direct `Totaal Verbruik` ($P_{\text{import}} + \max(0, P_{\text{solar}} - P_{\text{export}})$) en `Opgewekt Gebruikt` ($\min(P_{\text{solar}}, P_{\text{verbruik}})$).
+
+---
+
 ## [0.8.0] — 2026-09-08 (Architecture Streamlining: Absorb Layer 4 into Devices & Policies)
 
 ### Changed & Streamlined

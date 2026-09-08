@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.8.0
+Version: 0.9.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -519,6 +519,124 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             return
 
         # API: Status
+        # ANALYTICS: Grafana-style Power Producers Dual-Polarity Telemetry
+        if path.startswith("/api/analytics/power_producers"):
+            try:
+                sec = load_secrets()
+                pwd = sec.get("influxdb", {}).get("local_ha_influxdb", "")
+                
+                # Fetch 24h of 10-minute buckets for solar, import, and export
+                q = """
+                SELECT mean("value") * 1000 as afname_w FROM "kW" WHERE "entity_id" = 'power_consumption' AND time > now() - 24h GROUP BY time(10m) fill(linear);
+                SELECT mean("value") * 1000 as teruglevering_w FROM "kW" WHERE "entity_id" = 'power_production' AND time > now() - 24h GROUP BY time(10m) fill(linear);
+                SELECT mean("value") as solar_w FROM "W" WHERE "entity_id" = 'zonnepanelen_power' AND time > now() - 24h GROUP BY time(10m) fill(linear);
+                """
+                url = "http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
+                    "u": "hermes",
+                    "p": pwd,
+                    "db": "hassio",
+                    "q": q
+                })
+                
+                with urllib.request.urlopen(url, timeout=6) as r:
+                    data = json.loads(r.read().decode())
+                
+                afname_pts = data["results"][0].get("series", [{}])[0].get("values", [])
+                terug_pts = data["results"][1].get("series", [{}])[0].get("values", [])
+                solar_pts = data["results"][2].get("series", [{}])[0].get("values", [])
+                
+                labels = []
+                series_solar_neg = []
+                series_terug_neg = []
+                series_afname_pos = []
+                series_verbruik_pos = []
+                series_selfcons_pos = []
+                
+                # Compute points
+                for i in range(len(afname_pts)):
+                    ts_str = afname_pts[i][0]
+                    # Parse timestamp to local HH:MM
+                    try:
+                        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone()
+                        time_label = dt.strftime("%H:%M")
+                    except Exception:
+                        time_label = ts_str[11:16]
+                    
+                    labels.append(time_label)
+                    
+                    # Values
+                    afname = max(0.0, float(afname_pts[i][1] or 0.0))
+                    terug = max(0.0, float(terug_pts[i][1] or 0.0)) if i < len(terug_pts) else 0.0
+                    solar = abs(float(solar_pts[i][1] or 0.0)) if i < len(solar_pts) else 0.0
+                    
+                    # Positive stack
+                    verbruik = afname + max(0.0, solar - terug)
+                    self_cons = min(solar, verbruik)
+                    
+                    series_afname_pos.append(round(afname))
+                    series_verbruik_pos.append(round(verbruik))
+                    series_selfcons_pos.append(round(self_cons))
+                    
+                    # Negative stack (for dual-polarity display like Grafana)
+                    series_solar_neg.append(-round(solar))
+                    series_terug_neg.append(-round(terug))
+                
+                def fmt_w(val):
+                    abs_v = abs(val)
+                    sign = "-" if val < 0 else ""
+                    if abs_v >= 1000:
+                        return f"{sign}{abs_v / 1000.0:.2f} kW"
+                    return f"{sign}{int(abs_v)} W"
+
+                stats = {
+                    "zonnepanelen": {
+                        "last": fmt_w(series_solar_neg[-1] if series_solar_neg else 0),
+                        "min": fmt_w(min(series_solar_neg) if series_solar_neg else 0),
+                        "max": fmt_w(max(series_solar_neg) if series_solar_neg else 0)
+                    },
+                    "teruglevering": {
+                        "last": fmt_w(series_terug_neg[-1] if series_terug_neg else 0),
+                        "min": fmt_w(min(series_terug_neg) if series_terug_neg else 0),
+                        "max": fmt_w(max(series_terug_neg) if series_terug_neg else 0)
+                    },
+                    "afname": {
+                        "last": fmt_w(series_afname_pos[-1] if series_afname_pos else 0),
+                        "min": fmt_w(min(series_afname_pos) if series_afname_pos else 0),
+                        "max": fmt_w(max(series_afname_pos) if series_afname_pos else 0)
+                    },
+                    "totaal_opgewekt": {
+                        "last": fmt_w(series_solar_neg[-1] if series_solar_neg else 0),
+                        "min": fmt_w(min(series_solar_neg) if series_solar_neg else 0),
+                        "max": fmt_w(max(series_solar_neg) if series_solar_neg else 0)
+                    },
+                    "opgewekt_gebruikt": {
+                        "last": fmt_w(-series_selfcons_pos[-1] if series_selfcons_pos else 0),
+                        "min": fmt_w(-max(series_selfcons_pos) if series_selfcons_pos else 0),
+                        "max": fmt_w(0)
+                    },
+                    "totaal_verbruik": {
+                        "last": fmt_w(series_verbruik_pos[-1] if series_verbruik_pos else 0),
+                        "min": fmt_w(min(series_verbruik_pos) if series_verbruik_pos else 0),
+                        "max": fmt_w(max(series_verbruik_pos) if series_verbruik_pos else 0)
+                    }
+                }
+
+                res = {
+                    "status": "success",
+                    "labels": labels,
+                    "afname": series_afname_pos,
+                    "verbruik": series_verbruik_pos,
+                    "self_consumption": series_selfcons_pos,
+                    "solar_negative": series_solar_neg,
+                    "teruglevering_negative": series_terug_neg,
+                    "stats": stats
+                }
+                self._send_json(res)
+                return
+            except Exception as e:
+                self._send_json({"status": "error", "message": f"Fout bij ophalen InfluxDB telemetrie: {str(e)}"}, 500)
+                return
+
         if path == "/api/providers":
             cfg = load_json(CONFIG_FILE)
             providers_cfg = cfg.get("providers", {})
@@ -583,7 +701,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.8.0",
+                "version": "0.9.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1368,7 +1486,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.8.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.9.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1437,6 +1555,99 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <span class="text-[10px] uppercase font-bold text-slate-400 block">Prognose Validatie</span>
                         <div class="text-xl font-bold text-purple-400 mt-1" id="kpi-accuracy">92.6%</div>
                         <span class="text-[10px] text-slate-500">MAE: 0.18 kW</span>
+                    </div>
+                </div>
+
+                <!-- GRAFANA-STYLE POWER PRODUCERS CHART (DUAL POLARITY) -->
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-2xl space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-2.5">
+                            <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <h3 class="text-sm font-bold text-white tracking-wide">Power Producers & Netstromen</h3>
+                            <span class="text-[10px] text-slate-500 font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800">InfluxDB Realtime (24h)</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-xs">
+                            <button onclick="loadPowerProducersChart()" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition">
+                                🔄 Live Verversen
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Dual Polarity Chart Canvas -->
+                    <div class="relative w-full h-72 sm:h-80">
+                        <canvas id="powerProducersChart"></canvas>
+                    </div>
+
+                    <!-- Exact Grafana-Style Legend & Metrics Table -->
+                    <div class="pt-2 border-t border-slate-800/80">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs font-mono">
+                            <!-- Zonnepanelen -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-3 h-1.5 rounded-sm bg-yellow-500"></span>
+                                    <span class="text-slate-300">Zonnepanelen</span>
+                                </div>
+                                <div class="text-[11px] space-x-2 text-right">
+                                    <span class="text-slate-400">Last: <strong class="text-yellow-400" id="stat-solar-last">--</strong></span>
+                                    <span class="text-slate-500">Min: <span class="text-yellow-500/80" id="stat-solar-min">--</span></span>
+                                </div>
+                            </div>
+                            <!-- Teruglevering -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-3 h-1.5 rounded-sm bg-emerald-500"></span>
+                                    <span class="text-slate-300">Teruglevering</span>
+                                </div>
+                                <div class="text-[11px] space-x-2 text-right">
+                                    <span class="text-slate-400">Last: <strong class="text-emerald-400" id="stat-terug-last">--</strong></span>
+                                    <span class="text-slate-500">Min: <span class="text-emerald-500/80" id="stat-terug-min">--</span></span>
+                                </div>
+                            </div>
+                            <!-- Afname -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-3 h-1.5 rounded-sm bg-red-500"></span>
+                                    <span class="text-slate-300">Afname</span>
+                                </div>
+                                <div class="text-[11px] space-x-2 text-right">
+                                    <span class="text-slate-400">Last: <strong class="text-red-400" id="stat-afname-last">--</strong></span>
+                                    <span class="text-slate-500">Max: <span class="text-red-500/80" id="stat-afname-max">--</span></span>
+                                </div>
+                            </div>
+                            <!-- Totaal opgewekt -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-3 h-1.5 rounded-sm bg-lime-500"></span>
+                                    <span class="text-slate-300">Totaal opgewekt</span>
+                                </div>
+                                <div class="text-[11px] space-x-2 text-right">
+                                    <span class="text-slate-400">Last: <strong class="text-lime-400" id="stat-opgewekt-last">--</strong></span>
+                                    <span class="text-slate-500">Min: <span class="text-lime-500/80" id="stat-opgewekt-min">--</span></span>
+                                </div>
+                            </div>
+                            <!-- Opgewekt Gebruikt -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-3 h-1.5 rounded-sm bg-teal-400"></span>
+                                    <span class="text-slate-300">Opgewekt Gebruikt</span>
+                                </div>
+                                <div class="text-[11px] space-x-2 text-right">
+                                    <span class="text-slate-400">Last: <strong class="text-teal-400" id="stat-selfcons-last">--</strong></span>
+                                    <span class="text-slate-500">Min: <span class="text-teal-500/80" id="stat-selfcons-min">--</span></span>
+                                </div>
+                            </div>
+                            <!-- Totaal Verbruik -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-3 h-1.5 rounded-sm bg-orange-500"></span>
+                                    <span class="text-slate-300">Totaal Verbruik</span>
+                                </div>
+                                <div class="text-[11px] space-x-2 text-right">
+                                    <span class="text-slate-400">Last: <strong class="text-orange-400" id="stat-verbruik-last">--</strong></span>
+                                    <span class="text-slate-500">Max: <span class="text-orange-500/80" id="stat-verbruik-max">--</span></span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -3128,7 +3339,174 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
         function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
-                async function loadAnalytics() {
+                let powerProducersChartInstance = null;
+
+        async function loadPowerProducersChart() {
+            const canvas = document.getElementById('powerProducersChart');
+            if (!canvas) return;
+            
+            try {
+                const res = await fetch('./api/analytics/power_producers');
+                const data = await res.json();
+                if (data.status !== 'success') {
+                    console.error('Power producers error:', data.message);
+                    return;
+                }
+
+                // Update Legend Stats
+                const s = data.stats || {};
+                if (s.zonnepanelen) {
+                    document.getElementById('stat-solar-last').innerText = s.zonnepanelen.last;
+                    document.getElementById('stat-solar-min').innerText = s.zonnepanelen.min;
+                }
+                if (s.teruglevering) {
+                    document.getElementById('stat-terug-last').innerText = s.teruglevering.last;
+                    document.getElementById('stat-terug-min').innerText = s.teruglevering.min;
+                }
+                if (s.afname) {
+                    document.getElementById('stat-afname-last').innerText = s.afname.last;
+                    document.getElementById('stat-afname-max').innerText = s.afname.max;
+                }
+                if (s.totaal_opgewekt) {
+                    document.getElementById('stat-opgewekt-last').innerText = s.totaal_opgewekt.last;
+                    document.getElementById('stat-opgewekt-min').innerText = s.totaal_opgewekt.min;
+                }
+                if (s.opgewekt_gebruikt) {
+                    document.getElementById('stat-selfcons-last').innerText = s.opgewekt_gebruikt.last;
+                    document.getElementById('stat-selfcons-min').innerText = s.opgewekt_gebruikt.min;
+                }
+                if (s.totaal_verbruik) {
+                    document.getElementById('stat-verbruik-last').innerText = s.totaal_verbruik.last;
+                    document.getElementById('stat-verbruik-max').innerText = s.totaal_verbruik.max;
+                }
+
+                // Destroy old instance if exists
+                if (powerProducersChartInstance) powerProducersChartInstance.destroy();
+
+                const ctx = canvas.getContext('2d');
+                powerProducersChartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.labels,
+                        datasets: [
+                            // 1. Totaal Verbruik (Orange line on top)
+                            {
+                                label: 'Totaal Verbruik',
+                                data: data.verbruik,
+                                borderColor: '#F97316',
+                                backgroundColor: 'transparent',
+                                borderWidth: 2,
+                                pointRadius: 0,
+                                tension: 0.25,
+                                order: 1
+                            },
+                            // 2. Afname (Crimson/Red fill on positive axis)
+                            {
+                                label: 'Afname',
+                                data: data.afname,
+                                borderColor: '#EF4444',
+                                backgroundColor: 'rgba(239, 68, 68, 0.45)',
+                                fill: true,
+                                borderWidth: 1.5,
+                                pointRadius: 0,
+                                tension: 0.25,
+                                order: 2
+                            },
+                            // 3. Opgewekt Gebruikt (Teal/Green fill)
+                            {
+                                label: 'Opgewekt Gebruikt',
+                                data: data.self_consumption,
+                                borderColor: '#14B8A6',
+                                backgroundColor: 'rgba(20, 184, 166, 0.25)',
+                                fill: true,
+                                borderWidth: 1,
+                                pointRadius: 0,
+                                tension: 0.25,
+                                order: 3
+                            },
+                            // 4. Teruglevering (Green area below zero)
+                            {
+                                label: 'Teruglevering',
+                                data: data.teruglevering_negative,
+                                borderColor: '#10B981',
+                                backgroundColor: 'rgba(16, 185, 129, 0.45)',
+                                fill: true,
+                                borderWidth: 1.5,
+                                pointRadius: 0,
+                                tension: 0.25,
+                                order: 4
+                            },
+                            // 5. Zonnepanelen (Yellow area below zero)
+                            {
+                                label: 'Zonnepanelen',
+                                data: data.solar_negative,
+                                borderColor: '#EAB308',
+                                backgroundColor: 'rgba(234, 179, 8, 0.55)',
+                                fill: true,
+                                borderWidth: 1.5,
+                                pointRadius: 0,
+                                tension: 0.25,
+                                order: 5
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        plugins: {
+                            legend: {
+                                display: false // Using custom Grafana table legend
+                            },
+                            tooltip: {
+                                backgroundColor: 'rgba(11, 15, 23, 0.95)',
+                                borderColor: '#1E293B',
+                                borderWidth: 1,
+                                titleFont: { family: 'monospace', size: 12 },
+                                bodyFont: { family: 'monospace', size: 11 },
+                                callbacks: {
+                                    label: function(context) {
+                                        const val = context.raw || 0;
+                                        const absV = Math.abs(val);
+                                        const str = absV >= 1000 ? `${(absV / 1000).toFixed(2)} kW` : `${absV} W`;
+                                        return `${context.dataset.label}: ${val < 0 ? '-' : ''}${str}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: 'rgba(30, 41, 59, 0.4)' },
+                                ticks: { 
+                                    color: '#94A3B8', 
+                                    font: { family: 'monospace', size: 10 },
+                                    maxTicksLimit: 12
+                                }
+                            },
+                            y: {
+                                grid: { color: 'rgba(30, 41, 59, 0.6)' },
+                                ticks: {
+                                    color: '#94A3B8',
+                                    font: { family: 'monospace', size: 10 },
+                                    callback: function(val) {
+                                        const absV = Math.abs(val);
+                                        const prefix = val < 0 ? '-' : '';
+                                        return absV >= 1000 ? `${prefix}${absV / 1000} kW` : `${val} W`;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (err) {
+                console.error('Failed to load power producers chart:', err);
+            }
+        }
+
+        async function loadAnalytics() {
             try {
                 const res = await fetch('./api/analytics');
                 const d = await res.json();
