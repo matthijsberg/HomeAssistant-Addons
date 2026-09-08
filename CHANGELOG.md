@@ -10,6 +10,27 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.19.0] — 2026-09-08 (Classic Dual-Polarity Stacked Architecture & Net Overlay Line)
+
+### Added & Re-Architected
+- **Aligned with Power Producers & Netstromen Design Language:**
+  - **Consumers (> 0 kW):** All loads stack upward above the horizontal zero axis:
+    - Basislast (+kW, blue)
+    - SWW Tapwater 350L (+kW, pink)
+    - CV Verwarming (+kW, indigo)
+    - Accu Laden (+kW, emerald green) — explicitly categorized as a consumer.
+  - **Generation & Sources (< 0 kW):** All energy sources stack downward below the horizontal zero axis:
+    - Zon Productie (-kW, amber/gold)
+    - Accu Ontladen (-kW, teal/cyan)
+  - **Expected Net Power Line (`net_power_kw`):** Continuous bold orange overlay line drawn directly across the bar chart:
+    - Line > 0: Net grid import (netafname)
+    - Line < 0: Net grid export (teruglevering)
+    - Line = 0: Completely self-sufficient
+- **Dynamic Price Overlay:** Aligned on the right Y1-axis with mathematically synchronized zero axis.
+- **Unified Clean Tooltips:** Zero-value entries filtered out; tapping outside canvas immediately dismisses popups on mobile.
+
+---
+
 ## [0.18.1] — 2026-09-08 (Deploy Appliance Advice Banner & Surplus Badge)
 
 ### Fixed & Enhanced

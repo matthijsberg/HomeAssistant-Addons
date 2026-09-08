@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.18.1
+Version: 0.19.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.18.1",
+                "version": "0.19.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1838,7 +1838,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.18.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.19.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2004,20 +2004,19 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <canvas id="hemsChartAnalytics"></canvas>
                     </div>
 
-                    <!-- Floating Baseline Energy Architecture Legend Chips -->
+                    <!-- Dual Polarity Power Producers Aligned Legend Chips -->
                     <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
                         <div class="flex items-center gap-3 flex-wrap">
-                            <!-- Local Energy Sources (Negative Baseline) -->
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400/40 border border-amber-400"></span> <span class="text-slate-300">Zon Opwek</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-teal-400/40 border border-teal-400"></span> <span class="text-slate-300">Accu Ontladen</span></div>
-                            <!-- Consumer Stack (Starts at Negative Baseline & Rises Upward) -->
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Basislast</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW Tapwater (350L)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV Verwarming</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500/40 border border-emerald-400"></span> <span class="text-emerald-300 font-bold">Vrij Zonne-Overschot (Wasmachine/EV)</span></div>
-                            <!-- Net Balance & Price Lines -->
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-orange-400"></span> <span class="text-orange-400 font-bold">Netto Netvermogen (&gt;0 Netafname, &lt;0 Teruglevering)</span></div>
+                            <!-- Consumers Above Horizontal Axis (> 0 kW) -->
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Basislast (+kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW Tapwater (+kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV (+kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden (+kW)</span></div>
+                            <!-- Sources Below Horizontal Axis (< 0 kW) -->
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-slate-300">Zon (-kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-teal-400"></span> <span class="text-slate-300">Accu Ontladen (-kW)</span></div>
+                            <!-- Net & Price Lines -->
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-orange-400"></span> <span class="text-orange-400 font-bold">Verwacht Netto Verbruik (>0 Afname, <0 Export)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400">Prijs (€/kWh)</span></div>
                         </div>
                     </div>
@@ -3286,100 +3285,35 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 if (document.getElementById('prediction-baseload-badge')) document.getElementById('prediction-baseload-badge').innerText = `Basislast: ${data.baseload_watts || 300} W`;
                 if (document.getElementById('tab-baseload-input')) document.getElementById('tab-baseload-input').value = data.baseload_watts || 300;
 
-                // Compute Floating Baseline Stacks:
-                // Production (Zon + Accu Ontladen) defines the negative energy baseline [-tot_gen, 0].
-                // Consumers start stacking from -tot_gen UPWARDS.
-                // - If top of stack <= 0: covered by local generation (surplus exported).
-                // - If top of stack > 0: crosses above zero line into actual grid import!
+// Dual Polarity Stacked Engine (Power Producers Aligned):
+                // - Above 0 axis: All consumers stacked together (Basislast, SWW, CV, Accu Laden)
+                // - Below 0 axis: All generation/sources stacked together (Zon Productie, Accu Ontladen)
+                // - Net overlay line: Expected Net Grid Power (Cons - Prod)
                 const labels = data.labels;
-                const solarArr = (data.datasets.solar_kw_neg || []).map(s => Math.abs(s));
-                const batDisArr = (data.datasets.battery_discharge_kw_neg || []).map(d => Math.abs(d));
-                const baseArr = data.datasets.baseload_kw;
-                const swwArr = data.datasets.boiler_kw;
-                const cvArr = data.datasets.heating_kw || [];
-                const batChArr = data.datasets.battery_charge_kw;
-                const pricesArr = data.datasets.prices_eur;
-
-                const ds_solar = [];
-                const ds_bat_dis = [];
-                const ds_base = [];
-                const ds_sww = [];
-                const ds_cv = [];
-                const ds_bat_ch = [];
-                const ds_net = [];
-
-                for (let i = 0; i < labels.length; i++) {
-                    const s = solarArr[i] || 0;
-                    const d = batDisArr[i] || 0;
-                    const tot_gen = s + d;
-                    const cur_base = -tot_gen;
-
-                    // Production containers (negative bounds)
-                    ds_solar.push(s > 0 ? [-tot_gen, -d] : null);
-                    ds_bat_dis.push(d > 0 ? [-d, 0] : null);
-
-                    // Consumers stack upward starting from cur_base
-                    let c = cur_base;
-
-                    // 1. Baseload
-                    const b_val = baseArr[i] || 0;
-                    ds_base.push([c, c + b_val]);
-                    c += b_val;
-
-                    // 2. SWW Boiler
-                    const w_val = swwArr[i] || 0;
-                    if (w_val > 0) {
-                        ds_sww.push([c, c + w_val]);
-                        c += w_val;
-                    } else {
-                        ds_sww.push(null);
-                    }
-
-                    // 3. CV Verwarming
-                    const h_val = cvArr[i] || 0;
-                    if (h_val > 0) {
-                        ds_cv.push([c, c + h_val]);
-                        c += h_val;
-                    } else {
-                        ds_cv.push(null);
-                    }
-
-                    // 4. Accu Laden
-                    const ch_val = batChArr[i] || 0;
-                    if (ch_val > 0) {
-                        ds_bat_ch.push([c, c + ch_val]);
-                        c += ch_val;
-                    } else {
-                        ds_bat_ch.push(null);
-                    }
-
-                    ds_net.push(Math.round(c * 100) / 100);
-                }
+                const pricesArr = data.datasets.prices_eur || [];
+                const netPowerArr = data.datasets.net_power_kw || [];
 
                 // Populate recommendation banner & surplus badge
                 if (document.getElementById('solar-recommendation-text')) {
-                    document.getElementById('solar-recommendation-text').innerText = data.solar_recommendation || "☀️ Geen significant overschot";
+                    document.getElementById('solar-recommendation-text').innerText = data.solar_recommendation || "☀️ Geen overschot";
                 }
                 if (document.getElementById('prediction-surplus-badge')) {
                     document.getElementById('prediction-surplus-badge').innerText = `☀️ Vrij Overschot: ${data.surplus_total_kwh || 0.0} kWh`;
                 }
 
-                // Compute Unconsumed Solar Surplus floating bar: from c up to 0 (when c < 0)
-                const ds_surplus = [];
+                // === SYNCHRONIZE 0 LINE ON BOTH Y (kW) AND Y1 (€/kWh) AXES ===
+                let allVals = [...netPowerArr, ...(data.datasets.solar_kw_neg || []), ...(data.datasets.battery_discharge_kw_neg || [])];
+                let consVals = [];
                 for (let i = 0; i < labels.length; i++) {
-                    const netVal = ds_net[i];
-                    if (netVal < -0.05) {
-                        // Unconsumed free solar surplus between top of stack (netVal) and 0 line
-                        ds_surplus.push([netVal, 0]);
-                    } else {
-                        ds_surplus.push(null);
-                    }
+                    const b = data.datasets.baseload_kw[i] || 0;
+                    const w = data.datasets.boiler_kw[i] || 0;
+                    const h = (data.datasets.heating_kw && data.datasets.heating_kw[i]) || 0;
+                    const c = (data.datasets.battery_charge_kw && data.datasets.battery_charge_kw[i]) || 0;
+                    consVals.push(b + w + h + c);
                 }
 
-                // === SYNCHRONIZE 0 LINE ON BOTH Y (kW) AND Y1 (€/kWh) AXES ===
-                let allNetVals = ds_net.filter(v => v !== null && !isNaN(v));
-                let minY = Math.min(-2.5, ...allNetVals, ...(data.datasets.solar_kw_neg || []));
-                let maxY = Math.max(1.0, ...allNetVals, ...(data.datasets.baseload_kw || []));
+                let minY = Math.min(-2.5, ...allVals);
+                let maxY = Math.max(2.0, ...consVals, ...netPowerArr);
                 minY = Math.floor(minY * 2) / 2; // Clean 0.5 steps
                 maxY = Math.ceil(maxY * 2) / 2;
 
@@ -3389,7 +3323,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                 // Zero ratio from bottom on left axis
                 const zeroRatio = Math.abs(minY) / (maxY - minY);
-                // Align right axis so 0 is at exact same percentage
                 let syncdMinP = -(zeroRatio / (1.0 - zeroRatio)) * maxP;
                 if (minP < syncdMinP) {
                     syncdMinP = Math.floor(minP * 20) / 20;
@@ -3401,94 +3334,71 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     data: {
                         labels: labels,
                         datasets: [
-                            // 1. Background Production Buckets (Negative Pool)
+                            // === CONSUMERS (BOVEN DE AS > 0 kW, STACK: CONSUMPTION) ===
                             {
-                                label: 'Zon Opwek (Pool)',
-                                data: ds_solar,
-                                backgroundColor: 'rgba(245, 158, 11, 0.30)',
-                                borderColor: '#F59E0B',
-                                borderWidth: 1.5,
-                                borderRadius: 3,
-                                grouped: false,
-                                barPercentage: 0.85,
-                                order: 6
-                            },
-                            {
-                                label: 'Accu Ontladen (Pool)',
-                                data: ds_bat_dis,
-                                backgroundColor: 'rgba(20, 184, 166, 0.30)',
-                                borderColor: '#14B8A6',
-                                borderWidth: 1.5,
-                                borderRadius: 3,
-                                grouped: false,
-                                barPercentage: 0.85,
-                                order: 6
-                            },
-                            // 2. Unconsumed Solar Surplus (Free for non-smart appliances)
-                            {
-                                label: 'Vrij Zonne-Overschot',
-                                data: ds_surplus,
-                                backgroundColor: 'rgba(34, 197, 94, 0.35)',
-                                borderColor: '#22C55E',
-                                borderWidth: 1.5,
-                                borderDash: [2, 2],
-                                borderRadius: 2,
-                                grouped: false,
-                                barPercentage: 0.70,
-                                order: 5
-                            },
-                            // 3. Consumers Stacked from -tot_gen Upward
-                            {
-                                label: 'Basislast',
-                                data: ds_base,
+                                label: 'Basislast (kW)',
+                                data: data.datasets.baseload_kw,
                                 backgroundColor: '#3B82F6',
+                                stack: 'consumption',
                                 borderRadius: 2,
-                                grouped: false,
-                                barPercentage: 0.55,
+                                order: 3
+                            },
+                            {
+                                label: 'SWW Tapwater (kW)',
+                                data: data.datasets.boiler_kw,
+                                backgroundColor: '#EC4899',
+                                stack: 'consumption',
+                                borderRadius: 2,
+                                order: 3
+                            },
+                            {
+                                label: 'CV Verwarming (kW)',
+                                data: data.datasets.heating_kw || [],
+                                backgroundColor: '#6366F1',
+                                stack: 'consumption',
+                                borderRadius: 2,
+                                order: 3
+                            },
+                            {
+                                label: 'Accu Laden (kW)',
+                                data: data.datasets.battery_charge_kw || [],
+                                backgroundColor: '#10B981',
+                                stack: 'consumption',
+                                borderRadius: 2,
+                                order: 3
+                            },
+                            // === SOURCES (ONDER DE AS < 0 kW, STACK: PRODUCTION) ===
+                            {
+                                label: 'Zon Productie (-kW)',
+                                data: data.datasets.solar_kw_neg || [],
+                                backgroundColor: '#F59E0B',
+                                stack: 'production',
+                                borderRadius: 2,
                                 order: 4
                             },
                             {
-                                label: 'SWW Tapwater (350L)',
-                                data: ds_sww,
-                                backgroundColor: '#EC4899',
+                                label: 'Accu Ontladen (-kW)',
+                                data: data.datasets.battery_discharge_kw_neg || [],
+                                backgroundColor: '#14B8A6',
+                                stack: 'production',
                                 borderRadius: 2,
-                                grouped: false,
-                                barPercentage: 0.55,
-                                order: 3
+                                order: 4
                             },
-                            {
-                                label: 'CV Verwarming',
-                                data: ds_cv,
-                                backgroundColor: '#6366F1',
-                                borderRadius: 2,
-                                grouped: false,
-                                barPercentage: 0.55,
-                                order: 3
-                            },
-                            {
-                                label: 'Accu Laden',
-                                data: ds_bat_ch,
-                                backgroundColor: '#10B981',
-                                borderRadius: 2,
-                                grouped: false,
-                                barPercentage: 0.55,
-                                order: 3
-                            },
-                            // 4. Expected Net Power Line (>0 Grid Import, <0 Grid Export)
+                            // === OVERLAY: VERWACHT NETTO VERBRUIK (NETTO LIJN OVER DE BARS) ===
                             {
                                 label: 'Verwacht Netto Verbruik (kW)',
-                                data: ds_net,
+                                data: netPowerArr,
                                 type: 'line',
                                 borderColor: '#F97316',
                                 backgroundColor: 'transparent',
-                                borderWidth: 2.5,
+                                borderWidth: 3,
                                 pointRadius: 2,
                                 pointBackgroundColor: '#F97316',
-                                tension: 0.2,
+                                tension: 0.25,
                                 yAxisID: 'y',
                                 order: 1
                             },
-                            // 5. Dynamic Electricity Tariff (€/kWh)
+                            // === OVERLAY: STROOMPRIJS (€/kWh) ===
                             {
                                 label: 'Stroomprijs (€/kWh)',
                                 data: pricesArr,
@@ -3513,37 +3423,31 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 filter: function(tooltipItem) {
                                     const raw = tooltipItem.raw;
                                     if (raw === null || raw === undefined) return false;
-                                    if (Array.isArray(raw)) {
-                                        return Math.abs(raw[1] - raw[0]) > 0.02; // Filter out 0 kW rows!
-                                    }
-                                    if (tooltipItem.dataset.yAxisID === 'y1') return true;
-                                    return Math.abs(Number(raw)) > 0.02; // Filter out 0 kW rows!
+                                    return Math.abs(Number(raw)) > 0.02; // Filter out 0 kW entries
                                 },
                                 callbacks: {
-                                    label: function(context) {
-                                        const label = context.dataset.label || '';
-                                        const raw = context.raw;
-                                        if (Array.isArray(raw)) {
-                                            const diff = Math.abs(raw[1] - raw[0]).toFixed(2);
-                                            return `${label}: ${diff} kW`;
-                                        } else if (context.dataset.yAxisID === 'y1') {
-                                            return `${label}: €${Number(raw).toFixed(4)}/kWh`;
-                                        } else {
-                                            return `${label}: ${Number(raw).toFixed(2)} kW`;
+                                    label: function(ctx) {
+                                        const label = ctx.dataset.label || '';
+                                        const val = Number(ctx.raw);
+                                        if (ctx.dataset.yAxisID === 'y1') {
+                                            return `${label}: €${val.toFixed(4)}/kWh`;
                                         }
+                                        return `${label}: ${val >= 0 ? '+' : ''}${val.toFixed(2)} kW`;
                                     }
                                 }
                             }
                         },
                         scales: {
                             x: {
+                                stacked: true,
                                 grid: { color: '#1E293B' },
                                 ticks: { color: '#94A3B8', font: { family: 'monospace', size: 10 } }
                             },
                             y: {
+                                stacked: true,
                                 min: minY,
                                 max: maxY,
-                                title: { display: true, text: 'Vermogen (kW) — Opwek < 0 < Netafname', color: '#94A3B8' },
+                                title: { display: true, text: 'Opbrengst (-kW) < 0 < Verbruik (+kW)', color: '#94A3B8' },
                                 grid: {
                                     color: (ctx) => ctx.tick && ctx.tick.value === 0 ? '#94A3B8' : '#1E293B',
                                     lineWidth: (ctx) => ctx.tick && ctx.tick.value === 0 ? 2 : 1
@@ -3568,6 +3472,20 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     }
                 };
 
+                // Render on Analytics Tab
+                const canvasAnalytics = document.getElementById('hemsChartAnalytics');
+                if (canvasAnalytics) {
+                    if (analyticsChartInstance) analyticsChartInstance.destroy();
+                    analyticsChartInstance = new Chart(canvasAnalytics.getContext('2d'), JSON.parse(JSON.stringify(chartConfig)));
+                }
+
+                // Render on Dashboard Tab
+                const canvasDash = document.getElementById('hemsChart');
+                if (canvasDash) {
+                    if (chartInstance) chartInstance.destroy();
+                    chartInstance = new Chart(canvasDash.getContext('2d'), JSON.parse(JSON.stringify(chartConfig)));
+                }
+
                 // Add document tap/click listener to dismiss tooltip when clicking outside canvas
                 if (!window.__tooltipDismissAttached) {
                     window.__tooltipDismissAttached = true;
@@ -3581,20 +3499,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     };
                     document.addEventListener('click', dismissFn);
                     document.addEventListener('touchstart', dismissFn, { passive: true });
-                }
-
-                // Render on Analytics Tab
-                const canvasAnalytics = document.getElementById('hemsChartAnalytics');
-                if (canvasAnalytics) {
-                    if (analyticsChartInstance) analyticsChartInstance.destroy();
-                    analyticsChartInstance = new Chart(canvasAnalytics.getContext('2d'), JSON.parse(JSON.stringify(chartConfig)));
-                }
-
-                // Render on Dashboard Tab
-                const canvasDash = document.getElementById('hemsChart');
-                if (canvasDash) {
-                    if (chartInstance) chartInstance.destroy();
-                    chartInstance = new Chart(canvasDash.getContext('2d'), JSON.parse(JSON.stringify(chartConfig)));
                 }
             } catch (e) {
                 console.error('Chart load error:', e);
