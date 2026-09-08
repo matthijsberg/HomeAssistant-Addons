@@ -10,6 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.22.1] — 2026-09-08 (Calibrate 7x24 Load Profile directly from Canonical HA Energy Database)
+
+### Added & Calibrated
+- **Canonical HA Energy Statistics Calibration:**
+  - Diagnosed flat daytime profile. Re-calculated 180 days of hourly consumption from the canonical Home Assistant SQLite Energy database (`sensor.daily_energy_consumption`, `sensor.daily_energy_returned`, `sensor.zonnepanelen_export_power`, `sensor.daily_energy_usage_sum_wp`).
+  - Successfully captures real household daytime patterns:
+    - **Nacht (00:00–06:00):** Strak ~295–320 W (25th percentile standby).
+    - **Ochtend (07:00–09:00):** 500–750 W (thee, koffie, ontbijt).
+    - **Overdag (10:00–17:00):** 450–850 W (gezin, apparaten, actieve uren).
+    - **Avond & Wasdag:** Tot 950–992 W piek op dinsdagavond.
+
+---
+
 ## [0.22.0] — 2026-09-08 (Enforce Summer Lockout for CV Space Heating & Compact Mobile Badges)
 
 ### Fixed
