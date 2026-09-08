@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.18.1] — 2026-09-08 (Deploy Appliance Advice Banner & Surplus Badge)
+
+### Fixed & Enhanced
+- **Visible Appliance Advice Banner & Badge:**
+  - Added `☀️ Vrij Overschot: X.X kWh` summary badge to the 24h prediction header.
+  - Added dedicated emerald callout banner recommending optimal hours for running washing machines, dryers, dishwashers, or EV charging on free solar surplus.
+  - Added legend chip for `Vrij Zonne-Overschot (Wasmachine/EV)`.
+
+---
+
 ## [0.18.0] — 2026-09-08 (Synchronized Zero Axis, Solar Surplus Appliance Advice & Touch Dismiss)
 
 ### Added

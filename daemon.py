@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.18.0
+Version: 0.18.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.18.0",
+                "version": "0.18.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1838,7 +1838,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.18.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.18.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1976,6 +1976,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         </div>
                         <div class="flex items-center gap-3 text-xs flex-wrap">
                             <span class="text-[10px] text-slate-400 font-mono bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800" id="prediction-baseload-badge">Basislast: 300 W</span>
+                            <span class="text-[10px] text-emerald-400 font-mono bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-500/30" id="prediction-surplus-badge">☀️ Vrij Overschot: 0.0 kWh</span>
                             <button onclick="loadChartData()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                 <span>Herberekenen</span>
@@ -1990,6 +1991,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <span class="text-slate-200 font-medium" id="analytics-banner-text">Planning wordt geladen...</span>
                         </div>
                         <span class="text-[10px] text-purple-300 font-mono font-bold px-2 py-0.5 rounded bg-purple-900/50 border border-purple-800 hidden sm:inline">24H ROLLING OPTIMIZER</span>
+                    </div>
+
+                    <!-- Non-Smart Appliance Solar Advice Banner -->
+                    <div id="solar-recommendation-banner" class="bg-gradient-to-r from-emerald-950/60 via-[#0B0F17] to-teal-950/60 p-3 rounded-xl border border-emerald-500/30 flex items-center gap-2.5 text-xs text-emerald-200">
+                        <span class="text-base">🧺</span>
+                        <span id="solar-recommendation-text" class="font-medium">Zonne-overschot advies wordt geladen...</span>
                     </div>
 
                     <!-- Stacked Bar Chart Canvas -->
@@ -2008,6 +2015,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW Tapwater (350L)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV Verwarming</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500/40 border border-emerald-400"></span> <span class="text-emerald-300 font-bold">Vrij Zonne-Overschot (Wasmachine/EV)</span></div>
                             <!-- Net Balance & Price Lines -->
                             <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-orange-400"></span> <span class="text-orange-400 font-bold">Netto Netvermogen (&gt;0 Netafname, &lt;0 Teruglevering)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400">Prijs (€/kWh)</span></div>
