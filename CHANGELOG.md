@@ -10,6 +10,20 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.11.2] — 2026-09-08 (Fix CEST Dutch Timezone & Replace fill(previous) with fill(none))
+
+### Fixed
+- **CEST Timezone Alignment:**
+  - Standardized all time-axis labeling using Python's `zoneinfo.ZoneInfo("Europe/Amsterdam")` and explicit `TZ: Europe/Amsterdam` environment.
+  - X-axis timestamps now align 1-to-1 with Dutch local time (CEST/CET) matching the user's phone clock.
+- **Removed Artificial Rectangular Fill:**
+  - Replaced `fill(previous)` with `fill(none)` and added sparse-time point merging.
+  - The chart now displays actual, real data intervals without drawing artificial horizontal flat blocks across unmeasured time periods.
+- **Supervisor Token & Unbuffered Python:**
+  - Added `homeassistant_api: true` and `python3 -u` to ensure the background collector reliably communicates with Home Assistant and logs immediately.
+
+---
+
 ## [0.11.1] — 2026-09-08 (Fix Collector Thread & Dynamic Window Zoom for Pure openhems)
 
 ### Fixed & Enhanced

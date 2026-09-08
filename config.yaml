@@ -1,6 +1,6 @@
 name: "Open HEMS"
 description: "Open-source Home Energy Management System: predictive heat pump, solar, dynamic tariffs, and battery dispatch."
-version: "0.11.1"
+version: "0.11.2"
 slug: "open_hems"
 init: false
 arch:
@@ -10,6 +10,9 @@ url: "https://github.com/matthijsberg/ha-addon-open-hems"
 panel_icon: "mdi:lightning-bolt"
 ingress: true
 ingress_port: 8099
+homeassistant_api: true
+environment:
+  TZ: "Europe/Amsterdam"
 startup: services
 boot: auto
 map:

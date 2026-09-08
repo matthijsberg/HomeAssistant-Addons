@@ -20,14 +20,19 @@ echo "[INFO] Site config path: $CONFIG_PATH"
 echo "[INFO] Auto dispatch: $AUTO_DISPATCH"
 echo "[INFO] Sync interval: $SYNC_INTERVAL minutes"
 
-export PYTHONPATH="/opt/open-hems:$(dirname "$0"):${PYTHONPATH}"
+export PYTHONPATH="/addons/open-hems:/opt/open-hems:$(dirname "$0"):${PYTHONPATH}"
+export PYTHONUNBUFFERED=1
+export TZ="Europe/Amsterdam"
 
-DAEMON_SCRIPT="/opt/open-hems/daemon.py"
+DAEMON_SCRIPT="/addons/open-hems/daemon.py"
 if [ ! -f "$DAEMON_SCRIPT" ]; then
     DAEMON_SCRIPT="$(dirname "$0")/daemon.py"
 fi
+if [ ! -f "$DAEMON_SCRIPT" ]; then
+    DAEMON_SCRIPT="/opt/open-hems/daemon.py"
+fi
 
-exec python3 "$DAEMON_SCRIPT" \
+exec python3 -u "$DAEMON_SCRIPT" \
     --config "$CONFIG_PATH" \
     --interval "$SYNC_INTERVAL" \
     --port 8099

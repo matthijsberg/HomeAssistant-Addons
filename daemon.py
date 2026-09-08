@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.11.1
+Version: 0.11.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -32,6 +32,8 @@ import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
+from zoneinfo import ZoneInfo
+AMS_TZ = ZoneInfo('Europe/Amsterdam')
 from pathlib import Path
 
 CONFIG_FILE = Path("/config/heatpump_config.json")
@@ -101,9 +103,13 @@ def save_json(p: Path, data: dict):
 
 def fetch_ha_entities():
     """Queries Home Assistant Core REST API for available entities for dropdown selection."""
-    cfg = load_json(HA_API_CONFIG)
-    token = cfg.get("HASS_TOKEN") or os.environ.get("HASS_TOKEN")
-    ha_url = cfg.get("HASS_URL") or os.environ.get("HASS_URL") or "https://hass.b3rg.nl:8123"
+    token = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASS_TOKEN")
+    ha_url = "http://supervisor/core" if os.environ.get("SUPERVISOR_TOKEN") else (os.environ.get("HASS_URL") or "https://hass.b3rg.nl:8123")
+
+    if not token and HA_API_CONFIG.exists():
+        cfg = load_json(HA_API_CONFIG)
+        token = cfg.get("HASS_TOKEN")
+        ha_url = cfg.get("HASS_URL") or ha_url
 
     if not token:
         return []
@@ -540,12 +546,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 db_user = active_conn.get("username", "openhems")
                 pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
                 
-                # Query 100% strictly from openhems canonical database
-                # Query actual non-empty points from today / last 24h
+                # Query 100% strictly from openhems canonical database with fill(none) - no artificial flat blocks!
                 q = """
-                SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time > now() - 24h GROUP BY time(1m) fill(previous);
-                SELECT mean("power_w") as teruglevering_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time > now() - 24h GROUP BY time(1m) fill(previous);
-                SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time > now() - 24h GROUP BY time(1m) fill(previous);
+                SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time > now() - 24h GROUP BY time(1m) fill(none);
+                SELECT mean("power_w") as teruglevering_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time > now() - 24h GROUP BY time(1m) fill(none);
+                SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time > now() - 24h GROUP BY time(1m) fill(none);
                 """
 
                 url = "http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
@@ -558,40 +563,53 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 with urllib.request.urlopen(url, timeout=6) as r:
                     data = json.loads(r.read().decode())
                 
-                afname_pts = data["results"][0].get("series", [{}])[0].get("values", [])
-                terug_pts = data["results"][1].get("series", [{}])[0].get("values", [])
-                solar_pts = data["results"][2].get("series", [{}])[0].get("values", [])
-                
+                # Safely extract series lists
+                def get_series_values(res_idx):
+                    results = data.get("results", [])
+                    if res_idx < len(results):
+                        series = results[res_idx].get("series")
+                        if series and len(series) > 0:
+                            return series[0].get("values", [])
+                    return []
+
+                afname_pts = get_series_values(0)
+                terug_pts = get_series_values(1)
+                solar_pts = get_series_values(2)
+
+                # Map points by timestamp
+                ts_map = {}
+                for pt in afname_pts:
+                    if pt[1] is not None:
+                        ts_map.setdefault(pt[0], {})["afname"] = float(pt[1])
+                for pt in terug_pts:
+                    if pt[1] is not None:
+                        ts_map.setdefault(pt[0], {})["terug"] = float(pt[1])
+                for pt in solar_pts:
+                    if pt[1] is not None:
+                        ts_map.setdefault(pt[0], {})["solar"] = abs(float(pt[1]))
+
+                sorted_ts = sorted(ts_map.keys())
+
                 labels = []
                 series_solar_neg = []
                 series_terug_neg = []
                 series_afname_pos = []
                 series_verbruik_pos = []
                 series_selfcons_pos = []
-                
-                # Compute points - find first index with real data
-                valid_indices = [idx for idx in range(len(afname_pts)) if (
-                    (afname_pts[idx][1] is not None) or 
-                    (idx < len(terug_pts) and terug_pts[idx][1] is not None) or 
-                    (idx < len(solar_pts) and solar_pts[idx][1] is not None)
-                )]
-                
-                # If we have recent data, show from the first real point (or at least the last 60 minutes)
-                start_idx = max(0, valid_indices[0] - 5) if valid_indices else max(0, len(afname_pts) - 60)
-                
-                for i in range(start_idx, len(afname_pts)):
-                    ts_str = afname_pts[i][0]
+
+                for ts_str in sorted_ts:
+                    m = ts_map[ts_str]
                     try:
-                        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone()
+                        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
                         time_label = dt.strftime("%H:%M")
                     except Exception:
                         time_label = ts_str[11:16]
                     
                     labels.append(time_label)
                     
-                    afname = max(0.0, float(afname_pts[i][1] or 0.0))
-                    terug = max(0.0, float(terug_pts[i][1] or 0.0)) if i < len(terug_pts) else 0.0
-                    solar = abs(float(solar_pts[i][1] or 0.0)) if i < len(solar_pts) else 0.0
+                    afname = m.get("afname", 0.0)
+                    terug = m.get("terug", 0.0)
+                    solar = m.get("solar", 0.0)
                     
                     verbruik = afname + max(0.0, solar - terug)
                     self_cons = min(solar, verbruik)
@@ -599,7 +617,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     series_afname_pos.append(round(afname))
                     series_verbruik_pos.append(round(verbruik))
                     series_selfcons_pos.append(round(self_cons))
-                    
                     series_solar_neg.append(-round(solar))
                     series_terug_neg.append(-round(terug))
                 
@@ -723,7 +740,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.11.1",
+                "version": "0.11.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1512,7 +1529,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.11.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.11.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
