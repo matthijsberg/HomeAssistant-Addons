@@ -10,6 +10,28 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.7.0] — 2026-09-08 (MQTT Device Source Adapters & Direct Bus Ingestion)
+
+### Added
+- **Multi-Source Device Adapters (Home Assistant vs. Direct MQTT):**
+  - Clarified separation between physical devices (resources) and external context feeds.
+  - Devices can now be configured with either:
+    1. `source_type: "homeassistant"` (pulling live metrics from Home Assistant entity sensors/switches).
+    2. `source_type: "mqtt"` (subscribing directly to realtime MQTT streaming topics like DSMR P1 meters, ESPAltherma, Shelly devices, and Deye inverters).
+  - **MQTT Device Configuration Fields:**
+    - `mqtt_broker_id`: Selectable link to any configured broker from the Layer 1 connections catalog.
+    - `mqtt_power_topic`: Telemetry topic streaming live power/Wattage.
+    - `mqtt_power_json_key`: Optional JSON extraction path for structured payloads.
+    - `mqtt_control_topic`: Optional command topic for sending setpoint/switch payloads.
+  - **Ingress UI Device Editor:** Dynamic source-type switcher in `device-modal` displaying either HA entity pickers or MQTT topic/broker inputs.
+  - **Device Cards Enhancement:** Device cards explicitly show the active data source (`🏠 Home Assistant` or `⚡ MQTT Topic: <topic>`).
+
+### Security & Deployment
+- Automated pre-commit secret scan verified: 0 credentials.
+- Automatic snapshot v0.6.1 archived prior to upgrade.
+
+---
+
 ## [0.6.1] — 2026-09-08 (Secure Secrets Vault & ID-Based Testing)
 
 ### Fixed & Enhanced

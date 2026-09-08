@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.6.1
+Version: 0.7.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -520,7 +520,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.6.1",
+                "version": "0.7.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -931,12 +931,17 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "id": dev_id,
                 "name": body.get("name", "Nieuw Apparaat"),
                 "type": body.get("type", "generic"),
+                "source_type": body.get("source_type", "homeassistant"),
                 "adapter": body.get("adapter", "custom"),
                 "capabilities": body.get("capabilities", ["read_power"]),
                 "ha_power_entity": body.get("ha_power_entity", ""),
                 "ha_energy_entity": body.get("ha_energy_entity", ""),
                 "ha_temp_entity": body.get("ha_temp_entity", ""),
                 "ha_control_entity": body.get("ha_control_entity", ""),
+                "mqtt_broker_id": body.get("mqtt_broker_id", ""),
+                "mqtt_power_topic": body.get("mqtt_power_topic", ""),
+                "mqtt_power_json_key": body.get("mqtt_power_json_key", ""),
+                "mqtt_control_topic": body.get("mqtt_control_topic", ""),
                 "parameters": body.get("parameters", {})
             }
             cfg["devices"].append(new_dev)
@@ -1030,7 +1035,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             for d in cfg["devices"]:
                 if d["id"] == dev_id:
-                    for k in ["name", "type", "adapter", "capabilities", "ha_power_entity", "ha_energy_entity", "ha_temp_entity", "ha_control_entity", "parameters"]:
+                    for k in ["name", "type", "source_type", "adapter", "capabilities", "ha_power_entity", "ha_energy_entity", "ha_temp_entity", "ha_control_entity", "mqtt_broker_id", "mqtt_power_topic", "mqtt_power_json_key", "mqtt_control_topic", "parameters"]:
                         if k in body:
                             d[k] = body[k]
                     save_json(CONFIG_FILE, cfg)
@@ -1309,7 +1314,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.6.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.7.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1868,16 +1873,51 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </select>
                 </div>
                 <div>
-                    <label class="block mb-1 text-slate-400">Gekoppelde Vermogenssensor in Home Assistant (W of kW)</label>
-                    <select id="modal-dev-ha-power" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono text-[11px]">
-                        <option value="">-- Selecteer Home Assistant Entiteit --</option>
+                    <label class="block mb-1 text-slate-400">Data-Adapter (Data Bron)</label>
+                    <select id="modal-dev-source-type" onchange="toggleDeviceSourceFields()" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-medium">
+                        <option value="homeassistant">🏠 Home Assistant Entiteit</option>
+                        <option value="mqtt">⚡ Directe MQTT Streaming Bus</option>
                     </select>
                 </div>
-                <div>
-                    <label class="block mb-1 text-slate-400">Gekoppelde Schakelaar / Relais in Home Assistant</label>
-                    <select id="modal-dev-ha-control" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono text-[11px]">
-                        <option value="">-- Geen / Niet bestuurbaar --</option>
-                    </select>
+
+                <!-- HA Adapter Fields -->
+                <div id="dev-source-ha-fields" class="space-y-3">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Gekoppelde Vermogenssensor in Home Assistant (W of kW)</label>
+                        <select id="modal-dev-ha-power" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono text-[11px]">
+                            <option value="">-- Selecteer Home Assistant Entiteit --</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Gekoppelde Schakelaar / Relais in Home Assistant</label>
+                        <select id="modal-dev-ha-control" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono text-[11px]">
+                            <option value="">-- Geen / Niet bestuurbaar --</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- MQTT Adapter Fields -->
+                <div id="dev-source-mqtt-fields" class="space-y-3 hidden">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Gekoppelde MQTT Broker</label>
+                        <select id="modal-dev-mqtt-broker" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono text-[11px]">
+                            <option value="local_mosquitto">Lokale Mosquitto Broker (core-mosquitto:1883)</option>
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2">
+                        <div class="col-span-2">
+                            <label class="block mb-1 text-slate-400">Telemetrie / Vermogen Topic</label>
+                            <input type="text" id="modal-dev-mqtt-power-topic" placeholder="bijv. dsmr/reading/power" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                        </div>
+                        <div>
+                            <label class="block mb-1 text-slate-400">JSON Key (optioneel)</label>
+                            <input type="text" id="modal-dev-mqtt-json-key" placeholder="bijv. power" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Commando / Sturing Topic (Optioneel)</label>
+                        <input type="text" id="modal-dev-mqtt-control-topic" placeholder="bijv. P1P2/C/9/Heating_Cooling_Auto_Off" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                    </div>
                 </div>
                 <div class="flex justify-end gap-2 pt-3 border-t border-slate-800">
                     <button type="button" onclick="closeModal('device-modal')" class="px-3 py-1.5 bg-slate-800 text-slate-400 rounded-lg">Annuleren</button>
@@ -2839,8 +2879,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <div class="text-[11px] text-slate-400 mb-2 flex items-center gap-1.5 flex-wrap">
                             <span>Beleid:</span> ${policyBadge}
                         </div>
-                        <p class="text-[11px] text-slate-400 mb-1">Sensor: <code class="text-cyan-300">${dev.ha_power_entity || 'Geen'}</code></p>
-                        <p class="text-[11px] text-slate-400 mb-3">Relais/Switch: <code class="text-cyan-300">${dev.ha_control_entity || 'Geen'}</code></p>
+                        <div class="text-[11px] text-slate-300 bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800 mb-3 font-mono space-y-1">
+                            ${dev.source_type === 'mqtt' 
+                                ? `<div>Bron: <span class="text-amber-400 font-bold">⚡ MQTT Topic</span></div>
+                                   <div class="truncate text-slate-400 text-[10px]">${dev.mqtt_power_topic || 'geen topic'}</div>
+                                   ${dev.mqtt_control_topic ? `<div class="truncate text-slate-400 text-[10px]">Cmd: ${dev.mqtt_control_topic}</div>` : ''}`
+                                : `<div>Bron: <span class="text-cyan-400 font-bold">🏠 Home Assistant</span></div>
+                                   <div class="truncate text-slate-400 text-[10px]">${dev.ha_power_entity || 'geen sensor'}</div>
+                                   <div class="truncate text-slate-400 text-[10px]">${dev.ha_control_entity || 'geen switch'}</div>`
+                            }
+                        </div>
                     </div>
                     <div class="flex justify-end gap-2 pt-3 border-t border-[#1E293B]">
                         <button onclick='openDeviceModal(${JSON.stringify(dev)})' class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg">Bewerken</button>
@@ -2851,31 +2899,73 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             });
         }
 
+                function toggleDeviceSourceFields() {
+            const st = document.getElementById('modal-dev-source-type').value;
+            const haDiv = document.getElementById('dev-source-ha-fields');
+            const mqDiv = document.getElementById('dev-source-mqtt-fields');
+            if (st === 'mqtt') {
+                haDiv.classList.add('hidden');
+                mqDiv.classList.remove('hidden');
+            } else {
+                haDiv.classList.remove('hidden');
+                mqDiv.classList.add('hidden');
+            }
+        }
+
         function openDeviceModal(dev = null) {
             populateHaDropdowns();
+            
+            // Populate broker dropdown
+            const bSelect = document.getElementById('modal-dev-mqtt-broker');
+            if (bSelect) {
+                bSelect.innerHTML = '';
+                (cachedInfra.mqtt_connections || []).forEach(b => {
+                    const opt = document.createElement('option');
+                    opt.value = b.id;
+                    opt.innerText = `${b.name} (${b.host}:${b.port})`;
+                    bSelect.appendChild(opt);
+                });
+            }
+
             if (dev) {
                 document.getElementById('modal-dev-title').innerText = 'Apparaat Bewerken';
                 document.getElementById('modal-dev-id').value = dev.id;
                 document.getElementById('modal-dev-name').value = dev.name;
                 document.getElementById('modal-dev-type').value = dev.type;
+                document.getElementById('modal-dev-source-type').value = dev.source_type || 'homeassistant';
                 document.getElementById('modal-dev-ha-power').value = dev.ha_power_entity || '';
                 document.getElementById('modal-dev-ha-control').value = dev.ha_control_entity || '';
+                document.getElementById('modal-dev-mqtt-broker').value = dev.mqtt_broker_id || '';
+                document.getElementById('modal-dev-mqtt-power-topic').value = dev.mqtt_power_topic || '';
+                document.getElementById('modal-dev-mqtt-json-key').value = dev.mqtt_power_json_key || '';
+                document.getElementById('modal-dev-mqtt-control-topic').value = dev.mqtt_control_topic || '';
             } else {
                 document.getElementById('modal-dev-title').innerText = 'Nieuw Apparaat Toevoegen';
                 document.getElementById('modal-dev-id').value = '';
                 document.getElementById('modal-dev-name').value = '';
+                document.getElementById('modal-dev-source-type').value = 'homeassistant';
+                document.getElementById('modal-dev-mqtt-power-topic').value = '';
+                document.getElementById('modal-dev-mqtt-json-key').value = '';
+                document.getElementById('modal-dev-mqtt-control-topic').value = '';
             }
+            toggleDeviceSourceFields();
             document.getElementById('device-modal').classList.remove('hidden');
         }
 
         async function saveDevice(e) {
             e.preventDefault();
             const id = document.getElementById('modal-dev-id').value;
+            const st = document.getElementById('modal-dev-source-type').value;
             const payload = {
                 name: document.getElementById('modal-dev-name').value,
                 type: document.getElementById('modal-dev-type').value,
+                source_type: st,
                 ha_power_entity: document.getElementById('modal-dev-ha-power').value,
-                ha_control_entity: document.getElementById('modal-dev-ha-control').value
+                ha_control_entity: document.getElementById('modal-dev-ha-control').value,
+                mqtt_broker_id: document.getElementById('modal-dev-mqtt-broker').value,
+                mqtt_power_topic: document.getElementById('modal-dev-mqtt-power-topic').value,
+                mqtt_power_json_key: document.getElementById('modal-dev-mqtt-json-key').value,
+                mqtt_control_topic: document.getElementById('modal-dev-mqtt-control-topic').value
             };
             if (id) {
                 await fetch('./api/devices/' + id, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
