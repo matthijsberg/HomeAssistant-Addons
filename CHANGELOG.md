@@ -10,6 +10,14 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.11.4] — 2026-09-08 (Fix Global CONFIG_FILE Reassignment & Add-on Flushes)
+
+### Fixed
+- **Global `CONFIG_FILE` Scope:** Reassigned `global CONFIG_FILE` in `main()` when `--config` argument is passed by Home Assistant Supervisor options, guaranteeing that the background collector reads the correct site devices configuration.
+- **Unbuffered Logging (`flush=True`):** Added explicit `flush=True` to all background telemetry collector log statements for immediate diagnostic visibility in Home Assistant add-on logs.
+
+---
+
 ## [0.11.3] — 2026-09-08 (Fix kW Unit Conversion & Device Type Matching)
 
 ### Fixed

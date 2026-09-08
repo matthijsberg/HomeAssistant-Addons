@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.11.3
+Version: 0.11.4
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -740,7 +740,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.11.3",
+                "version": "0.11.4",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1529,7 +1529,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.11.3</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.11.4</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3760,11 +3760,12 @@ class HemsBackgroundCollector(threading.Thread):
                 if resp.status in [200, 204]:
                     self.last_write_status = "success"
                     self.total_points_written += len(lines)
-                    print(f"[Open HEMS Collector] Flushed {len(lines)} points to {db_name} (Total: {self.total_points_written})")
+                    print(f"[Open HEMS Collector] Flushed {len(lines)} points to {db_name} (Total: {self.total_points_written})", flush=True)
                 else:
                     self.last_write_status = f"status_{resp.status}"
+                    print(f"[Open HEMS Collector] Write status: {resp.status}", flush=True)
         except Exception as e:
-            print(f"[Open HEMS Collector] Write error: {e}")
+            print(f"[Open HEMS Collector] Write error: {e}", flush=True)
             self.last_write_status = f"err_{str(e)[:30]}"
 
 def run_server(port=8099):
@@ -3776,13 +3777,17 @@ def run_server(port=8099):
 
 
 def main():
+    global CONFIG_FILE
     parser = argparse.ArgumentParser(description="Open HEMS Daemon")
     parser.add_argument("--config", default=str(CONFIG_FILE))
     parser.add_argument("--interval", type=int, default=15)
     parser.add_argument("--port", type=int, default=8099)
     args = parser.parse_args()
 
-    cfg = load_json(Path(args.config) if args.config else CONFIG_FILE)
+    if args.config:
+        CONFIG_FILE = Path(args.config)
+
+    cfg = load_json(CONFIG_FILE)
     ensure_framework_defaults(cfg)
     run_server(args.port)
 
