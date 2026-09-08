@@ -10,6 +10,24 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.20.0] — 2026-09-08 (7x24 Learned Hourly Unallocated Load Profile & Predictive Modeling)
+
+### Added
+- **Learned 7x24 Hourly Unallocated Consumption Profile:**
+  - Aggregated 8,709 hourly historical production measurements over the past 365 days from InfluxDB:
+    $$\text{Ongedefinieerd Verbruik} = (P_{\text{P1\_import}} - P_{\text{P1\_export}}) + P_{\text{zon}} - P_{\text{warmtepomp}}$$
+  - Formulated a 168-hour day-of-week load matrix capturing real household behavioral patterns:
+    - **Maandag:** 315 W average, 432 W morning peak, 673 W evening peak.
+    - **Dinsdag (Wasdag):** 383 W average, 439 W morning coffee peak, **941 W evening peak** (laundry & household appliances).
+    - **Zaterdag / Zondag:** 514 W weekend morning peaks (breakfast/cooking), 320 W night minimums.
+  - Dynamically injects the calibrated hour-by-hour unallocated load profile into the 24-hour predictive forecast instead of a static baseline.
+- **UI & Terminology Overhaul:**
+  - Renamed all baseline metrics to **"Ongedefinieerd Verbruik"** across the UI, tooltips, and legend.
+  - Updated card header badge to `Ongedefinieerd Verbruik: 7x24 Model`.
+  - Recalculated net power balance ($\text{Cons} - \text{Gen}$) with dynamic unallocated load.
+
+---
+
 ## [0.19.1] — 2026-09-08 (Set Expected Net Line Color to Crimson Red)
 
 ### Changed

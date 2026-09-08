@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.19.1
+Version: 0.20.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.19.1",
+                "version": "0.20.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1037,11 +1037,26 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             except Exception as e_m:
                 print(f"Warning fetching Open-Meteo forecast: {e_m}")
 
-            # 3. Build rolling 24-hour timeline from current wall-clock hour
+            # 3. Load 7x24 Learned Hourly Unallocated Consumption Profile (P1 - Solar - Heatpump)
+            profile_matrix = {}
+            for prof_cand in [
+                Path("/config/addons/open-hems/data/unallocated_load_profile.json"),
+                Path("/config/projects/energy-scheduler/data/unallocated_load_profile.json"),
+                Path("/data/unallocated_load_profile.json")
+            ]:
+                if prof_cand.exists():
+                    try:
+                        with open(prof_cand) as fp:
+                            profile_matrix = json.load(fp).get("profile_watts", {})
+                        break
+                    except Exception as e_p:
+                        print(f"Warning loading unallocated load profile from {prof_cand}: {e_p}")
+
+            # Build rolling 24-hour timeline from current wall-clock hour
             labels = []
             prices = []
             solar = []
-            baseload = []
+            unallocated = []
             boiler = []
             heating = []
             battery_charge = []
@@ -1062,10 +1077,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 s_val = solar_map.get(k, 0.0)
                 t_val = temp_map.get(k, 18.0)
 
+                # Look up learned day-of-week and hour unallocated consumption (e.g. coffee peak, wasdag, etc.)
+                wd_str = str(dt_h.weekday())
+                hr_idx = dt_h.hour
+                unalloc_w = profile_matrix.get(wd_str, [350] * 24)[hr_idx] if profile_matrix else 350
+                unalloc_kw = round(float(unalloc_w) / 1000.0, 2)
+
                 labels.append(lbl)
                 prices.append(p_val)
                 solar.append(s_val)
-                baseload.append(baseload_kw)
+                unallocated.append(unalloc_kw)
                 boiler.append(0.0)
                 heating.append(0.0)
                 battery_charge.append(0.0)
@@ -1161,7 +1182,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             # Net Actual Expected Power Drawn from Grid:
             # Net = Total Consumption - (Solar + Battery Discharge)
             net_power = []
-            for b, bl, h, ch, s, d in zip(baseload, boiler, heating, battery_charge, solar, battery_discharge):
+            for b, bl, h, ch, s, d in zip(unallocated, boiler, heating, battery_charge, solar, battery_discharge):
                 tot_load = b + bl + h + ch
                 tot_gen = s + d
                 net_val = round(tot_load - tot_gen, 2)
@@ -1183,7 +1204,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             for it in timeline_items:
                 idx = it["idx"]
                 s_gen = it["solar"]
-                sched_load = baseload[idx] + boiler[idx] + heating[idx] + battery_charge[idx]
+                sched_load = unallocated[idx] + boiler[idx] + heating[idx] + battery_charge[idx]
                 surp = round(max(0.0, s_gen - sched_load), 2)
                 surplus_kw_list.append(surp)
                 if surp >= 0.15:
@@ -1202,7 +1223,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "hours": labels,
                 "labels": labels,
                 "datasets": {
-                    "baseload_kw": baseload,
+                    "unallocated_kw": unallocated,
+                    "baseload_kw": unallocated,
                     "boiler_kw": boiler,
                     "heating_kw": heating,
                     "battery_charge_kw": battery_charge,
@@ -1838,7 +1860,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.19.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.20.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1975,7 +1997,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             </div>
                         </div>
                         <div class="flex items-center gap-3 text-xs flex-wrap">
-                            <span class="text-[10px] text-slate-400 font-mono bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800" id="prediction-baseload-badge">Basislast: 300 W</span>
+                            <span class="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2.5 py-1 rounded-lg border border-blue-500/40" id="prediction-unallocated-badge">Ongedefinieerd Verbruik: 7x24 Model</span>
                             <span class="text-[10px] text-emerald-400 font-mono bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-500/30" id="prediction-surplus-badge">☀️ Vrij Overschot: 0.0 kWh</span>
                             <button onclick="loadChartData()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
@@ -2008,7 +2030,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
                         <div class="flex items-center gap-3 flex-wrap">
                             <!-- Consumers Above Horizontal Axis (> 0 kW) -->
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Basislast (+kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Ongedefinieerd Verbruik (+kW)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW Tapwater (+kW)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV (+kW)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden (+kW)</span></div>
@@ -3305,7 +3327,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 let allVals = [...netPowerArr, ...(data.datasets.solar_kw_neg || []), ...(data.datasets.battery_discharge_kw_neg || [])];
                 let consVals = [];
                 for (let i = 0; i < labels.length; i++) {
-                    const b = data.datasets.baseload_kw[i] || 0;
+                    const b = (data.datasets.unallocated_kw && data.datasets.unallocated_kw[i]) || data.datasets.baseload_kw[i] || 0;
                     const w = data.datasets.boiler_kw[i] || 0;
                     const h = (data.datasets.heating_kw && data.datasets.heating_kw[i]) || 0;
                     const c = (data.datasets.battery_charge_kw && data.datasets.battery_charge_kw[i]) || 0;
@@ -3313,7 +3335,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 }
 
                 let minY = Math.min(-2.5, ...allVals);
-                let maxY = Math.max(2.0, ...consVals, ...netPowerArr);
+                let maxY = Math.max(2.5, ...consVals, ...netPowerArr);
                 minY = Math.floor(minY * 2) / 2; // Clean 0.5 steps
                 maxY = Math.ceil(maxY * 2) / 2;
 
@@ -3336,8 +3358,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         datasets: [
                             // === CONSUMERS (BOVEN DE AS > 0 kW, STACK: CONSUMPTION) ===
                             {
-                                label: 'Basislast (kW)',
-                                data: data.datasets.baseload_kw,
+                                label: 'Ongedefinieerd Verbruik (kW)',
+                                data: data.datasets.unallocated_kw || data.datasets.baseload_kw,
                                 backgroundColor: '#3B82F6',
                                 stack: 'consumption',
                                 borderRadius: 2,
