@@ -10,6 +10,24 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.6.1] — 2026-09-08 (Secure Secrets Vault & ID-Based Testing)
+
+### Fixed & Enhanced
+- **Isolated Secrets Vault (`/config/open_hems_secrets.json`):**
+  - Moved all passwords and tokens out of public configs into an isolated vault with strict `0600` permissions.
+  - Added `open_hems_secrets.json` to `.gitignore` and `secret_scanner.py` exclusion patterns, preventing accidental leakage.
+  - Passwords are completely masked as `••••••••` in API payloads and DOM rendering.
+- **Fixed InfluxDB Unauthorized Error on Card Testing:**
+  - Resolved issue where `onclick='testSpecificInflux(${JSON.stringify(c)})'` broke on HTML attribute quoting and special characters (like section symbols `§`).
+  - Switched to clean ID-based testing: `testSpecificInflux(connId)` and `testSpecificMqtt(connId)`.
+  - The backend securely resolves the stored credentials from `/config/open_hems_secrets.json` using the connection ID, so tests always authenticate reliably without exposing secrets to client-side JavaScript.
+
+### Security & Deployment
+- Automated pre-commit secret scan verified: 0 credentials.
+- Automatic snapshot v0.6.0 archived prior to upgrade.
+
+---
+
 ## [0.6.0] — 2026-09-08 (Layer 5 Analytics & Reporting & Inverted Navigation Hierarchy)
 
 ### Added

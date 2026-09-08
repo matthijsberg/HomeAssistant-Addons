@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.6.0
+Version: 0.6.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -37,6 +37,41 @@ CONFIG_FILE = Path("/config/heatpump_config.json")
 PARAMS_FILE = Path("/config/heatpump_model_parameters.json")
 CACHE_FILE = Path("/config/data/energy_feed_cache.json")
 HA_API_CONFIG = Path("/config/.ha_api_config.json")
+SECRETS_FILE = Path("/config/open_hems_secrets.json")
+
+
+def load_secrets() -> dict:
+    """Loads private credentials from the 0600-permission vault."""
+    if SECRETS_FILE.exists():
+        try:
+            with open(SECRETS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Warning loading secrets: {e}")
+    return {"influxdb": {}, "mqtt": {}}
+
+
+def save_secret(domain: str, conn_id: str, secret: str):
+    """Saves a credential to the isolated private vault with 0600 permissions."""
+    if not secret:
+        return
+    sec = load_secrets()
+    sec.setdefault(domain, {})[conn_id] = secret
+    tmp = f"{SECRETS_FILE}.tmp.{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(sec, f, indent=2)
+    os.replace(tmp, SECRETS_FILE)
+    try:
+        os.chmod(SECRETS_FILE, 0o600)
+    except Exception:
+        pass
+
+
+def get_secret(domain: str, conn_id: str, default: str = "") -> str:
+    """Retrieves a credential from the private vault."""
+    sec = load_secrets()
+    return sec.get(domain, {}).get(conn_id, default)
+
 
 sys.path.insert(0, "/config/projects/energy-scheduler")
 sys.path.insert(0, "/config/lib")
@@ -485,7 +520,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.6.0",
+                "version": "0.6.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -506,11 +541,29 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         if path == "/api/infrastructure":
             cfg = load_json(CONFIG_FILE)
             ensure_framework_defaults(cfg)
+            sec = load_secrets()
+            
+            idb_conns = []
+            for c in cfg.get("influxdb_connections", []):
+                cc = dict(c)
+                has_pw = bool(sec.get("influxdb", {}).get(c["id"]) or c.get("password"))
+                cc["has_password"] = has_pw
+                cc["password"] = "••••••••" if has_pw else ""
+                idb_conns.append(cc)
+
+            mq_conns = []
+            for c in cfg.get("mqtt_connections", []):
+                cc = dict(c)
+                has_pw = bool(sec.get("mqtt", {}).get(c["id"]) or c.get("password"))
+                cc["has_password"] = has_pw
+                cc["password"] = "••••••••" if has_pw else ""
+                mq_conns.append(cc)
+
             self._send_json({
-                "influxdb_connections": cfg.get("influxdb_connections", []),
-                "mqtt_connections": cfg.get("mqtt_connections", []),
-                "influxdb": cfg.get("influxdb", {}),
-                "mqtt": cfg.get("mqtt", {})
+                "influxdb_connections": idb_conns,
+                "mqtt_connections": mq_conns,
+                "influxdb": idb_conns[0] if idb_conns else {},
+                "mqtt": mq_conns[0] if mq_conns else {}
             })
             return
 
@@ -681,11 +734,26 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
         # INFRASTRUCTURE: Test InfluxDB
         if path == "/api/infrastructure/influxdb/test":
+            cfg = load_json(CONFIG_FILE)
+            conn_id = body.get("id")
+            conn = next((c for c in cfg.get("influxdb_connections", []) if c["id"] == conn_id), {}) if conn_id else {}
+            
+            url = body.get("url") or conn.get("url") or "http://a0d7b954-influxdb:8086"
+            database = body.get("database") or conn.get("database") or "hermes"
+            username = body.get("username") if "username" in body else conn.get("username", "hermes")
+            
+            # Retrieve password from vault if not provided in payload
+            password = body.get("password")
+            if not password and conn_id:
+                password = get_secret("influxdb", conn_id) or conn.get("password", "")
+            if password == "••••••••" and conn_id:
+                password = get_secret("influxdb", conn_id) or conn.get("password", "")
+
             res = test_influxdb_connection(
-                url=body.get("url", "http://a0d7b954-influxdb:8086"),
-                database=body.get("database", "hermes"),
-                username=body.get("username", "hermes"),
-                password=body.get("password", "")
+                url=url,
+                database=database,
+                username=username,
+                password=password or ""
             )
             self._send_json(res)
             return
@@ -695,14 +763,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             cfg = load_json(CONFIG_FILE)
             ensure_framework_defaults(cfg)
             conn_id = body.get("id") or f"influx_{int(datetime.now().timestamp())}"
+            
+            # Save password securely in vault
+            if body.get("password") and body.get("password") != "••••••••":
+                save_secret("influxdb", conn_id, body["password"])
+
             updated = False
             conns = cfg.setdefault("influxdb_connections", [])
             conn_obj = None
             for c in conns:
                 if c["id"] == conn_id:
-                    for k in ["name", "type", "url", "database", "read_database", "username", "password", "retention_policy", "enabled", "is_default"]:
+                    for k in ["name", "type", "url", "database", "read_database", "username", "retention_policy", "enabled", "is_default"]:
                         if k in body:
                             c[k] = body[k]
+                    # Never keep plain password in public config
+                    c.pop("password", None)
                     updated = True
                     conn_obj = c
                     break
@@ -715,7 +790,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     "database": body.get("database", "hermes"),
                     "read_database": body.get("read_database", "hassio"),
                     "username": body.get("username", "hermes"),
-                    "password": body.get("password", ""),
                     "retention_policy": body.get("retention_policy", "autogen"),
                     "enabled": bool(body.get("enabled", True)),
                     "is_default": bool(body.get("is_default", False))
@@ -723,7 +797,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 conns.append(conn_obj)
 
             if conn_obj.get("is_default") or len(conns) == 1:
-                cfg["influxdb"] = conn_obj
+                cfg["influxdb"] = dict(conn_obj)
 
             save_json(CONFIG_FILE, cfg)
             self._send_json({"status": "saved", "connection": conn_obj})
@@ -731,12 +805,27 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
         # INFRASTRUCTURE: Test MQTT
         if path == "/api/infrastructure/mqtt/test":
+            cfg = load_json(CONFIG_FILE)
+            conn_id = body.get("id")
+            conn = next((c for c in cfg.get("mqtt_connections", []) if c["id"] == conn_id), {}) if conn_id else {}
+            
+            host = body.get("host") or conn.get("host") or "core-mosquitto"
+            port = body.get("port") or conn.get("port") or 1883
+            username = body.get("username") if "username" in body else conn.get("username", "")
+            client_id = body.get("client_id") or conn.get("client_id") or "open-hems-test"
+            
+            password = body.get("password")
+            if not password and conn_id:
+                password = get_secret("mqtt", conn_id) or conn.get("password", "")
+            if password == "••••••••" and conn_id:
+                password = get_secret("mqtt", conn_id) or conn.get("password", "")
+
             res = test_mqtt_connection(
-                host=body.get("host", "core-mosquitto"),
-                port=body.get("port", 1883),
-                username=body.get("username", ""),
-                password=body.get("password", ""),
-                client_id=body.get("client_id", "open-hems-test")
+                host=host,
+                port=port,
+                username=username,
+                password=password or "",
+                client_id=client_id
             )
             self._send_json(res)
             return
@@ -795,8 +884,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             write_db = body.get("database") or "hermes"
             url = f"{clean_url}/write?db={write_db}"
             req = urllib.request.Request(url, data=line.encode("utf-8"), method="POST")
-            if ic.get("username") and ic.get("password"):
-                auth = base64.b64encode(f"{ic['username']}:{ic['password']}".encode()).decode()
+            conn_id = ic.get("id", "local_ha_influxdb")
+            pwd = ic.get("password") or get_secret("influxdb", conn_id)
+            if ic.get("username") and pwd:
+                auth = base64.b64encode(f"{ic['username']}:{pwd}".encode()).decode()
                 req.add_header("Authorization", f"Basic {auth}")
 
             t0 = time.time()
@@ -1218,7 +1309,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.6.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.6.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1980,7 +2071,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             </div>
                         </div>
                         <div class="flex justify-between items-center pt-3 border-t border-[#1E293B]">
-                            <button onclick='testSpecificInflux(${JSON.stringify(c)})' class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg flex items-center gap-1">
+                            <button onclick="testSpecificInflux('${c.id}')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg flex items-center gap-1">
                                 <svg class="w-3 h-3 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                                 <span>Testen</span>
                             </button>
@@ -2019,7 +2110,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             </div>
                         </div>
                         <div class="flex justify-between items-center pt-3 border-t border-[#1E293B]">
-                            <button onclick='testSpecificMqtt(${JSON.stringify(c)})' class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg flex items-center gap-1">
+                            <button onclick="testSpecificMqtt('${c.id}')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg flex items-center gap-1">
                                 <svg class="w-3 h-3 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                                 <span>Testen</span>
                             </button>
@@ -2043,8 +2134,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             }
         }
 
-        async function testSpecificInflux(c) {
-            const badge = document.getElementById(`badge-influx-${c.id}`);
+        async function testSpecificInflux(connId) {
+            const badge = document.getElementById(`badge-influx-${connId}`);
             if (badge) {
                 badge.innerText = 'Testen...';
                 badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-yellow-900/60 text-yellow-300 border border-yellow-800';
@@ -2053,7 +2144,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const res = await fetch('./api/infrastructure/influxdb/test', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(c)
+                    body: JSON.stringify({ id: connId })
                 });
                 const d = await res.json();
                 if (badge) {
@@ -2074,8 +2165,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             }
         }
 
-        async function testSpecificMqtt(c) {
-            const badge = document.getElementById(`badge-mqtt-${c.id}`);
+        async function testSpecificMqtt(connId) {
+            const badge = document.getElementById(`badge-mqtt-${connId}`);
             if (badge) {
                 badge.innerText = 'Testen...';
                 badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-yellow-900/60 text-yellow-300 border border-yellow-800';
@@ -2084,7 +2175,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const res = await fetch('./api/infrastructure/mqtt/test', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(c)
+                    body: JSON.stringify({ id: connId })
                 });
                 const d = await res.json();
                 if (badge) {
