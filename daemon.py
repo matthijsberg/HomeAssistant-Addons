@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.20.2
+Version: 0.21.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.20.2",
+                "version": "0.21.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1222,6 +1222,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             else:
                 solar_recommendation = "☀️ Geen significant zonne-overschot verwacht; alle opwek wordt direct door basislast en SWW benut."
 
+            # 8. Compute Total 24h Predicted Energy Consumption & Energy Costs
+            tot_cons_kwh = round(sum(u + b + h + c for u, b, h, c in zip(unallocated, boiler, heating, battery_charge)), 2)
+            tot_solar_kwh = round(sum(solar), 2)
+            net_cost_eur = round(sum(np * p for np, p in zip(net_power, prices)), 2)
+            gross_cost_eur = round(sum((u + b + h + c) * p for u, b, h, c, p in zip(unallocated, boiler, heating, battery_charge, prices)), 2)
+            solar_savings_eur = round(max(0.0, gross_cost_eur - net_cost_eur), 2)
+
             self._send_json({
                 "hours": labels,
                 "labels": labels,
@@ -1244,7 +1251,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "banner_text": banner_adv,
                 "baseload_watts": baseload_w,
                 "surplus_total_kwh": round(surplus_kwh_tot, 1),
-                "solar_recommendation": solar_recommendation
+                "solar_recommendation": solar_recommendation,
+                "total_consumption_kwh": tot_cons_kwh,
+                "total_solar_kwh": tot_solar_kwh,
+                "total_net_cost_eur": net_cost_eur,
+                "total_gross_cost_eur": gross_cost_eur,
+                "solar_savings_eur": solar_savings_eur
             })
             return
 
@@ -1863,7 +1875,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.20.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.21.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1999,9 +2011,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <p class="text-[11px] text-slate-400">Gestapelde planning: Basislast + Warm Tapwater (SWW) + Verwarming (CV) + Accu t.o.v. zonne-opwek.</p>
                             </div>
                         </div>
-                        <div class="flex items-center gap-3 text-xs flex-wrap">
-                            <span class="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2.5 py-1 rounded-lg border border-blue-500/40" id="prediction-unallocated-badge">Ongedefinieerd Verbruik: 7x24 Model</span>
-                            <span class="text-[10px] text-emerald-400 font-mono bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-500/30" id="prediction-surplus-badge">☀️ Vrij Overschot: 0.0 kWh</span>
+                        <div class="flex items-center gap-2.5 text-xs flex-wrap">
+                            <span class="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2.5 py-1 rounded-lg border border-blue-500/40" id="prediction-unallocated-badge">Ongedefinieerd: 7x24 Model</span>
+                            <span class="text-[10px] text-indigo-300 font-mono bg-indigo-950/70 px-2.5 py-1 rounded-lg border border-indigo-500/40 font-bold" id="prediction-total-kwh-badge">⚡ Verbruik: -- kWh</span>
+                            <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950/70 px-2.5 py-1 rounded-lg border border-emerald-500/40 font-bold" id="prediction-total-cost-badge">💶 Netto Kosten: €--</span>
+                            <span class="text-[10px] text-amber-400 font-mono bg-amber-950/60 px-2.5 py-1 rounded-lg border border-amber-500/30" id="prediction-surplus-badge">☀️ Vrij Overschot: 0.0 kWh</span>
                             <button onclick="loadChartData()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                 <span>Herberekenen</span>
@@ -3318,7 +3332,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const pricesArr = data.datasets.prices_eur || [];
                 const netPowerArr = data.datasets.net_power_kw || [];
 
-                // Populate recommendation banner & surplus badge
+                // Populate totals, costs, recommendation banner & surplus badge
+                if (document.getElementById('prediction-total-kwh-badge')) {
+                    document.getElementById('prediction-total-kwh-badge').innerText = `⚡ Verbruik: ${(data.total_consumption_kwh || 0.0).toFixed(1)} kWh`;
+                }
+                if (document.getElementById('prediction-total-cost-badge')) {
+                    const costVal = Number(data.total_net_cost_eur || 0.0);
+                    document.getElementById('prediction-total-cost-badge').innerText = `💶 Netto Kosten: €${costVal.toFixed(2)}`;
+                }
                 if (document.getElementById('solar-recommendation-text')) {
                     document.getElementById('solar-recommendation-text').innerText = data.solar_recommendation || "☀️ Geen overschot";
                 }

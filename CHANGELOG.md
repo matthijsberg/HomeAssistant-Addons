@@ -10,6 +10,20 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.21.0] — 2026-09-08 (Calibrated ~300W Night Standby & 24h Total Predicted Energy / Cost Engine)
+
+### Added
+- **24-Hour Total Predicted Energy & Net Cost Engine:**
+  - Computes total predicted 24-hour gross electrical consumption ($E_{\text{verbruik}} = \sum P_{\text{load}} \cdot \Delta t$) in kWh.
+  - Computes total expected net energy cost ($\sum P_{\text{net}} \cdot \text{tarief}$) in EUR based on live hourly EPEX day-ahead prices and scheduled self-consumption/arbitrage.
+  - Calculates gross load value and solar self-consumption savings.
+- **Top Metrics Badges:**
+  - Added `⚡ Verbruik: XX.X kWh` (indigo) and `💶 Netto Kosten: €X.XX` (emerald) to the prediction header alongside the unallocated profile and solar surplus badges.
+- **Calibrated Night Baseline Standby:**
+  - Anchored nighttime unallocated consumption (00:00–06:00) around ~300 W (295–315 W) by filtering out intermittent winter EV charging / defrost outliers using robust percentile statistics.
+
+---
+
 ## [0.20.2] — 2026-09-08 (Resolve Path to Learned Profile via `__file__`)
 
 ### Fixed
