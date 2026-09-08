@@ -10,6 +10,21 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.14.0] — 2026-09-08 (Dual-Axis Solar Forecast & Clean Settings Architecture)
+
+### Added & Enhanced
+- **Geïntegreerde Zonnestroom Verwachting (Dual-Axis Chart):**
+  - De grafiek toont nu direct de **Verwachte Zonneproductie (kW)** van vandaag als een vloeiende gouden/gele gloedcurve op een tweede rechter Y-as (`y1` in kW).
+  - Je ziet nu direct hoe de zonnepiek (vandaag tot 1,41 kW) samenvalt met de goedkopere beursstroomuren rond het middaguur (€0,1935/kWh om 13:00).
+- **Opgeruimde Mobiele Header in Analyse:**
+  - Het invoerveld voor zonnestroom-kosten is verwijderd uit de grafiek-header, waardoor de balk op mobiel niet meer rommelig over meerdere regels breekt.
+  - De header bevat nu alleen de schone resolutie-kiezer (`Kwartiertarieven (15m)` / `Uurtarieven (1h)`) en de verversknop.
+- **Centrale Instelling in 'Tarieven & Leveranciers':**
+  - Een nieuwe instellingen-kaart toegevoegd onder *Tarieven & Leveranciers*: **Interne Opwek & Afschrijving Kostprijzen**.
+  - Hier kan de gebruiker de *Zonnestroom Kostprijs / LCOE* (€/kWh, standaard €0,060) bewerken en opslaan. De gestippelde referentielijn in de grafiek beweegt direct mee.
+
+---
+
 ## [0.13.0] — 2026-09-08 (EPEX Electricity Prices & Configurable Solar Cost Chart)
 
 ### Added
