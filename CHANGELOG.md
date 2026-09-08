@@ -10,6 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.20.1] — 2026-09-08 (Fix Variable Naming for Unallocated Load in Battery Optimization)
+
+### Fixed
+- Replaced remaining `baseload` references with `unallocated` in battery surplus candidate calculations.
+
+---
+
 ## [0.20.0] — 2026-09-08 (7x24 Learned Hourly Unallocated Load Profile & Predictive Modeling)
 
 ### Added

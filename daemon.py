@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.20.0
+Version: 0.20.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.20.0",
+                "version": "0.20.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1139,11 +1139,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 # Find daylight slot with surplus above baseload and SWW
                 surplus_candidates = [
                     it for it in daylight_slots
-                    if (it["solar"] - (baseload[it["idx"]] + boiler[it["idx"]])) >= 0.5
+                    if (it["solar"] - (unallocated[it["idx"]] + boiler[it["idx"]])) >= 0.5
                 ]
                 if surplus_candidates:
-                    charge_slot = max(surplus_candidates, key=lambda x: (x["solar"] - (baseload[x["idx"]] + boiler[x["idx"]])))
-                    avail_surplus = charge_slot["solar"] - (baseload[charge_slot["idx"]] + boiler[charge_slot["idx"]])
+                    charge_slot = max(surplus_candidates, key=lambda x: (x["solar"] - (unallocated[x["idx"]] + boiler[x["idx"]])))
+                    avail_surplus = charge_slot["solar"] - (unallocated[charge_slot["idx"]] + boiler[charge_slot["idx"]])
                     charge_kw = round(min(2.5, max(1.0, avail_surplus)), 2)
                 else:
                     charge_slot = peak_solar_it
@@ -1860,7 +1860,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.20.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.20.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
