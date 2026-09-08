@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.7.1
+Version: 0.8.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -583,7 +583,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.7.1",
+                "version": "0.8.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1308,11 +1308,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 </button>
             </div>
 
-            <!-- Nav Links (Inverted 5 down to 1) -->
+            <!-- Nav Links (Streamlined 4-Layer Hierarchy) -->
             <nav class="p-3 space-y-1">
-                <!-- LAAG 5: ANALYSE & RAPPORTAGE (BOVENAAN) -->
+                <!-- LAAG 4: ANALYSE & RAPPORTAGE (BOVENAAN) -->
                 <div class="px-3 pt-2 pb-1 text-[10px] font-bold text-cyan-400 uppercase tracking-wider flex items-center justify-between">
-                    <span>Laag 5: Analyse & Rapport</span>
+                    <span>Laag 4: Analyse & Rapport</span>
                     <span class="px-1.5 py-0.2 bg-cyan-950 text-cyan-300 text-[9px] rounded border border-cyan-800">KPI</span>
                 </div>
                 <a href="#analytics" onclick="showTab('analytics')" id="nav-analytics" class="nav-link active flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
@@ -1320,16 +1320,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <span>Analyse & Besparing</span>
                 </a>
 
-                <!-- LAAG 4: VEILIGHEID & AANSTURING -->
-                <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-red-400 uppercase tracking-wider">
-                    <span>Laag 4: Veiligheid & Relais</span>
-                </div>
-                <a href="#control" onclick="showTab('control')" id="nav-control" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
-                    <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                    <span>Hardware Status (RAM Relais)</span>
-                </a>
-
-                <!-- LAAG 3: OPTIMALISATIE & BELEID -->
+                <!-- LAAG 3: OPTIMALISATIE & BELEID (INCLUSIEF PEAK SHAVING) -->
                 <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-purple-400 uppercase tracking-wider">
                     <span>Laag 3: Optimalisatie & Beleid</span>
                 </div>
@@ -1377,7 +1368,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.7.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.8.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1454,66 +1445,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <h3 class="text-sm font-bold text-white">Geautomatiseerd Dagrapport (Digest)</h3>
                     <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 whitespace-pre-line" id="analytics-digest">
                         Laden van analyserapport...
-                    </div>
-                </div>
-            </div>
-
-            <!-- TAB 4: CONTROL & SAFETY GUARD (LAAG 4) -->
-            <div id="view-control" class="tab-content space-y-6">
-                <div class="bg-gradient-to-r from-red-950/80 via-[#0e1422] to-amber-950/80 border border-red-500/30 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div class="flex items-center gap-3 sm:gap-4">
-                        <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-red-500/20 border border-red-500/30 flex items-center justify-center text-red-400 text-xl sm:text-2xl shadow-[0_0_15px_rgba(239,68,68,0.2)] flex-shrink-0">
-                            🛡️
-                        </div>
-                        <div>
-                            <div class="flex items-center gap-2">
-                                <span class="text-xs uppercase font-bold text-red-400 tracking-wider">Laag 4 Veiligheid & Relais Aansturing</span>
-                                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-red-500/20 text-red-300 border border-red-500/40">RAM SG-READY</span>
-                            </div>
-                            <div class="text-xs sm:text-sm font-bold text-white mt-1">
-                                Hardware guardrails, 20-minuten compressor bescherming en binaire relaisstatus.
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 shadow-xl space-y-4">
-                        <h3 class="text-sm font-bold text-white">Smart Grid Relais Status (Daikin S10S/S11S)</h3>
-                        <p class="text-xs text-slate-400">Aansturing uitsluitend via fysieke contacten (geëvalueerd in vluchtig RAM, 0 EEPROM write cycles).</p>
-                        <div class="space-y-2 text-xs font-mono">
-                            <div class="flex justify-between p-2.5 bg-[#0B0F17] rounded-lg border border-slate-800">
-                                <span>Actieve Modus:</span>
-                                <span class="text-cyan-300 font-bold">SG2 (Auto / Eco)</span>
-                            </div>
-                            <div class="flex justify-between p-2.5 bg-[#0B0F17] rounded-lg border border-slate-800">
-                                <span>Contact S10S (Relais 1):</span>
-                                <span class="text-slate-300">OPEN</span>
-                            </div>
-                            <div class="flex justify-between p-2.5 bg-[#0B0F17] rounded-lg border border-slate-800">
-                                <span>Contact S11S (Relais 2):</span>
-                                <span class="text-slate-300">OPEN</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 shadow-xl space-y-4">
-                        <h3 class="text-sm font-bold text-white">Hardware & Comfort Guardrails</h3>
-                        <p class="text-xs text-slate-400">Automatische beveiligingen tegen compressor pendelen en elektrische weerstand.</p>
-                        <div class="space-y-2 text-xs font-mono">
-                            <div class="flex justify-between p-2.5 bg-[#0B0F17] rounded-lg border border-slate-800">
-                                <span>🚨 Nood-Comfortgrens:</span>
-                                <span class="text-emerald-400 font-bold">OK (Vat 52.8°C > 38.0°C)</span>
-                            </div>
-                            <div class="flex justify-between p-2.5 bg-[#0B0F17] rounded-lg border border-slate-800">
-                                <span>🔒 Compressor Dwell-Time:</span>
-                                <span class="text-emerald-400 font-bold">Gereed (> 20 min)</span>
-                            </div>
-                            <div class="flex justify-between p-2.5 bg-[#0B0F17] rounded-lg border border-slate-800">
-                                <span>⚡ 9 kW BUH Uitsluiting:</span>
-                                <span class="text-emerald-400 font-bold">CV Uit tijdens SG4 boost</span>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -1646,12 +1577,46 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 </div>
             </div>
 
-            <!-- TAB 2: POLICIES CRUD -->
-            <div id="view-policies" class="tab-content space-y-4">
-                <div class="flex justify-between items-center">
+            <!-- TAB 2: POLICIES CRUD & MULTI-DEVICE ORCHESTRATION -->
+            <div id="view-policies" class="tab-content space-y-6">
+                <!-- System-wide Multi-Device Constraints (Peak Shaving & Interlocks) -->
+                <div class="bg-gradient-to-r from-purple-950/60 via-[#0e1422] to-indigo-950/60 border border-purple-500/30 rounded-2xl p-5 shadow-xl">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400 text-xl">
+                                ⚖️
+                            </div>
+                            <div>
+                                <h3 class="text-sm font-bold text-white">Systeembrede Limieten & Peak Shaving (Multi-Device)</h3>
+                                <p class="text-xs text-slate-400">Beperkingen die over meerdere apparaten tegelijk gelden.</p>
+                            </div>
+                        </div>
+                        <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">BELEIDSREGELS</span>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
+                            <div class="text-[10px] text-slate-400 uppercase">⚡ Max Netafname (Peak Shaving)</div>
+                            <div class="text-base font-bold text-white mt-1">17.250 W <span class="text-xs text-slate-500">(3x25A)</span></div>
+                            <div class="text-[10px] text-emerald-400 mt-1">✓ Smoor laadpaal/accu bij pieken</div>
+                        </div>
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
+                            <div class="text-[10px] text-slate-400 uppercase">🔀 Hydraulische Uitsluiting</div>
+                            <div class="text-base font-bold text-white mt-1">CV Uit bij SWW Boost</div>
+                            <div class="text-[10px] text-emerald-400 mt-1">✓ Voorkomt 9 kW Backup Heater</div>
+                        </div>
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
+                            <div class="text-[10px] text-slate-400 uppercase">☀️ Zonne-Overschot Volgorde</div>
+                            <div class="text-base font-bold text-white mt-1">1. SWW → 2. Accu → 3. Net</div>
+                            <div class="text-[10px] text-purple-400 mt-1">✓ Maximale eigen consumptie</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-between items-center pt-2">
                     <div>
-                        <h2 class="text-base font-bold text-white">Beleidsregels & Orchestratie (Policy Engine)</h2>
-                        <p class="text-xs text-slate-400">Definieer overkoepelend beleid op basis van kosten, zonne-opwek en comfortguardrails.</p>
+                        <h2 class="text-base font-bold text-white">Beleidsregels per Archetype</h2>
+                        <p class="text-xs text-slate-400">Koppel apparaten aan shiftable, thermische of batterij-arbitrage policies.</p>
                     </div>
                     <button onclick="openPolicyModal()" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-xl shadow transition-all">
                         + Nieuwe Policy Aanmaken
@@ -2999,6 +2964,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 document.getElementById('modal-dev-mqtt-json-key').value = '';
                 document.getElementById('modal-dev-mqtt-control-topic').value = '';
             }
+            document.getElementById('modal-dev-min-runtime').value = (dev && dev.parameters) ? (dev.parameters.min_runtime_minutes || '') : '';
+            document.getElementById('modal-dev-max-power').value = (dev && dev.parameters) ? (dev.parameters.max_power_w || '') : '';
+            document.getElementById('modal-dev-emergency-threshold').value = (dev && dev.parameters) ? (dev.parameters.emergency_threshold || '') : '';
             toggleDeviceSourceFields();
             document.getElementById('device-modal').classList.remove('hidden');
         }
@@ -3016,7 +2984,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 mqtt_broker_id: document.getElementById('modal-dev-mqtt-broker').value,
                 mqtt_power_topic: document.getElementById('modal-dev-mqtt-power-topic').value,
                 mqtt_power_json_key: document.getElementById('modal-dev-mqtt-json-key').value,
-                mqtt_control_topic: document.getElementById('modal-dev-mqtt-control-topic').value
+                mqtt_control_topic: document.getElementById('modal-dev-mqtt-control-topic').value,
+                parameters: {
+                    min_runtime_minutes: parseInt(document.getElementById('modal-dev-min-runtime').value) || 0,
+                    max_power_w: parseFloat(document.getElementById('modal-dev-max-power').value) || 0,
+                    emergency_threshold: parseFloat(document.getElementById('modal-dev-emergency-threshold').value) || 0
+                }
             };
             if (id) {
                 await fetch('./api/devices/' + id, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });

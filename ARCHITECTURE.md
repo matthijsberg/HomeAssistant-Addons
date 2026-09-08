@@ -1,7 +1,7 @@
 # Open HEMS — Master Architecture & Agent Scoping Blueprint
-**Version:** `0.4.1` (Modular Monorepo Architecture)
+**Version:** `0.8.0` (Streamlined 4-Layer Modular Monorepo)
 
-Open HEMS is structured as a **Contract-First Modular Monorepo**. It achieves full decoupling between data ingestion, empirical physics, economic optimization, and hardware actuation, allowing specialized AI agents and developers to work within a bounded, well-defined scope without breaking adjacent layers.
+Open HEMS is structured as a **Contract-First Modular Monorepo**. Hardware actuation and safety guardrails are absorbed directly into **Device Hardware Adapters** (device-specific parameters such as dwell-time, SG contacts, and emergency thresholds) and **Policy Orchestration** (multi-device constraints such as 3x25A main grid peak-shaving and hydraulic heater interlocks).
 
 ---
 
@@ -15,27 +15,29 @@ Open HEMS is structured as a **Contract-First Modular Monorepo**. It achieves fu
          ┌─────────────────────────────────┼─────────────────────────────────┐
          ▼                                 ▼                                 ▼
 ┌─────────────────────────┐   ┌─────────────────────────┐   ┌─────────────────────────┐
-│ LAAG 1: INGESTION       │   │ LAAG 2: CALIBRATION     │   │ LAAG 3: OPTIMIZER       │
+│ LAAG 1: DATA & DEVICES  │   │ LAAG 2: CALIBRATION     │   │ LAAG 3: POLICIES & PLAN │
 │ layer1_data_collection/ │   │ layer2_calibration/     │   │ layer3_scheduling/      │
 ├─────────────────────────┤   ├─────────────────────────┤   ├─────────────────────────┤
-│ • InfluxDB Line Protocol│   │ • Solar K(h) OLS Matrix │   │ • 3 Policy Archetypes:  │
-│ • MQTT Message Broker   │   │ • Building UA_base      │   │   - Shiftable Consumer  │
-│ • EPEX Spot & Meteo APIs│   │ • Standby Loss (350L)   │   │   - Thermal Buffer      │
-│ • Home Assistant Poll   │   │ • 80/20 EMA Smoothing   │   │   - Battery Deadband    │
-│ • Atomic Hot Cache      │   │ • Physical Clamping     │   │ • Waterfall Priority    │
-│                         │   │                         │   │ • 24h Dispatch Schedule │
+│ • InfluxDB & Secrets    │   │ • Solar K(h) OLS Matrix │   │ • 3 Policy Archetypes:  │
+│ • MQTT Bus & Streaming  │   │ • Building UA_base      │   │   - Shiftable Consumer  │
+│ • Device Source Adapters│   │ • Standby Loss (350L)   │   │   - Thermal Buffer      │
+│ • Per-Device Safety:    │   │ • 80/20 EMA Smoothing   │   │   - Battery Arbitrage   │
+│   - Compressor Dwell    │   │ • Sensor Downtime Masks │   │ • Multi-Device Limits:  │
+│   - Max Device Wattage  │   │                         │   │   - 3x25A Peak Shaving  │
+│   - Noodgrens (<38°C)   │   │                         │   │   - Hydraulic Cutoffs   │
+│   - SG Relais Contacts  │   │                         │   │   - Surplus Waterfall   │
 └───────────┬─────────────┘   └────────────┬────────────┘   └───────────┬─────────────┘
             │                              │                            │
             └──────────────────────────────┼────────────────────────────┘
                                            ▼
                               ┌─────────────────────────┐
-                              │ LAAG 4: ACTUATION       │
-                              │ layer4_control/         │
+                              │ LAAG 4: ANALYTICS       │
+                              │ layer5_analytics/       │
                               ├─────────────────────────┤
-                              │ • RAM Relais (SG1..SG4) │
-                              │ • Compressor Dwell-Time │
-                              │ • Hydraulic BUH Cutoff  │
-                              │ • Emergency Comfort <38°│
+                              │ • Realized Net Savings  │
+                              │ • Solar Self-Consump %  │
+                              │ • Seasonal COP & SCOP   │
+                              │ • MAE Forecast Accuracy │
                               └─────────────────────────┘
 ```
 
@@ -47,16 +49,18 @@ When prompting or spawning an AI Agent to work on this repository, **set the sco
 
 | Target Work | Target Directory | Dedicated Agent Spec | Permitted Actions | Forbidden Actions |
 | :--- | :--- | :--- | :--- | :--- |
-| **Data & Connectivity** | `layer1_data_collection/` | `AGENT_SPEC.md` | I/O, API clients, InfluxDB, MQTT, Line Protocol, caching | Optimization, scheduling, relay switching |
-| **Physics & Calibration** | `layer2_calibration/` | `AGENT_SPEC.md` | OLS regression, $K(h)$ matrix, $UA$, 80/20 damping, clamping | Network calls, live hardware access, scheduling |
-| **Policies & Solvers** | `layer3_scheduling/` | `AGENT_SPEC.md` | Waterfall dispatch, policy archetypes, battery deadband ($\Delta P \ge 0{,}115$) | Direct hardware control, raw sensor polling |
-| **Hardware & Safety** | `layer4_control/` | `AGENT_SPEC.md` | Relay truth table (S10S/S11S), dwell-time locks, hydraulic isolation | Modifying solvers, continuous EEPROM bus writes |
+| **Data, Devices & Ingest** | `layer1_data_collection/` | `AGENT_SPEC.md` | I/O, API clients, InfluxDB, MQTT, device adapters, hardware limits | Macro-scheduling, tariff economics, analytics reporting |
+| **Physical Calibration** | `layer2_calibration/` | `AGENT_SPEC.md` | OLS regression, thermal equations, sensor mask filtering | External network calls, relay switching, UI styling |
+| **Policies & Peak Shaving** | `layer3_scheduling/` | `AGENT_SPEC.md` | Dynamic dispatch, tariff arbitration, multi-device peak shaving | Direct database writing, hardware I/O |
+| **Analytics & Reporting** | `layer5_analytics/` | `AGENT_SPEC.md` | Financial KPIs, self-consumption %, COP calculations, export | Modifying optimization plans, writing device commands |
+| **Universal Contracts** | `models/canonical.py` | `ARCHITECTURE.md` | Dataclass definitions, unit conversions, type annotations | Business logic, stateful code |
 
 ---
 
-## 🔒 Non-Negotiable Directives
-
-1. **No-Mock-Data Rule:** Production pipelines and analyses must NEVER use synthetic or fabricated data. Tests must use explicit fixtures.
-2. **Volatile RAM Control (EEPROM Protection):** Daikin compressor control must strictly use physical Smart Grid contacts S10S/S11S evaluated in volatile RAM.
-3. **Priority 1 Emergency Comfort:** DHW temperature $< 38{,}0^\circ\text{C}$ immediately triggers emergency reheat, overruling all economic optimizations.
-4. **Hydraulic Separation:** Space heating must be turned OFF during SG4 forced DHW runs to eliminate 9 kW backup heater (BUH) engagement.
+## 🔒 Architectural Guardrails
+1. **Strict No-Mock-Data Integrity:** All calculations and reports must run against real verified data.
+2. **Device vs. Policy Separation:**
+   - Apparaat-specifieke parameters (minimale looptijd, fysiek SG contact, noodcomfort $<38^\circ\text{C}$) horen bij het **Device**.
+   - Systeembrede totalen (3x25A netafname peak shaving, overschotprioritering, hydraulische uitsluiting) horen bij **Policies**.
+3. **RAM Relais (0 EEPROM Wear):** Daikin Smart Grid relais uitsluitend aansturen via vluchtige binaire contacten S10S/S11S.
+4. **Isolated Secrets Vault:** Wachtwoorden en API-sleutels leven in `/config/open_hems_secrets.json` (`0600`) en worden nooit in git of HTML gedeeld.

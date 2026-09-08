@@ -10,6 +10,28 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.8.0] — 2026-09-08 (Architecture Streamlining: Absorb Layer 4 into Devices & Policies)
+
+### Changed & Streamlined
+- **Abolished Standalone Layer 4 (Actuation/Control):**
+  - Re-allocated device-level parameters directly to **Device Hardware Adapters (Layer 1)**:
+    - Minimum runtime / compressor dwell-time (anti-pendel protection).
+    - Device max power ratings.
+    - Local emergency comfort thresholds (e.g. DHW tank $< 38.0^\circ\text{C}$ emergency heat).
+    - Physical hardware relay actuation entities (S10S / S11S).
+  - Re-allocated multi-device total constraints directly to **Policy Orchestration (Layer 3)**:
+    - Systeembrede 3-fasen netlimiet / Peak Shaving (max 17.250 W / 3x25A) to prevent main fuse blowouts.
+    - Multi-device hydraulic interlock: CV heating lockout during SG4 hot water boost to prevent 9 kW backup heater.
+    - Solar surplus cascading priority waterfall: 1) SWW Boiler $\rightarrow$ 2) Home Battery $\rightarrow$ 3) EV $\rightarrow$ 4) Grid export.
+- **Streamlined 4-Layer Hierarchy in UI & Documentation:**
+  - **Laag 4:** Analyse & Rapportage (KPIs, Besparingen, COP).
+  - **Laag 3:** Optimalisatie & Beleid (inclusief Peak Shaving banner en multi-device orchestration).
+  - **Laag 2:** Zelflerend & Fysica (Kalibratie, Offsets, Sensor downtime maskers).
+  - **Laag 1:** Data, Verbindingen & Apparaten (InfluxDB, MQTT, Device Hardware Links met beveiliging).
+- **Updated `ARCHITECTURE.md` and `AGENTS.md`** across the repository and add-on.
+
+---
+
 ## [0.7.1] — 2026-09-08 (Live EPEX, P1 DSMR & Weather Ingestion)
 
 ### Added & Connected
