@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.19.0
+Version: 0.19.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.19.0",
+                "version": "0.19.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1838,7 +1838,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.19.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.19.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2016,7 +2016,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-slate-300">Zon (-kW)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-teal-400"></span> <span class="text-slate-300">Accu Ontladen (-kW)</span></div>
                             <!-- Net & Price Lines -->
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-orange-400"></span> <span class="text-orange-400 font-bold">Verwacht Netto Verbruik (>0 Afname, <0 Export)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500"></span> <span class="text-red-400 font-bold">Verwacht Netto Verbruik (>0 Afname, <0 Export)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400">Prijs (€/kWh)</span></div>
                         </div>
                     </div>
@@ -3389,11 +3389,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 label: 'Verwacht Netto Verbruik (kW)',
                                 data: netPowerArr,
                                 type: 'line',
-                                borderColor: '#F97316',
+                                borderColor: '#EF4444',
                                 backgroundColor: 'transparent',
                                 borderWidth: 3,
                                 pointRadius: 2,
-                                pointBackgroundColor: '#F97316',
+                                pointBackgroundColor: '#EF4444',
                                 tension: 0.25,
                                 yAxisID: 'y',
                                 order: 1

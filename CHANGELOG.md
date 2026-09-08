@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.19.1] — 2026-09-08 (Set Expected Net Line Color to Crimson Red)
+
+### Changed
+- **Verwacht Netto Verbruik Line Color:**
+  - Changed overlay line color and points from orange (`#F97316`) to vivid crimson red (`#EF4444`).
+  - Updated corresponding legend chip indicator to red (`bg-red-500` / `text-red-400`).
+
+---
+
 ## [0.19.0] — 2026-09-08 (Classic Dual-Polarity Stacked Architecture & Net Overlay Line)
 
 ### Added & Re-Architected
