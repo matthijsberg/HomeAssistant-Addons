@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.15.2
+Version: 0.16.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.15.2",
+                "version": "0.16.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1095,7 +1095,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 boiler[sww_idx] = 1.2  # 1.2 kW heat pump electrical power (~3.6 kW thermal for 350L tank)
                 advices[sww_idx] = f"♨️ SWW Boiler 350L Run: Laagste tarief (€{best_sww_slot['price']:.3f}/kWh) & {best_sww_slot['solar']} kW zon"
 
-            # 6. Plan Battery Arbitrage & Solar Buffering
+            # 6. Plan Battery Arbitrage, Solar Buffering & Battery Discharge
+            battery_discharge = [0.0] * 24
             min_item = min(timeline_items, key=lambda x: x["price"])
             max_item = max(timeline_items, key=lambda x: x["price"])
             price_delta = max_item["price"] - min_item["price"]
@@ -1103,23 +1104,51 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             bat_msg = ""
             peak_solar_it = max(timeline_items, key=lambda x: x["solar"])
-            if price_delta >= deadband and min_item["idx"] < max_item["idx"]:
+            
+            # Sort timeline items by price to find evening peaks
+            expensive_slots = sorted(timeline_items, key=lambda x: x["price"], reverse=True)
+            
+            if price_delta >= deadband:
+                # Charge on cheapest hour
                 battery_charge[min_item["idx"]] = 2.0
+                # Discharge on most expensive hour(s)
+                battery_discharge[max_item["idx"]] = 2.0
+                if len(expensive_slots) > 1 and expensive_slots[1]["idx"] != min_item["idx"]:
+                    battery_discharge[expensive_slots[1]["idx"]] = 1.5
                 bat_msg = f"🔋 Accu-Arbitrage: Laden om {min_item['label']} (€{min_item['price']:.2f}), Ontladen om {max_item['label']} (€{max_item['price']:.2f}) [Spread €{price_delta:.3f} > €{deadband:.3f}]"
             else:
-                # Solar buffer mode
+                # Solar buffer mode: charge during solar surplus peak, discharge during evening peak
                 if peak_solar_it["solar"] > 1.2:
                     battery_charge[peak_solar_it["idx"]] = round(min(2.5, peak_solar_it["solar"] - 0.5), 2)
-                    bat_msg = f"☀️ Zonne-Buffer: Accu absorbeert overtollige zonnestroom om {peak_solar_it['label']} ({peak_solar_it['solar']} kW)."
+                    # Discharge during evening dinner/relaxation peak (19:00 - 21:00)
+                    evening_slots = [it for it in timeline_items if 18 <= it["dt"].hour <= 22]
+                    if evening_slots:
+                        best_discharge = max(evening_slots, key=lambda x: x["price"])
+                        battery_discharge[best_discharge["idx"]] = 1.8
+                    bat_msg = f"☀️ Zonne-Buffer: Accu laadt om {peak_solar_it['label']} ({peak_solar_it['solar']} kW) en ontlaadt in de avondpiek."
                 else:
                     bat_msg = f"⏸️ Accu Stand-by (Deadband): Prijsdelta €{price_delta:.3f}/kWh is onder drempel (€{deadband:.3f}/kWh)."
+
+            # Calculate Dual-Polarity Datasets
+            # Negative stack: Solar generation and Battery discharge (< 0 kW)
+            solar_neg = [-round(s, 2) for s in solar]
+            bat_discharge_neg = [-round(d, 2) for d in battery_discharge]
+
+            # Net Actual Expected Power Drawn from Grid:
+            # Net = Total Consumption - (Solar + Battery Discharge)
+            net_power = []
+            for b, bl, h, ch, s, d in zip(baseload, boiler, heating, battery_charge, solar, battery_discharge):
+                tot_load = b + bl + h + ch
+                tot_gen = s + d
+                net_val = round(tot_load - tot_gen, 2)
+                net_power.append(net_val)
 
             cheapest_hour_lbl = min_item["label"]
             cheapest_price = min_item["price"]
             banner_adv = f"Beste stroomtarief om {cheapest_hour_lbl} (€{cheapest_price:.4f}/kWh)"
             if peak_solar_it["solar"] > 1.0:
                 advices[peak_solar_it["idx"]] = f"☀️ Zonnepiek ({peak_solar_it['solar']:.1f} kW) — Gratis stroom van eigen dak!"
-            advices[max_item["idx"]] = f"⛔ Prijspiek (€{max_item['price']:.2f}/kWh) — Zware verbruikers blokkeren!"
+            advices[max_item["idx"]] = f"⛔ Prijspiek (€{max_item['price']:.2f}/kWh) — Accu ontlaadt om netafname te voorkomen!"
 
             self._send_json({
                 "hours": labels,
@@ -1129,7 +1158,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     "boiler_kw": boiler,
                     "heating_kw": heating,
                     "battery_charge_kw": battery_charge,
-                    "solar_kw": solar,
+                    "solar_kw_neg": solar_neg,
+                    "battery_discharge_kw_neg": bat_discharge_neg,
+                    "net_power_kw": net_power,
                     "prices_eur": prices
                 },
                 "advices": advices,
@@ -1756,7 +1787,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.15.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.16.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1915,15 +1946,20 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <canvas id="hemsChartAnalytics"></canvas>
                     </div>
 
-                    <!-- Prediction Legend Chips -->
+                    <!-- Dual Polarity Prediction Legend Chips -->
                     <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
                         <div class="flex items-center gap-3 flex-wrap">
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Basislast</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW Tapwater (350L)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV Verwarming</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-amber-400"></span> <span class="text-slate-300">Zon (kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400"></span> <span class="text-slate-300">Prijs (€/kWh)</span></div>
+                            <!-- Positive Stack (Verbruikers) -->
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Basislast (+kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW Tapwater (+kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV (+kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden (+kW)</span></div>
+                            <!-- Negative Stack (Opwek & Ontladen) -->
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-slate-300">Zon (-kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-teal-400"></span> <span class="text-slate-300">Accu Ontladen (-kW)</span></div>
+                            <!-- Overlay Lines -->
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-orange-400"></span> <span class="text-orange-400 font-bold">Verwacht Netto Verbruik (kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400">Prijs (€/kWh)</span></div>
                         </div>
                     </div>
                 </div>
@@ -3196,54 +3232,75 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     data: {
                         labels: data.labels,
                         datasets: [
+                            // === POSITIVE STACK: VERBRUIKERS (> 0 kW) ===
                             {
                                 label: 'Basislast (kW)',
                                 data: data.datasets.baseload_kw,
                                 backgroundColor: '#3B82F6',
                                 stack: 'consumption',
-                                borderRadius: 4
+                                borderRadius: 2
                             },
                             {
                                 label: 'SWW Tapwater (kW)',
                                 data: data.datasets.boiler_kw,
                                 backgroundColor: '#EC4899',
                                 stack: 'consumption',
-                                borderRadius: 4
+                                borderRadius: 2
                             },
                             {
                                 label: 'CV Verwarming (kW)',
                                 data: data.datasets.heating_kw || [],
                                 backgroundColor: '#6366F1',
                                 stack: 'consumption',
-                                borderRadius: 4
+                                borderRadius: 2
                             },
                             {
                                 label: 'Accu Laden (kW)',
                                 data: data.datasets.battery_charge_kw,
                                 backgroundColor: '#10B981',
                                 stack: 'consumption',
-                                borderRadius: 4
+                                borderRadius: 2
+                            },
+                            // === NEGATIVE STACK: OPWEK & ACCU ONTLADEN (< 0 kW) ===
+                            {
+                                label: 'Zon Productie (-kW)',
+                                data: data.datasets.solar_kw_neg || [],
+                                backgroundColor: '#F59E0B',
+                                stack: 'production',
+                                borderRadius: 2
                             },
                             {
-                                label: 'Zon Productie (kW)',
-                                data: data.datasets.solar_kw,
-                                type: 'line',
-                                borderColor: '#F59E0B',
-                                borderWidth: 2.5,
-                                pointBackgroundColor: '#F59E0B',
-                                pointRadius: 2,
-                                tension: 0.35,
-                                yAxisID: 'y'
+                                label: 'Accu Ontladen (-kW)',
+                                data: data.datasets.battery_discharge_kw_neg || [],
+                                backgroundColor: '#14B8A6',
+                                stack: 'production',
+                                borderRadius: 2
                             },
+                            // === OVERLAY: VERWACHT NETTO VERBRUIK (NET POWER) ===
+                            {
+                                label: 'Verwacht Netto Verbruik (kW)',
+                                data: data.datasets.net_power_kw || [],
+                                type: 'line',
+                                borderColor: '#F97316',
+                                backgroundColor: 'transparent',
+                                borderWidth: 3,
+                                pointRadius: 2,
+                                pointBackgroundColor: '#F97316',
+                                tension: 0.25,
+                                yAxisID: 'y',
+                                order: 1
+                            },
+                            // === OVERLAY: STROOMPRIJS (€/kWh) ===
                             {
                                 label: 'Stroomprijs (€/kWh)',
                                 data: data.datasets.prices_eur,
                                 type: 'line',
                                 borderColor: '#06B6D4',
-                                borderDash: [5, 5],
+                                borderDash: [4, 4],
                                 borderWidth: 1.5,
                                 pointRadius: 0,
-                                yAxisID: 'y1'
+                                yAxisID: 'y1',
+                                order: 2
                             }
                         ]
                     },

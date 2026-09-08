@@ -10,6 +10,18 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.16.0] — 2026-09-08 (Dual-Polarity 24h Prediction & Battery Discharge Optimization)
+
+### Added
+- **Dual-Polarity 24-Hour Forecast Engine:**
+  - **Negative Stack (< 0 kW):** Expected solar PV production (`solar_kw_neg`) and scheduled battery discharge (`battery_discharge_kw_neg`) plotted downward under the center axis.
+  - **Battery Discharge Optimization:** Intelligent schedule activates battery discharge during peak evening tariff hours (€0.40 - €0.44/kWh) or high household demand to displace expensive grid import.
+  - **Positive Stack (> 0 kW):** Baseload, SWW boiler (350L), space heating (CV), and battery charging stacked upward.
+  - **Expected Net Grid Power Line Overlay (`net_power_kw`):** Continuous bold orange line showing actual power drawn from the grid ($\text{Load} - \text{Gen}$). When line is below zero, energy is exported; when above zero, imported.
+  - **Dual Polarity Legend Chips:** Distinct indicators for positive consumers (+kW), negative generators (-kW), net grid power, and price overlay.
+
+---
+
 ## [0.15.2] — 2026-09-08 (Declare Chart Variables Globally & Deep-Clone Multi-Canvas Configurations)
 
 ### Fixed
