@@ -10,6 +10,29 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.5.1] — 2026-09-08 (Responsive Mobile UI & Off-Canvas Navigation Drawer)
+
+### Added
+- **Full Mobile-Friendly Responsiveness (Ingress & Handheld Viewports):**
+  - Converted sidebar navigation into an off-canvas responsive drawer on screens `< 768px`:
+    - Automatically hides off-screen (`-translate-x-full`) with a smooth 300ms CSS slide animation.
+    - Added backdrop overlay (`#sidebar-backdrop`) for backdrop clicks.
+    - Added mobile-only hamburger button (`☰`) in the header and close button (`✕`) inside the drawer.
+    - Auto-closes the drawer upon selecting any menu navigation tab.
+  - **Fluid Content Layout:**
+    - Main viewport takes full width (`w-full`), eliminating the squeezed ~40% width column issue on phones.
+    - Optimized padding (`p-3 sm:p-5 md:p-8`) giving cards full room on narrow screens.
+    - Grid cards collapse cleanly to 1 column on mobile, expanding to 2-3 columns on desktop.
+    - Action buttons and metric badges wrap cleanly (`flex-wrap`).
+  - **Responsive Modals:**
+    - All CRUD modals constrained to `w-full max-w-lg max-h-[90vh] overflow-y-auto` with backdrop blur, preventing overflow beyond phone screens.
+
+### Security & Deployment
+- Automated pre-commit secret scan verified: 0 credentials.
+- Automatic snapshot v0.5.0 archived prior to upgrade.
+
+---
+
 ## [0.5.0] — 2026-09-08 (4-Layer Modular Monorepo Architecture & Agent Scoping)
 
 ### Added

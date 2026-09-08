@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.5.0
+Version: 0.5.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -448,7 +448,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.5.0",
+                "version": "0.5.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1084,15 +1084,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         }
     </style>
 </head>
-<body class="h-full text-slate-200 antialiased flex overflow-hidden bg-[#080B11] font-sans select-none">
+<body class="h-full text-slate-200 antialiased flex overflow-hidden bg-[#080B11] font-sans select-none relative">
 
-    <!-- LEFT SIDEBAR NAVIGATION -->
-    <aside class="w-64 flex-shrink-0 bg-[#0B0F17] border-r border-[#1E293B] flex flex-col justify-between z-20">
+    <!-- MOBILE SIDEBAR BACKDROP -->
+    <div id="sidebar-backdrop" onclick="toggleMobileSidebar(false)" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 hidden md:hidden"></div>
+
+    <!-- LEFT SIDEBAR NAVIGATION (RESPONSIVE DRAWER ON MOBILE) -->
+    <aside id="main-sidebar" class="fixed inset-y-0 left-0 z-50 w-72 md:w-64 flex-shrink-0 bg-[#0B0F17] border-r border-[#1E293B] flex flex-col justify-between transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-300 ease-in-out shadow-2xl md:shadow-none">
         <div>
             <!-- Header Brand -->
-            <div class="h-20 px-6 flex items-center justify-between border-b border-[#1E293B]">
+            <div class="h-16 md:h-20 px-4 md:px-6 flex items-center justify-between border-b border-[#1E293B]">
                 <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500/20 to-amber-400/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
+                    <div class="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-gradient-to-tr from-amber-500/20 to-amber-400/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
                         <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
                     </div>
                     <div>
@@ -1103,6 +1106,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <p class="text-[11px] text-slate-400">Data & Policy Platform</p>
                     </div>
                 </div>
+                <!-- Mobile close button -->
+                <button onclick="toggleMobileSidebar(false)" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 md:hidden" aria-label="Sluit menu">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
             </div>
 
             <!-- Nav Links -->
@@ -1155,47 +1162,53 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.5.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.5.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
 
     <!-- MAIN VIEW -->
-    <main class="flex-1 flex flex-col min-w-0 overflow-y-auto bg-[#080B11]">
-        <header class="h-20 border-b border-[#1E293B] bg-[#0B0F17]/90 backdrop-blur px-8 flex items-center justify-between sticky top-0 z-30">
-            <div>
-                <h1 class="text-lg font-bold text-white tracking-tight" id="header-title">Verbindingen & Opslag (Laag 1)</h1>
-                <p class="text-xs text-slate-400 mt-0.5" id="header-sub">Beheer InfluxDB en MQTT instanties voor tijdreeksopslag en streaming connectiviteit.</p>
+    <main class="flex-1 flex flex-col min-w-0 overflow-y-auto bg-[#080B11] w-full">
+        <header class="h-16 md:h-20 border-b border-[#1E293B] bg-[#0B0F17]/95 backdrop-blur px-4 md:px-8 flex items-center justify-between sticky top-0 z-30">
+            <div class="flex items-center gap-3 min-w-0">
+                <!-- Mobile Hamburger Button -->
+                <button onclick="toggleMobileSidebar(true)" class="p-2 -ml-1 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 md:hidden flex-shrink-0" aria-label="Open menu">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                </button>
+                <div class="min-w-0">
+                    <h1 class="text-base md:text-lg font-bold text-white tracking-tight truncate" id="header-title">Verbindingen & Opslag (Laag 1)</h1>
+                    <p class="text-[11px] md:text-xs text-slate-400 mt-0.5 hidden sm:block truncate" id="header-sub">Beheer InfluxDB en MQTT instanties voor tijdreeksopslag en streaming connectiviteit.</p>
+                </div>
             </div>
-            <div class="flex items-center gap-3">
-                <button onclick="refreshCurrentTab()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow transition-all flex items-center gap-1.5">
+            <div class="flex items-center gap-2 md:gap-3 flex-shrink-0">
+                <button onclick="refreshCurrentTab()" class="px-2.5 md:px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow transition-all flex items-center gap-1.5">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                    <span>Verversen</span>
+                    <span class="hidden sm:inline">Verversen</span>
                 </button>
             </div>
         </header>
 
-        <div class="p-8 space-y-6">
+        <div class="p-3 sm:p-5 md:p-8 space-y-5 md:space-y-8 max-w-7xl mx-auto w-full">
 
             <!-- TAB 0: INFRASTRUCTURE & CONNECTIVITY (LAAG 1) -->
-            <div id="view-infrastructure" class="tab-content active space-y-8">
+            <div id="view-infrastructure" class="tab-content active space-y-6">
                 <!-- Status & Telemetry Header Banner -->
-                <div class="bg-gradient-to-r from-emerald-950/80 via-[#0e1422] to-blue-950/80 border border-emerald-500/30 rounded-2xl p-5 shadow-xl flex items-center justify-between">
-                    <div class="flex items-center gap-4">
-                        <div class="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-2xl shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                <div class="bg-gradient-to-r from-emerald-950/80 via-[#0e1422] to-blue-950/80 border border-emerald-500/30 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div class="flex items-start sm:items-center gap-3 sm:gap-4">
+                        <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xl sm:text-2xl shadow-[0_0_15px_rgba(16,185,129,0.2)] flex-shrink-0">
                             🔌
                         </div>
-                        <div>
-                            <div class="flex items-center gap-2">
+                        <div class="min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap">
                                 <span class="text-xs uppercase font-bold text-emerald-400 tracking-wider">Laag 1 Dataverzameling & Connectiviteit</span>
                                 <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">STANDALONE & MULTI-INSTANCE</span>
                             </div>
-                            <div class="text-sm font-bold text-white mt-1" id="infra-summary-text">
+                            <div class="text-xs sm:text-sm font-bold text-white mt-1 break-words" id="infra-summary-text">
                                 InfluxDB tijdreeksopslag & MQTT streaming gereed voor realtime datastromen.
                             </div>
                         </div>
                     </div>
-                    <button onclick="writeTestTelemetryPoint()" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-lg transition-all flex items-center gap-2">
+                    <button onclick="writeTestTelemetryPoint()" class="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 flex-shrink-0 w-full sm:w-auto">
                         <span>⚡ Schrijf Test Telemetrie</span>
                     </button>
                 </div>
@@ -1406,8 +1419,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
     </main>
 
     <!-- MODAL: ADD / EDIT INFLUXDB CONNECTION PROFILE -->
-    <div id="influx-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
-        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-lg text-xs text-slate-300">
+    <div id="influx-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center hidden z-50 p-3">
+        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto text-xs text-slate-300 shadow-2xl">
             <h3 class="text-sm font-bold text-white mb-4" id="modal-influx-title">InfluxDB Instantie Configureren</h3>
             <form onsubmit="saveInfluxModal(event)" class="space-y-3">
                 <input type="hidden" id="modal-influx-id">
@@ -1474,8 +1487,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
     </div>
 
     <!-- MODAL: ADD / EDIT MQTT BROKER PROFILE -->
-    <div id="mqtt-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
-        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-lg text-xs text-slate-300">
+    <div id="mqtt-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center hidden z-50 p-3">
+        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto text-xs text-slate-300 shadow-2xl">
             <h3 class="text-sm font-bold text-white mb-4" id="modal-mqtt-title">MQTT Broker Configureren</h3>
             <form onsubmit="saveMqttModal(event)" class="space-y-3">
                 <input type="hidden" id="modal-mqtt-id">
@@ -1541,8 +1554,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
     </div>
 
     <!-- MODAL: ADD / EDIT POLICY -->
-    <div id="policy-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
-        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-lg text-xs text-slate-300 max-h-[90vh] overflow-y-auto">
+    <div id="policy-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center hidden z-50 p-3">
+        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-6 w-full max-w-lg text-xs text-slate-300 max-h-[90vh] overflow-y-auto shadow-2xl">
             <h3 class="text-sm font-bold text-white mb-4" id="modal-pol-title">Policy Configureren</h3>
             <form onsubmit="savePolicy(event)" class="space-y-3">
                 <input type="hidden" id="modal-pol-id">
@@ -1574,8 +1587,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
     </div>
 
     <!-- MODAL: ADD / EDIT DEVICE -->
-    <div id="device-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
-        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-lg text-xs text-slate-300">
+    <div id="device-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center hidden z-50 p-3">
+        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto text-xs text-slate-300 shadow-2xl">
             <h3 class="text-sm font-bold text-white mb-4" id="modal-dev-title">Apparaat Configureren (Hardware)</h3>
             <form onsubmit="saveDevice(event)" class="space-y-3">
                 <input type="hidden" id="modal-dev-id">
@@ -1616,8 +1629,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
     </div>
 
     <!-- MODAL: ADD / EDIT TARIFF -->
-    <div id="tariff-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
-        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-md text-xs text-slate-300">
+    <div id="tariff-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center hidden z-50 p-3">
+        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto text-xs text-slate-300 shadow-2xl">
             <h3 class="text-sm font-bold text-white mb-4" id="modal-tariff-title">Energieleverancier Configureren</h3>
             <form onsubmit="saveTariff(event)" class="space-y-3">
                 <input type="hidden" id="modal-tariff-id">
@@ -1670,8 +1683,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
     </div>
 
     <!-- MODAL: EXCLUSION -->
-    <div id="exclusion-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
-        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-md text-xs text-slate-300">
+    <div id="exclusion-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center hidden z-50 p-3">
+        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto text-xs text-slate-300 shadow-2xl">
             <h3 class="text-sm font-bold text-white mb-4">Uitsluitingsmasker Toevoegen</h3>
             <form onsubmit="saveExclusion(event)" class="space-y-3">
                 <div>
@@ -1708,8 +1721,25 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         let activeTabId = 'infrastructure';
         let cachedInfra = { influxdb_connections: [], mqtt_connections: [] };
 
+        function toggleMobileSidebar(open) {
+            const sidebar = document.getElementById('main-sidebar');
+            const backdrop = document.getElementById('sidebar-backdrop');
+            if (open) {
+                sidebar.classList.remove('-translate-x-full');
+                sidebar.classList.add('translate-x-0');
+                backdrop.classList.remove('hidden');
+            } else {
+                sidebar.classList.remove('translate-x-0');
+                sidebar.classList.add('-translate-x-full');
+                backdrop.classList.add('hidden');
+            }
+        }
+
         function showTab(tabId) {
             activeTabId = tabId;
+            if (window.innerWidth < 768) {
+                toggleMobileSidebar(false);
+            }
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
             const target = document.getElementById('view-' + tabId);
