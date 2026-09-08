@@ -10,6 +10,24 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.12.0] — 2026-09-08 (Timeframe Selector & Energy Integrals kWh Totals)
+
+### Added
+- **Interactive Timeframe Selector in GUI:**
+  - Added clean dropdown selector directly in the Power Producers header:
+    - `1h`: Laatste 1 uur (1-minuut resolutie)
+    - `6h`: Laatste 6 uur (2-minuten resolutie)
+    - `24h`: Laatste 24 uur (5-minuten resolutie, standaard)
+    - `48h`: Laatste 2 dagen (15-minuten kwartierresolutie)
+    - `7d`: Laatste 7 dagen (1-uurs resolutie)
+  - Seamlessly re-queries `openhems` InfluxDB and dynamically updates the Chart.js canvas on change.
+- **Timeframe Energy Totals (kWh) in Legend Cards:**
+  - Integrated Riemann/trapezoidal energy integration across all sampled intervals:
+    `Energy (kWh) = sum(Power (W) * dt (hours) / 1000)`
+  - Each of the 6 metric cards below the graph displays the exact period energy total in bold (e.g. `0.38 kWh`, `2.47 kWh`) alongside `Last *` and `Min`/`Max` power values.
+
+---
+
 ## [0.11.4] — 2026-09-08 (Fix Global CONFIG_FILE Reassignment & Add-on Flushes)
 
 ### Fixed

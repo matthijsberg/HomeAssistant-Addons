@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.11.4
+Version: 0.12.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -535,7 +535,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             return
 
         # API: Status
-        # ANALYTICS: Pure openhems Power Producers Telemetry (NO HASSIO FALLBACK)
+        # ANALYTICS: Pure openhems Power Producers Telemetry with Timeframe Selector & Energy Integrals
         if path.startswith("/api/analytics/power_producers"):
             try:
                 sec = load_secrets()
@@ -545,12 +545,30 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 db_name = active_conn.get("database", "openhems")
                 db_user = active_conn.get("username", "openhems")
                 pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
+
+                # Parse timeframe parameter: 1h, 6h, 24h, 48h, 7d
+                parsed_url = urllib.parse.urlparse(self.path)
+                qp = urllib.parse.parse_qs(parsed_url.query)
+                tf = qp.get("range", ["24h"])[0]
+
+                tf_configs = {
+                    "1h": {"window": "1h", "bucket": "1m", "interval_h": 1.0 / 60.0, "time_fmt": "%H:%M"},
+                    "6h": {"window": "6h", "bucket": "2m", "interval_h": 2.0 / 60.0, "time_fmt": "%H:%M"},
+                    "24h": {"window": "24h", "bucket": "5m", "interval_h": 5.0 / 60.0, "time_fmt": "%H:%M"},
+                    "48h": {"window": "48h", "bucket": "15m", "interval_h": 15.0 / 60.0, "time_fmt": "%d %H:%M"},
+                    "7d": {"window": "7d", "bucket": "1h", "interval_h": 1.0, "time_fmt": "%a %d %H:00"}
+                }
+                curr_tf = tf_configs.get(tf, tf_configs["24h"])
+                time_win = curr_tf["window"]
+                bucket_sz = curr_tf["bucket"]
+                interval_h = curr_tf["interval_h"]
+                time_fmt = curr_tf["time_fmt"]
                 
-                # Query 100% strictly from openhems canonical database with fill(none) - no artificial flat blocks!
-                q = """
-                SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time > now() - 24h GROUP BY time(1m) fill(none);
-                SELECT mean("power_w") as teruglevering_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time > now() - 24h GROUP BY time(1m) fill(none);
-                SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time > now() - 24h GROUP BY time(1m) fill(none);
+                # Query 100% strictly from openhems canonical database with fill(none)
+                q = f"""
+                SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time > now() - {time_win} GROUP BY time({bucket_sz}) fill(none);
+                SELECT mean("power_w") as teruglevering_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time > now() - {time_win} GROUP BY time({bucket_sz}) fill(none);
+                SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time > now() - {time_win} GROUP BY time({bucket_sz}) fill(none);
                 """
 
                 url = "http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
@@ -597,11 +615,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 series_verbruik_pos = []
                 series_selfcons_pos = []
 
+                # Accumulators for timeframe energy totals (kWh = sum(P * dt / 1000))
+                tot_solar_wh = 0.0
+                tot_terug_wh = 0.0
+                tot_afname_wh = 0.0
+                tot_verbruik_wh = 0.0
+                tot_selfcons_wh = 0.0
+
                 for ts_str in sorted_ts:
                     m = ts_map[ts_str]
                     try:
                         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
-                        time_label = dt.strftime("%H:%M")
+                        time_label = dt.strftime(time_fmt)
                     except Exception:
                         time_label = ts_str[11:16]
                     
@@ -619,6 +644,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     series_selfcons_pos.append(round(self_cons))
                     series_solar_neg.append(-round(solar))
                     series_terug_neg.append(-round(terug))
+
+                    # Integrate energy in Wh: P * hours
+                    tot_afname_wh += afname * interval_h
+                    tot_terug_wh += terug * interval_h
+                    tot_solar_wh += solar * interval_h
+                    tot_verbruik_wh += verbruik * interval_h
+                    tot_selfcons_wh += self_cons * interval_h
                 
                 def fmt_w(val):
                     abs_v = abs(val)
@@ -627,36 +659,51 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         return f"{sign}{abs_v / 1000.0:.2f} kW"
                     return f"{sign}{int(abs_v)} W"
 
+                def fmt_kwh(wh):
+                    kwh = abs(wh) / 1000.0
+                    if kwh < 0.01:
+                        return "0.00 kWh"
+                    elif kwh < 10.0:
+                        return f"{kwh:.2f} kWh"
+                    else:
+                        return f"{kwh:.1f} kWh"
+
                 stats = {
                     "zonnepanelen": {
                         "last": fmt_w(series_solar_neg[-1] if series_solar_neg else 0),
                         "min": fmt_w(min(series_solar_neg) if series_solar_neg else 0),
-                        "max": fmt_w(max(series_solar_neg) if series_solar_neg else 0)
+                        "max": fmt_w(max(series_solar_neg) if series_solar_neg else 0),
+                        "total_kwh": fmt_kwh(tot_solar_wh)
                     },
                     "teruglevering": {
                         "last": fmt_w(series_terug_neg[-1] if series_terug_neg else 0),
                         "min": fmt_w(min(series_terug_neg) if series_terug_neg else 0),
-                        "max": fmt_w(max(series_terug_neg) if series_terug_neg else 0)
+                        "max": fmt_w(max(series_terug_neg) if series_terug_neg else 0),
+                        "total_kwh": fmt_kwh(tot_terug_wh)
                     },
                     "afname": {
                         "last": fmt_w(series_afname_pos[-1] if series_afname_pos else 0),
                         "min": fmt_w(min(series_afname_pos) if series_afname_pos else 0),
-                        "max": fmt_w(max(series_afname_pos) if series_afname_pos else 0)
+                        "max": fmt_w(max(series_afname_pos) if series_afname_pos else 0),
+                        "total_kwh": fmt_kwh(tot_afname_wh)
                     },
                     "totaal_opgewekt": {
                         "last": fmt_w(series_solar_neg[-1] if series_solar_neg else 0),
                         "min": fmt_w(min(series_solar_neg) if series_solar_neg else 0),
-                        "max": fmt_w(max(series_solar_neg) if series_solar_neg else 0)
+                        "max": fmt_w(max(series_solar_neg) if series_solar_neg else 0),
+                        "total_kwh": fmt_kwh(tot_solar_wh)
                     },
                     "opgewekt_gebruikt": {
                         "last": fmt_w(-series_selfcons_pos[-1] if series_selfcons_pos else 0),
                         "min": fmt_w(-max(series_selfcons_pos) if series_selfcons_pos else 0),
-                        "max": fmt_w(0)
+                        "max": fmt_w(0),
+                        "total_kwh": fmt_kwh(tot_selfcons_wh)
                     },
                     "totaal_verbruik": {
                         "last": fmt_w(series_verbruik_pos[-1] if series_verbruik_pos else 0),
                         "min": fmt_w(min(series_verbruik_pos) if series_verbruik_pos else 0),
-                        "max": fmt_w(max(series_verbruik_pos) if series_verbruik_pos else 0)
+                        "max": fmt_w(max(series_verbruik_pos) if series_verbruik_pos else 0),
+                        "total_kwh": fmt_kwh(tot_verbruik_wh)
                     }
                 }
 
@@ -740,7 +787,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.11.4",
+                "version": "0.12.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1529,7 +1576,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.11.4</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.12.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1601,17 +1648,26 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </div>
                 </div>
 
-                <!-- GRAFANA-STYLE POWER PRODUCERS CHART (DUAL POLARITY) -->
+                <!-- GRAFANA-STYLE POWER PRODUCERS CHART (DUAL POLARITY & TIMEFRAME SELECTOR) -->
                 <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-2xl space-y-4">
                     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
                         <div class="flex items-center gap-2.5">
                             <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
                             <h3 class="text-sm font-bold text-white tracking-wide">Power Producers & Netstromen</h3>
-                            <span class="text-[10px] text-slate-500 font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800">InfluxDB Realtime (24h)</span>
+                            <span class="text-[10px] text-slate-500 font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800">openhems</span>
                         </div>
                         <div class="flex items-center gap-2 text-xs">
-                            <button onclick="loadPowerProducersChart()" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition">
-                                🔄 Live Verversen
+                            <label for="pp-range-select" class="text-slate-400 text-xs hidden sm:inline font-mono">Periode:</label>
+                            <select id="pp-range-select" onchange="loadPowerProducersChart()" class="bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-medium focus:outline-none focus:border-blue-500 font-mono">
+                                <option value="1h">Laatste 1 uur</option>
+                                <option value="6h">Laatste 6 uur</option>
+                                <option value="24h" selected>Laatste 24 uur</option>
+                                <option value="48h">Laatste 2 dagen</option>
+                                <option value="7d">Laatste 7 dagen</option>
+                            </select>
+                            <button onclick="loadPowerProducersChart()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                <span>Verversen</span>
                             </button>
                         </div>
                     </div>
@@ -1621,73 +1677,91 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <canvas id="powerProducersChart"></canvas>
                     </div>
 
-                    <!-- Exact Grafana-Style Legend & Metrics Table -->
+                    <!-- Grafana-Style Legend with Periode Totals (kWh) -->
                     <div class="pt-2 border-t border-slate-800/80">
                         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs font-mono">
                             <!-- Zonnepanelen -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-3 h-1.5 rounded-sm bg-yellow-500"></span>
-                                    <span class="text-slate-300">Zonnepanelen</span>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-yellow-500"></span>
+                                        <span class="text-slate-300 font-medium">Zonnepanelen</span>
+                                    </div>
+                                    <span class="text-xs text-yellow-400 font-bold" id="stat-solar-total">-- kWh</span>
                                 </div>
-                                <div class="text-[11px] space-x-2 text-right">
-                                    <span class="text-slate-400">Last: <strong class="text-yellow-400" id="stat-solar-last">--</strong></span>
-                                    <span class="text-slate-500">Min: <span class="text-yellow-500/80" id="stat-solar-min">--</span></span>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Last: <strong class="text-yellow-400 font-normal" id="stat-solar-last">--</strong></span>
+                                    <span>Min: <span class="text-yellow-500/80" id="stat-solar-min">--</span></span>
                                 </div>
                             </div>
                             <!-- Teruglevering -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-3 h-1.5 rounded-sm bg-emerald-500"></span>
-                                    <span class="text-slate-300">Teruglevering</span>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-emerald-500"></span>
+                                        <span class="text-slate-300 font-medium">Teruglevering</span>
+                                    </div>
+                                    <span class="text-xs text-emerald-400 font-bold" id="stat-terug-total">-- kWh</span>
                                 </div>
-                                <div class="text-[11px] space-x-2 text-right">
-                                    <span class="text-slate-400">Last: <strong class="text-emerald-400" id="stat-terug-last">--</strong></span>
-                                    <span class="text-slate-500">Min: <span class="text-emerald-500/80" id="stat-terug-min">--</span></span>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Last: <strong class="text-emerald-400 font-normal" id="stat-terug-last">--</strong></span>
+                                    <span>Min: <span class="text-emerald-500/80" id="stat-terug-min">--</span></span>
                                 </div>
                             </div>
                             <!-- Afname -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-3 h-1.5 rounded-sm bg-red-500"></span>
-                                    <span class="text-slate-300">Afname</span>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-red-500"></span>
+                                        <span class="text-slate-300 font-medium">Afname</span>
+                                    </div>
+                                    <span class="text-xs text-red-400 font-bold" id="stat-afname-total">-- kWh</span>
                                 </div>
-                                <div class="text-[11px] space-x-2 text-right">
-                                    <span class="text-slate-400">Last: <strong class="text-red-400" id="stat-afname-last">--</strong></span>
-                                    <span class="text-slate-500">Max: <span class="text-red-500/80" id="stat-afname-max">--</span></span>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Last: <strong class="text-red-400 font-normal" id="stat-afname-last">--</strong></span>
+                                    <span>Max: <span class="text-red-500/80" id="stat-afname-max">--</span></span>
                                 </div>
                             </div>
                             <!-- Totaal opgewekt -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-3 h-1.5 rounded-sm bg-lime-500"></span>
-                                    <span class="text-slate-300">Totaal opgewekt</span>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-lime-500"></span>
+                                        <span class="text-slate-300 font-medium">Totaal opgewekt</span>
+                                    </div>
+                                    <span class="text-xs text-lime-400 font-bold" id="stat-opgewekt-total">-- kWh</span>
                                 </div>
-                                <div class="text-[11px] space-x-2 text-right">
-                                    <span class="text-slate-400">Last: <strong class="text-lime-400" id="stat-opgewekt-last">--</strong></span>
-                                    <span class="text-slate-500">Min: <span class="text-lime-500/80" id="stat-opgewekt-min">--</span></span>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Last: <strong class="text-lime-400 font-normal" id="stat-opgewekt-last">--</strong></span>
+                                    <span>Min: <span class="text-lime-500/80" id="stat-opgewekt-min">--</span></span>
                                 </div>
                             </div>
                             <!-- Opgewekt Gebruikt -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-3 h-1.5 rounded-sm bg-teal-400"></span>
-                                    <span class="text-slate-300">Opgewekt Gebruikt</span>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-teal-400"></span>
+                                        <span class="text-slate-300 font-medium">Opgewekt Gebruikt</span>
+                                    </div>
+                                    <span class="text-xs text-teal-400 font-bold" id="stat-selfcons-total">-- kWh</span>
                                 </div>
-                                <div class="text-[11px] space-x-2 text-right">
-                                    <span class="text-slate-400">Last: <strong class="text-teal-400" id="stat-selfcons-last">--</strong></span>
-                                    <span class="text-slate-500">Min: <span class="text-teal-500/80" id="stat-selfcons-min">--</span></span>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Last: <strong class="text-teal-400 font-normal" id="stat-selfcons-last">--</strong></span>
+                                    <span>Min: <span class="text-teal-500/80" id="stat-selfcons-min">--</span></span>
                                 </div>
                             </div>
                             <!-- Totaal Verbruik -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex items-center justify-between">
-                                <div class="flex items-center gap-2">
-                                    <span class="w-3 h-1.5 rounded-sm bg-orange-500"></span>
-                                    <span class="text-slate-300">Totaal Verbruik</span>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-orange-500"></span>
+                                        <span class="text-slate-300 font-medium">Totaal Verbruik</span>
+                                    </div>
+                                    <span class="text-xs text-orange-400 font-bold" id="stat-verbruik-total">-- kWh</span>
                                 </div>
-                                <div class="text-[11px] space-x-2 text-right">
-                                    <span class="text-slate-400">Last: <strong class="text-orange-400" id="stat-verbruik-last">--</strong></span>
-                                    <span class="text-slate-500">Max: <span class="text-orange-500/80" id="stat-verbruik-max">--</span></span>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Last: <strong class="text-orange-400 font-normal" id="stat-verbruik-last">--</strong></span>
+                                    <span>Max: <span class="text-orange-500/80" id="stat-verbruik-max">--</span></span>
                                 </div>
                             </div>
                         </div>
@@ -3390,38 +3464,46 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             if (!canvas) return;
             
             try {
-                const res = await fetch('./api/analytics/power_producers');
+                const rangeSelect = document.getElementById('pp-range-select');
+                const rangeVal = rangeSelect ? rangeSelect.value : '24h';
+                const res = await fetch('./api/analytics/power_producers?range=' + encodeURIComponent(rangeVal));
                 const data = await res.json();
                 if (data.status !== 'success') {
                     console.error('Power producers error:', data.message);
                     return;
                 }
 
-                // Update Legend Stats
+                // Update Legend Stats & Timeframe Totals
                 const s = data.stats || {};
                 if (s.zonnepanelen) {
                     document.getElementById('stat-solar-last').innerText = s.zonnepanelen.last;
                     document.getElementById('stat-solar-min').innerText = s.zonnepanelen.min;
+                    if (document.getElementById('stat-solar-total')) document.getElementById('stat-solar-total').innerText = s.zonnepanelen.total_kwh || '-- kWh';
                 }
                 if (s.teruglevering) {
                     document.getElementById('stat-terug-last').innerText = s.teruglevering.last;
                     document.getElementById('stat-terug-min').innerText = s.teruglevering.min;
+                    if (document.getElementById('stat-terug-total')) document.getElementById('stat-terug-total').innerText = s.teruglevering.total_kwh || '-- kWh';
                 }
                 if (s.afname) {
                     document.getElementById('stat-afname-last').innerText = s.afname.last;
                     document.getElementById('stat-afname-max').innerText = s.afname.max;
+                    if (document.getElementById('stat-afname-total')) document.getElementById('stat-afname-total').innerText = s.afname.total_kwh || '-- kWh';
                 }
                 if (s.totaal_opgewekt) {
                     document.getElementById('stat-opgewekt-last').innerText = s.totaal_opgewekt.last;
                     document.getElementById('stat-opgewekt-min').innerText = s.totaal_opgewekt.min;
+                    if (document.getElementById('stat-opgewekt-total')) document.getElementById('stat-opgewekt-total').innerText = s.totaal_opgewekt.total_kwh || '-- kWh';
                 }
                 if (s.opgewekt_gebruikt) {
                     document.getElementById('stat-selfcons-last').innerText = s.opgewekt_gebruikt.last;
                     document.getElementById('stat-selfcons-min').innerText = s.opgewekt_gebruikt.min;
+                    if (document.getElementById('stat-selfcons-total')) document.getElementById('stat-selfcons-total').innerText = s.opgewekt_gebruikt.total_kwh || '-- kWh';
                 }
                 if (s.totaal_verbruik) {
                     document.getElementById('stat-verbruik-last').innerText = s.totaal_verbruik.last;
                     document.getElementById('stat-verbruik-max').innerText = s.totaal_verbruik.max;
+                    if (document.getElementById('stat-verbruik-total')) document.getElementById('stat-verbruik-total').innerText = s.totaal_verbruik.total_kwh || '-- kWh';
                 }
 
                 // Destroy old instance if exists
