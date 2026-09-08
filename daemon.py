@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.21.0
+Version: 0.22.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.21.0",
+                "version": "0.22.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1096,14 +1096,27 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 advices.append("")
                 timeline_items.append({"idx": i, "dt": dt_h, "key": k, "label": lbl, "price": p_val, "solar": s_val, "temp": t_val})
 
-            # 4. Plan Space Heating (CV) if in active heating demand
+            # 4. Plan Space Heating (CV) with Summer Lockout & Night Setback Guards
+            mean_outdoor_temp = sum(it["temp"] for it in timeline_items) / len(timeline_items) if timeline_items else 18.0
+            max_outdoor_temp = max(it["temp"] for it in timeline_items) if timeline_items else 20.0
+            summer_lockout_mean = float(cfg.get("space_heating", {}).get("summer_lockout_mean_temp", 15.0))
+            summer_lockout_max = float(cfg.get("space_heating", {}).get("summer_lockout_max_temp", 18.0))
+            is_summer_lockout = (mean_outdoor_temp >= summer_lockout_mean or max_outdoor_temp >= summer_lockout_max or now_ams.month in [5, 6, 7, 8, 9])
+
             for it in timeline_items:
                 i = it["idx"]
-                if it["temp"] < 15.5:
-                    # Space heating demand needed (delta T * UA / COP)
-                    cop = 4.2
-                    heat_kw = round(max(0.0, (19.5 - it["temp"]) * 0.18 / cop), 2)
-                    heating[i] = heat_kw
+                if is_summer_lockout:
+                    heating[i] = 0.0
+                else:
+                    # Active heating season: space heating modulated during waking/day hours, night setback at night
+                    is_night = it["dt"].hour < 6 or it["dt"].hour >= 23
+                    target_temp = 17.5 if is_night else 20.0
+                    if it["temp"] < (target_temp - 2.0):
+                        cop = 4.2
+                        heat_kw = round(max(0.0, (target_temp - it["temp"]) * 0.18 / cop), 2)
+                        heating[i] = heat_kw
+                    else:
+                        heating[i] = 0.0
 
             # 5. Plan Hot Water Generation (SWW Boiler 350L) with Solar Priority
             daylight_slots = [it for it in timeline_items if 9 <= it["dt"].hour <= 17]
@@ -1875,7 +1888,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.21.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.22.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2011,11 +2024,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <p class="text-[11px] text-slate-400">Gestapelde planning: Basislast + Warm Tapwater (SWW) + Verwarming (CV) + Accu t.o.v. zonne-opwek.</p>
                             </div>
                         </div>
-                        <div class="flex items-center gap-2.5 text-xs flex-wrap">
-                            <span class="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2.5 py-1 rounded-lg border border-blue-500/40" id="prediction-unallocated-badge">Ongedefinieerd: 7x24 Model</span>
-                            <span class="text-[10px] text-indigo-300 font-mono bg-indigo-950/70 px-2.5 py-1 rounded-lg border border-indigo-500/40 font-bold" id="prediction-total-kwh-badge">⚡ Verbruik: -- kWh</span>
-                            <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950/70 px-2.5 py-1 rounded-lg border border-emerald-500/40 font-bold" id="prediction-total-cost-badge">💶 Netto Kosten: €--</span>
-                            <span class="text-[10px] text-amber-400 font-mono bg-amber-950/60 px-2.5 py-1 rounded-lg border border-amber-500/30" id="prediction-surplus-badge">☀️ Vrij Overschot: 0.0 kWh</span>
+                        <div class="flex items-center gap-1.5 text-xs flex-wrap">
+                            <span class="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2 py-0.5 rounded-md border border-blue-500/40" id="prediction-unallocated-badge">Ongedefinieerd: 7x24</span>
+                            <span class="text-[10px] text-indigo-300 font-mono bg-indigo-950/70 px-2 py-0.5 rounded-md border border-indigo-500/40 font-bold" id="prediction-total-kwh-badge">⚡ Verbruik: -- kWh</span>
+                            <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950/70 px-2 py-0.5 rounded-md border border-emerald-500/40 font-bold" id="prediction-total-cost-badge">💶 Netto: €--</span>
+                            <span class="text-[10px] text-amber-400 font-mono bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-500/30 font-bold" id="prediction-surplus-badge">☀️ Overschot: -- kWh</span>
                             <button onclick="loadChartData()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                 <span>Herberekenen</span>

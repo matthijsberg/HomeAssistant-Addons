@@ -10,6 +10,18 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.22.0] — 2026-09-08 (Enforce Summer Lockout for CV Space Heating & Compact Mobile Badges)
+
+### Fixed
+- **Summer Lockout for CV Space Heating:**
+  - Resolved root cause of nighttime load showing ~550 W instead of ~300 W. The predictive engine had a legacy threshold planning 240 W of space heating (`CV (+kW)`) whenever outdoor temperature dropped under 15.5°C at night, despite being in early September.
+  - Enforced strict summer lockout rules from `heatpump_config.json`: when 24h mean outdoor temperature $\ge 15^\circ\text{C}$, maximum temperature $\ge 18^\circ\text{C}$, or month is May–September, space heating is strictly locked at 0.0 kW.
+  - Night load (01:00–06:00) now cleanly sits at pure unallocated baseline of **320 W** with 0 CV load and the red net line tracking exactly along the 320 W bar.
+- **Compact Mobile Prediction Badges:**
+  - Streamlined badge padding and labels (`Ongedefinieerd: 7x24`, `⚡ Verbruik: XX.X kWh`, `💶 Netto: €X.XX`, `☀️ Overschot: X.X kWh`) to wrap cleanly on mobile screens without truncation.
+
+---
+
 ## [0.21.0] — 2026-09-08 (Calibrated ~300W Night Standby & 24h Total Predicted Energy / Cost Engine)
 
 ### Added
