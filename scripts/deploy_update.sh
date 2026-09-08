@@ -8,7 +8,7 @@ BUMP_TYPE="${1:-patch}"
 ADDON_DIR="/config/addons/open-hems"
 ARCHIVE_DIR="/config/addons_archive/open-hems"
 MAX_BACKUPS=5
-SSH_KEY="/root/.ssh/id_ed25519"
+SSH_KEY="/config/.ssh/id_ed25519"
 SSH_HOST="172.30.32.1"
 SSH_PORT="2222"
 

@@ -2,12 +2,12 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.4.0
+Version: 0.4.1
 Generic Energy Management Platform:
-  - Solidified Data Collection Layer (Laag 1):
-      * InfluxDB 1.8 / 2.x Time-Series Storage (hermes & hassio) with connection testing
-      * MQTT Message Broker (Mosquitto) with TCP socket & protocol handshake testing
-      * Real-time line-protocol telemetry ingestion and status monitoring
+  - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
+      * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
+      * MQTT Multi-Broker CRUD (Local Mosquitto, Remote Brokers, Cloud Gateways)
+      * Native Real-Time Connection Testers & Line Protocol Ingest Monitor
   - Decoupled Policy Engine with 3 Fundamental Policy Archetypes:
       1. ShiftableConsumerPolicy (Verbruik zonder opslag: vaatwasser, wasmachine)
       2. ThermalBufferPolicy (Buffer zonder teruggave: 350L SWW, CV vloer)
@@ -209,31 +209,51 @@ def ensure_framework_defaults(cfg: dict):
     """Initializes the generic framework defaults if config is fresh."""
     dirty = False
 
-    # InfluxDB storage config
-    if "influxdb" not in cfg:
-        cfg["influxdb"] = {
-            "url": "http://a0d7b954-influxdb:8086",
-            "database": "hermes",
-            "read_database": "hassio",
-            "username": "hermes",
-            "password": "",
-            "retention_policy": "autogen",
-            "enabled": True
-        }
+    # Multi-instance InfluxDB connections
+    if "influxdb_connections" not in cfg or not cfg["influxdb_connections"]:
+        cfg["influxdb_connections"] = [
+            {
+                "id": "local_ha_influxdb",
+                "name": "Lokale Home Assistant InfluxDB (1.8)",
+                "type": "influx_v1",
+                "url": cfg.get("influxdb", {}).get("url", "http://a0d7b954-influxdb:8086"),
+                "database": cfg.get("influxdb", {}).get("database", "hermes"),
+                "read_database": cfg.get("influxdb", {}).get("read_database", "hassio"),
+                "username": cfg.get("influxdb", {}).get("username", "hermes"),
+                "password": cfg.get("influxdb", {}).get("password", ""),
+                "retention_policy": cfg.get("influxdb", {}).get("retention_policy", "autogen"),
+                "enabled": True,
+                "is_default": True
+            }
+        ]
         dirty = True
 
-    # MQTT broker config
+    # Multi-instance MQTT connections
+    if "mqtt_connections" not in cfg or not cfg["mqtt_connections"]:
+        cfg["mqtt_connections"] = [
+            {
+                "id": "local_mosquitto",
+                "name": "Lokale Mosquitto Broker",
+                "type": "standard",
+                "host": cfg.get("mqtt", {}).get("host", "core-mosquitto"),
+                "port": cfg.get("mqtt", {}).get("port", 1883),
+                "base_topic": cfg.get("mqtt", {}).get("base_topic", "openhems"),
+                "client_id": cfg.get("mqtt", {}).get("client_id", "open-hems-collector"),
+                "username": cfg.get("mqtt", {}).get("username", ""),
+                "password": cfg.get("mqtt", {}).get("password", ""),
+                "tls": cfg.get("mqtt", {}).get("tls", False),
+                "enabled": True,
+                "is_default": True
+            }
+        ]
+        dirty = True
+
+    # Keep top-level influxdb and mqtt pointers synchronized
+    if "influxdb" not in cfg:
+        cfg["influxdb"] = cfg["influxdb_connections"][0]
+        dirty = True
     if "mqtt" not in cfg:
-        cfg["mqtt"] = {
-            "host": "core-mosquitto",
-            "port": 1883,
-            "username": "",
-            "password": "",
-            "base_topic": "openhems",
-            "client_id": "open-hems-collector",
-            "tls": False,
-            "enabled": True
-        }
+        cfg["mqtt"] = cfg["mqtt_connections"][0]
         dirty = True
 
     if "providers" not in cfg:
@@ -428,13 +448,15 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.4.0",
+                "version": "0.4.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
                 "total_devices": len(cfg.get("devices", [])),
                 "total_policies": len(cfg.get("policies", [])),
                 "total_tariffs": len(cfg.get("tariffs_list", [])),
+                "total_influx_conns": len(cfg.get("influxdb_connections", [])),
+                "total_mqtt_conns": len(cfg.get("mqtt_connections", [])),
                 "dhw_optimal_run": cfg.get("last_optimal_run", "13:00"),
                 "dhw_temperature": 52.8,
                 "heatpump_power_w": 33.0,
@@ -448,6 +470,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             cfg = load_json(CONFIG_FILE)
             ensure_framework_defaults(cfg)
             self._send_json({
+                "influxdb_connections": cfg.get("influxdb_connections", []),
+                "mqtt_connections": cfg.get("mqtt_connections", []),
                 "influxdb": cfg.get("influxdb", {}),
                 "mqtt": cfg.get("mqtt", {})
             })
@@ -460,9 +484,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ic = cfg.get("influxdb", {})
             stats = {"hassio_series": 2330, "hermes_series": 0, "status": "online"}
             try:
-                # Query hermes database measurements
                 clean_url = ic.get("url", "http://a0d7b954-influxdb:8086").rstrip("/")
-                q_url = f"{clean_url}/query?" + urllib.parse.urlencode({"q": f"SHOW MEASUREMENTS ON {ic.get('database', 'hermes')}"})
+                target_db = ic.get("database", "hermes")
+                q_url = f"{clean_url}/query?" + urllib.parse.urlencode({"q": f"SHOW MEASUREMENTS ON {target_db}"})
                 req = urllib.request.Request(q_url)
                 if ic.get("username") and ic.get("password"):
                     auth = base64.b64encode(f"{ic['username']}:{ic['password']}".encode()).decode()
@@ -629,21 +653,43 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             self._send_json(res)
             return
 
-        # INFRASTRUCTURE: Save InfluxDB Settings
+        # INFRASTRUCTURE: Save / Upsert InfluxDB Connection Profile
         if path == "/api/infrastructure/influxdb":
             cfg = load_json(CONFIG_FILE)
             ensure_framework_defaults(cfg)
-            cfg["influxdb"] = {
-                "url": body.get("url", "http://a0d7b954-influxdb:8086"),
-                "database": body.get("database", "hermes"),
-                "read_database": body.get("read_database", "hassio"),
-                "username": body.get("username", "hermes"),
-                "password": body.get("password", ""),
-                "retention_policy": body.get("retention_policy", "autogen"),
-                "enabled": bool(body.get("enabled", True))
-            }
+            conn_id = body.get("id") or f"influx_{int(datetime.now().timestamp())}"
+            updated = False
+            conns = cfg.setdefault("influxdb_connections", [])
+            conn_obj = None
+            for c in conns:
+                if c["id"] == conn_id:
+                    for k in ["name", "type", "url", "database", "read_database", "username", "password", "retention_policy", "enabled", "is_default"]:
+                        if k in body:
+                            c[k] = body[k]
+                    updated = True
+                    conn_obj = c
+                    break
+            if not updated or conn_obj is None:
+                conn_obj = {
+                    "id": conn_id,
+                    "name": body.get("name", "Nieuwe InfluxDB Instantie"),
+                    "type": body.get("type", "influx_v1"),
+                    "url": body.get("url", "http://localhost:8086"),
+                    "database": body.get("database", "hermes"),
+                    "read_database": body.get("read_database", "hassio"),
+                    "username": body.get("username", "hermes"),
+                    "password": body.get("password", ""),
+                    "retention_policy": body.get("retention_policy", "autogen"),
+                    "enabled": bool(body.get("enabled", True)),
+                    "is_default": bool(body.get("is_default", False))
+                }
+                conns.append(conn_obj)
+
+            if conn_obj.get("is_default") or len(conns) == 1:
+                cfg["influxdb"] = conn_obj
+
             save_json(CONFIG_FILE, cfg)
-            self._send_json({"status": "saved", "influxdb": cfg["influxdb"]})
+            self._send_json({"status": "saved", "connection": conn_obj})
             return
 
         # INFRASTRUCTURE: Test MQTT
@@ -658,22 +704,44 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             self._send_json(res)
             return
 
-        # INFRASTRUCTURE: Save MQTT Settings
+        # INFRASTRUCTURE: Save / Upsert MQTT Connection Profile
         if path == "/api/infrastructure/mqtt":
             cfg = load_json(CONFIG_FILE)
             ensure_framework_defaults(cfg)
-            cfg["mqtt"] = {
-                "host": body.get("host", "core-mosquitto"),
-                "port": int(body.get("port", 1883)),
-                "username": body.get("username", ""),
-                "password": body.get("password", ""),
-                "base_topic": body.get("base_topic", "openhems"),
-                "client_id": body.get("client_id", "open-hems-collector"),
-                "tls": bool(body.get("tls", False)),
-                "enabled": bool(body.get("enabled", True))
-            }
+            conn_id = body.get("id") or f"mqtt_{int(datetime.now().timestamp())}"
+            updated = False
+            conns = cfg.setdefault("mqtt_connections", [])
+            conn_obj = None
+            for c in conns:
+                if c["id"] == conn_id:
+                    for k in ["name", "type", "host", "port", "username", "password", "base_topic", "client_id", "tls", "enabled", "is_default"]:
+                        if k in body:
+                            c[k] = int(body[k]) if k == "port" else body[k]
+                    updated = True
+                    conn_obj = c
+                    break
+            if not updated or conn_obj is None:
+                conn_obj = {
+                    "id": conn_id,
+                    "name": body.get("name", "Nieuwe MQTT Broker"),
+                    "type": body.get("type", "standard"),
+                    "host": body.get("host", "localhost"),
+                    "port": int(body.get("port", 1883)),
+                    "username": body.get("username", ""),
+                    "password": body.get("password", ""),
+                    "base_topic": body.get("base_topic", "openhems"),
+                    "client_id": body.get("client_id", "open-hems-collector"),
+                    "tls": bool(body.get("tls", False)),
+                    "enabled": bool(body.get("enabled", True)),
+                    "is_default": bool(body.get("is_default", False))
+                }
+                conns.append(conn_obj)
+
+            if conn_obj.get("is_default") or len(conns) == 1:
+                cfg["mqtt"] = conn_obj
+
             save_json(CONFIG_FILE, cfg)
-            self._send_json({"status": "saved", "mqtt": cfg["mqtt"]})
+            self._send_json({"status": "saved", "connection": conn_obj})
             return
 
         # INFRASTRUCTURE: Write Test Telemetry Line to InfluxDB
@@ -869,6 +937,40 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
 
+        # DELETE: InfluxDB Connection
+        m_inf = re.match(r"^/api/infrastructure/influxdb/([^/]+)$", path)
+        if m_inf:
+            c_id = m_inf.group(1)
+            cfg = load_json(CONFIG_FILE)
+            ensure_framework_defaults(cfg)
+            orig_len = len(cfg.get("influxdb_connections", []))
+            cfg["influxdb_connections"] = [c for c in cfg.get("influxdb_connections", []) if c["id"] != c_id]
+            if len(cfg["influxdb_connections"]) < orig_len:
+                if cfg.get("influxdb_connections"):
+                    cfg["influxdb"] = cfg["influxdb_connections"][0]
+                save_json(CONFIG_FILE, cfg)
+                self._send_json({"status": "deleted", "id": c_id})
+            else:
+                self._send_json({"error": "InfluxDB connection not found"}, 404)
+            return
+
+        # DELETE: MQTT Broker Connection
+        m_mq = re.match(r"^/api/infrastructure/mqtt/([^/]+)$", path)
+        if m_mq:
+            c_id = m_mq.group(1)
+            cfg = load_json(CONFIG_FILE)
+            ensure_framework_defaults(cfg)
+            orig_len = len(cfg.get("mqtt_connections", []))
+            cfg["mqtt_connections"] = [c for c in cfg.get("mqtt_connections", []) if c["id"] != c_id]
+            if len(cfg["mqtt_connections"]) < orig_len:
+                if cfg.get("mqtt_connections"):
+                    cfg["mqtt"] = cfg["mqtt_connections"][0]
+                save_json(CONFIG_FILE, cfg)
+                self._send_json({"status": "deleted", "id": c_id})
+            else:
+                self._send_json({"error": "MQTT connection not found"}, 404)
+            return
+
         # DELETE: Policy
         m_pol = re.match(r"^/api/policies/([^/]+)$", path)
         if m_pol:
@@ -931,7 +1033,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         self._send_json({"error": "Endpoint not found"}, 404)
 
     # =========================================================================
-    # HTML SINGLE PAGE APPLICATION (Framework UI + Laag 1 Infrastructure)
+    # HTML SINGLE PAGE APPLICATION (Framework UI + Multi-Instance Laag 1)
     # =========================================================================
     def _serve_spa(self):
         self.send_response(200)
@@ -1005,7 +1107,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             <!-- Nav Links -->
             <nav class="p-3 space-y-1">
-                <!-- LAAG 1: DATA & CONNECTIVITY (NEW) -->
+                <!-- LAAG 1: DATA & CONNECTIVITY -->
                 <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center justify-between">
                     <span>Data & Verbindingen (Laag 1)</span>
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -1013,7 +1115,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 <a href="#infrastructure" onclick="showTab('infrastructure')" id="nav-infrastructure" class="nav-link active flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
                     <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
                     <span>Verbindingen & Opslag</span>
-                    <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-emerald-950/80 text-emerald-300 font-medium rounded border border-emerald-800">LIVE</span>
+                    <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-emerald-950/80 text-emerald-300 font-medium rounded border border-emerald-800" id="badge-infra-conns">2</span>
                 </a>
 
                 <div class="px-3 pt-4 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Visualisatie & Status</div>
@@ -1053,8 +1155,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.4.0</strong></span>
-            <span>Laag 1 Solidified</span>
+            <span>Versie: <strong class="text-slate-400">v0.4.1</strong></span>
+            <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
 
@@ -1063,7 +1165,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         <header class="h-20 border-b border-[#1E293B] bg-[#0B0F17]/90 backdrop-blur px-8 flex items-center justify-between sticky top-0 z-30">
             <div>
                 <h1 class="text-lg font-bold text-white tracking-tight" id="header-title">Verbindingen & Opslag (Laag 1)</h1>
-                <p class="text-xs text-slate-400 mt-0.5" id="header-sub">Configureer InfluxDB tijdreeksopslag en MQTT streaming connectiviteit voor betrouwbare realtime data-ingest.</p>
+                <p class="text-xs text-slate-400 mt-0.5" id="header-sub">Beheer InfluxDB en MQTT instanties voor tijdreeksopslag en streaming connectiviteit.</p>
             </div>
             <div class="flex items-center gap-3">
                 <button onclick="refreshCurrentTab()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow transition-all flex items-center gap-1.5">
@@ -1076,7 +1178,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         <div class="p-8 space-y-6">
 
             <!-- TAB 0: INFRASTRUCTURE & CONNECTIVITY (LAAG 1) -->
-            <div id="view-infrastructure" class="tab-content active space-y-6">
+            <div id="view-infrastructure" class="tab-content active space-y-8">
                 <!-- Status & Telemetry Header Banner -->
                 <div class="bg-gradient-to-r from-emerald-950/80 via-[#0e1422] to-blue-950/80 border border-emerald-500/30 rounded-2xl p-5 shadow-xl flex items-center justify-between">
                     <div class="flex items-center gap-4">
@@ -1085,11 +1187,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         </div>
                         <div>
                             <div class="flex items-center gap-2">
-                                <span class="text-xs uppercase font-bold text-emerald-400 tracking-wider">Laag 1 Dataverzameling & Opslag</span>
-                                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">NO-MOCK-DATA</span>
+                                <span class="text-xs uppercase font-bold text-emerald-400 tracking-wider">Laag 1 Dataverzameling & Connectiviteit</span>
+                                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">STANDALONE & MULTI-INSTANCE</span>
                             </div>
                             <div class="text-sm font-bold text-white mt-1" id="infra-summary-text">
-                                InfluxDB actief (2.330 series in hassio) · MQTT broker gereed voor realtime streams.
+                                InfluxDB tijdreeksopslag & MQTT streaming gereed voor realtime datastromen.
                             </div>
                         </div>
                     </div>
@@ -1098,135 +1200,45 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </button>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <!-- INFLUXDB STORAGE CARD -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+                <!-- SECTION 1: INFLUXDB CONNECTIONS CRUD -->
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
                         <div>
-                            <div class="flex justify-between items-start mb-4">
-                                <div>
-                                    <h3 class="text-sm font-bold text-white flex items-center gap-2">
-                                        <span>InfluxDB Tijdreeksdatabase</span>
-                                        <span id="badge-influx-status" class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">Niet getest</span>
-                                    </h3>
-                                    <p class="text-xs text-slate-400 mt-0.5">Opslag van historische en realtime meetreeksen (Line Protocol).</p>
-                                </div>
-                                <div class="p-2 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
-                                </div>
-                            </div>
-
-                            <form id="form-influxdb" onsubmit="saveInfluxSettings(event)" class="space-y-3 text-xs text-slate-300">
-                                <div>
-                                    <label class="block mb-1 text-slate-400">Server URL & Poort</label>
-                                    <input type="text" id="influx_url" required value="http://a0d7b954-influxdb:8086" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
-                                </div>
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label class="block mb-1 text-slate-400">Data Opslag Database</label>
-                                        <input type="text" id="influx_database" required value="hermes" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
-                                    </div>
-                                    <div>
-                                        <label class="block mb-1 text-slate-400">HA Lees Database</label>
-                                        <input type="text" id="influx_read_database" required value="hassio" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
-                                    </div>
-                                </div>
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label class="block mb-1 text-slate-400">Gebruikersnaam</label>
-                                        <input type="text" id="influx_user" value="hermes" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                                    </div>
-                                    <div>
-                                        <label class="block mb-1 text-slate-400">Wachtwoord</label>
-                                        <input type="password" id="influx_pass" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                                    </div>
-                                </div>
-                                <div>
-                                    <label class="block mb-1 text-slate-400">Retentiebeleid (Retention Policy)</label>
-                                    <input type="text" id="influx_retention" value="autogen" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
-                                </div>
-
-                                <!-- Feedback message box -->
-                                <div id="influx-feedback" class="p-2.5 rounded-lg text-[11px] font-mono hidden"></div>
-
-                                <div class="flex justify-between items-center pt-3 border-t border-slate-800">
-                                    <button type="button" onclick="testInfluxDb()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition-all flex items-center gap-1.5">
-                                        <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                                        <span>Test Verbinding</span>
-                                    </button>
-                                    <button type="submit" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg shadow">
-                                        Opslaan
-                                    </button>
-                                </div>
-                            </form>
+                            <h2 class="text-base font-bold text-white flex items-center gap-2">
+                                <span>InfluxDB Tijdreeks Instanties</span>
+                                <span class="text-xs font-normal text-slate-400">(Tijdreeksopslag, lokaal of remote)</span>
+                            </h2>
+                            <p class="text-xs text-slate-400">Ondersteunt InfluxDB 1.8 en 2.x/Cloud voor het opslaan van realtime telemetrie en uitlezen van historie.</p>
                         </div>
+                        <button onclick="openInfluxModal()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow transition-all">
+                            + InfluxDB Instantie Toevoegen
+                        </button>
                     </div>
-
-                    <!-- MQTT BROKER CARD -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 shadow-xl flex flex-col justify-between">
-                        <div>
-                            <div class="flex justify-between items-start mb-4">
-                                <div>
-                                    <h3 class="text-sm font-bold text-white flex items-center gap-2">
-                                        <span>MQTT Message Broker</span>
-                                        <span id="badge-mqtt-status" class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">Niet getest</span>
-                                    </h3>
-                                    <p class="text-xs text-slate-400 mt-0.5">Streaming connectiviteit voor P1 meters, omvormers en warmtepomp telemetrie.</p>
-                                </div>
-                                <div class="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
-                                </div>
-                            </div>
-
-                            <form id="form-mqtt" onsubmit="saveMqttSettings(event)" class="space-y-3 text-xs text-slate-300">
-                                <div class="grid grid-cols-3 gap-3">
-                                    <div class="col-span-2">
-                                        <label class="block mb-1 text-slate-400">Broker Hostname / IP</label>
-                                        <input type="text" id="mqtt_host" required value="core-mosquitto" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
-                                    </div>
-                                    <div>
-                                        <label class="block mb-1 text-slate-400">Poort</label>
-                                        <input type="number" id="mqtt_port" required value="1883" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
-                                    </div>
-                                </div>
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label class="block mb-1 text-slate-400">Base Topic Prefix</label>
-                                        <input type="text" id="mqtt_topic" value="openhems" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
-                                    </div>
-                                    <div>
-                                        <label class="block mb-1 text-slate-400">Client ID</label>
-                                        <input type="text" id="mqtt_client_id" value="open-hems-collector" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
-                                    </div>
-                                </div>
-                                <div class="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label class="block mb-1 text-slate-400">Gebruikersnaam</label>
-                                        <input type="text" id="mqtt_user" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                                    </div>
-                                    <div>
-                                        <label class="block mb-1 text-slate-400">Wachtwoord</label>
-                                        <input type="password" id="mqtt_pass" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
-                                    </div>
-                                </div>
-
-                                <!-- Feedback message box -->
-                                <div id="mqtt-feedback" class="p-2.5 rounded-lg text-[11px] font-mono hidden"></div>
-
-                                <div class="flex justify-between items-center pt-3 border-t border-slate-800">
-                                    <button type="button" onclick="testMqtt()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition-all flex items-center gap-1.5">
-                                        <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                                        <span>Test Verbinding</span>
-                                    </button>
-                                    <button type="submit" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg shadow">
-                                        Opslaan
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
+                    <div id="influx-conns-container" class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <!-- Loaded dynamically -->
                     </div>
                 </div>
 
-                <!-- LIVE TELEMETRY STREAM STATUS CARD -->
+                <!-- SECTION 2: MQTT BROKERS CRUD -->
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h2 class="text-base font-bold text-white flex items-center gap-2">
+                                <span>MQTT Message Brokers</span>
+                                <span class="text-xs font-normal text-slate-400">(Streaming data-inname en events)</span>
+                            </h2>
+                            <p class="text-xs text-slate-400">Verbind met lokale Home Assistant Mosquitto brokers, externe cloud brokers of omvormer gateways.</p>
+                        </div>
+                        <button onclick="openMqttModal()" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-xl shadow transition-all">
+                            + MQTT Broker Toevoegen
+                        </button>
+                    </div>
+                    <div id="mqtt-conns-container" class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <!-- Loaded dynamically -->
+                    </div>
+                </div>
+
+                <!-- SECTION 3: LIVE TELEMETRY STREAM STATUS CARD -->
                 <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 shadow-xl space-y-4">
                     <div class="flex justify-between items-center">
                         <div>
@@ -1256,33 +1268,24 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 </div>
             </div>
 
-            <!-- TAB 1: 24H STACKED BAR GRAPH & RECOMMENDATION BALLOONS -->
+            <!-- TAB 1: 24H STACKED BAR GRAPH -->
             <div id="view-dashboard" class="tab-content space-y-6">
-                <!-- Recommendation Balloon Banner -->
                 <div id="recommendation-banner" class="bg-gradient-to-r from-emerald-950/80 via-[#0e1422] to-amber-950/80 border border-emerald-500/40 rounded-2xl p-4 shadow-xl flex items-center justify-between">
                     <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xl shadow-[0_0_15px_rgba(16,185,129,0.3)]">
-                            💡
-                        </div>
+                        <div class="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xl shadow-[0_0_15px_rgba(16,185,129,0.3)]">💡</div>
                         <div>
                             <span class="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">Dynamisch Verbruiksadvies</span>
-                            <div class="text-sm font-bold text-white mt-0.5" id="banner-text">
-                                Goedkoopste stroom verwacht om 13:00 (€0.18/kWh) — Warmtepomp buffert automatisch naar 60°C!
-                            </div>
+                            <div class="text-sm font-bold text-white mt-0.5" id="banner-text">Bezig met laden...</div>
                         </div>
                     </div>
-                    <span class="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" id="banner-tag">
-                        OPTIMAL DISPATCH
-                    </span>
+                    <span class="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" id="banner-tag">OPTIMAL DISPATCH</span>
                 </div>
 
-                <!-- Battery Economic Status Banner -->
                 <div class="bg-[#0e1422] border border-[#1E293B] rounded-xl p-3.5 flex items-center gap-3 text-xs text-slate-300">
                     <span class="text-base">🔋</span>
                     <span id="battery-status-banner" class="font-mono text-emerald-400">Accu-beleid wordt geëvalueerd...</span>
                 </div>
 
-                <!-- The Stacked Bar Chart Card -->
                 <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 shadow-xl">
                     <div class="flex justify-between items-center mb-6">
                         <div>
@@ -1402,6 +1405,141 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
     </main>
 
+    <!-- MODAL: ADD / EDIT INFLUXDB CONNECTION PROFILE -->
+    <div id="influx-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
+        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-lg text-xs text-slate-300">
+            <h3 class="text-sm font-bold text-white mb-4" id="modal-influx-title">InfluxDB Instantie Configureren</h3>
+            <form onsubmit="saveInfluxModal(event)" class="space-y-3">
+                <input type="hidden" id="modal-influx-id">
+                <div>
+                    <label class="block mb-1 text-slate-400">Naam Instantie</label>
+                    <input type="text" id="modal-influx-name" required placeholder="bijv. Lokale Home Assistant of Remote Server" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Type / Versie</label>
+                        <select id="modal-influx-type" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                            <option value="influx_v1">InfluxDB 1.8 (User/Password)</option>
+                            <option value="influx_v2">InfluxDB 2.x / Cloud (Token/Org)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Server URL</label>
+                        <input type="text" id="modal-influx-url" required value="http://a0d7b954-influxdb:8086" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Data Opslag Database</label>
+                        <input type="text" id="modal-influx-db" required value="hermes" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">HA Lees Database</label>
+                        <input type="text" id="modal-influx-read-db" required value="hassio" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Gebruikersnaam / Org</label>
+                        <input type="text" id="modal-influx-user" value="hermes" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Wachtwoord / Token</label>
+                        <input type="password" id="modal-influx-pass" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                    </div>
+                </div>
+                <div>
+                    <label class="block mb-1 text-slate-400">Retentiebeleid (Retention Policy)</label>
+                    <input type="text" id="modal-influx-retention" value="autogen" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                </div>
+                <label class="flex items-center gap-2 pt-1">
+                    <input type="checkbox" id="modal-influx-default" class="rounded bg-slate-900 text-blue-600 border-slate-700">
+                    <span class="text-slate-300 text-xs">Instellen als standaard opslag</span>
+                </label>
+
+                <div id="modal-influx-feedback" class="p-2 rounded text-[11px] font-mono hidden"></div>
+
+                <div class="flex justify-between items-center pt-3 border-t border-slate-800">
+                    <button type="button" onclick="testModalInflux()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition-all flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        <span>Test Verbinding</span>
+                    </button>
+                    <div class="flex gap-2">
+                        <button type="button" onclick="closeModal('influx-modal')" class="px-3 py-1.5 bg-slate-800 text-slate-400 rounded-lg">Annuleren</button>
+                        <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white font-semibold rounded-lg shadow">Opslaan</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: ADD / EDIT MQTT BROKER PROFILE -->
+    <div id="mqtt-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
+        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-lg text-xs text-slate-300">
+            <h3 class="text-sm font-bold text-white mb-4" id="modal-mqtt-title">MQTT Broker Configureren</h3>
+            <form onsubmit="saveMqttModal(event)" class="space-y-3">
+                <input type="hidden" id="modal-mqtt-id">
+                <div>
+                    <label class="block mb-1 text-slate-400">Naam Broker</label>
+                    <input type="text" id="modal-mqtt-name" required placeholder="bijv. Lokale Mosquitto of Cloud Gateway" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                </div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="col-span-2">
+                        <label class="block mb-1 text-slate-400">Broker Hostname / IP</label>
+                        <input type="text" id="modal-mqtt-host" required value="core-mosquitto" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Poort</label>
+                        <input type="number" id="modal-mqtt-port" required value="1883" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Base Topic Prefix</label>
+                        <input type="text" id="modal-mqtt-topic" value="openhems" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Client ID</label>
+                        <input type="text" id="modal-mqtt-client-id" value="open-hems-collector" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block mb-1 text-slate-400">Gebruikersnaam</label>
+                        <input type="text" id="modal-mqtt-user" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                    </div>
+                    <div>
+                        <label class="block mb-1 text-slate-400">Wachtwoord</label>
+                        <input type="password" id="modal-mqtt-pass" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                    </div>
+                </div>
+                <div class="flex items-center gap-6 pt-1">
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" id="modal-mqtt-tls" class="rounded bg-slate-900 text-amber-600 border-slate-700">
+                        <span class="text-slate-300 text-xs">TLS/SSL Encryptie</span>
+                    </label>
+                    <label class="flex items-center gap-2">
+                        <input type="checkbox" id="modal-mqtt-default" class="rounded bg-slate-900 text-amber-600 border-slate-700">
+                        <span class="text-slate-300 text-xs">Instellen als standaard broker</span>
+                    </label>
+                </div>
+
+                <div id="modal-mqtt-feedback" class="p-2 rounded text-[11px] font-mono hidden"></div>
+
+                <div class="flex justify-between items-center pt-3 border-t border-slate-800">
+                    <button type="button" onclick="testModalMqtt()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg transition-all flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        <span>Test Verbinding</span>
+                    </button>
+                    <div class="flex gap-2">
+                        <button type="button" onclick="closeModal('mqtt-modal')" class="px-3 py-1.5 bg-slate-800 text-slate-400 rounded-lg">Annuleren</button>
+                        <button type="submit" class="px-3 py-1.5 bg-amber-600 text-white font-semibold rounded-lg shadow">Opslaan</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- MODAL: ADD / EDIT POLICY -->
     <div id="policy-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
         <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-lg text-xs text-slate-300 max-h-[90vh] overflow-y-auto">
@@ -1420,18 +1558,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <option value="shiftable_consumer">🧺 Verbruik Zonder Opslag (Vaatwasser, Wasmachine)</option>
                     </select>
                 </div>
-
-                <!-- Device Selector for Policy Binding -->
                 <div>
                     <label class="block mb-1 text-slate-400">Gekoppelde HEMS Apparaten (Selecteer één of meer)</label>
                     <div id="modal-pol-devices-list" class="bg-[#0B0F17] border border-slate-800 rounded-lg p-2.5 max-h-36 overflow-y-auto space-y-1.5 font-sans text-xs">
                         <span class="text-slate-500 italic">Apparaten laden...</span>
                     </div>
                 </div>
-
-                <!-- Dynamic Parameters Container -->
                 <div id="pol-params-container" class="space-y-3 pt-2 border-t border-slate-800"></div>
-
                 <div class="flex justify-end gap-2 pt-3 border-t border-slate-800">
                     <button type="button" onclick="closeModal('policy-modal')" class="px-3 py-1.5 bg-slate-800 text-slate-400 rounded-lg">Annuleren</button>
                     <button type="submit" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-lg">Opslaan</button>
@@ -1440,7 +1573,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
     </div>
 
-    <!-- MODAL: ADD / EDIT DEVICE (Hardware & HA Selectors Only) -->
+    <!-- MODAL: ADD / EDIT DEVICE -->
     <div id="device-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
         <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 w-full max-w-lg text-xs text-slate-300">
             <h3 class="text-sm font-bold text-white mb-4" id="modal-dev-title">Apparaat Configureren (Hardware)</h3>
@@ -1462,7 +1595,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <option value="baseload">Basislast / Sluipverbruik</option>
                     </select>
                 </div>
-
                 <div>
                     <label class="block mb-1 text-slate-400">Gekoppelde Vermogenssensor in Home Assistant (W of kW)</label>
                     <select id="modal-dev-ha-power" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono text-[11px]">
@@ -1475,7 +1607,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <option value="">-- Geen / Niet bestuurbaar --</option>
                     </select>
                 </div>
-
                 <div class="flex justify-end gap-2 pt-3 border-t border-slate-800">
                     <button type="button" onclick="closeModal('device-modal')" class="px-3 py-1.5 bg-slate-800 text-slate-400 rounded-lg">Annuleren</button>
                     <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white font-semibold rounded-lg">Opslaan</button>
@@ -1575,6 +1706,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         let haEntitiesCache = [];
         let currentPolicyParams = {};
         let activeTabId = 'infrastructure';
+        let cachedInfra = { influxdb_connections: [], mqtt_connections: [] };
 
         function showTab(tabId) {
             activeTabId = tabId;
@@ -1586,7 +1718,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             if (link) link.classList.add('active');
 
             const titles = {
-                'infrastructure': ['Verbindingen & Opslag (Laag 1)', 'Configureer InfluxDB tijdreeksopslag en MQTT streaming connectiviteit voor betrouwbare realtime data-ingest.'],
+                'infrastructure': ['Verbindingen & Opslag (Laag 1)', 'Beheer InfluxDB en MQTT instanties voor tijdreeksopslag en streaming connectiviteit.'],
                 'dashboard': ['24h Verwachting & Gestapeld Verbruik', 'Gestapelde uurgrafiek: basislast, warmtepomp, accu en zonne-advies'],
                 'policies': ['Beleidsregels & Orchestratie (Policy Engine)', 'Definieer overkoepelend beleid op basis van kosten, zonne-opwek en comfortguardrails.'],
                 'devices': ['Apparaten & Hardware (Physical Resources)', 'Koppel Home Assistant entiteiten en technische limieten.'],
@@ -1611,7 +1743,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         }
 
         // =========================================================================
-        // LAAG 1: INFRASTRUCTURE & CONNECTIVITY CONTROLLER
+        // LAAG 1: MULTI-INSTANCE INFRASTRUCTURE CONTROLLER
         // =========================================================================
         async function loadInfrastructure() {
             try {
@@ -1619,49 +1751,202 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     fetch('./api/infrastructure'),
                     fetch('./api/infrastructure/telemetry-stats')
                 ]);
-                const inf = await infRes.json();
+                cachedInfra = await infRes.json();
                 const stat = await statRes.json();
 
-                // Populate InfluxDB Form
-                const idb = inf.influxdb || {};
-                document.getElementById('influx_url').value = idb.url || 'http://a0d7b954-influxdb:8086';
-                document.getElementById('influx_database').value = idb.database || 'hermes';
-                document.getElementById('influx_read_database').value = idb.read_database || 'hassio';
-                document.getElementById('influx_user').value = idb.username || 'hermes';
-                if (idb.password) document.getElementById('influx_pass').value = idb.password;
-                document.getElementById('influx_retention').value = idb.retention_policy || 'autogen';
+                // Render InfluxDB Connections Cards
+                const infContainer = document.getElementById('influx-conns-container');
+                infContainer.innerHTML = '';
+                const idbList = cachedInfra.influxdb_connections || [];
 
-                // Populate MQTT Form
-                const mq = inf.mqtt || {};
-                document.getElementById('mqtt_host').value = mq.host || 'core-mosquitto';
-                document.getElementById('mqtt_port').value = mq.port || 1883;
-                document.getElementById('mqtt_topic').value = mq.base_topic || 'openhems';
-                document.getElementById('mqtt_client_id').value = mq.client_id || 'open-hems-collector';
-                document.getElementById('mqtt_user').value = mq.username || '';
-                if (mq.password) document.getElementById('mqtt_pass').value = mq.password;
+                idbList.forEach(c => {
+                    const card = document.createElement('div');
+                    card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 flex flex-col justify-between shadow-lg';
+                    card.innerHTML = `
+                        <div>
+                            <div class="flex justify-between items-start mb-2">
+                                <h4 class="font-bold text-white text-sm flex items-center gap-2">
+                                    <span>${c.name}</span>
+                                    ${c.is_default ? '<span class="px-1.5 py-0.5 rounded text-[9px] bg-blue-900/60 text-blue-300 border border-blue-800">STANDAARD</span>' : ''}
+                                </h4>
+                                <span id="badge-influx-${c.id}" class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">Gereed</span>
+                            </div>
+                            <p class="text-[11px] text-cyan-300 font-mono mb-2">${c.url}</p>
+                            <div class="grid grid-cols-2 gap-2 text-[11px] text-slate-300 bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800 mb-3 font-mono">
+                                <div>Opslag DB: <span class="text-white font-bold">${c.database}</span></div>
+                                <div>Lees DB: <span class="text-white">${c.read_database || 'geen'}</span></div>
+                                <div>Gebruiker: <span class="text-slate-400">${c.username || 'anoniem'}</span></div>
+                                <div>Retentie: <span class="text-slate-400">${c.retention_policy}</span></div>
+                            </div>
+                        </div>
+                        <div class="flex justify-between items-center pt-3 border-t border-[#1E293B]">
+                            <button onclick='testSpecificInflux(${JSON.stringify(c)})' class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg flex items-center gap-1">
+                                <svg class="w-3 h-3 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                <span>Testen</span>
+                            </button>
+                            <div class="flex gap-2">
+                                <button onclick='openInfluxModal(${JSON.stringify(c)})' class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg">Bewerken</button>
+                                <button onclick="deleteInfluxConn('${c.id}')" class="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800 text-xs rounded-lg">Verwijderen</button>
+                            </div>
+                        </div>
+                    `;
+                    infContainer.appendChild(card);
+                });
 
-                // Update Stats
+                // Render MQTT Brokers Cards
+                const mqContainer = document.getElementById('mqtt-conns-container');
+                mqContainer.innerHTML = '';
+                const mqList = cachedInfra.mqtt_connections || [];
+
+                mqList.forEach(c => {
+                    const card = document.createElement('div');
+                    card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 flex flex-col justify-between shadow-lg';
+                    card.innerHTML = `
+                        <div>
+                            <div class="flex justify-between items-start mb-2">
+                                <h4 class="font-bold text-white text-sm flex items-center gap-2">
+                                    <span>${c.name}</span>
+                                    ${c.is_default ? '<span class="px-1.5 py-0.5 rounded text-[9px] bg-amber-900/60 text-amber-300 border border-amber-800">STANDAARD</span>' : ''}
+                                </h4>
+                                <span id="badge-mqtt-${c.id}" class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">Gereed</span>
+                            </div>
+                            <p class="text-[11px] text-amber-300 font-mono mb-2">${c.host}:${c.port} ${c.tls ? '(TLS ✓)' : ''}</p>
+                            <div class="grid grid-cols-2 gap-2 text-[11px] text-slate-300 bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800 mb-3 font-mono">
+                                <div>Topic Prefix: <span class="text-white">${c.base_topic}</span></div>
+                                <div>Client ID: <span class="text-white">${c.client_id}</span></div>
+                                <div>Gebruiker: <span class="text-slate-400">${c.username || 'geen'}</span></div>
+                                <div>Status: <span class="text-emerald-400">Actief</span></div>
+                            </div>
+                        </div>
+                        <div class="flex justify-between items-center pt-3 border-t border-[#1E293B]">
+                            <button onclick='testSpecificMqtt(${JSON.stringify(c)})' class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg flex items-center gap-1">
+                                <svg class="w-3 h-3 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                <span>Testen</span>
+                            </button>
+                            <div class="flex gap-2">
+                                <button onclick='openMqttModal(${JSON.stringify(c)})' class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg">Bewerken</button>
+                                <button onclick="deleteMqttConn('${c.id}')" class="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800 text-xs rounded-lg">Verwijderen</button>
+                            </div>
+                        </div>
+                    `;
+                    mqContainer.appendChild(card);
+                });
+
+                // Update Total Conns Badge
+                document.getElementById('badge-infra-conns').innerText = idbList.length + mqList.length;
+
+                // Update Telemetry Stats
                 document.getElementById('stat-hassio-count').innerText = (stat.hassio_series || 2330).toLocaleString();
                 document.getElementById('stat-hermes-count').innerText = `${stat.hermes_series || 0} series`;
-
-                // Run connection test silently to populate status badges
-                testInfluxDb(true);
             } catch (e) {
                 console.error('Error loading infrastructure:', e);
             }
         }
 
-        async function testInfluxDb(silent = false) {
-            const badge = document.getElementById('badge-influx-status');
-            const fb = document.getElementById('influx-feedback');
-            badge.innerText = 'Testen...';
-            badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-yellow-900/60 text-yellow-300 border border-yellow-800';
+        async function testSpecificInflux(c) {
+            const badge = document.getElementById(`badge-influx-${c.id}`);
+            if (badge) {
+                badge.innerText = 'Testen...';
+                badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-yellow-900/60 text-yellow-300 border border-yellow-800';
+            }
+            try {
+                const res = await fetch('./api/infrastructure/influxdb/test', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(c)
+                });
+                const d = await res.json();
+                if (badge) {
+                    if (d.status === 'success') {
+                        badge.innerText = `🟢 OK (${d.latency_ms}ms)`;
+                        badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800';
+                    } else {
+                        badge.innerText = '🔴 Fout';
+                        badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-red-950 text-red-300 border border-red-800';
+                        alert(`InfluxDB Test Fout: ${d.message}`);
+                    }
+                }
+            } catch (e) {
+                if (badge) {
+                    badge.innerText = '🔴 Onbereikbaar';
+                    badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-red-950 text-red-300 border border-red-800';
+                }
+            }
+        }
+
+        async function testSpecificMqtt(c) {
+            const badge = document.getElementById(`badge-mqtt-${c.id}`);
+            if (badge) {
+                badge.innerText = 'Testen...';
+                badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-yellow-900/60 text-yellow-300 border border-yellow-800';
+            }
+            try {
+                const res = await fetch('./api/infrastructure/mqtt/test', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(c)
+                });
+                const d = await res.json();
+                if (badge) {
+                    if (d.status === 'success') {
+                        badge.innerText = `🟢 OK (${d.latency_ms}ms)`;
+                        badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800';
+                    } else {
+                        badge.innerText = '🔴 Fout';
+                        badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-red-950 text-red-300 border border-red-800';
+                        alert(`MQTT Test Fout: ${d.message}`);
+                    }
+                }
+            } catch (e) {
+                if (badge) {
+                    badge.innerText = '🔴 Onbereikbaar';
+                    badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-red-950 text-red-300 border border-red-800';
+                }
+            }
+        }
+
+        function openInfluxModal(c = null) {
+            const fb = document.getElementById('modal-influx-feedback');
+            fb.classList.add('hidden');
+            if (c) {
+                document.getElementById('modal-influx-title').innerText = 'InfluxDB Instantie Bewerken';
+                document.getElementById('modal-influx-id').value = c.id;
+                document.getElementById('modal-influx-name').value = c.name;
+                document.getElementById('modal-influx-type').value = c.type || 'influx_v1';
+                document.getElementById('modal-influx-url').value = c.url;
+                document.getElementById('modal-influx-db').value = c.database;
+                document.getElementById('modal-influx-read-db').value = c.read_database || 'hassio';
+                document.getElementById('modal-influx-user').value = c.username || '';
+                document.getElementById('modal-influx-pass').value = c.password || '';
+                document.getElementById('modal-influx-retention').value = c.retention_policy || 'autogen';
+                document.getElementById('modal-influx-default').checked = !!c.is_default;
+            } else {
+                document.getElementById('modal-influx-title').innerText = 'Nieuwe InfluxDB Instantie Toevoegen';
+                document.getElementById('modal-influx-id').value = '';
+                document.getElementById('modal-influx-name').value = '';
+                document.getElementById('modal-influx-type').value = 'influx_v1';
+                document.getElementById('modal-influx-url').value = 'http://localhost:8086';
+                document.getElementById('modal-influx-db').value = 'hermes';
+                document.getElementById('modal-influx-read-db').value = 'hassio';
+                document.getElementById('modal-influx-user').value = 'hermes';
+                document.getElementById('modal-influx-pass').value = '';
+                document.getElementById('modal-influx-retention').value = 'autogen';
+                document.getElementById('modal-influx-default').checked = false;
+            }
+            document.getElementById('influx-modal').classList.remove('hidden');
+        }
+
+        async function testModalInflux() {
+            const fb = document.getElementById('modal-influx-feedback');
+            fb.classList.remove('hidden');
+            fb.className = 'p-2 rounded text-[11px] font-mono bg-yellow-950/60 text-yellow-300 border border-yellow-800 block';
+            fb.innerText = 'Verbinding testen met InfluxDB...';
 
             const payload = {
-                url: document.getElementById('influx_url').value,
-                database: document.getElementById('influx_database').value,
-                username: document.getElementById('influx_user').value,
-                password: document.getElementById('influx_pass').value
+                url: document.getElementById('modal-influx-url').value,
+                database: document.getElementById('modal-influx-db').value,
+                username: document.getElementById('modal-influx-user').value,
+                password: document.getElementById('modal-influx-pass').value
             };
 
             try {
@@ -1671,60 +1956,93 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     body: JSON.stringify(payload)
                 });
                 const d = await res.json();
-
                 if (d.status === 'success') {
-                    badge.innerText = `🟢 Verbonden (${d.latency_ms}ms)`;
-                    badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800';
-                    if (!silent) {
-                        fb.className = 'p-2.5 rounded-lg text-[11px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-800 block';
-                        fb.innerText = `✓ ${d.message} [Databases: ${(d.databases || []).join(', ')}]`;
-                    }
+                    fb.className = 'p-2 rounded text-[11px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-800 block';
+                    fb.innerText = `✓ ${d.message} [Databases: ${(d.databases || []).join(', ')}] (${d.latency_ms}ms)`;
                 } else {
-                    badge.innerText = '🔴 Fout';
-                    badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-red-950 text-red-300 border border-red-800';
-                    if (!silent) {
-                        fb.className = 'p-2.5 rounded-lg text-[11px] font-mono bg-red-950/60 text-red-300 border border-red-800 block';
-                        fb.innerText = `❌ ${d.message}`;
-                    }
+                    fb.className = 'p-2 rounded text-[11px] font-mono bg-red-950/60 text-red-300 border border-red-800 block';
+                    fb.innerText = `❌ ${d.message}`;
                 }
             } catch (e) {
-                badge.innerText = '🔴 Onbereikbaar';
-                badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-red-950 text-red-300 border border-red-800';
+                fb.className = 'p-2 rounded text-[11px] font-mono bg-red-950/60 text-red-300 border border-red-800 block';
+                fb.innerText = `❌ Netwerkfout: ${e}`;
             }
         }
 
-        async function saveInfluxSettings(e) {
+        async function saveInfluxModal(e) {
             e.preventDefault();
+            const id = document.getElementById('modal-influx-id').value;
             const payload = {
-                url: document.getElementById('influx_url').value,
-                database: document.getElementById('influx_database').value,
-                read_database: document.getElementById('influx_read_database').value,
-                username: document.getElementById('influx_user').value,
-                password: document.getElementById('influx_pass').value,
-                retention_policy: document.getElementById('influx_retention').value,
+                id: id || undefined,
+                name: document.getElementById('modal-influx-name').value,
+                type: document.getElementById('modal-influx-type').value,
+                url: document.getElementById('modal-influx-url').value,
+                database: document.getElementById('modal-influx-db').value,
+                read_database: document.getElementById('modal-influx-read-db').value,
+                username: document.getElementById('modal-influx-user').value,
+                password: document.getElementById('modal-influx-pass').value,
+                retention_policy: document.getElementById('modal-influx-retention').value,
+                is_default: document.getElementById('modal-influx-default').checked,
                 enabled: true
             };
-            const res = await fetch('./api/infrastructure/influxdb', {
+            await fetch('./api/infrastructure/influxdb', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
             });
-            const d = await res.json();
-            testInfluxDb();
+            closeModal('influx-modal');
+            loadInfrastructure();
         }
 
-        async function testMqtt() {
-            const badge = document.getElementById('badge-mqtt-status');
-            const fb = document.getElementById('mqtt-feedback');
-            badge.innerText = 'Testen...';
-            badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-yellow-900/60 text-yellow-300 border border-yellow-800';
+        async function deleteInfluxConn(id) {
+            if (!confirm('Weet je zeker dat je deze InfluxDB configuratie wilt verwijderen?')) return;
+            await fetch('./api/infrastructure/influxdb/' + id, { method: 'DELETE' });
+            loadInfrastructure();
+        }
+
+        function openMqttModal(c = null) {
+            const fb = document.getElementById('modal-mqtt-feedback');
+            fb.classList.add('hidden');
+            if (c) {
+                document.getElementById('modal-mqtt-title').innerText = 'MQTT Broker Bewerken';
+                document.getElementById('modal-mqtt-id').value = c.id;
+                document.getElementById('modal-mqtt-name').value = c.name;
+                document.getElementById('modal-mqtt-host').value = c.host;
+                document.getElementById('modal-mqtt-port').value = c.port;
+                document.getElementById('modal-mqtt-topic').value = c.base_topic || 'openhems';
+                document.getElementById('modal-mqtt-client-id').value = c.client_id || 'open-hems-collector';
+                document.getElementById('modal-mqtt-user').value = c.username || '';
+                document.getElementById('modal-mqtt-pass').value = c.password || '';
+                document.getElementById('modal-mqtt-tls').checked = !!c.tls;
+                document.getElementById('modal-mqtt-default').checked = !!c.is_default;
+            } else {
+                document.getElementById('modal-mqtt-title').innerText = 'Nieuwe MQTT Broker Toevoegen';
+                document.getElementById('modal-mqtt-id').value = '';
+                document.getElementById('modal-mqtt-name').value = '';
+                document.getElementById('modal-mqtt-host').value = 'core-mosquitto';
+                document.getElementById('modal-mqtt-port').value = 1883;
+                document.getElementById('modal-mqtt-topic').value = 'openhems';
+                document.getElementById('modal-mqtt-client-id').value = 'open-hems-collector';
+                document.getElementById('modal-mqtt-user').value = '';
+                document.getElementById('modal-mqtt-pass').value = '';
+                document.getElementById('modal-mqtt-tls').checked = false;
+                document.getElementById('modal-mqtt-default').checked = false;
+            }
+            document.getElementById('mqtt-modal').classList.remove('hidden');
+        }
+
+        async function testModalMqtt() {
+            const fb = document.getElementById('modal-mqtt-feedback');
+            fb.classList.remove('hidden');
+            fb.className = 'p-2 rounded text-[11px] font-mono bg-yellow-950/60 text-yellow-300 border border-yellow-800 block';
+            fb.innerText = 'Verbinding testen met MQTT broker...';
 
             const payload = {
-                host: document.getElementById('mqtt_host').value,
-                port: parseInt(document.getElementById('mqtt_port').value),
-                username: document.getElementById('mqtt_user').value,
-                password: document.getElementById('mqtt_pass').value,
-                client_id: document.getElementById('mqtt_client_id').value
+                host: document.getElementById('modal-mqtt-host').value,
+                port: parseInt(document.getElementById('modal-mqtt-port').value),
+                username: document.getElementById('modal-mqtt-user').value,
+                password: document.getElementById('modal-mqtt-pass').value,
+                client_id: document.getElementById('modal-mqtt-client-id').value
             };
 
             try {
@@ -1734,33 +2052,33 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     body: JSON.stringify(payload)
                 });
                 const d = await res.json();
-
                 if (d.status === 'success') {
-                    badge.innerText = `🟢 Verbonden (${d.latency_ms}ms)`;
-                    badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800';
-                    fb.className = 'p-2.5 rounded-lg text-[11px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-800 block';
-                    fb.innerText = `✓ ${d.message}`;
+                    fb.className = 'p-2 rounded text-[11px] font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-800 block';
+                    fb.innerText = `✓ ${d.message} (${d.latency_ms}ms)`;
                 } else {
-                    badge.innerText = '🔴 Verificatie Fout';
-                    badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-red-950 text-red-300 border border-red-800';
-                    fb.className = 'p-2.5 rounded-lg text-[11px] font-mono bg-red-950/60 text-red-300 border border-red-800 block';
-                    fb.innerText = `❌ ${d.message} (Controleer host/poort of gebruikersgegevens)`;
+                    fb.className = 'p-2 rounded text-[11px] font-mono bg-red-950/60 text-red-300 border border-red-800 block';
+                    fb.innerText = `❌ ${d.message}`;
                 }
             } catch (e) {
-                badge.innerText = '🔴 Onbereikbaar';
-                badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-red-950 text-red-300 border border-red-800';
+                fb.className = 'p-2 rounded text-[11px] font-mono bg-red-950/60 text-red-300 border border-red-800 block';
+                fb.innerText = `❌ Netwerkfout: ${e}`;
             }
         }
 
-        async function saveMqttSettings(e) {
+        async function saveMqttModal(e) {
             e.preventDefault();
+            const id = document.getElementById('modal-mqtt-id').value;
             const payload = {
-                host: document.getElementById('mqtt_host').value,
-                port: parseInt(document.getElementById('mqtt_port').value),
-                base_topic: document.getElementById('mqtt_topic').value,
-                client_id: document.getElementById('mqtt_client_id').value,
-                username: document.getElementById('mqtt_user').value,
-                password: document.getElementById('mqtt_pass').value,
+                id: id || undefined,
+                name: document.getElementById('modal-mqtt-name').value,
+                host: document.getElementById('modal-mqtt-host').value,
+                port: parseInt(document.getElementById('modal-mqtt-port').value),
+                base_topic: document.getElementById('modal-mqtt-topic').value,
+                client_id: document.getElementById('modal-mqtt-client-id').value,
+                username: document.getElementById('modal-mqtt-user').value,
+                password: document.getElementById('modal-mqtt-pass').value,
+                tls: document.getElementById('modal-mqtt-tls').checked,
+                is_default: document.getElementById('modal-mqtt-default').checked,
                 enabled: true
             };
             await fetch('./api/infrastructure/mqtt', {
@@ -1768,7 +2086,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
             });
-            testMqtt();
+            closeModal('mqtt-modal');
+            loadInfrastructure();
+        }
+
+        async function deleteMqttConn(id) {
+            if (!confirm('Weet je zeker dat je deze MQTT broker configuratie wilt verwijderen?')) return;
+            await fetch('./api/infrastructure/mqtt/' + id, { method: 'DELETE' });
+            loadInfrastructure();
         }
 
         async function writeTestTelemetryPoint() {

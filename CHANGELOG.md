@@ -10,6 +10,29 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.4.1] — 2026-09-08 (Multi-Instance InfluxDB & MQTT CRUD Console)
+
+### Added
+- **Multi-Instance CRUD for Time-Series Storage & Streaming Brokers:**
+  - Open HEMS is now 100% decoupled from single-instance or local-only assumptions.
+  - **InfluxDB Instances (`/api/infrastructure/influxdb`):**
+    - Users can add, edit, test, and delete multiple InfluxDB connections (e.g. local HA InfluxDB 1.8, remote dedicated servers, or InfluxDB 2.x Cloud with token/org).
+    - Dedicated connection modal with live connection tester (`testModalInflux`) reporting database existence, series count, and latency in ms.
+    - Selectable default/active storage instance.
+  - **MQTT Message Brokers (`/api/infrastructure/mqtt`):**
+    - Users can add, edit, test, and delete multiple MQTT broker endpoints (e.g. local Home Assistant Mosquitto, external cloud brokers, or dedicated IoT gateways).
+    - Dedicated broker modal with TLS/SSL toggle, base topic prefix, client ID, credentials, and live protocol handshake tester (`testModalMqtt`).
+    - Selectable default/active broker.
+  - **Live Multi-Instance UI Console:**
+    - Visual grid of configured InfluxDB and MQTT connection cards in the `Verbindingen & Opslag (Laag 1)` tab.
+    - Per-card `Testen`, `Bewerken`, and `Verwijderen` action buttons with real-time status badges.
+
+### Security & Deployment
+- Automated pre-commit secret scan verified: 0 credentials.
+- Automatic snapshot v0.4.0 archived prior to upgrade.
+
+---
+
 ## [0.4.0] — 2026-09-08 (Solidified Data Collection Layer: InfluxDB & MQTT)
 
 ### Added
