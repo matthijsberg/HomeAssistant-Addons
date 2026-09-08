@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.11.0
+Version: 0.11.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -29,6 +29,7 @@ import ssl
 import socket
 import base64
 import time
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 from pathlib import Path
@@ -257,16 +258,25 @@ def ensure_framework_defaults(cfg: dict):
                 "name": "Lokale Open HEMS InfluxDB (1.8)",
                 "type": "influx_v1",
                 "url": cfg.get("influxdb", {}).get("url", "http://a0d7b954-influxdb:8086"),
-                "database": cfg.get("influxdb", {}).get("database", "hermes"),
+                "database": "openhems",
                 "read_database": "openhems",
-                "username": cfg.get("influxdb", {}).get("username", "hermes"),
-                "password": cfg.get("influxdb", {}).get("password", ""),
-                "retention_policy": cfg.get("influxdb", {}).get("retention_policy", "autogen"),
+                "username": "openhems",
+                "password": "",
+                "retention_policy": "autogen",
                 "enabled": True,
                 "is_default": True
             }
         ]
         dirty = True
+    else:
+        for c in cfg["influxdb_connections"]:
+            if c.get("id") == "local_ha_influxdb":
+                if c.get("database") in ["hermes", "hassio"]:
+                    c["database"] = "openhems"
+                    dirty = True
+                if c.get("username") == "hermes":
+                    c["username"] = "openhems"
+                    dirty = True
 
     # Multi-instance MQTT connections
     if "mqtt_connections" not in cfg or not cfg["mqtt_connections"]:
@@ -531,11 +541,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
                 
                 # Query 100% strictly from openhems canonical database
-                # Group by 1m or 5m buckets (industry standard aggregation)
+                # Query actual non-empty points from today / last 24h
                 q = """
-                SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time > now() - 24h GROUP BY time(1m) fill(linear);
-                SELECT mean("power_w") as teruglevering_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time > now() - 24h GROUP BY time(1m) fill(linear);
-                SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time > now() - 24h GROUP BY time(1m) fill(linear);
+                SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time > now() - 24h GROUP BY time(1m) fill(previous);
+                SELECT mean("power_w") as teruglevering_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time > now() - 24h GROUP BY time(1m) fill(previous);
+                SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time > now() - 24h GROUP BY time(1m) fill(previous);
                 """
 
                 url = "http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
@@ -559,10 +569,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 series_verbruik_pos = []
                 series_selfcons_pos = []
                 
-                # Compute points
-                for i in range(len(afname_pts)):
+                # Compute points - find first index with real data
+                valid_indices = [idx for idx in range(len(afname_pts)) if (
+                    (afname_pts[idx][1] is not None) or 
+                    (idx < len(terug_pts) and terug_pts[idx][1] is not None) or 
+                    (idx < len(solar_pts) and solar_pts[idx][1] is not None)
+                )]
+                
+                # If we have recent data, show from the first real point (or at least the last 60 minutes)
+                start_idx = max(0, valid_indices[0] - 5) if valid_indices else max(0, len(afname_pts) - 60)
+                
+                for i in range(start_idx, len(afname_pts)):
                     ts_str = afname_pts[i][0]
-                    # Parse timestamp to local HH:MM
                     try:
                         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone()
                         time_label = dt.strftime("%H:%M")
@@ -571,12 +589,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     
                     labels.append(time_label)
                     
-                    # Values
                     afname = max(0.0, float(afname_pts[i][1] or 0.0))
                     terug = max(0.0, float(terug_pts[i][1] or 0.0)) if i < len(terug_pts) else 0.0
                     solar = abs(float(solar_pts[i][1] or 0.0)) if i < len(solar_pts) else 0.0
                     
-                    # Positive stack
                     verbruik = afname + max(0.0, solar - terug)
                     self_cons = min(solar, verbruik)
                     
@@ -584,7 +600,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     series_verbruik_pos.append(round(verbruik))
                     series_selfcons_pos.append(round(self_cons))
                     
-                    # Negative stack (for dual-polarity display like Grafana)
                     series_solar_neg.append(-round(solar))
                     series_terug_neg.append(-round(terug))
                 
@@ -708,7 +723,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.11.0",
+                "version": "0.11.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1497,7 +1512,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.11.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.11.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3545,7 +3560,172 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         self.wfile.write(html.encode("utf-8"))
 
 
+
+class HemsBackgroundCollector(threading.Thread):
+    """
+    Continuous background collector for Layer 1.
+    Samples all configured devices every 10s into an in-memory window accumulator.
+    Averages values over a 60-second tumble window to eliminate spikes and noise.
+    Flushes clean, noise-filtered 1-minute averages to the dedicated openhems InfluxDB.
+    """
+    def __init__(self, sample_interval_seconds=10, flush_window_seconds=60):
+        super().__init__(daemon=True, name="HemsBackgroundCollector")
+        self.sample_interval = sample_interval_seconds
+        self.flush_window = flush_window_seconds
+        self.running = True
+        self.last_write_status = "idle"
+        self.total_points_written = 0
+        self._lock = threading.Lock()
+        self._accumulator = {}
+        self._last_flush_time = time.time()
+
+    def run(self):
+        print(f"[Open HEMS Collector] Started 60s Window Accumulator (Sample: {self.sample_interval}s, Flush: {self.flush_window}s)")
+        time.sleep(3)
+        while self.running:
+            try:
+                self.sample_devices()
+                now = time.time()
+                if now - self._last_flush_time >= self.flush_window:
+                    self.flush_window_to_influx()
+                    self._last_flush_time = now
+            except Exception as e:
+                print(f"[Open HEMS Collector] Error in loop: {e}")
+            time.sleep(self.sample_interval)
+
+    def sample_devices(self):
+        cfg = load_json(CONFIG_FILE)
+        ha_states = get_ha_states_map()
+        if not ha_states:
+            return
+
+        def get_val(eid):
+            s = ha_states.get(eid, {}).get("state")
+            try:
+                return float(s)
+            except (ValueError, TypeError):
+                return None
+
+        with self._lock:
+            for dev in cfg.get("devices", []):
+                dev_id = dev.get("id")
+                dev_type = dev.get("type", "generic")
+                src_type = dev.get("source_type", "homeassistant")
+
+                # P1 Grid Meter
+                if dev_type == "grid_meter":
+                    p_imp = get_val(dev.get("ha_power_entity", "sensor.power_consumption"))
+                    p_exp = get_val(dev.get("parameters", {}).get("production_entity", "sensor.power_production"))
+                    if p_imp is not None:
+                        k = f"energy_telemetry|{dev_id}|grid_meter|IMPORT|{src_type}|ELECTRICITY"
+                        entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w"})
+                        entry["sum"] += p_imp
+                        entry["count"] += 1
+                    if p_exp is not None:
+                        k = f"energy_telemetry|{dev_id}|grid_meter|EXPORT|{src_type}|ELECTRICITY"
+                        entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w"})
+                        entry["sum"] += p_exp
+                        entry["count"] += 1
+
+                # Solar PV
+                elif dev_type == "solar_pv":
+                    p_sol = get_val(dev.get("ha_power_entity", "sensor.zonnepanelen_power_avg_5_minutes"))
+                    if p_sol is not None:
+                        k = f"energy_telemetry|{dev_id}|solar_pv|GENERATION|{src_type}|ELECTRICITY"
+                        entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w"})
+                        entry["sum"] += abs(p_sol)
+                        entry["count"] += 1
+
+                # Heat Pump
+                elif dev_type == "heat_pump":
+                    p_hp = get_val(dev.get("ha_power_entity", "sensor.warmtepomp_power"))
+                    if p_hp is not None:
+                        k = f"energy_telemetry|{dev_id}|heat_pump|CONSUMPTION|{src_type}|HEAT"
+                        entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w"})
+                        entry["sum"] += p_hp
+                        entry["count"] += 1
+
+                # Thermal Buffer (DHW Tank)
+                elif dev_type in ["thermal_buffer", "dhw_tank"]:
+                    t_dhw = get_val(dev.get("ha_temp_entity", "sensor.hc_dhw_temperature_r5t_dhw_tank"))
+                    if t_dhw is not None:
+                        k = f"energy_telemetry|{dev_id}|thermal_buffer|STORAGE|{src_type}|HEAT"
+                        entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "temperature_c"})
+                        entry["sum"] += t_dhw
+                        entry["count"] += 1
+
+            # Market & Weather Feeds
+            epex_val = get_val(cfg.get("providers", {}).get("epex_spot", {}).get("ha_sensor_entity", "sensor.energyzero_today_energy_current_hour_price"))
+            if epex_val is not None:
+                k = "market_tariffs|epex_spot|1h|spot_electricity"
+                entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "price_eur"})
+                entry["sum"] += epex_val
+                entry["count"] += 1
+
+            temp_val = get_val(cfg.get("providers", {}).get("open_meteo", {}).get("ha_temp_sensor", "sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature"))
+            if temp_val is not None:
+                k = "weather_forecast|wittboy"
+                entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "outdoor_temp_c"})
+                entry["sum"] += temp_val
+                entry["count"] += 1
+
+    def flush_window_to_influx(self):
+        with self._lock:
+            if not self._accumulator:
+                return
+            snapshot = self._accumulator
+            self._accumulator = {}
+
+        cfg = load_json(CONFIG_FILE)
+        sec = load_secrets()
+        active_conn = cfg.get("influxdb_connections", [{}])[0]
+        db_name = active_conn.get("database", "openhems")
+        db_user = active_conn.get("username", "openhems")
+        db_url = active_conn.get("url", "http://a0d7b954-influxdb:8086")
+        db_pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
+
+        now_ns = int(time.time() * 1e9)
+        lines = []
+
+        for k, v in snapshot.items():
+            if v["count"] == 0:
+                continue
+            mean_val = round(v["sum"] / v["count"], 2)
+            parts = k.split("|")
+            m_name = parts[0]
+
+            if m_name == "energy_telemetry":
+                dev_id, dev_type, flow, src_type, vector = parts[1], parts[2], parts[3], parts[4], parts[5]
+                field_name = v["type"]
+                lines.append(f"energy_telemetry,device_id={dev_id},device_type={dev_type},flow={flow},source_type={src_type},vector={vector} {field_name}={mean_val} {now_ns}")
+            elif m_name == "market_tariffs":
+                provider, res, t_type = parts[1], parts[2], parts[3]
+                lines.append(f"market_tariffs,provider={provider},resolution={res},tariff_type={t_type} price_eur={mean_val} {now_ns}")
+            elif m_name == "weather_forecast":
+                provider = parts[1]
+                lines.append(f"weather_forecast,provider={provider} outdoor_temp_c={mean_val} {now_ns}")
+
+        if not lines:
+            return
+
+        write_url = f"{db_url}/write?" + urllib.parse.urlencode({"u": db_user, "p": db_pwd, "db": db_name})
+        payload = "\n".join(lines).encode("utf-8")
+        req = urllib.request.Request(write_url, data=payload, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status in [200, 204]:
+                    self.last_write_status = "success"
+                    self.total_points_written += len(lines)
+                    print(f"[Open HEMS Collector] Flushed {len(lines)} points to {db_name} (Total: {self.total_points_written})")
+                else:
+                    self.last_write_status = f"status_{resp.status}"
+        except Exception as e:
+            print(f"[Open HEMS Collector] Write error: {e}")
+            self.last_write_status = f"err_{str(e)[:30]}"
+
 def run_server(port=8099):
+    collector = HemsBackgroundCollector(sample_interval_seconds=10, flush_window_seconds=60)
+    collector.start()
     server = HTTPServer(("0.0.0.0", port), HemsApiHandler)
     print(f"Open HEMS Framework Console running on port {port}...")
     server.serve_forever()

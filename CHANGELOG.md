@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.11.1] — 2026-09-08 (Fix Collector Thread & Dynamic Window Zoom for Pure openhems)
+
+### Fixed & Enhanced
+- **Started Background Collector Thread:** Corrected server initialization in `daemon.py` to instantiate and start `HemsBackgroundCollector` on daemon boot.
+- **Dynamic Time Window Zooming:** When initializing on a brand-new database with less than 24h of history, the chart dynamically zooms to the actual recording window (from first recorded point to present) rather than squashing data against 1400 empty leading intervals.
+- **InfluxDB Authentication:** Ensured default connection config automatically maps to `openhems` user and database.
+
+---
+
 ## [0.11.0] — 2026-09-08 (100% Pure openhems Datastore & Rolling Window Accumulator)
 
 ### Changed & Hardened
