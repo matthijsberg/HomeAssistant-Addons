@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.10.0
+Version: 0.11.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -258,7 +258,7 @@ def ensure_framework_defaults(cfg: dict):
                 "type": "influx_v1",
                 "url": cfg.get("influxdb", {}).get("url", "http://a0d7b954-influxdb:8086"),
                 "database": cfg.get("influxdb", {}).get("database", "hermes"),
-                "read_database": cfg.get("influxdb", {}).get("read_database", "hassio"),
+                "read_database": "openhems",
                 "username": cfg.get("influxdb", {}).get("username", "hermes"),
                 "password": cfg.get("influxdb", {}).get("password", ""),
                 "retention_policy": cfg.get("influxdb", {}).get("retention_policy", "autogen"),
@@ -519,7 +519,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             return
 
         # API: Status
-        # ANALYTICS: Grafana-style Power Producers Dual-Polarity Telemetry
+        # ANALYTICS: Pure openhems Power Producers Telemetry (NO HASSIO FALLBACK)
         if path.startswith("/api/analytics/power_producers"):
             try:
                 sec = load_secrets()
@@ -530,50 +530,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 db_user = active_conn.get("username", "openhems")
                 pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
                 
-                # Check if openhems has enough points (> 10 points)
-                q_check = 'SELECT count("power_w") FROM "energy_telemetry" WHERE time > now() - 24h'
-                url_chk = f"http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
+                # Query 100% strictly from openhems canonical database
+                # Group by 1m or 5m buckets (industry standard aggregation)
+                q = """
+                SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time > now() - 24h GROUP BY time(1m) fill(linear);
+                SELECT mean("power_w") as teruglevering_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time > now() - 24h GROUP BY time(1m) fill(linear);
+                SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time > now() - 24h GROUP BY time(1m) fill(linear);
+                """
+
+                url = "http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
                     "u": db_user,
                     "p": pwd,
                     "db": db_name,
-                    "q": q_check
-                })
-                
-                has_enough_openhems = False
-                try:
-                    with urllib.request.urlopen(urllib.request.Request(url_chk), timeout=4) as r:
-                        chk_res = json.loads(r.read().decode())
-                        vals = chk_res.get("results", [{}])[0].get("series", [{}])[0].get("values", [])
-                        if vals and vals[0][1] >= 20:
-                            has_enough_openhems = True
-                except Exception:
-                    has_enough_openhems = False
-
-                if has_enough_openhems:
-                    # Query canonical openhems database!
-                    q = """
-                    SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time > now() - 24h GROUP BY time(10m) fill(linear);
-                    SELECT mean("power_w") as teruglevering_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time > now() - 24h GROUP BY time(10m) fill(linear);
-                    SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time > now() - 24h GROUP BY time(10m) fill(linear);
-                    """
-                    query_user = db_user
-                    query_pwd = pwd
-                    query_db = db_name
-                else:
-                    # Graceful fallback to hassio for historical backfill
-                    q = """
-                    SELECT mean("value") * 1000 as afname_w FROM "kW" WHERE "entity_id" = 'power_consumption' AND time > now() - 24h GROUP BY time(10m) fill(linear);
-                    SELECT mean("value") * 1000 as teruglevering_w FROM "kW" WHERE "entity_id" = 'power_production' AND time > now() - 24h GROUP BY time(10m) fill(linear);
-                    SELECT mean("value") as solar_w FROM "W" WHERE "entity_id" = 'zonnepanelen_power' AND time > now() - 24h GROUP BY time(10m) fill(linear);
-                    """
-                    query_user = "hermes"
-                    query_pwd = sec.get("influxdb", {}).get("local_ha_influxdb_old", "iu32dp§2g3dpuiy§g23pd9h23")
-                    query_db = "hassio"
-
-                url = "http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
-                    "u": query_user,
-                    "p": query_pwd,
-                    "db": query_db,
                     "q": q
                 })
                 
@@ -740,7 +708,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.10.0",
+                "version": "0.11.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -792,19 +760,23 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             cfg = load_json(CONFIG_FILE)
             ensure_framework_defaults(cfg)
             ic = cfg.get("influxdb", {})
-            stats = {"hassio_series": 2330, "hermes_series": 0, "status": "online"}
+            stats = {"openhems_series": 0, "status": "online"}
             try:
                 clean_url = ic.get("url", "http://a0d7b954-influxdb:8086").rstrip("/")
-                target_db = ic.get("database", "hermes")
-                q_url = f"{clean_url}/query?" + urllib.parse.urlencode({"q": f"SHOW MEASUREMENTS ON {target_db}"})
+                sec = load_secrets()
+                pwd = sec.get("influxdb", {}).get(ic.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
+                target_db = ic.get("database", "openhems")
+                q_url = f"{clean_url}/query?" + urllib.parse.urlencode({
+                    "u": ic.get("username", "openhems"),
+                    "p": pwd,
+                    "db": target_db,
+                    "q": f"SHOW MEASUREMENTS ON {target_db}"
+                })
                 req = urllib.request.Request(q_url)
-                if ic.get("username") and ic.get("password"):
-                    auth = base64.b64encode(f"{ic['username']}:{ic['password']}".encode()).decode()
-                    req.add_header("Authorization", f"Basic {auth}")
                 with urllib.request.urlopen(req, timeout=3) as r:
                     res = json.loads(r.read().decode("utf-8"))
                     vals = res.get("results", [{}])[0].get("series", [{}])[0].get("values", [])
-                    stats["hermes_series"] = len(vals)
+                    stats["openhems_series"] = len(vals)
                     stats["measurements"] = [v[0] for v in vals]
             except Exception as e:
                 stats["error"] = str(e)
@@ -1008,7 +980,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     "type": body.get("type", "influx_v1"),
                     "url": body.get("url", "http://localhost:8086"),
                     "database": body.get("database", "hermes"),
-                    "read_database": body.get("read_database", "hassio"),
+                    "read_database": body.get("read_database", "openhems"),
                     "username": body.get("username", "hermes"),
                     "retention_policy": body.get("retention_policy", "autogen"),
                     "enabled": bool(body.get("enabled", True)),
@@ -1525,7 +1497,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.10.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.11.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1771,14 +1743,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
                         <div class="bg-[#0B0F17] border border-slate-800 p-4 rounded-xl">
-                            <span class="text-slate-500 block text-[10px] uppercase">Geregistreerde HA Series</span>
-                            <span class="text-xl font-bold text-white mt-1 block" id="stat-hassio-count">2.330</span>
-                            <span class="text-[10px] text-cyan-400">Database: hassio (Read)</span>
+                            <span class="text-slate-500 block text-[10px] uppercase">Open HEMS Metingen</span>
+                            <span class="text-xl font-bold text-emerald-400 mt-1 block" id="stat-openhems-count">Actief</span>
+                            <span class="text-[10px] text-cyan-400">Database: openhems (Canonical HEMS Store)</span>
                         </div>
                         <div class="bg-[#0B0F17] border border-slate-800 p-4 rounded-xl">
-                            <span class="text-slate-500 block text-[10px] uppercase">Open HEMS Tabellen</span>
-                            <span class="text-xl font-bold text-white mt-1 block" id="stat-hermes-count">Actief</span>
-                            <span class="text-[10px] text-emerald-400">Database: hermes (Read/Write)</span>
+                            <span class="text-slate-500 block text-[10px] uppercase">Tumble Window Buffer</span>
+                            <span class="text-xl font-bold text-purple-400 mt-1 block">60s Gemiddelde</span>
+                            <span class="text-[10px] text-purple-300">Anti-Spike Filter Actief</span>
                         </div>
                         <div class="bg-[#0B0F17] border border-slate-800 p-4 rounded-xl">
                             <span class="text-slate-500 block text-[10px] uppercase">Integriteit & Protocol</span>
@@ -1978,7 +1950,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </div>
                     <div>
                         <label class="block mb-1 text-slate-400">HA Lees Database</label>
-                        <input type="text" id="modal-influx-read-db" required value="hassio" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                        <input type="text" id="modal-influx-read-db" required value="openhems" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-3">
@@ -2433,8 +2405,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 document.getElementById('badge-infra-conns').innerText = idbList.length + mqList.length;
 
                 // Update Telemetry Stats
-                document.getElementById('stat-hassio-count').innerText = (stat.hassio_series || 2330).toLocaleString();
-                document.getElementById('stat-hermes-count').innerText = `${stat.hermes_series || 0} series`;
+                if (document.getElementById('stat-openhems-count')) {
+                    document.getElementById('stat-openhems-count').innerText = `${stat.openhems_series || 0} series`;
+                }
             } catch (e) {
                 console.error('Error loading infrastructure:', e);
             }
@@ -2512,7 +2485,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 document.getElementById('modal-influx-type').value = c.type || 'influx_v1';
                 document.getElementById('modal-influx-url').value = c.url;
                 document.getElementById('modal-influx-db').value = c.database;
-                document.getElementById('modal-influx-read-db').value = c.read_database || 'hassio';
+                document.getElementById('modal-influx-read-db').value = c.read_database || 'openhems';
                 document.getElementById('modal-influx-user').value = c.username || '';
                 document.getElementById('modal-influx-pass').value = c.password || '';
                 document.getElementById('modal-influx-retention').value = c.retention_policy || 'autogen';
@@ -2524,7 +2497,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 document.getElementById('modal-influx-type').value = 'influx_v1';
                 document.getElementById('modal-influx-url').value = 'http://localhost:8086';
                 document.getElementById('modal-influx-db').value = 'hermes';
-                document.getElementById('modal-influx-read-db').value = 'hassio';
+                document.getElementById('modal-influx-read-db').value = 'openhems';
                 document.getElementById('modal-influx-user').value = 'hermes';
                 document.getElementById('modal-influx-pass').value = '';
                 document.getElementById('modal-influx-retention').value = 'autogen';

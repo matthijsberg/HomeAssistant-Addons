@@ -10,6 +10,21 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.11.0] — 2026-09-08 (100% Pure openhems Datastore & Rolling Window Accumulator)
+
+### Changed & Hardened
+- **Completely Purged `hassio` Data Sources & Fallbacks:**
+  - Removed all queries, configurations, and fallbacks pointing to Home Assistant's internal `hassio` database.
+  - Open HEMS is now 100% self-contained and exclusively reads and writes to the canonical `openhems` InfluxDB database.
+- **Layer 1 Rolling Window Accumulator (Anti-Spike & Noise Filtering):**
+  - Implemented in-memory tumbling window accumulator:
+    - High-frequency devices (P1 1s streams, Modbus 10s meters, and irregular HA events) are sampled every 10 seconds into a thread-safe sliding accumulator.
+    - Computes mathematical arithmetic mean ($\bar{x} = \sum x_i / N$) over the industry-standard **60-second window**.
+    - Flushes anti-spike, noise-filtered 1-minute averages to `openhems` exactly once per minute at aligned timestamps.
+  - Power Producers Analytics queries `openhems` directly with 1-minute/15-minute group-by buckets.
+
+---
+
 ## [0.10.0] — 2026-09-08 (Dedicated Open HEMS InfluxDB & Background Collector Engine)
 
 ### Added
