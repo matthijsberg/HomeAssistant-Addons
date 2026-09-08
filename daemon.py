@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.11.2
+Version: 0.11.3
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -740,7 +740,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.11.2",
+                "version": "0.11.3",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1529,7 +1529,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.11.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.11.3</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3616,10 +3616,24 @@ class HemsBackgroundCollector(threading.Thread):
         if not ha_states:
             return
 
-        def get_val(eid):
-            s = ha_states.get(eid, {}).get("state")
+        def get_val_w(eid):
+            """Returns value converted to Watt if sensor reports in kW, or raw float."""
+            st_obj = ha_states.get(eid, {})
+            val_raw = st_obj.get("state")
+            unit = st_obj.get("unit") or st_obj.get("attributes", {}).get("unit_of_measurement", "")
             try:
-                return float(s)
+                v = float(val_raw)
+                if unit in ["kW", "kw"]:
+                    v = v * 1000.0  # Convert kW to Watt!
+                return v
+            except (ValueError, TypeError):
+                return None
+
+        def get_val_raw(eid):
+            st_obj = ha_states.get(eid, {})
+            val_raw = st_obj.get("state")
+            try:
+                return float(val_raw)
             except (ValueError, TypeError):
                 return None
 
@@ -3629,10 +3643,10 @@ class HemsBackgroundCollector(threading.Thread):
                 dev_type = dev.get("type", "generic")
                 src_type = dev.get("source_type", "homeassistant")
 
-                # P1 Grid Meter
-                if dev_type == "grid_meter":
-                    p_imp = get_val(dev.get("ha_power_entity", "sensor.power_consumption"))
-                    p_exp = get_val(dev.get("parameters", {}).get("production_entity", "sensor.power_production"))
+                # P1 Grid Meter (converts kW to W)
+                if dev_type in ["grid_meter", "p1_meter"]:
+                    p_imp = get_val_w(dev.get("ha_power_entity", "sensor.power_consumption"))
+                    p_exp = get_val_w(dev.get("parameters", {}).get("production_entity", "sensor.power_production"))
                     if p_imp is not None:
                         k = f"energy_telemetry|{dev_id}|grid_meter|IMPORT|{src_type}|ELECTRICITY"
                         entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w"})
@@ -3644,9 +3658,12 @@ class HemsBackgroundCollector(threading.Thread):
                         entry["sum"] += p_exp
                         entry["count"] += 1
 
-                # Solar PV
-                elif dev_type == "solar_pv":
-                    p_sol = get_val(dev.get("ha_power_entity", "sensor.zonnepanelen_power_avg_5_minutes"))
+                # Solar PV / Inverter
+                elif dev_type in ["solar_pv", "solar_inverter", "solar"]:
+                    sol_eid = dev.get("ha_power_entity") or "sensor.zonnepanelen_power"
+                    p_sol = get_val_w(sol_eid)
+                    if p_sol is None:
+                        p_sol = get_val_w("sensor.zonnepanelen_power_avg_5_minutes")
                     if p_sol is not None:
                         k = f"energy_telemetry|{dev_id}|solar_pv|GENERATION|{src_type}|ELECTRICITY"
                         entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w"})
@@ -3655,31 +3672,41 @@ class HemsBackgroundCollector(threading.Thread):
 
                 # Heat Pump
                 elif dev_type == "heat_pump":
-                    p_hp = get_val(dev.get("ha_power_entity", "sensor.warmtepomp_power"))
+                    p_hp = get_val_w(dev.get("ha_power_entity", "sensor.warmtepomp_power"))
                     if p_hp is not None:
                         k = f"energy_telemetry|{dev_id}|heat_pump|CONSUMPTION|{src_type}|HEAT"
                         entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w"})
                         entry["sum"] += p_hp
                         entry["count"] += 1
 
-                # Thermal Buffer (DHW Tank)
-                elif dev_type in ["thermal_buffer", "dhw_tank"]:
-                    t_dhw = get_val(dev.get("ha_temp_entity", "sensor.hc_dhw_temperature_r5t_dhw_tank"))
+                # Thermal Buffer (DHW Tank / Boiler)
+                elif dev_type in ["thermal_buffer", "dhw_tank", "dhw_boiler"]:
+                    t_dhw = get_val_raw(dev.get("ha_temp_entity", "sensor.hc_dhw_temperature_r5t_dhw_tank"))
                     if t_dhw is not None:
                         k = f"energy_telemetry|{dev_id}|thermal_buffer|STORAGE|{src_type}|HEAT"
                         entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "temperature_c"})
                         entry["sum"] += t_dhw
                         entry["count"] += 1
 
+                # Battery
+                elif dev_type in ["battery", "home_battery", "battery_storage"]:
+                    p_bat = get_val_w(dev.get("ha_power_entity", "sensor.battery_power"))
+                    if p_bat is not None:
+                        flow = "STORAGE_CHARGE" if p_bat >= 0 else "STORAGE_DISCHARGE"
+                        k = f"energy_telemetry|{dev_id}|battery|{flow}|{src_type}|ELECTRICITY"
+                        entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w"})
+                        entry["sum"] += abs(p_bat)
+                        entry["count"] += 1
+
             # Market & Weather Feeds
-            epex_val = get_val(cfg.get("providers", {}).get("epex_spot", {}).get("ha_sensor_entity", "sensor.energyzero_today_energy_current_hour_price"))
+            epex_val = get_val_raw(cfg.get("providers", {}).get("epex_spot", {}).get("ha_sensor_entity", "sensor.energyzero_today_energy_current_hour_price"))
             if epex_val is not None:
                 k = "market_tariffs|epex_spot|1h|spot_electricity"
                 entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "price_eur"})
                 entry["sum"] += epex_val
                 entry["count"] += 1
 
-            temp_val = get_val(cfg.get("providers", {}).get("open_meteo", {}).get("ha_temp_sensor", "sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature"))
+            temp_val = get_val_raw(cfg.get("providers", {}).get("open_meteo", {}).get("ha_temp_sensor", "sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature"))
             if temp_val is not None:
                 k = "weather_forecast|wittboy"
                 entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "outdoor_temp_c"})

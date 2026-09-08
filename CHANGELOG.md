@@ -10,6 +10,22 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.11.3] — 2026-09-08 (Fix kW Unit Conversion & Device Type Matching)
+
+### Fixed
+- **Automatic kW to Watt Unit Conversion:**
+  - Resolved unit mismatch where Home Assistant sensors reporting in `kW` (such as `sensor.power_consumption` and `sensor.power_production`) were previously recorded directly as fractional Watts (e.g. 0.055 W instead of 55 W), resulting in values rounding down to zero.
+  - Implemented unit inspection in `sample_devices()` multiplying `kW` readings by 1000 to store canonical Watts.
+- **Robust Device Type Matching:**
+  - Expanded device archetype filters to properly catch all hardware definitions:
+    - Solar: `solar_pv`, `solar_inverter`, `solar`
+    - Thermal buffers: `thermal_buffer`, `dhw_tank`, `dhw_boiler`
+    - Batteries: `battery`, `home_battery`, `battery_storage`
+- **Live Non-Zero Telemetry Verified:**
+  - Verified live points streaming to `openhems`: Solar ~784 W, House Consumption ~821 W, Export ~11 W, Import ~47 W.
+
+---
+
 ## [0.11.2] — 2026-09-08 (Fix CEST Dutch Timezone & Replace fill(previous) with fill(none))
 
 ### Fixed
