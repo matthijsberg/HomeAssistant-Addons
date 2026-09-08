@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.15.0
+Version: 0.15.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.15.0",
+                "version": "0.15.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1756,7 +1756,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.15.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.15.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2746,7 +2746,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             document.getElementById('header-title').innerText = t[0];
             document.getElementById('header-sub').innerText = t[1];
 
-            if (tabId === 'analytics') loadAnalytics();
+            if (tabId === 'analytics') {
+                loadAnalytics();
+                loadElectricityPricesChart();
+                loadPowerProducersChart();
+                loadChartData();
+            }
             if (tabId === 'control') loadControl();
             if (tabId === 'infrastructure') loadInfrastructure();
             if (tabId === 'dashboard') loadChartData();
@@ -3176,25 +3181,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const res = await fetch('./api/schedule/chart-data');
                 const data = await res.json();
 
-                const adv = data.advices[data.cheapest_hour] || `Beste stroomtarief om ${data.cheapest_hour}:00 (€${data.cheapest_price_eur.toFixed(4)}/kWh)`;
-                document.getElementById('banner-text').innerText = adv;
-                document.getElementById('battery-status-banner').innerText = data.battery_status_msg;
+                const adv = data.banner_text || `Beste stroomtarief om ${data.cheapest_hour} (€${Number(data.cheapest_price_eur).toFixed(4)}/kWh)`;
+                if (document.getElementById('banner-text')) document.getElementById('banner-text').innerText = adv;
+                if (document.getElementById('analytics-banner-text')) document.getElementById('analytics-banner-text').innerText = adv;
+                if (document.getElementById('battery-status-banner')) document.getElementById('battery-status-banner').innerText = data.battery_status_msg;
+                if (document.getElementById('prediction-baseload-badge')) document.getElementById('prediction-baseload-badge').innerText = `Basislast: ${data.baseload_watts || 300} W`;
+                if (document.getElementById('tab-baseload-input')) document.getElementById('tab-baseload-input').value = data.baseload_watts || 300;
 
-                // Render on Analytics Tab
-                const canvasAnalytics = document.getElementById('hemsChartAnalytics');
-                if (canvasAnalytics) {
-                    if (analyticsChartInstance) analyticsChartInstance.destroy();
-                    analyticsChartInstance = new Chart(canvasAnalytics.getContext('2d'), chartConfig);
-                }
-
-                // Render on Dashboard Tab
-                const canvasDash = document.getElementById('hemsChart');
-                if (canvasDash) {
-                    if (chartInstance) chartInstance.destroy();
-                    chartInstance = new Chart(canvasDash.getContext('2d'), chartConfig);
-                }
-                return;
-                const dummyCtx = null;
+                const chartConfig = {
                     type: 'bar',
                     data: {
                         labels: data.labels,
@@ -3207,9 +3201,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 borderRadius: 4
                             },
                             {
-                                label: 'Warmtepomp / SWW (kW)',
+                                label: 'SWW Tapwater (kW)',
                                 data: data.datasets.boiler_kw,
                                 backgroundColor: '#EC4899',
+                                stack: 'consumption',
+                                borderRadius: 4
+                            },
+                            {
+                                label: 'CV Verwarming (kW)',
+                                data: data.datasets.heating_kw || [],
+                                backgroundColor: '#6366F1',
                                 stack: 'consumption',
                                 borderRadius: 4
                             },
@@ -3225,9 +3226,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 data: data.datasets.solar_kw,
                                 type: 'line',
                                 borderColor: '#F59E0B',
-                                borderWidth: 3,
+                                borderWidth: 2.5,
                                 pointBackgroundColor: '#F59E0B',
-                                pointRadius: 3,
+                                pointRadius: 2,
                                 tension: 0.35,
                                 yAxisID: 'y'
                             },
@@ -3237,7 +3238,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 type: 'line',
                                 borderColor: '#06B6D4',
                                 borderDash: [5, 5],
-                                borderWidth: 2,
+                                borderWidth: 1.5,
                                 pointRadius: 0,
                                 yAxisID: 'y1'
                             }
@@ -3266,7 +3267,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             }
                         }
                     }
-                });
+                };
+
+                // Render on Analytics Tab
+                const canvasAnalytics = document.getElementById('hemsChartAnalytics');
+                if (canvasAnalytics) {
+                    if (analyticsChartInstance) analyticsChartInstance.destroy();
+                    analyticsChartInstance = new Chart(canvasAnalytics.getContext('2d'), chartConfig);
+                }
+
+                // Render on Dashboard Tab
+                const canvasDash = document.getElementById('hemsChart');
+                if (canvasDash) {
+                    if (chartInstance) chartInstance.destroy();
+                    chartInstance = new Chart(canvasDash.getContext('2d'), chartConfig);
+                }
             } catch (e) {
                 console.error('Chart load error:', e);
             }

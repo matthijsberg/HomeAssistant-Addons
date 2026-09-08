@@ -10,6 +10,21 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.15.1] — 2026-09-08 (Fix JS Syntax Error & Synchronize Analytics All-Chart Loader)
+
+### Fixed
+- **Resolved Fatal Frontend JavaScript Syntax Error:**
+  - Diagnosed and fixed a dangling syntax token in `loadChartData()` which caused the browser's JavaScript engine to halt on load and prevented any API data from fetching.
+  - Verified JavaScript syntax clean with Node.js parser (0 errors).
+- **Synchronized Multi-Chart Loader on Boot & Tab Change:**
+  - Ensured `showTab('analytics')` and the initial boot sequence explicitly invoke all three analytics panels:
+    1. `loadAnalytics()` (KPIs & Daily Digest)
+    2. `loadElectricityPricesChart()` (EPEX Dual-Axis Rates & Solar Forecast)
+    3. `loadPowerProducersChart()` (Live Dual-Polarity Net InfluxDB Telemetry)
+    4. `loadChartData()` (24h Ahead Rolling Consumption Forecast)
+
+---
+
 ## [0.15.0] — 2026-09-08 (24h Ahead Rolling Power Prediction & Baseload Settings)
 
 ### Added
