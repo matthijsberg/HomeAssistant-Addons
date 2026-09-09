@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.27.0
+Version: 0.28.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -953,7 +953,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.27.0",
+                "version": "0.28.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2061,7 +2061,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.27.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.28.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5180,7 +5180,7 @@ class HemsMqttSubscriberThread(threading.Thread):
 
                 self.connected = True
                 # Subscribe to mbmd/# and openhems/#
-                for sub_t in [b"mbmd/#", b"openhems/#"]:
+                for sub_t in [b"mbmd/#", b"openhems/#", b"P1P2/#"]:
                     sub_pkt = bytearray([0x82, 5 + len(sub_t), 0, 1, 0, len(sub_t)]) + sub_t + bytearray([0])
                     s.sendall(sub_pkt)
                     s.recv(5)
@@ -5236,6 +5236,7 @@ class HemsBackgroundCollector(threading.Thread):
         self._last_flush_time = time.time()
         self.sample_count_in_window = 0
         self.last_flush_iso = "Zojuist gestart"
+        self.live_hp_disagg = None
         self.mqtt_sub = HemsMqttSubscriberThread()
         self.mqtt_sub.start()
         self.live_balance = {
@@ -5333,7 +5334,7 @@ class HemsBackgroundCollector(threading.Thread):
                         entry["sum"] += p_sol
                         entry["count"] += 1
 
-                # Heat Pump (Direct MQTT MBMD / HA Fallback)
+                # Heat Pump (Direct MQTT MBMD + Site Adapter P1P2 Disaggregation)
                 elif dev_type == "heat_pump":
                     p_hp = None
                     if src_type == "mqtt":
@@ -5344,10 +5345,22 @@ class HemsBackgroundCollector(threading.Thread):
                         p_hp = get_val_w(dev.get("ha_power_entity", "sensor.warmtepomp_power"))
 
                     if p_hp is not None:
-                        k = f"energy_telemetry|{dev_id}|heat_pump|CONSUMPTION|{src_type}|HEAT"
-                        entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w"})
+                        # Apply Site-Specific Daikin P1P2 State Classifier
+                        disagg = DaikinP1P2StateClassifier.classify(
+                            total_power_w=p_hp,
+                            mqtt_cache=self.mqtt_sub.cache,
+                            ha_states=states_map
+                        )
+                        mode_tag = disagg.mode.lower()
+
+                        # Store total power with mode tag
+                        k = f"energy_telemetry|{dev_id}|heat_pump|CONSUMPTION|{src_type}|HEAT|{mode_tag}"
+                        entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w", "mode": mode_tag})
                         entry["sum"] += p_hp
                         entry["count"] += 1
+
+                        # Track disaggregated live states
+                        self.live_hp_disagg = disagg
 
                 # Thermal Buffer (DHW Tank / Boiler)
                 elif dev_type in ["thermal_buffer", "dhw_tank", "dhw_boiler"]:
@@ -5455,7 +5468,7 @@ class HemsBackgroundCollector(threading.Thread):
             if m_name == "energy_telemetry":
                 dev_id, dev_type, flow, src_type, vector = parts[1], parts[2], parts[3], parts[4], parts[5]
                 field_name = v["type"]
-                lines.append(f"energy_telemetry,device_id={dev_id},device_type={dev_type},flow={flow},source_type={src_type},vector={vector} {field_name}={mean_val} {now_ns}")
+                lines.append(f"energy_telemetry,device_id={dev_id},device_type={dev_type},flow={flow},source_type={src_type},vector={vector}{mode_tag} {field_name}={mean_val} {now_ns}")
             elif m_name == "market_tariffs":
                 provider, res, t_type = parts[1], parts[2], parts[3]
                 lines.append(f"market_tariffs,provider={provider},resolution={res},tariff_type={t_type} price_eur={mean_val} {now_ns}")

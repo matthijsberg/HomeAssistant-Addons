@@ -17,6 +17,23 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.28.0] — 2026-09-08 (Site Adapters Architecture & Daikin P1P2 State Disaggregation)
+
+### Added
+- **Site-Specific Adapters Architecture (`site_adapters/`):**
+  - Created cleanly isolated sub-package `site_adapters/daikin_p1p2/` to strictly decouple hardware- and site-specific classifiers from Open HEMS Core.
+  - Implemented `DaikinP1P2StateClassifier` & `HeatPumpDisaggregation` dataclass.
+  - Multi-source state decision tree evaluating:
+    - Primary: Raw Daikin P1P2 MQTT topics (`Action_Heating_Cooling_Auto_Off`, `DHW_Demand`, `Valve_DHW_Tank`, `Climate_Heating`, `Climate_Cooling`).
+    - Secondary: Home Assistant fallback entities (`select.daily_energy_usage_sums_wp`, `binary_sensor.hc_*`).
+    - Power safety: Standby threshold (< 48 W) ensures idle compressor draw (~33 W) is strictly booked as STANDBY.
+  - Disaggregates total heat pump electrical power into pure physical buckets: `dhw_w`, `heating_w`, `cooling_w`, and `standby_w`.
+  - Enriched InfluxDB `energy_telemetry` with tag `mode={mode_tag}`.
+  - Visualized live heat pump mode badge on Systeeminfrastructuur telemetry bar (e.g. `Warmtepomp: 33 W [STANDBY]`).
+  - Added unit test suite in `tests/unit/test_site_adapters.py` (7 tests, 100% passing; total 34 tests passing).
+
+---
+
 ## [0.27.0] — 2026-09-08 (Unified 6-Box Metrics with Integrated Monetary Costs & Central Theme)
 
 ### Added
