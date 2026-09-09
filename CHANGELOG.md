@@ -17,6 +17,23 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.29.0] — 2026-09-08 (Interactive Bar/Line Toggle & Grafana-Style Smart Interval Resolution for Power Producers)
+
+### Added
+- **Interactive Diagram Type Toggle (📊 Staven vs 📈 Lijn):**
+  - Added toggle on the historical "Power Producers & Netstromen" chart allowing users to instantly switch between:
+    - **📊 Staven (Bar chart):** Aligned with the 24-Hour Ahead Prediction chart, featuring dual-polarity stacked bars on `stack: 'energy'` with positive consumers (Afname + Opgewekt Gebruikt) above the axis, negative producers (Teruglevering + Direct Benut) below the axis, and overlaid lines for Total Consumption & Net Grid flow.
+    - **📈 Lijn (Line chart):** Continuous multi-layer filled area graph.
+- **Grafana-Style Smart Interval Resolution Toggle (1 Uur vs 15 Min vs Auto):**
+  - Implemented dynamic interval resolution buttons (`1 Uur` & `15 Min`) on the chart card.
+  - Smart default auto-tuning:
+    - For `24h` range: Defaults strictly to **1 Uur** (`1h`) hourly aggregation.
+    - For short ranges (`1h`, `6h`): Defaults automatically to **15 Min** (`15m`) quarter-hourly aggregation.
+    - For multi-day ranges (`48h`, `7d`): Defaults to **1 Uur** or **2 Uur** for balanced density without visual clutter.
+  - Full backend query support in `/api/analytics/power_producers?range=...&resolution=...`.
+
+---
+
 ## [0.28.0] — 2026-09-08 (Site Adapters Architecture & Daikin P1P2 State Disaggregation)
 
 ### Added

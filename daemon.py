@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.28.2
+Version: 0.29.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -646,23 +646,53 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 db_user = active_conn.get("username", "openhems")
                 pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
 
-                # Parse timeframe parameter: 1h, 6h, 24h, 48h, 7d
+                # Parse timeframe and resolution parameters (Grafana-style smart defaults)
                 parsed_url = urllib.parse.urlparse(self.path)
                 qp = urllib.parse.parse_qs(parsed_url.query)
                 tf = qp.get("range", ["24h"])[0]
+                user_res = qp.get("resolution", [None])[0] or qp.get("res", [None])[0]
 
-                tf_configs = {
-                    "1h": {"window": "1h", "bucket": "1m", "interval_h": 1.0 / 60.0, "time_fmt": "%H:%M"},
-                    "6h": {"window": "6h", "bucket": "2m", "interval_h": 2.0 / 60.0, "time_fmt": "%H:%M"},
-                    "24h": {"window": "24h", "bucket": "5m", "interval_h": 5.0 / 60.0, "time_fmt": "%H:%M"},
-                    "48h": {"window": "48h", "bucket": "15m", "interval_h": 15.0 / 60.0, "time_fmt": "%d %H:%M"},
-                    "7d": {"window": "7d", "bucket": "1h", "interval_h": 1.0, "time_fmt": "%a %d %H:00"}
+                tf_windows = {
+                    "1h": "1h",
+                    "6h": "6h",
+                    "24h": "24h",
+                    "48h": "48h",
+                    "7d": "7d"
                 }
-                curr_tf = tf_configs.get(tf, tf_configs["24h"])
-                time_win = curr_tf["window"]
-                bucket_sz = curr_tf["bucket"]
-                interval_h = curr_tf["interval_h"]
-                time_fmt = curr_tf["time_fmt"]
+                time_win = tf_windows.get(tf, "24h")
+
+                # Smart resolution determination:
+                # Standard for 24h is 1 hour ('1h'). Small intervals (<24h) default to 15m.
+                # Large intervals (>24h) default to 1h or 2h.
+                if user_res == "15m":
+                    bucket_sz = "15m"
+                    interval_h = 0.25
+                    time_fmt = "%H:%M" if tf in ["1h", "6h", "24h"] else "%d %H:%M"
+                elif user_res == "1h":
+                    bucket_sz = "1h"
+                    interval_h = 1.0
+                    time_fmt = "%H:00" if tf in ["1h", "6h", "24h"] else "%d %H:00"
+                elif user_res == "high": # smooth 5m line
+                    bucket_sz = "5m" if tf != "1h" else "1m"
+                    interval_h = 5.0 / 60.0 if tf != "1h" else 1.0 / 60.0
+                    time_fmt = "%H:%M"
+                else: # auto
+                    if tf in ["1h", "6h"]:
+                        bucket_sz = "15m"
+                        interval_h = 0.25
+                        time_fmt = "%H:%M"
+                    elif tf == "24h":
+                        bucket_sz = "1h"
+                        interval_h = 1.0
+                        time_fmt = "%H:00"
+                    elif tf == "48h":
+                        bucket_sz = "1h"
+                        interval_h = 1.0
+                        time_fmt = "%d %H:00"
+                    else: # 7d
+                        bucket_sz = "2h"
+                        interval_h = 2.0
+                        time_fmt = "%a %d %H:00"
                 
                 # Query 100% strictly from openhems canonical database with fill(none)
                 q = f"""
@@ -959,7 +989,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.28.2",
+                "version": "0.29.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2067,7 +2097,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.28.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.29.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2373,9 +2403,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <h3 class="text-sm font-bold text-white tracking-wide">Power Producers & Netstromen</h3>
                             <span class="text-[10px] text-slate-500 font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800">openhems</span>
                         </div>
-                        <div class="flex items-center gap-2 text-xs">
+                        <div class="flex items-center gap-2 text-xs flex-wrap">
+                            <!-- Diagram Type Toggle: Staven vs Lijn -->
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
+                                <button id="pp-btn-type-bar" onclick="setPowerProducersType('bar')" class="px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow">📊 Staven</button>
+                                <button id="pp-btn-type-line" onclick="setPowerProducersType('line')" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">📈 Lijn</button>
+                            </div>
+
+                            <!-- Interval / Resolutie Toggle -->
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
+                                <button id="pp-btn-res-1h" onclick="setPowerProducersResolution('1h')" class="px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow">1 Uur</button>
+                                <button id="pp-btn-res-15m" onclick="setPowerProducersResolution('15m')" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
+                            </div>
+
                             <label for="pp-range-select" class="text-slate-400 text-xs hidden sm:inline font-mono">Periode:</label>
-                            <select id="pp-range-select" onchange="loadPowerProducersChart()" class="bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-medium focus:outline-none focus:border-blue-500 font-mono">
+                            <select id="pp-range-select" onchange="onPowerProducersRangeChange()" class="bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-medium focus:outline-none focus:border-blue-500 font-mono">
                                 <option value="1h">Laatste 1 uur</option>
                                 <option value="6h">Laatste 6 uur</option>
                                 <option value="24h" selected>Laatste 24 uur</option>
@@ -4828,7 +4870,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             try {
                 const rangeSelect = document.getElementById('pp-range-select');
                 const rangeVal = rangeSelect ? rangeSelect.value : '24h';
-                const res = await fetch('./api/analytics/power_producers?range=' + encodeURIComponent(rangeVal));
+                const resParam = (powerProducersChartType === 'line' && powerProducersResolution === '1h') ? '1h' : powerProducersResolution;
+                const res = await fetch('./api/analytics/power_producers?range=' + encodeURIComponent(rangeVal) + '&resolution=' + encodeURIComponent(resParam));
                 const data = await res.json();
                 if (data.status !== 'success') {
                     console.error('Power producers error:', data.message);
@@ -4878,71 +4921,138 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 if (powerProducersChartInstance) powerProducersChartInstance.destroy();
 
                 const ctx = canvas.getContext('2d');
+                let datasets = [];
+
+                if (powerProducersChartType === 'bar') {
+                    // === STAAVEN (BAR) MODUS: EXACT GELIJK AAN DE 24-UURS VOORUIT GRAFIEK ===
+                    // 1. Totaal Verbruik (Oranje overlay lijn)
+                    datasets.push({
+                        label: 'Totaal Verbruik',
+                        data: data.verbruik,
+                        type: 'line',
+                        borderColor: '#F97316',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2.5,
+                        pointRadius: 2,
+                        tension: 0.25,
+                        order: 1
+                    });
+                    // 2. Netto Grid Afname / Teruglevering Lijn (Felrood)
+                    const netGridArr = (data.afname || []).map((afn, idx) => {
+                        const ter = Math.abs((data.teruglevering_negative && data.teruglevering_negative[idx]) || 0);
+                        return afn - ter;
+                    });
+                    datasets.push({
+                        label: 'Netto Grid Stroom',
+                        data: netGridArr,
+                        type: 'line',
+                        borderColor: '#EF4444',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        pointRadius: 2,
+                        tension: 0.25,
+                        order: 2
+                    });
+                    // 3. Positieve staven (Boven de as: Afname + Opgewekt Gebruikt)
+                    datasets.push({
+                        label: 'Afname',
+                        data: data.afname,
+                        backgroundColor: '#EF4444',
+                        stack: 'energy',
+                        borderRadius: 2,
+                        order: 3
+                    });
+                    datasets.push({
+                        label: 'Opgewekt Gebruikt',
+                        data: data.self_consumption,
+                        backgroundColor: '#06B6D4',
+                        stack: 'energy',
+                        borderRadius: 2,
+                        order: 3
+                    });
+                    // 4. Negatieve staven (Onder de as: Teruglevering + Direct Verbruikte Zon)
+                    datasets.push({
+                        label: 'Teruglevering',
+                        data: data.teruglevering_negative,
+                        backgroundColor: '#10B981',
+                        stack: 'energy',
+                        borderRadius: 2,
+                        order: 4
+                    });
+                    const selfConsNeg = (data.self_consumption || []).map(v => -Math.abs(v));
+                    datasets.push({
+                        label: 'Zon Direct Benut',
+                        data: selfConsNeg,
+                        backgroundColor: '#EAB308',
+                        stack: 'energy',
+                        borderRadius: 2,
+                        order: 4
+                    });
+                } else {
+                    // === LIJN (LINE / AREA) MODUS: CONTINUE VLOEIENDE LIJNEN ===
+                    datasets = [
+                        {
+                            label: 'Totaal Verbruik',
+                            data: data.verbruik,
+                            borderColor: '#F97316',
+                            backgroundColor: 'transparent',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0.25,
+                            order: 1
+                        },
+                        {
+                            label: 'Afname',
+                            data: data.afname,
+                            borderColor: '#EF4444',
+                            backgroundColor: 'rgba(239, 68, 68, 0.45)',
+                            fill: true,
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            tension: 0.25,
+                            order: 2
+                        },
+                        {
+                            label: 'Opgewekt Gebruikt',
+                            data: data.self_consumption,
+                            borderColor: '#14B8A6',
+                            backgroundColor: 'rgba(20, 184, 166, 0.25)',
+                            fill: true,
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            tension: 0.25,
+                            order: 3
+                        },
+                        {
+                            label: 'Teruglevering',
+                            data: data.teruglevering_negative,
+                            borderColor: '#10B981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.45)',
+                            fill: true,
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            tension: 0.25,
+                            order: 4
+                        },
+                        {
+                            label: 'Zonnepanelen',
+                            data: data.solar_negative,
+                            borderColor: '#EAB308',
+                            backgroundColor: 'rgba(234, 179, 8, 0.55)',
+                            fill: true,
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            tension: 0.25,
+                            order: 5
+                        }
+                    ];
+                }
+
                 powerProducersChartInstance = new Chart(ctx, {
-                    type: 'line',
+                    type: powerProducersChartType === 'bar' ? 'bar' : 'line',
                     data: {
                         labels: data.labels,
-                        datasets: [
-                            // 1. Totaal Verbruik (Orange line on top)
-                            {
-                                label: 'Totaal Verbruik',
-                                data: data.verbruik,
-                                borderColor: '#F97316',
-                                backgroundColor: 'transparent',
-                                borderWidth: 2,
-                                pointRadius: 0,
-                                tension: 0.25,
-                                order: 1
-                            },
-                            // 2. Afname (Crimson/Red fill on positive axis)
-                            {
-                                label: 'Afname',
-                                data: data.afname,
-                                borderColor: '#EF4444',
-                                backgroundColor: 'rgba(239, 68, 68, 0.45)',
-                                fill: true,
-                                borderWidth: 1.5,
-                                pointRadius: 0,
-                                tension: 0.25,
-                                order: 2
-                            },
-                            // 3. Opgewekt Gebruikt (Teal/Green fill)
-                            {
-                                label: 'Opgewekt Gebruikt',
-                                data: data.self_consumption,
-                                borderColor: '#14B8A6',
-                                backgroundColor: 'rgba(20, 184, 166, 0.25)',
-                                fill: true,
-                                borderWidth: 1,
-                                pointRadius: 0,
-                                tension: 0.25,
-                                order: 3
-                            },
-                            // 4. Teruglevering (Green area below zero)
-                            {
-                                label: 'Teruglevering',
-                                data: data.teruglevering_negative,
-                                borderColor: '#10B981',
-                                backgroundColor: 'rgba(16, 185, 129, 0.45)',
-                                fill: true,
-                                borderWidth: 1.5,
-                                pointRadius: 0,
-                                tension: 0.25,
-                                order: 4
-                            },
-                            // 5. Zonnepanelen (Yellow area below zero)
-                            {
-                                label: 'Zonnepanelen',
-                                data: data.solar_negative,
-                                borderColor: '#EAB308',
-                                backgroundColor: 'rgba(234, 179, 8, 0.55)',
-                                fill: true,
-                                borderWidth: 1.5,
-                                pointRadius: 0,
-                                tension: 0.25,
-                                order: 5
-                            }
-                        ]
+                        datasets: datasets
                     },
                     options: {
                         responsive: true,
@@ -4953,7 +5063,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         },
                         plugins: {
                             legend: {
-                                display: false // Using custom Grafana table legend
+                                display: false // Using custom aligned 6-box cards below
                             },
                             tooltip: {
                                 backgroundColor: 'rgba(11, 15, 23, 0.95)',
@@ -4988,7 +5098,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                     callback: function(val) {
                                         const absV = Math.abs(val);
                                         const prefix = val < 0 ? '-' : '';
-                                        return absV >= 1000 ? `${prefix}${absV / 1000} kW` : `${val} W`;
+                                        return absV >= 1000 ? `${prefix}${(absV / 1000).toFixed(1)} kW` : `${val} W`;
                                     }
                                 }
                             }
