@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.24.0
+Version: 0.24.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.24.0",
+                "version": "0.24.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -998,6 +998,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             cfg = load_json(CONFIG_FILE)
             ensure_framework_defaults(cfg)
 
+            parsed_url = urllib.parse.urlparse(self.path)
+            qp = urllib.parse.parse_qs(parsed_url.query)
+            res_mode = qp.get("resolution", ["1h"])[0]
+            is_15m = (res_mode == "15m")
+
             baseload_w = float(cfg.get("baseload_watts", 300.0))
             baseload_kw = round(baseload_w / 1000.0, 3)
 
@@ -1007,17 +1012,19 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             # 1. Fetch EPEX prices for today & tomorrow
             prices_map = {}
+            interval_str = "INTERVAL_QUARTER" if is_15m else "INTERVAL_HOUR"
             for d_str in [today_str, tomorrow_str]:
                 try:
-                    url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval=INTERVAL_HOUR"
+                    url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval={interval_str}"
                     req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
                     with urllib.request.urlopen(req_p, timeout=5) as r_p:
                         res_p = json.loads(r_p.read().decode())
                         for it in res_p.get("all_in_with_vat", []):
                             dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
-                            prices_map[dt.strftime("%Y-%m-%d %H:00")] = round(float(it.get("price", {}).get("value", 0.25)), 4)
+                            k_fmt = "%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00"
+                            prices_map[dt.strftime(k_fmt)] = round(float(it.get("price", {}).get("value", 0.25)), 4)
                 except Exception as e_p:
-                    print(f"Warning fetching EPEX {d_str}: {e_p}")
+                    pass
 
             # 2. Fetch Open-Meteo Solar & Weather for Culemborg
             solar_map = {}
@@ -1895,7 +1902,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.24.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.24.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
