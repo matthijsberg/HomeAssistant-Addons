@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.28.1
+Version: 0.28.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -959,7 +959,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.28.1",
+                "version": "0.28.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2067,7 +2067,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.28.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.28.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5355,7 +5355,7 @@ class HemsBackgroundCollector(threading.Thread):
                         disagg = DaikinP1P2StateClassifier.classify(
                             total_power_w=p_hp,
                             mqtt_cache=self.mqtt_sub.cache,
-                            ha_states=states_map
+                            ha_states=ha_states
                         )
                         mode_tag = disagg.mode.lower()
 
@@ -5424,12 +5424,23 @@ class HemsBackgroundCollector(threading.Thread):
             # 4. Unallocated Load = Total House Load - Heatpump - Battery charging
             unalloc = max(50.0, tot_house - wp)
 
+            hp_mode = self.live_hp_disagg.mode if self.live_hp_disagg else "STANDBY"
+            hp_dhw = self.live_hp_disagg.dhw_w if self.live_hp_disagg else 0.0
+            hp_heat = self.live_hp_disagg.heating_w if self.live_hp_disagg else 0.0
+            hp_cool = self.live_hp_disagg.cooling_w if self.live_hp_disagg else 0.0
+            hp_standby = self.live_hp_disagg.standby_w if self.live_hp_disagg else wp
+
             self.live_balance = {
                 "p1_import_w": round(p1_imp, 1),
                 "p1_export_w": round(p1_exp, 1),
                 "net_grid_w": round(net_grid, 1),
                 "solar_w": round(sol, 1),
                 "heatpump_w": round(wp, 1),
+                "heatpump_mode": hp_mode,
+                "heatpump_dhw_w": round(hp_dhw, 1),
+                "heatpump_heating_w": round(hp_heat, 1),
+                "heatpump_cooling_w": round(hp_cool, 1),
+                "heatpump_standby_w": round(hp_standby, 1),
                 "battery_w": round(bat, 1),
                 "direct_solar_w": round(dir_sol, 1),
                 "total_house_w": round(tot_house, 1),
