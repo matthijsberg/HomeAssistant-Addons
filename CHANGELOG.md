@@ -10,6 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.25.1] — 2026-09-08 (Fix Solar Absolute Sign in Live Pipeline Power Balance)
+
+### Fixed
+- Enforced `abs(sol_raw)` for solar inverter readings in `HemsBackgroundCollector` live power balance, correctly calculating direct solar self-consumption and unallocated load during daytime export.
+
+---
+
 ## [0.25.0] — 2026-09-08 (Self-Learning Unallocated Model in Calibration & Live Data Pipeline Monitor)
 
 ### Added

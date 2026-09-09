@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.25.0
+Version: 0.25.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -911,7 +911,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.25.0",
+                "version": "0.25.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2048,7 +2048,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.25.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.25.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5079,7 +5079,8 @@ class HemsBackgroundCollector(threading.Thread):
             # Update Live Pipeline Power Balance (10s snapshot)
             p1_imp = get_val_w("sensor.power_consumption") or 0.0
             p1_exp = get_val_w("sensor.power_production") or 0.0
-            sol = get_val_w("sensor.zonnepanelen_power") or get_val_w("sensor.zonnepanelen_power_avg_5_minutes") or 0.0
+            sol_raw = get_val_w("sensor.zonnepanelen_power") or get_val_w("sensor.zonnepanelen_power_avg_5_minutes") or 0.0
+            sol = abs(sol_raw)
             wp = get_val_w("sensor.warmtepomp_power") or 0.0
             bat = get_val_w("sensor.battery_power") or 0.0
 
@@ -5089,7 +5090,7 @@ class HemsBackgroundCollector(threading.Thread):
             # 2. Direct Consumed Solar = Solar produced minus what was pushed to the grid
             dir_sol = max(0.0, sol - p1_exp)
             # 3. Total Real Household Load = Net Grid Import + Solar
-            tot_house = net_grid + sol
+            tot_house = max(0.0, net_grid + sol)
             # 4. Unallocated Load = Total House Load - Heatpump - Battery charging
             unalloc = max(50.0, tot_house - wp)
 
