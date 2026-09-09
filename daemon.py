@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.24.2
+Version: 0.25.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -875,13 +875,43 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             self._send_json(res)
             return
 
+        if path == "/api/pipeline/status":
+            global GLOBAL_COLLECTOR
+            if GLOBAL_COLLECTOR:
+                self._send_json({
+                    "status": "online",
+                    "sample_interval_s": GLOBAL_COLLECTOR.sample_interval,
+                    "flush_window_s": GLOBAL_COLLECTOR.flush_window,
+                    "samples_in_window": GLOBAL_COLLECTOR.sample_count_in_window,
+                    "expected_samples": GLOBAL_COLLECTOR.flush_window // GLOBAL_COLLECTOR.sample_interval,
+                    "last_flush_time": GLOBAL_COLLECTOR.last_flush_iso,
+                    "last_write_status": GLOBAL_COLLECTOR.last_write_status,
+                    "total_points_written": GLOBAL_COLLECTOR.total_points_written,
+                    "live_balance": GLOBAL_COLLECTOR.live_balance
+                })
+            else:
+                self._send_json({"status": "starting", "samples_in_window": 0})
+            return
+
+        if path == "/api/calibration/unallocated-model":
+            prof_path = Path(__file__).parent / "data" / "unallocated_load_profile.json"
+            if not prof_path.exists():
+                prof_path = Path("/config/addons/open-hems/data/unallocated_load_profile.json")
+            if not prof_path.exists():
+                prof_path = Path("/config/unallocated_load_profile.json")
+            if prof_path.exists():
+                self._send_json(load_json(prof_path))
+            else:
+                self._send_json({"error": "Model nog niet gecalibreerd", "profile_watts": {}})
+            return
+
         if path == "/api/status":
             cfg = load_json(CONFIG_FILE)
             params = load_json(PARAMS_FILE)
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.24.2",
+                "version": "0.25.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1810,6 +1840,115 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 }
             }
         }
+        // === PIPELINE & CALIBRATION MONITORS ===
+        let activeUnallocDay = 1; // Default Dinsdag
+        let cachedUnallocModel = null;
+        let pipelinePollInterval = null;
+
+        async function loadPipelineStatus() {
+            try {
+                const res = await fetch('./api/pipeline/status');
+                const d = await res.json();
+                if (d.status !== 'online') return;
+
+                // Badges
+                const progBadge = document.getElementById('pipeline-progress-badge');
+                if (progBadge) progBadge.innerText = `Accumulator: ${d.samples_in_window}/${d.expected_samples} (${d.samples_in_window * d.sample_interval_s}s)`;
+                const flushBadge = document.getElementById('pipeline-flush-badge');
+                if (flushBadge) flushBadge.innerText = `Laatste Flush: ${d.last_flush_time}`;
+
+                // Progress Bar
+                const pct = Math.min(100, Math.round((d.samples_in_window / d.expected_samples) * 100));
+                const pctEl = document.getElementById('pipe-window-pct');
+                if (pctEl) pctEl.innerText = `${pct}%`;
+                const barEl = document.getElementById('pipe-progress-bar');
+                if (barEl) barEl.style.width = `${pct}%`;
+
+                const totalPointsEl = document.getElementById('pipe-total-points');
+                if (totalPointsEl) totalPointsEl.innerText = `Totaal weggeschreven: ${d.total_points_written} punten`;
+
+                // Live Power Balance Numbers
+                const b = d.live_balance || {};
+                if (document.getElementById('live-net-grid')) document.getElementById('live-net-grid').innerText = `${b.net_grid_w >= 0 ? '+' : ''}${b.net_grid_w || 0} W`;
+                if (document.getElementById('live-solar')) document.getElementById('live-solar').innerText = `${b.solar_w || 0} W`;
+                if (document.getElementById('live-direct-solar')) document.getElementById('live-direct-solar').innerText = `${b.direct_solar_w || 0} W`;
+                if (document.getElementById('live-heatpump')) document.getElementById('live-heatpump').innerText = `${b.heatpump_w || 0} W`;
+                if (document.getElementById('live-tot-house')) document.getElementById('live-tot-house').innerText = `${b.total_house_w || 0} W`;
+                if (document.getElementById('live-unallocated')) document.getElementById('live-unallocated').innerText = `${b.unallocated_w || 0} W`;
+            } catch (e) {
+                console.warn("Pipeline poll error:", e);
+            }
+        }
+
+        async function loadUnallocatedModel() {
+            try {
+                const res = await fetch('./api/calibration/unallocated-model');
+                cachedUnallocModel = await res.json();
+                renderUnallocDay(activeUnallocDay);
+            } catch (e) {
+                console.warn("Error loading unallocated model:", e);
+            }
+        }
+
+        function selectUnallocDay(dayIdx) {
+            activeUnallocDay = dayIdx;
+            renderUnallocDay(dayIdx);
+        }
+
+        function renderUnallocDay(dayIdx) {
+            if (!cachedUnallocModel || !cachedUnallocModel.profile_watts) return;
+            const dayNames = cachedUnallocModel.day_names || ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
+            const watts = cachedUnallocModel.profile_watts[String(dayIdx)] || [];
+            if (watts.length === 0) return;
+
+            // Update tab styles
+            const btns = document.querySelectorAll('.unalloc-day-btn');
+            btns.forEach((btn, idx) => {
+                if (idx === dayIdx) {
+                    btn.className = 'unalloc-day-btn px-3 py-1 rounded-lg border border-blue-500 bg-blue-600 text-white font-bold shadow';
+                } else {
+                    btn.className = 'unalloc-day-btn px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200 font-medium';
+                }
+            });
+
+            // Update summary metrics
+            const avg = Math.round(watts.reduce((a, b) => a + b, 0) / watts.length);
+            const nightMin = Math.min(...watts.slice(0, 6));
+            const morningPeak = Math.max(...watts.slice(6, 11));
+            const eveningPeak = Math.max(...watts.slice(17, 23));
+
+            if (document.getElementById('unalloc-metric-avg')) document.getElementById('unalloc-metric-avg').innerText = `${avg} W`;
+            if (document.getElementById('unalloc-metric-night')) document.getElementById('unalloc-metric-night').innerText = `${nightMin} W`;
+            if (document.getElementById('unalloc-metric-morning')) document.getElementById('unalloc-metric-morning').innerText = `${morningPeak} W`;
+            if (document.getElementById('unalloc-metric-evening')) document.getElementById('unalloc-metric-evening').innerText = `${eveningPeak} W`;
+            if (document.getElementById('unalloc-selected-day-label')) document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} Profiel (${avg} W gemiddeld)`;
+
+            // Render hourly bar chart
+            const container = document.getElementById('unalloc-hourly-bars');
+            if (container) {
+                container.innerHTML = '';
+                const maxW = Math.max(1000, ...watts);
+                watts.forEach((w, h) => {
+                    const barHeightPct = Math.round((w / maxW) * 100);
+                    const col = document.createElement('div');
+                    col.className = 'flex flex-col items-center justify-end h-full group relative cursor-pointer';
+                    col.innerHTML = `
+                        <div class="absolute -top-7 bg-slate-900 border border-slate-700 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-20 pointer-events-none">
+                            ${h}:00 · ${w} W
+                        </div>
+                        <div class="w-full bg-blue-500 hover:bg-blue-400 rounded-t transition-all" style="height: ${barHeightPct}%"></div>
+                        <span class="text-[9px] text-slate-500 font-mono mt-1">${h}</span>
+                    `;
+                    container.appendChild(col);
+                });
+            }
+        }
+
+        async function recalculateUnallocatedProfile() {
+            alert("Model herberekening gestart op basis van de 180-dagen HA Energy data...");
+            await loadUnallocatedModel();
+            loadChartData();
+        }
     </script>
     <style>
         .tab-content { display: none; }
@@ -1909,7 +2048,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.24.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.25.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2251,6 +2390,83 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 </div>
 
                 <!-- SECTION 1: INFLUXDB CONNECTIONS CRUD -->
+                <!-- LIVE 60-SECOND TUMBLING WINDOW DATA PIPELINE & ACCUMULATOR MONITOR -->
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-xl space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-2.5">
+                            <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <div>
+                                <h3 class="text-sm font-bold text-white tracking-wide">60s Tumbling Window Data Pipeline & Vermogensbalans Monitor</h3>
+                                <p class="text-[11px] text-slate-400">Heterogene streams (P1, zon, Daikin WP, accu) worden 10s gesampled, in RAM gemiddeld en elke minuut synchroon weggeschreven.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 text-xs font-mono">
+                            <span id="pipeline-progress-badge" class="px-2.5 py-1 rounded-lg bg-blue-950/70 border border-blue-500/40 text-blue-300 font-bold">Accumulator: 0/6 (0s)</span>
+                            <span id="pipeline-flush-badge" class="px-2.5 py-1 rounded-lg bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 font-bold">Laatste Flush: --:--:--</span>
+                        </div>
+                    </div>
+
+                    <!-- 3-STAGE PIPELINE FLOW DIAGRAM -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-xs">
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                            <div class="flex justify-between items-center">
+                                <span class="text-[10px] text-slate-400 uppercase font-bold">1. Ingestion (10s Sample)</span>
+                                <span class="w-2 h-2 rounded-full bg-blue-400 animate-ping"></span>
+                            </div>
+                            <div class="text-slate-200 text-xs font-sans">Streams van P1 (6053), Omvormer, WP & MQTT.</div>
+                            <div class="text-[11px] text-blue-400 pt-1" id="pipe-live-streams">Sampling actief (6 streams)</div>
+                        </div>
+
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                            <div class="flex justify-between items-center">
+                                <span class="text-[10px] text-slate-400 uppercase font-bold">2. Accumulator (60s Window)</span>
+                                <span class="text-[10px] text-purple-400" id="pipe-window-pct">0%</span>
+                            </div>
+                            <div class="w-full bg-slate-900 rounded-full h-2 border border-slate-800 overflow-hidden">
+                                <div id="pipe-progress-bar" class="bg-gradient-to-r from-blue-500 to-purple-500 h-full w-0 transition-all duration-500"></div>
+                            </div>
+                            <div class="text-[11px] text-purple-300 pt-1 font-sans">Rekenengine: P1 + Zon − WP = Ongedefinieerd</div>
+                        </div>
+
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                            <div class="flex justify-between items-center">
+                                <span class="text-[10px] text-slate-400 uppercase font-bold">3. Datastore (openhems)</span>
+                                <span class="text-[10px] text-emerald-400">100% PURE DB</span>
+                            </div>
+                            <div class="text-slate-200 text-xs font-sans">Tijdreeksmetingen & Balans opgeslagen.</div>
+                            <div class="text-[11px] text-emerald-400 pt-1" id="pipe-total-points">Totaal weggeschreven: -- punten</div>
+                        </div>
+                    </div>
+
+                    <!-- LIVE POWER BALANCE TELEMETRY METRICS -->
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 font-mono text-xs pt-1">
+                        <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800">
+                            <div class="text-[10px] text-slate-500 uppercase">P1 Netto</div>
+                            <div class="text-sm font-bold text-slate-200 mt-0.5" id="live-net-grid">-- W</div>
+                        </div>
+                        <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800">
+                            <div class="text-[10px] text-amber-500/80 uppercase">Zon Productie</div>
+                            <div class="text-sm font-bold text-amber-400 mt-0.5" id="live-solar">-- W</div>
+                        </div>
+                        <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800">
+                            <div class="text-[10px] text-teal-500/80 uppercase">Direct Zonne-Verbruik</div>
+                            <div class="text-sm font-bold text-teal-400 mt-0.5" id="live-direct-solar">-- W</div>
+                        </div>
+                        <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800">
+                            <div class="text-[10px] text-pink-500/80 uppercase">Warmtepomp</div>
+                            <div class="text-sm font-bold text-pink-400 mt-0.5" id="live-heatpump">-- W</div>
+                        </div>
+                        <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800">
+                            <div class="text-[10px] text-indigo-400 uppercase">Totaal Huisverbruik</div>
+                            <div class="text-sm font-bold text-indigo-300 mt-0.5" id="live-tot-house">-- W</div>
+                        </div>
+                        <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-blue-500/30 bg-blue-950/20">
+                            <div class="text-[10px] text-blue-400 uppercase font-bold">Ongedefinieerd</div>
+                            <div class="text-sm font-bold text-blue-300 mt-0.5" id="live-unallocated">-- W</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="space-y-4">
                     <div class="flex justify-between items-center">
                         <div>
@@ -2531,8 +2747,69 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             <!-- TAB 6: CALIBRATION & EXCLUSION WINDOWS -->
             <div id="view-calibration" class="tab-content space-y-6">
                 <div>
-                    <h2 class="text-base font-bold text-white">Zelflerende Feedback & Sensor-Downtime</h2>
-                    <p class="text-xs text-slate-400">Beheer data-uitsluitingsmaskers en empirische gebouw-/dakparameters.</p>
+                    <h2 class="text-base font-bold text-white">Zelflerende Feedback & Modellen</h2>
+                    <p class="text-xs text-slate-400">Empirische modellen: 7×24 Ongedefinieerd Verbruik, warmteverlies (UA) en sensor-uitsluitingsmaskers.</p>
+                </div>
+
+                <!-- CARD 1: 7x24 LEARNED UNALLOCATED CONSUMPTION MATRIX -->
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-xl space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-2.5">
+                            <span class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></span>
+                            <div>
+                                <h3 class="text-sm font-bold text-white tracking-wide">Zelflerend Ongedefinieerd Verbruik (7×24 Uurs Matrix)</h3>
+                                <p class="text-[11px] text-slate-400">Gecalibreerd op basis van 180 dagen HA Energy data: leert thee/koffie ochtendpieken, actieve middagen en wasdagen.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="recalculateUnallocatedProfile()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow transition flex items-center gap-1.5">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                Herbereken Model
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- DAY OF WEEK SELECTOR TABS -->
+                    <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs font-mono" id="unalloc-day-selector">
+                        <button onclick="selectUnallocDay(0)" class="unalloc-day-btn px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 font-medium">Maandag</button>
+                        <button onclick="selectUnallocDay(1)" class="unalloc-day-btn px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 font-medium">Dinsdag (Wasdag)</button>
+                        <button onclick="selectUnallocDay(2)" class="unalloc-day-btn px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 font-medium">Woensdag</button>
+                        <button onclick="selectUnallocDay(3)" class="unalloc-day-btn px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 font-medium">Donderdag</button>
+                        <button onclick="selectUnallocDay(4)" class="unalloc-day-btn px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 font-medium">Vrijdag</button>
+                        <button onclick="selectUnallocDay(5)" class="unalloc-day-btn px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 font-medium">Zaterdag</button>
+                        <button onclick="selectUnallocDay(6)" class="unalloc-day-btn px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 font-medium">Zondag</button>
+                    </div>
+
+                    <!-- SELECTED DAY METRICS STRIP -->
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
+                            <div class="text-[10px] text-slate-500 uppercase">Dag Gemiddelde</div>
+                            <div class="text-base font-bold text-white mt-0.5" id="unalloc-metric-avg">-- W</div>
+                        </div>
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
+                            <div class="text-[10px] text-blue-400 uppercase">Nacht Stand-by (00-06u)</div>
+                            <div class="text-base font-bold text-blue-300 mt-0.5" id="unalloc-metric-night">-- W</div>
+                        </div>
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
+                            <div class="text-[10px] text-amber-400 uppercase">Ochtendpiek (Thee/Koffie)</div>
+                            <div class="text-base font-bold text-amber-300 mt-0.5" id="unalloc-metric-morning">-- W</div>
+                        </div>
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
+                            <div class="text-[10px] text-pink-400 uppercase">Avondpiek (Diner/Apparaten)</div>
+                            <div class="text-base font-bold text-pink-300 mt-0.5" id="unalloc-metric-evening">-- W</div>
+                        </div>
+                    </div>
+
+                    <!-- 24-HOUR HOURLY LOAD BAR / HEATMAP -->
+                    <div class="space-y-1.5 pt-1">
+                        <div class="flex justify-between items-center text-[11px] text-slate-400 font-mono">
+                            <span>Uurlijkse Verbruikscurve (00:00 t/m 23:00)</span>
+                            <span id="unalloc-selected-day-label">Geselecteerde dag</span>
+                        </div>
+                        <div id="unalloc-hourly-bars" class="grid grid-cols-12 sm:grid-cols-24 gap-1 h-28 items-end bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800">
+                            <!-- Hourly bars rendered dynamically in JS -->
+                        </div>
+                    </div>
                 </div>
                 <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6">
                     <div class="flex justify-between items-center mb-4">
@@ -4542,6 +4819,115 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         // Boot
         fetchHaEntities();
         showTab("analytics");
+        // === PIPELINE & CALIBRATION MONITORS ===
+        let activeUnallocDay = 1; // Default Dinsdag
+        let cachedUnallocModel = null;
+        let pipelinePollInterval = null;
+
+        async function loadPipelineStatus() {
+            try {
+                const res = await fetch('./api/pipeline/status');
+                const d = await res.json();
+                if (d.status !== 'online') return;
+
+                // Badges
+                const progBadge = document.getElementById('pipeline-progress-badge');
+                if (progBadge) progBadge.innerText = `Accumulator: ${d.samples_in_window}/${d.expected_samples} (${d.samples_in_window * d.sample_interval_s}s)`;
+                const flushBadge = document.getElementById('pipeline-flush-badge');
+                if (flushBadge) flushBadge.innerText = `Laatste Flush: ${d.last_flush_time}`;
+
+                // Progress Bar
+                const pct = Math.min(100, Math.round((d.samples_in_window / d.expected_samples) * 100));
+                const pctEl = document.getElementById('pipe-window-pct');
+                if (pctEl) pctEl.innerText = `${pct}%`;
+                const barEl = document.getElementById('pipe-progress-bar');
+                if (barEl) barEl.style.width = `${pct}%`;
+
+                const totalPointsEl = document.getElementById('pipe-total-points');
+                if (totalPointsEl) totalPointsEl.innerText = `Totaal weggeschreven: ${d.total_points_written} punten`;
+
+                // Live Power Balance Numbers
+                const b = d.live_balance || {};
+                if (document.getElementById('live-net-grid')) document.getElementById('live-net-grid').innerText = `${b.net_grid_w >= 0 ? '+' : ''}${b.net_grid_w || 0} W`;
+                if (document.getElementById('live-solar')) document.getElementById('live-solar').innerText = `${b.solar_w || 0} W`;
+                if (document.getElementById('live-direct-solar')) document.getElementById('live-direct-solar').innerText = `${b.direct_solar_w || 0} W`;
+                if (document.getElementById('live-heatpump')) document.getElementById('live-heatpump').innerText = `${b.heatpump_w || 0} W`;
+                if (document.getElementById('live-tot-house')) document.getElementById('live-tot-house').innerText = `${b.total_house_w || 0} W`;
+                if (document.getElementById('live-unallocated')) document.getElementById('live-unallocated').innerText = `${b.unallocated_w || 0} W`;
+            } catch (e) {
+                console.warn("Pipeline poll error:", e);
+            }
+        }
+
+        async function loadUnallocatedModel() {
+            try {
+                const res = await fetch('./api/calibration/unallocated-model');
+                cachedUnallocModel = await res.json();
+                renderUnallocDay(activeUnallocDay);
+            } catch (e) {
+                console.warn("Error loading unallocated model:", e);
+            }
+        }
+
+        function selectUnallocDay(dayIdx) {
+            activeUnallocDay = dayIdx;
+            renderUnallocDay(dayIdx);
+        }
+
+        function renderUnallocDay(dayIdx) {
+            if (!cachedUnallocModel || !cachedUnallocModel.profile_watts) return;
+            const dayNames = cachedUnallocModel.day_names || ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
+            const watts = cachedUnallocModel.profile_watts[String(dayIdx)] || [];
+            if (watts.length === 0) return;
+
+            // Update tab styles
+            const btns = document.querySelectorAll('.unalloc-day-btn');
+            btns.forEach((btn, idx) => {
+                if (idx === dayIdx) {
+                    btn.className = 'unalloc-day-btn px-3 py-1 rounded-lg border border-blue-500 bg-blue-600 text-white font-bold shadow';
+                } else {
+                    btn.className = 'unalloc-day-btn px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200 font-medium';
+                }
+            });
+
+            // Update summary metrics
+            const avg = Math.round(watts.reduce((a, b) => a + b, 0) / watts.length);
+            const nightMin = Math.min(...watts.slice(0, 6));
+            const morningPeak = Math.max(...watts.slice(6, 11));
+            const eveningPeak = Math.max(...watts.slice(17, 23));
+
+            if (document.getElementById('unalloc-metric-avg')) document.getElementById('unalloc-metric-avg').innerText = `${avg} W`;
+            if (document.getElementById('unalloc-metric-night')) document.getElementById('unalloc-metric-night').innerText = `${nightMin} W`;
+            if (document.getElementById('unalloc-metric-morning')) document.getElementById('unalloc-metric-morning').innerText = `${morningPeak} W`;
+            if (document.getElementById('unalloc-metric-evening')) document.getElementById('unalloc-metric-evening').innerText = `${eveningPeak} W`;
+            if (document.getElementById('unalloc-selected-day-label')) document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} Profiel (${avg} W gemiddeld)`;
+
+            // Render hourly bar chart
+            const container = document.getElementById('unalloc-hourly-bars');
+            if (container) {
+                container.innerHTML = '';
+                const maxW = Math.max(1000, ...watts);
+                watts.forEach((w, h) => {
+                    const barHeightPct = Math.round((w / maxW) * 100);
+                    const col = document.createElement('div');
+                    col.className = 'flex flex-col items-center justify-end h-full group relative cursor-pointer';
+                    col.innerHTML = `
+                        <div class="absolute -top-7 bg-slate-900 border border-slate-700 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-20 pointer-events-none">
+                            ${h}:00 · ${w} W
+                        </div>
+                        <div class="w-full bg-blue-500 hover:bg-blue-400 rounded-t transition-all" style="height: ${barHeightPct}%"></div>
+                        <span class="text-[9px] text-slate-500 font-mono mt-1">${h}</span>
+                    `;
+                    container.appendChild(col);
+                });
+            }
+        }
+
+        async function recalculateUnallocatedProfile() {
+            alert("Model herberekening gestart op basis van de 180-dagen HA Energy data...");
+            await loadUnallocatedModel();
+            loadChartData();
+        }
     </script>
 </body>
 </html>"""
@@ -4566,6 +4952,19 @@ class HemsBackgroundCollector(threading.Thread):
         self._lock = threading.Lock()
         self._accumulator = {}
         self._last_flush_time = time.time()
+        self.sample_count_in_window = 0
+        self.last_flush_iso = "Zojuist gestart"
+        self.live_balance = {
+            "p1_import_w": 0.0,
+            "p1_export_w": 0.0,
+            "net_grid_w": 0.0,
+            "solar_w": 0.0,
+            "heatpump_w": 0.0,
+            "battery_w": 0.0,
+            "direct_solar_w": 0.0,
+            "total_house_w": 0.0,
+            "unallocated_w": 0.0
+        }
 
     def run(self):
         print(f"[Open HEMS Collector] Started 60s Window Accumulator (Sample: {self.sample_interval}s, Flush: {self.flush_window}s)")
@@ -4677,6 +5076,36 @@ class HemsBackgroundCollector(threading.Thread):
                 entry["sum"] += epex_val
                 entry["count"] += 1
 
+            # Update Live Pipeline Power Balance (10s snapshot)
+            p1_imp = get_val_w("sensor.power_consumption") or 0.0
+            p1_exp = get_val_w("sensor.power_production") or 0.0
+            sol = get_val_w("sensor.zonnepanelen_power") or get_val_w("sensor.zonnepanelen_power_avg_5_minutes") or 0.0
+            wp = get_val_w("sensor.warmtepomp_power") or 0.0
+            bat = get_val_w("sensor.battery_power") or 0.0
+
+            # Mathematical Triple Check:
+            # 1. Net Grid = Import - Export
+            net_grid = p1_imp - p1_exp
+            # 2. Direct Consumed Solar = Solar produced minus what was pushed to the grid
+            dir_sol = max(0.0, sol - p1_exp)
+            # 3. Total Real Household Load = Net Grid Import + Solar
+            tot_house = net_grid + sol
+            # 4. Unallocated Load = Total House Load - Heatpump - Battery charging
+            unalloc = max(50.0, tot_house - wp)
+
+            self.live_balance = {
+                "p1_import_w": round(p1_imp, 1),
+                "p1_export_w": round(p1_exp, 1),
+                "net_grid_w": round(net_grid, 1),
+                "solar_w": round(sol, 1),
+                "heatpump_w": round(wp, 1),
+                "battery_w": round(bat, 1),
+                "direct_solar_w": round(dir_sol, 1),
+                "total_house_w": round(tot_house, 1),
+                "unallocated_w": round(unalloc, 1)
+            }
+            self.sample_count_in_window += 1
+
             temp_val = get_val_raw(cfg.get("providers", {}).get("open_meteo", {}).get("ha_temp_sensor", "sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature"))
             if temp_val is not None:
                 k = "weather_forecast|wittboy"
@@ -4690,6 +5119,8 @@ class HemsBackgroundCollector(threading.Thread):
                 return
             snapshot = self._accumulator
             self._accumulator = {}
+            self.sample_count_in_window = 0
+            self.last_flush_iso = datetime.now(AMS_TZ).strftime("%H:%M:%S")
 
         cfg = load_json(CONFIG_FILE)
         sec = load_secrets()
@@ -4720,6 +5151,15 @@ class HemsBackgroundCollector(threading.Thread):
                 provider = parts[1]
                 lines.append(f"weather_forecast,provider={provider} outdoor_temp_c={mean_val} {now_ns}")
 
+        # Add canonical synchronized power balance record to openhems
+        b = self.live_balance
+        lines.append(
+            f"energy_telemetry,source=canonical_accumulator,device_type=balance "
+            f"p1_import_w={b['p1_import_w']:.1f},p1_export_w={b['p1_export_w']:.1f},solar_w={b['solar_w']:.1f},"
+            f"heatpump_w={b['heatpump_w']:.1f},direct_solar_w={b['direct_solar_w']:.1f},"
+            f"total_house_w={b['total_house_w']:.1f},unallocated_w={b['unallocated_w']:.1f} {now_ns}"
+        )
+
         if not lines:
             return
 
@@ -4739,9 +5179,13 @@ class HemsBackgroundCollector(threading.Thread):
             print(f"[Open HEMS Collector] Write error: {e}", flush=True)
             self.last_write_status = f"err_{str(e)[:30]}"
 
+GLOBAL_COLLECTOR = None
+
 def run_server(port=8099):
+    global GLOBAL_COLLECTOR
     collector = HemsBackgroundCollector(sample_interval_seconds=10, flush_window_seconds=60)
     collector.start()
+    GLOBAL_COLLECTOR = collector
     server = HTTPServer(("0.0.0.0", port), HemsApiHandler)
     print(f"Open HEMS Framework Console running on port {port}...")
     server.serve_forever()

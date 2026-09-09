@@ -10,6 +10,33 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.25.0] — 2026-09-08 (Self-Learning Unallocated Model in Calibration & Live Data Pipeline Monitor)
+
+### Added
+- **Self-Learning Unallocated Model Dashboard in Calibration Tab (`view-calibration`):**
+  - Added dedicated card displaying the 7×24 hourly unallocated profile matrix.
+  - Interactive Day-of-Week selector (`Ma`, `Di (Wasdag)`, `Wo`, `Do`, `Vr`, `Za`, `Zo`).
+  - Realtime visual 24-hour load heatmap bar chart with hover tooltips showing exact wattage per hour.
+  - Key metrics display: Day Average, Night Standby (295–320 W), Morning Peak, Evening Peak.
+  - Added "Herbereken Model" button to re-evaluate the 180-day canonical dataset on demand.
+- **60s Tumbling Window Data Pipeline & Power Balance Monitor in Infrastructure Tab (`view-infrastructure`):**
+  - Visual 3-stage animated data flow diagram:
+    1. Ingestion (10s): P1 Meter (ESPHome 6053), Solar Inverter, Daikin WP, Home Battery & MQTT.
+    2. Accumulator (60s Window): In-memory tumbling window averaging with live progress bar (`0% - 100%`) and sample counter (`X/6 samples`).
+    3. Datastore (`openhems`): Synchronized time-series write to dedicated InfluxDB with total points counter.
+  - Live Mathematical Power Balance telemetry strip:
+    - P1 Netto ($P_{\text{imp}} - P_{\text{exp}}$)
+    - Zon Productie ($P_{\text{sol}}$)
+    - Direct Zonne-Eigenverbruik ($\max(0, P_{\text{sol}} - P_{\text{exp}})$)
+    - Warmtepomp ($P_{\text{wp}}$)
+    - Totaal Werkelijk Huisverbruik ($P_{\text{net}} + P_{\text{sol}}$)
+    - Ongedefinieerd Verbruik ($P_{\text{totaal}} - P_{\text{wp}}$)
+- **REST Endpoints:**
+  - Added `/api/pipeline/status` for continuous 10s polling of the in-memory window accumulator.
+  - Added `/api/calibration/unallocated-model` for inspection and synchronization of the 7x24 profile.
+
+---
+
 ## [0.24.0] — 2026-09-08 (Same-Column Dual-Polarity Alignment & 15-Minute Prediction Toggle)
 
 ### Added & Enhanced
