@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.29.0
+Version: 0.29.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -989,7 +989,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.29.0",
+                "version": "0.29.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2097,7 +2097,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.29.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.29.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3358,14 +3358,67 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         var chartInstance = null;
         var analyticsChartInstance = null;
         var powerProducersChartInstance = null;
+        var powerProducersChartType = 'bar'; // Default to Staven (aligned with 24h prediction)
+        var powerProducersResolution = '1h';  // Default to 1 Uur for 24h range
         var electricityPricesChartInstance = null;
         var pipelinePollInterval = null;
         var activeUnallocDay = 1;
         var cachedUnallocModel = null;
         let haEntitiesCache = [];
         let currentPolicyParams = {};
-                let activeTabId = 'analytics';
+        let activeTabId = 'analytics';
         let predictionResolution = '1h';
+
+        function setPowerProducersType(type) {
+            powerProducersChartType = type;
+            const btnBar = document.getElementById('pp-btn-type-bar');
+            const btnLine = document.getElementById('pp-btn-type-line');
+            if (btnBar && btnLine) {
+                if (type === 'bar') {
+                    btnBar.className = 'px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow';
+                    btnLine.className = 'px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                } else {
+                    btnBar.className = 'px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                    btnLine.className = 'px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow';
+                }
+            }
+            loadPowerProducersChart();
+        }
+
+        function setPowerProducersResolution(res) {
+            powerProducersResolution = res;
+            updatePowerProducersResButtons(res);
+            loadPowerProducersChart();
+        }
+
+        function updatePowerProducersResButtons(res) {
+            const btn1h = document.getElementById('pp-btn-res-1h');
+            const btn15m = document.getElementById('pp-btn-res-15m');
+            if (btn1h && btn15m) {
+                if (res === '1h') {
+                    btn1h.className = 'px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow';
+                    btn15m.className = 'px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                } else {
+                    btn1h.className = 'px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                    btn15m.className = 'px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow';
+                }
+            }
+        }
+
+        function onPowerProducersRangeChange() {
+            const rangeSelect = document.getElementById('pp-range-select');
+            const rangeVal = rangeSelect ? rangeSelect.value : '24h';
+            // Auto-adjust resolution based on range (Grafana style)
+            if (rangeVal === '24h') {
+                powerProducersResolution = '1h';
+            } else if (rangeVal === '1h' || rangeVal === '6h') {
+                powerProducersResolution = '15m';
+            } else {
+                powerProducersResolution = '1h';
+            }
+            updatePowerProducersResButtons(powerProducersResolution);
+            loadPowerProducersChart();
+        }
 
         function setPredictionResolution(res) {
             predictionResolution = res;
