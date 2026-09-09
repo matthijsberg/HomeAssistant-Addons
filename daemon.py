@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.26.0
+Version: 0.27.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -709,12 +709,34 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 series_verbruik_pos = []
                 series_selfcons_pos = []
 
-                # Accumulators for timeframe energy totals (kWh = sum(P * dt / 1000))
+                # Fetch EPEX prices for cost integration across timeframe
+                now_ams = datetime.now(AMS_TZ)
+                epex_prices_map = {}
+                try:
+                    for days_back in range(3):
+                        d_str = (now_ams - timedelta(days=days_back)).strftime("%d-%m-%Y")
+                        url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval=INTERVAL_HOUR"
+                        req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
+                        with urllib.request.urlopen(req_p, timeout=3) as r_p:
+                            res_p = json.loads(r_p.read().decode())
+                            for it in res_p.get("all_in_with_vat", []):
+                                dt_p = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
+                                epex_prices_map[dt_p.strftime("%Y-%m-%d %H:00")] = float(it.get("price", {}).get("value", 0.25))
+                except Exception as e_pr:
+                    pass
+
+                # Accumulators for timeframe energy totals (kWh) & monetary costs (€)
                 tot_solar_wh = 0.0
                 tot_terug_wh = 0.0
                 tot_afname_wh = 0.0
                 tot_verbruik_wh = 0.0
                 tot_selfcons_wh = 0.0
+
+                tot_solar_eur = 0.0
+                tot_terug_eur = 0.0
+                tot_afname_eur = 0.0
+                tot_verbruik_eur = 0.0
+                tot_selfcons_eur = 0.0
 
                 for ts_str in sorted_ts:
                     m = ts_map[ts_str]
@@ -745,6 +767,15 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     tot_solar_wh += solar * interval_h
                     tot_verbruik_wh += verbruik * interval_h
                     tot_selfcons_wh += self_cons * interval_h
+
+                    # EPEX cost calculation: kWh * price (€/kWh)
+                    hr_key = ts_str[:13].replace('T', ' ') + ':00'
+                    cur_price = epex_prices_map.get(hr_key, 0.25)
+                    tot_afname_eur += (afname / 1000.0) * interval_h * cur_price
+                    tot_terug_eur += (terug / 1000.0) * interval_h * cur_price
+                    tot_solar_eur += (solar / 1000.0) * interval_h * cur_price
+                    tot_verbruik_eur += (verbruik / 1000.0) * interval_h * cur_price
+                    tot_selfcons_eur += (self_cons / 1000.0) * interval_h * cur_price
                 
                 def fmt_w(val):
                     abs_v = abs(val)
@@ -762,42 +793,51 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     else:
                         return f"{kwh:.1f} kWh"
 
+                def fmt_eur(val, prefix="€"):
+                    return f"{prefix}{val:.2f}"
+
                 stats = {
                     "zonnepanelen": {
                         "last": fmt_w(series_solar_neg[-1] if series_solar_neg else 0),
                         "min": fmt_w(min(series_solar_neg) if series_solar_neg else 0),
                         "max": fmt_w(max(series_solar_neg) if series_solar_neg else 0),
-                        "total_kwh": fmt_kwh(tot_solar_wh)
+                        "total_kwh": fmt_kwh(tot_solar_wh),
+                        "cost_eur": fmt_eur(tot_solar_eur)
                     },
                     "teruglevering": {
                         "last": fmt_w(series_terug_neg[-1] if series_terug_neg else 0),
                         "min": fmt_w(min(series_terug_neg) if series_terug_neg else 0),
                         "max": fmt_w(max(series_terug_neg) if series_terug_neg else 0),
-                        "total_kwh": fmt_kwh(tot_terug_wh)
+                        "total_kwh": fmt_kwh(tot_terug_wh),
+                        "cost_eur": fmt_eur(tot_terug_eur)
                     },
                     "afname": {
                         "last": fmt_w(series_afname_pos[-1] if series_afname_pos else 0),
                         "min": fmt_w(min(series_afname_pos) if series_afname_pos else 0),
                         "max": fmt_w(max(series_afname_pos) if series_afname_pos else 0),
-                        "total_kwh": fmt_kwh(tot_afname_wh)
+                        "total_kwh": fmt_kwh(tot_afname_wh),
+                        "cost_eur": fmt_eur(tot_afname_eur)
                     },
                     "totaal_opgewekt": {
                         "last": fmt_w(series_solar_neg[-1] if series_solar_neg else 0),
                         "min": fmt_w(min(series_solar_neg) if series_solar_neg else 0),
                         "max": fmt_w(max(series_solar_neg) if series_solar_neg else 0),
-                        "total_kwh": fmt_kwh(tot_solar_wh)
+                        "total_kwh": fmt_kwh(tot_solar_wh),
+                        "cost_eur": fmt_eur(tot_solar_eur)
                     },
                     "opgewekt_gebruikt": {
                         "last": fmt_w(-series_selfcons_pos[-1] if series_selfcons_pos else 0),
                         "min": fmt_w(-max(series_selfcons_pos) if series_selfcons_pos else 0),
                         "max": fmt_w(0),
-                        "total_kwh": fmt_kwh(tot_selfcons_wh)
+                        "total_kwh": fmt_kwh(tot_selfcons_wh),
+                        "cost_eur": fmt_eur(tot_selfcons_eur)
                     },
                     "totaal_verbruik": {
                         "last": fmt_w(series_verbruik_pos[-1] if series_verbruik_pos else 0),
                         "min": fmt_w(min(series_verbruik_pos) if series_verbruik_pos else 0),
                         "max": fmt_w(max(series_verbruik_pos) if series_verbruik_pos else 0),
-                        "total_kwh": fmt_kwh(tot_verbruik_wh)
+                        "total_kwh": fmt_kwh(tot_verbruik_wh),
+                        "cost_eur": fmt_eur(tot_verbruik_eur)
                     }
                 }
 
@@ -913,7 +953,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.26.0",
+                "version": "0.27.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1287,13 +1327,92 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             else:
                 solar_recommendation = "☀️ Geen significant zonne-overschot verwacht; alle opwek wordt direct door basislast en SWW benut."
 
-            # 8. Compute Total 24h Predicted Energy Consumption & Energy Costs
+            # 8. Compute Total 24h Predicted Energy Consumption, Costs & 6-Box Stats
             step_h = 0.25 if is_15m else 1.0
             tot_cons_kwh = round(sum(u + b + h + c for u, b, h, c in zip(unallocated, boiler, heating, battery_charge)) * step_h, 2)
             tot_solar_kwh = round(sum(solar) * step_h, 2)
             net_cost_eur = round(sum(np * p for np, p in zip(net_power, prices)) * step_h, 2)
             gross_cost_eur = round(sum((u + b + h + c) * p for u, b, h, c, p in zip(unallocated, boiler, heating, battery_charge, prices)) * step_h, 2)
             solar_savings_eur = round(max(0.0, gross_cost_eur - net_cost_eur), 2)
+
+            # Compute detailed 6-box prediction metrics aligned with historical power producers
+            pred_afname_kwh = 0.0
+            pred_afname_eur = 0.0
+            pred_terug_kwh = 0.0
+            pred_terug_eur = 0.0
+            pred_selfcons_kwh = 0.0
+            pred_selfcons_eur = 0.0
+            pred_solar_eur = 0.0
+            pred_verbruik_eur = 0.0
+
+            afname_series = []
+            terug_series = []
+            selfcons_series = []
+            verbruik_series = []
+
+            for u, b, h, c, s, d, np_val, p in zip(unallocated, boiler, heating, battery_charge, solar, battery_discharge, net_power, prices):
+                c_tot = u + b + h + c
+                g_tot = s + d
+                afn = max(0.0, np_val)
+                ter = max(0.0, -np_val)
+                s_cons = min(s, c_tot)
+
+                afname_series.append(afn)
+                terug_series.append(ter)
+                selfcons_series.append(s_cons)
+                verbruik_series.append(c_tot)
+
+                pred_afname_kwh += afn * step_h
+                pred_afname_eur += afn * step_h * p
+                pred_terug_kwh += ter * step_h
+                pred_terug_eur += ter * step_h * p
+                pred_selfcons_kwh += s_cons * step_h
+                pred_selfcons_eur += s_cons * step_h * p
+                pred_solar_eur += s * step_h * p
+                pred_verbruik_eur += c_tot * step_h * p
+
+            def fmt_kw(val, neg=False):
+                sign = "-" if neg and val > 0 else ""
+                return f"{sign}{val:.2f} kW"
+
+            prediction_stats = {
+                "zonnepanelen": {
+                    "total_kwh": f"{tot_solar_kwh:.2f} kWh",
+                    "cost_eur": f"€{pred_solar_eur:.2f}",
+                    "last": fmt_kw(solar[0] if solar else 0, neg=True),
+                    "min": fmt_kw(max(solar) if solar else 0, neg=True)
+                },
+                "teruglevering": {
+                    "total_kwh": f"{pred_terug_kwh:.2f} kWh",
+                    "cost_eur": f"€{pred_terug_eur:.2f}",
+                    "last": fmt_kw(terug_series[0] if terug_series else 0, neg=True),
+                    "min": fmt_kw(max(terug_series) if terug_series else 0, neg=True)
+                },
+                "afname": {
+                    "total_kwh": f"{pred_afname_kwh:.2f} kWh",
+                    "cost_eur": f"€{pred_afname_eur:.2f}",
+                    "last": fmt_kw(afname_series[0] if afname_series else 0),
+                    "max": fmt_kw(max(afname_series) if afname_series else 0)
+                },
+                "totaal_opgewekt": {
+                    "total_kwh": f"{tot_solar_kwh:.2f} kWh",
+                    "cost_eur": f"€{pred_solar_eur:.2f}",
+                    "last": fmt_kw(solar[0] if solar else 0, neg=True),
+                    "min": fmt_kw(max(solar) if solar else 0, neg=True)
+                },
+                "opgewekt_gebruikt": {
+                    "total_kwh": f"{pred_selfcons_kwh:.2f} kWh",
+                    "cost_eur": f"€{pred_selfcons_eur:.2f}",
+                    "last": fmt_kw(selfcons_series[0] if selfcons_series else 0, neg=True),
+                    "min": fmt_kw(max(selfcons_series) if selfcons_series else 0, neg=True)
+                },
+                "totaal_verbruik": {
+                    "total_kwh": f"{tot_cons_kwh:.2f} kWh",
+                    "cost_eur": f"€{pred_verbruik_eur:.2f}",
+                    "last": fmt_kw(verbruik_series[0] if verbruik_series else 0),
+                    "max": fmt_kw(max(verbruik_series) if verbruik_series else 0)
+                }
+            }
 
             self._send_json({
                 "hours": labels,
@@ -1317,6 +1436,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "banner_text": banner_adv,
                 "baseload_watts": baseload_w,
                 "surplus_total_kwh": round(surplus_kwh_tot, 1),
+                "prediction_stats": prediction_stats,
                 "solar_recommendation": solar_recommendation,
                 "total_consumption_kwh": tot_cons_kwh,
                 "total_solar_kwh": tot_solar_kwh,
@@ -1941,7 +2061,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.26.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.27.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2113,6 +2233,114 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <canvas id="hemsChartAnalytics"></canvas>
                     </div>
 
+                    <!-- 24H PREDICTION 6-BOX METRIC SUMMARY (ALIGNED WITH HISTORICAL) -->
+                    <div class="pt-2 border-t border-slate-800/80">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs font-mono">
+                            <!-- Zonnepanelen -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-yellow-500"></span>
+                                        <span class="text-slate-300 font-medium">Zonnepanelen</span>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="text-xs text-yellow-400 font-bold block" id="pred-stat-solar-total">-- kWh</span>
+                                        <span class="text-[10px] text-yellow-500/90 font-mono font-medium block" id="pred-stat-solar-cost">€--</span>
+                                    </div>
+                                </div>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Nu: <strong class="text-yellow-400 font-normal" id="pred-stat-solar-last">--</strong></span>
+                                    <span>Piek: <span class="text-yellow-500/80" id="pred-stat-solar-min">--</span></span>
+                                </div>
+                            </div>
+                            <!-- Teruglevering -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-emerald-500"></span>
+                                        <span class="text-slate-300 font-medium">Teruglevering</span>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="text-xs text-emerald-400 font-bold block" id="pred-stat-terug-total">-- kWh</span>
+                                        <span class="text-[10px] text-emerald-500/90 font-mono font-medium block" id="pred-stat-terug-cost">€--</span>
+                                    </div>
+                                </div>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Nu: <strong class="text-emerald-400 font-normal" id="pred-stat-terug-last">--</strong></span>
+                                    <span>Piek: <span class="text-emerald-500/80" id="pred-stat-terug-min">--</span></span>
+                                </div>
+                            </div>
+                            <!-- Afname -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-red-500"></span>
+                                        <span class="text-slate-300 font-medium">Afname</span>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="text-xs text-red-400 font-bold block" id="pred-stat-afname-total">-- kWh</span>
+                                        <span class="text-[10px] text-red-500/90 font-mono font-medium block" id="pred-stat-afname-cost">€--</span>
+                                    </div>
+                                </div>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Nu: <strong class="text-red-400 font-normal" id="pred-stat-afname-last">--</strong></span>
+                                    <span>Piek: <span class="text-red-500/80" id="pred-stat-afname-max">--</span></span>
+                                </div>
+                            </div>
+                            <!-- Totaal opgewekt -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-lime-500"></span>
+                                        <span class="text-slate-300 font-medium">Totaal opgewekt</span>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="text-xs text-lime-400 font-bold block" id="pred-stat-opgewekt-total">-- kWh</span>
+                                        <span class="text-[10px] text-lime-500/90 font-mono font-medium block" id="pred-stat-opgewekt-cost">€--</span>
+                                    </div>
+                                </div>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Nu: <strong class="text-lime-400 font-normal" id="pred-stat-opgewekt-last">--</strong></span>
+                                    <span>Piek: <span class="text-lime-500/80" id="pred-stat-opgewekt-min">--</span></span>
+                                </div>
+                            </div>
+                            <!-- Opgewekt Gebruikt -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-teal-400"></span>
+                                        <span class="text-slate-300 font-medium">Opgewekt Gebruikt</span>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="text-xs text-teal-400 font-bold block" id="pred-stat-selfcons-total">-- kWh</span>
+                                        <span class="text-[10px] text-teal-500/90 font-mono font-medium block" id="pred-stat-selfcons-cost">€--</span>
+                                    </div>
+                                </div>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Nu: <strong class="text-teal-400 font-normal" id="pred-stat-selfcons-last">--</strong></span>
+                                    <span>Piek: <span class="text-teal-500/80" id="pred-stat-selfcons-min">--</span></span>
+                                </div>
+                            </div>
+                            <!-- Totaal Verbruik -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-3 h-1.5 rounded-sm bg-orange-500"></span>
+                                        <span class="text-slate-300 font-medium">Totaal Verbruik</span>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="text-xs text-orange-400 font-bold block" id="pred-stat-verbruik-total">-- kWh</span>
+                                        <span class="text-[10px] text-orange-500/90 font-mono font-medium block" id="pred-stat-verbruik-cost">€--</span>
+                                    </div>
+                                </div>
+                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                    <span>Nu: <strong class="text-orange-400 font-normal" id="pred-stat-verbruik-last">--</strong></span>
+                                    <span>Piek: <span class="text-orange-500/80" id="pred-stat-verbruik-max">--</span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Dual Polarity Power Producers Aligned Legend Chips -->
                     <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
                         <div class="flex items-center gap-3 flex-wrap">
@@ -2170,7 +2398,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                         <span class="w-3 h-1.5 rounded-sm bg-yellow-500"></span>
                                         <span class="text-slate-300 font-medium">Zonnepanelen</span>
                                     </div>
-                                    <span class="text-xs text-yellow-400 font-bold" id="stat-solar-total">-- kWh</span>
+                                    <div class="text-right">
+                                        <span class="text-xs text-yellow-400 font-bold block" id="stat-solar-total">-- kWh</span>
+                                        <span class="text-[10px] text-yellow-500/90 font-mono font-medium block" id="stat-solar-cost">€--</span>
+                                    </div>
                                 </div>
                                 <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
                                     <span>Last: <strong class="text-yellow-400 font-normal" id="stat-solar-last">--</strong></span>
@@ -2184,7 +2415,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                         <span class="w-3 h-1.5 rounded-sm bg-emerald-500"></span>
                                         <span class="text-slate-300 font-medium">Teruglevering</span>
                                     </div>
-                                    <span class="text-xs text-emerald-400 font-bold" id="stat-terug-total">-- kWh</span>
+                                    <div class="text-right">
+                                        <span class="text-xs text-emerald-400 font-bold block" id="stat-terug-total">-- kWh</span>
+                                        <span class="text-[10px] text-emerald-500/90 font-mono font-medium block" id="stat-terug-cost">€--</span>
+                                    </div>
                                 </div>
                                 <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
                                     <span>Last: <strong class="text-emerald-400 font-normal" id="stat-terug-last">--</strong></span>
@@ -2198,7 +2432,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                         <span class="w-3 h-1.5 rounded-sm bg-red-500"></span>
                                         <span class="text-slate-300 font-medium">Afname</span>
                                     </div>
-                                    <span class="text-xs text-red-400 font-bold" id="stat-afname-total">-- kWh</span>
+                                    <div class="text-right">
+                                        <span class="text-xs text-red-400 font-bold block" id="stat-afname-total">-- kWh</span>
+                                        <span class="text-[10px] text-red-500/90 font-mono font-medium block" id="stat-afname-cost">€--</span>
+                                    </div>
                                 </div>
                                 <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
                                     <span>Last: <strong class="text-red-400 font-normal" id="stat-afname-last">--</strong></span>
@@ -2212,7 +2449,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                         <span class="w-3 h-1.5 rounded-sm bg-lime-500"></span>
                                         <span class="text-slate-300 font-medium">Totaal opgewekt</span>
                                     </div>
-                                    <span class="text-xs text-lime-400 font-bold" id="stat-opgewekt-total">-- kWh</span>
+                                    <div class="text-right">
+                                        <span class="text-xs text-lime-400 font-bold block" id="stat-opgewekt-total">-- kWh</span>
+                                        <span class="text-[10px] text-lime-500/90 font-mono font-medium block" id="stat-opgewekt-cost">€--</span>
+                                    </div>
                                 </div>
                                 <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
                                     <span>Last: <strong class="text-lime-400 font-normal" id="stat-opgewekt-last">--</strong></span>
@@ -2226,7 +2466,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                         <span class="w-3 h-1.5 rounded-sm bg-teal-400"></span>
                                         <span class="text-slate-300 font-medium">Opgewekt Gebruikt</span>
                                     </div>
-                                    <span class="text-xs text-teal-400 font-bold" id="stat-selfcons-total">-- kWh</span>
+                                    <div class="text-right">
+                                        <span class="text-xs text-teal-400 font-bold block" id="stat-selfcons-total">-- kWh</span>
+                                        <span class="text-[10px] text-teal-500/90 font-mono font-medium block" id="stat-selfcons-cost">€--</span>
+                                    </div>
                                 </div>
                                 <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
                                     <span>Last: <strong class="text-teal-400 font-normal" id="stat-selfcons-last">--</strong></span>
@@ -2240,7 +2483,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                         <span class="w-3 h-1.5 rounded-sm bg-orange-500"></span>
                                         <span class="text-slate-300 font-medium">Totaal Verbruik</span>
                                     </div>
-                                    <span class="text-xs text-orange-400 font-bold" id="stat-verbruik-total">-- kWh</span>
+                                    <div class="text-right">
+                                        <span class="text-xs text-orange-400 font-bold block" id="stat-verbruik-total">-- kWh</span>
+                                        <span class="text-[10px] text-orange-500/90 font-mono font-medium block" id="stat-verbruik-cost">€--</span>
+                                    </div>
                                 </div>
                                 <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
                                     <span>Last: <strong class="text-orange-400 font-normal" id="stat-verbruik-last">--</strong></span>
@@ -3610,6 +3856,45 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     document.getElementById('solar-recommendation-text').innerText = data.solar_recommendation || "☀️ Geen overschot";
                 }
 
+                // Populate 6-Box Prediction Metrics Aligned with Historical
+                const ps = data.prediction_stats || {};
+                if (ps.zonnepanelen) {
+                    if (document.getElementById('pred-stat-solar-total')) document.getElementById('pred-stat-solar-total').innerText = ps.zonnepanelen.total_kwh || '-- kWh';
+                    if (document.getElementById('pred-stat-solar-cost')) document.getElementById('pred-stat-solar-cost').innerText = ps.zonnepanelen.cost_eur || '€--';
+                    if (document.getElementById('pred-stat-solar-last')) document.getElementById('pred-stat-solar-last').innerText = ps.zonnepanelen.last || '--';
+                    if (document.getElementById('pred-stat-solar-min')) document.getElementById('pred-stat-solar-min').innerText = ps.zonnepanelen.min || '--';
+                }
+                if (ps.teruglevering) {
+                    if (document.getElementById('pred-stat-terug-total')) document.getElementById('pred-stat-terug-total').innerText = ps.teruglevering.total_kwh || '-- kWh';
+                    if (document.getElementById('pred-stat-terug-cost')) document.getElementById('pred-stat-terug-cost').innerText = ps.teruglevering.cost_eur || '€--';
+                    if (document.getElementById('pred-stat-terug-last')) document.getElementById('pred-stat-terug-last').innerText = ps.teruglevering.last || '--';
+                    if (document.getElementById('pred-stat-terug-min')) document.getElementById('pred-stat-terug-min').innerText = ps.teruglevering.min || '--';
+                }
+                if (ps.afname) {
+                    if (document.getElementById('pred-stat-afname-total')) document.getElementById('pred-stat-afname-total').innerText = ps.afname.total_kwh || '-- kWh';
+                    if (document.getElementById('pred-stat-afname-cost')) document.getElementById('pred-stat-afname-cost').innerText = ps.afname.cost_eur || '€--';
+                    if (document.getElementById('pred-stat-afname-last')) document.getElementById('pred-stat-afname-last').innerText = ps.afname.last || '--';
+                    if (document.getElementById('pred-stat-afname-max')) document.getElementById('pred-stat-afname-max').innerText = ps.afname.max || '--';
+                }
+                if (ps.totaal_opgewekt) {
+                    if (document.getElementById('pred-stat-opgewekt-total')) document.getElementById('pred-stat-opgewekt-total').innerText = ps.totaal_opgewekt.total_kwh || '-- kWh';
+                    if (document.getElementById('pred-stat-opgewekt-cost')) document.getElementById('pred-stat-opgewekt-cost').innerText = ps.totaal_opgewekt.cost_eur || '€--';
+                    if (document.getElementById('pred-stat-opgewekt-last')) document.getElementById('pred-stat-opgewekt-last').innerText = ps.totaal_opgewekt.last || '--';
+                    if (document.getElementById('pred-stat-opgewekt-min')) document.getElementById('pred-stat-opgewekt-min').innerText = ps.totaal_opgewekt.min || '--';
+                }
+                if (ps.opgewekt_gebruikt) {
+                    if (document.getElementById('pred-stat-selfcons-total')) document.getElementById('pred-stat-selfcons-total').innerText = ps.opgewekt_gebruikt.total_kwh || '-- kWh';
+                    if (document.getElementById('pred-stat-selfcons-cost')) document.getElementById('pred-stat-selfcons-cost').innerText = ps.opgewekt_gebruikt.cost_eur || '€--';
+                    if (document.getElementById('pred-stat-selfcons-last')) document.getElementById('pred-stat-selfcons-last').innerText = ps.opgewekt_gebruikt.last || '--';
+                    if (document.getElementById('pred-stat-selfcons-min')) document.getElementById('pred-stat-selfcons-min').innerText = ps.opgewekt_gebruikt.min || '--';
+                }
+                if (ps.totaal_verbruik) {
+                    if (document.getElementById('pred-stat-verbruik-total')) document.getElementById('pred-stat-verbruik-total').innerText = ps.totaal_verbruik.total_kwh || '-- kWh';
+                    if (document.getElementById('pred-stat-verbruik-cost')) document.getElementById('pred-stat-verbruik-cost').innerText = ps.totaal_verbruik.cost_eur || '€--';
+                    if (document.getElementById('pred-stat-verbruik-last')) document.getElementById('pred-stat-verbruik-last').innerText = ps.totaal_verbruik.last || '--';
+                    if (document.getElementById('pred-stat-verbruik-max')) document.getElementById('pred-stat-verbruik-max').innerText = ps.totaal_verbruik.max || '--';
+                }
+
                 // === SYNCHRONIZE 0 LINE ON BOTH Y (kW) AND Y1 (€/kWh) AXES ===
                 let allVals = [...netPowerArr, ...(data.datasets.solar_kw_neg || []), ...(data.datasets.battery_discharge_kw_neg || [])];
                 let consVals = [];
@@ -4550,31 +4835,37 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     document.getElementById('stat-solar-last').innerText = s.zonnepanelen.last;
                     document.getElementById('stat-solar-min').innerText = s.zonnepanelen.min;
                     if (document.getElementById('stat-solar-total')) document.getElementById('stat-solar-total').innerText = s.zonnepanelen.total_kwh || '-- kWh';
+                    if (document.getElementById('stat-solar-cost')) document.getElementById('stat-solar-cost').innerText = s.zonnepanelen.cost_eur || '€--';
                 }
                 if (s.teruglevering) {
                     document.getElementById('stat-terug-last').innerText = s.teruglevering.last;
                     document.getElementById('stat-terug-min').innerText = s.teruglevering.min;
                     if (document.getElementById('stat-terug-total')) document.getElementById('stat-terug-total').innerText = s.teruglevering.total_kwh || '-- kWh';
+                    if (document.getElementById('stat-terug-cost')) document.getElementById('stat-terug-cost').innerText = s.teruglevering.cost_eur || '€--';
                 }
                 if (s.afname) {
                     document.getElementById('stat-afname-last').innerText = s.afname.last;
                     document.getElementById('stat-afname-max').innerText = s.afname.max;
                     if (document.getElementById('stat-afname-total')) document.getElementById('stat-afname-total').innerText = s.afname.total_kwh || '-- kWh';
+                    if (document.getElementById('stat-afname-cost')) document.getElementById('stat-afname-cost').innerText = s.afname.cost_eur || '€--';
                 }
                 if (s.totaal_opgewekt) {
                     document.getElementById('stat-opgewekt-last').innerText = s.totaal_opgewekt.last;
                     document.getElementById('stat-opgewekt-min').innerText = s.totaal_opgewekt.min;
                     if (document.getElementById('stat-opgewekt-total')) document.getElementById('stat-opgewekt-total').innerText = s.totaal_opgewekt.total_kwh || '-- kWh';
+                    if (document.getElementById('stat-opgewekt-cost')) document.getElementById('stat-opgewekt-cost').innerText = s.totaal_opgewekt.cost_eur || '€--';
                 }
                 if (s.opgewekt_gebruikt) {
                     document.getElementById('stat-selfcons-last').innerText = s.opgewekt_gebruikt.last;
                     document.getElementById('stat-selfcons-min').innerText = s.opgewekt_gebruikt.min;
                     if (document.getElementById('stat-selfcons-total')) document.getElementById('stat-selfcons-total').innerText = s.opgewekt_gebruikt.total_kwh || '-- kWh';
+                    if (document.getElementById('stat-selfcons-cost')) document.getElementById('stat-selfcons-cost').innerText = s.opgewekt_gebruikt.cost_eur || '€--';
                 }
                 if (s.totaal_verbruik) {
                     document.getElementById('stat-verbruik-last').innerText = s.totaal_verbruik.last;
                     document.getElementById('stat-verbruik-max').innerText = s.totaal_verbruik.max;
                     if (document.getElementById('stat-verbruik-total')) document.getElementById('stat-verbruik-total').innerText = s.totaal_verbruik.total_kwh || '-- kWh';
+                    if (document.getElementById('stat-verbruik-cost')) document.getElementById('stat-verbruik-cost').innerText = s.totaal_verbruik.cost_eur || '€--';
                 }
 
                 // Destroy old instance if exists

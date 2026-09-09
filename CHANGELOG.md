@@ -17,6 +17,34 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.27.0] — 2026-09-08 (Unified 6-Box Metrics with Integrated Monetary Costs & Central Theme)
+
+### Added
+- **Unified 6-Box Metrics Grid for Both Historical & 24h Ahead Prediction:**
+  - Standardized metrics layout (2 rows x 3 columns) across both the historical Power Producers chart and the 24-Hour Ahead Prediction chart.
+  - Box 1: Zonnepanelen (kWh, Last/Avg kW, Min/Piek kW, and Monetary Value €).
+  - Box 2: Teruglevering (kWh, Last/Avg kW, Min/Piek kW, and Monetary Revenue €).
+  - Box 3: Afname (kWh, Last/Avg kW, Max/Piek kW, and Monetary Grid Cost €).
+  - Box 4: Totaal opgewekt (kWh, Last/Avg kW, Min/Piek kW, and Total Generation Value €).
+  - Box 5: Opgewekt Gebruikt / Direct Self-Consumption (kWh, Last/Avg kW, Min/Piek kW, and Net Avoidance Savings €).
+  - Box 6: Totaal Verbruik (kWh, Last/Avg kW, Max/Piek kW, and Gross Energy Cost €).
+- **Integrated EPEX Spot / EnergyZero Monetary Pricing:**
+  - Realtime and predictive price multiplication (`kWh * EPEX spot price €/kWh`) for every interval (hourly and quarter-hourly PT15M).
+  - Clean display of cost badges (e.g. `17.9 kWh · €3.42` / `€0.18 opbr.` / `€0.89 besp.`).
+- **Canonical Central Color Theme (`data/theme_colors.json`):**
+  - Created central single source of truth for all device types, energy flow polarities, metric boxes, and chart overlays (`theme_colors.json`).
+  - Colors matching the canonical dashboard design:
+    - Zonnepanelen: `#EAB308` (Yellow)
+    - Teruglevering: `#10B981` (Emerald)
+    - Afname: `#EF4444` (Red)
+    - Totaal opgewekt: `#84CC16` (Lime)
+    - Opgewekt Gebruikt: `#06B6D4` (Cyan)
+    - Totaal Verbruik: `#F97316` (Orange)
+    - Netto lijn: `#EF4444` (Felrood)
+    - Prijslijn: `#06B6D4` (Cyan gestreept)
+
+---
+
 ## [0.26.0] — 2026-09-08 (Direct Inepro Modbus MQTT Streaming Adapters for Heat Pump & Solar)
 
 ### Added
