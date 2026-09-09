@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.23.0
+Version: 0.24.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.23.0",
+                "version": "0.24.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1055,7 +1055,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     except Exception as e_p:
                         print(f"Warning loading unallocated load profile from {prof_cand}: {e_p}")
 
-            # Build rolling 24-hour timeline from current wall-clock hour
+            # Build rolling timeline (24 slots for 1h, 96 slots for 15m)
             labels = []
             prices = []
             solar = []
@@ -1065,24 +1065,30 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             battery_charge = []
             advices = []
 
+            total_slots = 96 if is_15m else 24
+            step_mins = 15 if is_15m else 60
+            start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
+            base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
+
             timeline_items = []
-            for i in range(24):
-                dt_h = now_ams.replace(minute=0, second=0, microsecond=0) + timedelta(hours=i)
-                k = dt_h.strftime("%Y-%m-%d %H:00")
+            for i in range(total_slots):
+                dt_slot = base_dt + timedelta(minutes=step_mins * i)
+                k_full = dt_slot.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
+                k_hour = dt_slot.strftime("%Y-%m-%d %H:00")
+
                 if i == 0:
-                    lbl = dt_h.strftime("Nu (%H:00)")
-                elif dt_h.day != now_ams.day and dt_h.hour == 0:
-                    lbl = dt_h.strftime("Morgen %H:00")
+                    lbl = dt_slot.strftime("Nu (%H:%M)" if is_15m else "Nu (%H:00)")
+                elif dt_slot.day != now_ams.day and dt_slot.hour == 0 and dt_slot.minute == 0:
+                    lbl = dt_slot.strftime("Morgen %H:%M" if is_15m else "Morgen %H:00")
                 else:
-                    lbl = dt_h.strftime("%H:00")
+                    lbl = dt_slot.strftime("%H:%M" if is_15m else "%H:00")
 
-                p_val = prices_map.get(k, 0.28)
-                s_val = solar_map.get(k, 0.0)
-                t_val = temp_map.get(k, 18.0)
+                p_val = prices_map.get(k_full, prices_map.get(k_hour, 0.28))
+                s_val = solar_map.get(k_hour, 0.0)
+                t_val = temp_map.get(k_hour, 18.0)
 
-                # Look up learned day-of-week and hour unallocated consumption (e.g. coffee peak, wasdag, etc.)
-                wd_str = str(dt_h.weekday())
-                hr_idx = dt_h.hour
+                wd_str = str(dt_slot.weekday())
+                hr_idx = dt_slot.hour
                 unalloc_w = profile_matrix.get(wd_str, [350] * 24)[hr_idx] if profile_matrix else 350
                 unalloc_kw = round(float(unalloc_w) / 1000.0, 2)
 
@@ -1094,7 +1100,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 heating.append(0.0)
                 battery_charge.append(0.0)
                 advices.append("")
-                timeline_items.append({"idx": i, "dt": dt_h, "key": k, "label": lbl, "price": p_val, "solar": s_val, "temp": t_val})
+                timeline_items.append({"idx": i, "dt": dt_slot, "key": k_full, "label": lbl, "price": p_val, "solar": s_val, "temp": t_val})
 
             # 4. Plan Space Heating (CV) with Summer Lockout & Night Setback Guards
             mean_outdoor_temp = sum(it["temp"] for it in timeline_items) / len(timeline_items) if timeline_items else 18.0
@@ -1236,10 +1242,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 solar_recommendation = "☀️ Geen significant zonne-overschot verwacht; alle opwek wordt direct door basislast en SWW benut."
 
             # 8. Compute Total 24h Predicted Energy Consumption & Energy Costs
-            tot_cons_kwh = round(sum(u + b + h + c for u, b, h, c in zip(unallocated, boiler, heating, battery_charge)), 2)
-            tot_solar_kwh = round(sum(solar), 2)
-            net_cost_eur = round(sum(np * p for np, p in zip(net_power, prices)), 2)
-            gross_cost_eur = round(sum((u + b + h + c) * p for u, b, h, c, p in zip(unallocated, boiler, heating, battery_charge, prices)), 2)
+            step_h = 0.25 if is_15m else 1.0
+            tot_cons_kwh = round(sum(u + b + h + c for u, b, h, c in zip(unallocated, boiler, heating, battery_charge)) * step_h, 2)
+            tot_solar_kwh = round(sum(solar) * step_h, 2)
+            net_cost_eur = round(sum(np * p for np, p in zip(net_power, prices)) * step_h, 2)
+            gross_cost_eur = round(sum((u + b + h + c) * p for u, b, h, c, p in zip(unallocated, boiler, heating, battery_charge, prices)) * step_h, 2)
             solar_savings_eur = round(max(0.0, gross_cost_eur - net_cost_eur), 2)
 
             self._send_json({
@@ -1888,7 +1895,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.23.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.24.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2024,7 +2031,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <p class="text-[11px] text-slate-400">Gestapelde planning: Basislast + Warm Tapwater (SWW) + Verwarming (CV) + Accu t.o.v. zonne-opwek.</p>
                             </div>
                         </div>
-                        <div class="flex items-center gap-1.5 text-xs flex-wrap">
+                        <div class="flex items-center gap-2 text-xs flex-wrap">
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
+                                <button onclick="setPredictionResolution('1h')" class="res-btn-1h px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
+                                <button onclick="setPredictionResolution('15m')" class="res-btn-15m px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
+                            </div>
                             <span class="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2 py-0.5 rounded-md border border-blue-500/40" id="prediction-unallocated-badge">Ongedefinieerd: 7x24</span>
                             <span class="text-[10px] text-indigo-300 font-mono bg-indigo-950/70 px-2 py-0.5 rounded-md border border-indigo-500/40 font-bold" id="prediction-total-kwh-badge">⚡ Verbruik: -- kWh</span>
                             <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950/70 px-2 py-0.5 rounded-md border border-emerald-500/40 font-bold" id="prediction-total-cost-badge">💶 Netto: €--</span>
@@ -2320,7 +2331,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <p class="text-[11px] text-slate-400">Gestapeld verbruik (kW) t.o.v. zonne-opwek en dynamische stroomprijs</p>
                             </div>
                         </div>
-                        <div class="flex items-center gap-1.5 text-xs flex-wrap">
+                        <div class="flex items-center gap-2 text-xs flex-wrap">
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
+                                <button onclick="setPredictionResolution('1h')" class="res-btn-1h px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
+                                <button onclick="setPredictionResolution('15m')" class="res-btn-15m px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
+                            </div>
                             <span class="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2 py-0.5 rounded-md border border-blue-500/40" id="dash-prediction-unallocated-badge">Ongedefinieerd: 7x24</span>
                             <span class="text-[10px] text-indigo-300 font-mono bg-indigo-950/70 px-2 py-0.5 rounded-md border border-indigo-500/40 font-bold" id="dash-prediction-total-kwh-badge">⚡ Verbruik: -- kWh</span>
                             <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950/70 px-2 py-0.5 rounded-md border border-emerald-500/40 font-bold" id="dash-prediction-total-cost-badge">💶 Netto: €--</span>
@@ -2868,7 +2883,27 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         var electricityPricesChartInstance = null;
         let haEntitiesCache = [];
         let currentPolicyParams = {};
-        let activeTabId = 'analytics';
+                let activeTabId = 'analytics';
+        let predictionResolution = '1h';
+
+        function setPredictionResolution(res) {
+            predictionResolution = res;
+            document.querySelectorAll('.res-btn-1h').forEach(b => {
+                if (res === '1h') {
+                    b.className = 'res-btn-1h px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow';
+                } else {
+                    b.className = 'res-btn-1h px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                }
+            });
+            document.querySelectorAll('.res-btn-15m').forEach(b => {
+                if (res === '15m') {
+                    b.className = 'res-btn-15m px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow';
+                } else {
+                    b.className = 'res-btn-15m px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                }
+            });
+            loadChartData();
+        }
         let cachedInfra = { influxdb_connections: [], mqtt_connections: [] };
 
         function toggleMobileSidebar(open) {
@@ -3342,7 +3377,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
         async function loadChartData() {
             try {
-                const res = await fetch('./api/schedule/chart-data');
+                const res = await fetch('./api/schedule/chart-data?resolution=' + encodeURIComponent(predictionResolution));
                 const data = await res.json();
 
                 const adv = data.banner_text || `Beste stroomtarief om ${data.cheapest_hour} (€${Number(data.cheapest_price_eur).toFixed(4)}/kWh)`;
@@ -3417,7 +3452,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 label: 'Ongedefinieerd Verbruik (kW)',
                                 data: data.datasets.unallocated_kw || data.datasets.baseload_kw,
                                 backgroundColor: '#3B82F6',
-                                stack: 'consumption',
+                                stack: 'energy',
                                 borderRadius: 2,
                                 order: 3
                             },
@@ -3425,7 +3460,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 label: 'SWW Tapwater (kW)',
                                 data: data.datasets.boiler_kw,
                                 backgroundColor: '#EC4899',
-                                stack: 'consumption',
+                                stack: 'energy',
                                 borderRadius: 2,
                                 order: 3
                             },
@@ -3433,7 +3468,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 label: 'CV Verwarming (kW)',
                                 data: data.datasets.heating_kw || [],
                                 backgroundColor: '#6366F1',
-                                stack: 'consumption',
+                                stack: 'energy',
                                 borderRadius: 2,
                                 order: 3
                             },
@@ -3441,7 +3476,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 label: 'Accu Laden (kW)',
                                 data: data.datasets.battery_charge_kw || [],
                                 backgroundColor: '#10B981',
-                                stack: 'consumption',
+                                stack: 'energy',
                                 borderRadius: 2,
                                 order: 3
                             },
@@ -3450,7 +3485,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 label: 'Zon Productie (-kW)',
                                 data: data.datasets.solar_kw_neg || [],
                                 backgroundColor: '#F59E0B',
-                                stack: 'production',
+                                stack: 'energy',
                                 borderRadius: 2,
                                 order: 4
                             },
@@ -3458,7 +3493,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 label: 'Accu Ontladen (-kW)',
                                 data: data.datasets.battery_discharge_kw_neg || [],
                                 backgroundColor: '#14B8A6',
-                                stack: 'production',
+                                stack: 'energy',
                                 borderRadius: 2,
                                 order: 4
                             },

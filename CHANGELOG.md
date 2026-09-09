@@ -10,6 +10,18 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.24.0] — 2026-09-08 (Same-Column Dual-Polarity Alignment & 15-Minute Prediction Toggle)
+
+### Added & Enhanced
+- **Same-Column Dual-Polarity Alignment:**
+  - Unified all stacked bar datasets under a single `stack: 'energy'` identifier.
+  - Positive consumer bars (Ongedefinieerd, SWW, CV, Accu Laden) stack directly upward above $Y=0$, and negative production bars (Zon, Accu Ontladen) stack directly downward below $Y=0$ in the **exact same vertical column**, eliminating side-by-side splitting.
+- **15-Minute Resolution Forecast Toggle:**
+  - Added interactive `[ 1 Uur ] [ 15 Min ]` segmented control buttons to both the Dashboard and Analytics card headers.
+  - Integrated 15-minute EPEX market tariffs from EnergyZero (`INTERVAL_QUARTER`) across 96 quarter-hour slots (24 hours ahead) with $0.25\text{h}$ trapezoidal energy integral.
+
+---
+
 ## [0.23.0] — 2026-09-08 (Fix Mobile Legend Overflow on Dashboard Tab)
 
 ### Fixed & Enhanced
