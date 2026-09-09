@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.25.3
+Version: 0.26.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -887,6 +887,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     "last_flush_time": GLOBAL_COLLECTOR.last_flush_iso,
                     "last_write_status": GLOBAL_COLLECTOR.last_write_status,
                     "total_points_written": GLOBAL_COLLECTOR.total_points_written,
+                    "mqtt_connected": GLOBAL_COLLECTOR.mqtt_sub.connected,
+                    "mqtt_cached_topics": len(GLOBAL_COLLECTOR.mqtt_sub.cache),
                     "live_balance": GLOBAL_COLLECTOR.live_balance
                 })
             else:
@@ -911,7 +913,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.25.3",
+                "version": "0.26.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1939,7 +1941,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.25.3</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.26.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4835,6 +4837,95 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
 
 
+class HemsMqttSubscriberThread(threading.Thread):
+    """
+    Background subscriber thread connecting directly to MQTT broker (Mosquitto)
+    using configured credentials. Ingests high-frequency Modbus (MBMD) and device streams
+    into an in-memory cache for zero-latency Layer 1 sampling.
+    """
+    def __init__(self, host="core-mosquitto", port=1883, user="openhems", pwd=""):
+        super().__init__(daemon=True, name="HemsMqttSubscriber")
+        self.host = host
+        self.port = int(port)
+        self.user = user
+        self.pwd = pwd
+        self.cache = {}
+        self.running = True
+        self.connected = False
+        self.last_msg_time = 0
+
+    def run(self):
+        while self.running:
+            try:
+                # Reload secrets if password was empty
+                if not self.pwd:
+                    sec = load_secrets()
+                    self.pwd = sec.get("mqtt", {}).get("local_mosquitto") or sec.get("mqtt", {}).get("openhems_mqtt") or ""
+
+                s = socket.socket()
+                s.settimeout(10)
+                s.connect((self.host, self.port))
+
+                proto = b"MQTT"
+                flags = 0x02
+                if self.user: flags |= 0x80
+                if self.pwd: flags |= 0x40
+                var_h = bytearray([0, 4]) + proto + bytearray([4, flags, 0, 60])
+                payload = bytearray([0, 15]) + b"openhems-stream"
+                if self.user:
+                    u_b = self.user.encode()
+                    payload += bytearray([0, len(u_b)]) + u_b
+                if self.pwd:
+                    p_b = self.pwd.encode()
+                    payload += bytearray([0, len(p_b)]) + p_b
+
+                pkt = bytearray([0x10, len(var_h) + len(payload)]) + var_h + payload
+                s.sendall(pkt)
+                connack = s.recv(4)
+                if not (len(connack) >= 4 and connack[3] == 0):
+                    self.connected = False
+                    time.sleep(5)
+                    continue
+
+                self.connected = True
+                # Subscribe to mbmd/# and openhems/#
+                for sub_t in [b"mbmd/#", b"openhems/#"]:
+                    sub_pkt = bytearray([0x82, 5 + len(sub_t), 0, 1, 0, len(sub_t)]) + sub_t + bytearray([0])
+                    s.sendall(sub_pkt)
+                    s.recv(5)
+
+                buf = bytearray()
+                s.settimeout(2.0)
+                while self.running:
+                    try:
+                        chunk = s.recv(2048)
+                        if not chunk: break
+                        buf.extend(chunk)
+                        while len(buf) > 2:
+                            pkt_type = buf[0] >> 4
+                            if pkt_type == 3: # PUBLISH
+                                rem = buf[1]
+                                if len(buf) >= 2 + rem:
+                                    data = buf[2:2+rem]
+                                    buf = buf[2+rem:]
+                                    t_len = (data[0] << 8) | data[1]
+                                    top = data[2:2+t_len].decode("utf-8", errors="ignore")
+                                    val_str = data[2+t_len:].decode("utf-8", errors="ignore")
+                                    try:
+                                        self.cache[top] = float(val_str)
+                                    except ValueError:
+                                        self.cache[top] = val_str
+                                    self.last_msg_time = time.time()
+                                else: break
+                            else:
+                                buf = buf[1:]
+                    except socket.timeout:
+                        continue
+            except Exception as e:
+                self.connected = False
+                time.sleep(5)
+
+
 class HemsBackgroundCollector(threading.Thread):
     """
     Continuous background collector for Layer 1.
@@ -4854,6 +4945,8 @@ class HemsBackgroundCollector(threading.Thread):
         self._last_flush_time = time.time()
         self.sample_count_in_window = 0
         self.last_flush_iso = "Zojuist gestart"
+        self.mqtt_sub = HemsMqttSubscriberThread()
+        self.mqtt_sub.start()
         self.live_balance = {
             "p1_import_w": 0.0,
             "p1_export_w": 0.0,
@@ -4928,21 +5021,37 @@ class HemsBackgroundCollector(threading.Thread):
                         entry["sum"] += p_exp
                         entry["count"] += 1
 
-                # Solar PV / Inverter
+                # Solar PV / Inverter (Direct MQTT MBMD / HA Fallback)
                 elif dev_type in ["solar_pv", "solar_inverter", "solar"]:
-                    sol_eid = dev.get("ha_power_entity") or "sensor.zonnepanelen_power"
-                    p_sol = get_val_w(sol_eid)
+                    p_sol = None
+                    if src_type == "mqtt":
+                        t_pow = dev.get("mqtt_power_topic", "mbmd/inepro1-103/Power")
+                        if t_pow in self.mqtt_sub.cache:
+                            p_sol = abs(float(self.mqtt_sub.cache[t_pow]))
                     if p_sol is None:
-                        p_sol = get_val_w("sensor.zonnepanelen_power_avg_5_minutes")
+                        sol_eid = dev.get("ha_power_entity") or "sensor.zonnepanelen_power"
+                        p_sol = get_val_w(sol_eid)
+                        if p_sol is None:
+                            p_sol = get_val_w("sensor.zonnepanelen_power_avg_5_minutes")
+                        if p_sol is not None:
+                            p_sol = abs(p_sol)
+
                     if p_sol is not None:
                         k = f"energy_telemetry|{dev_id}|solar_pv|GENERATION|{src_type}|ELECTRICITY"
                         entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w"})
-                        entry["sum"] += abs(p_sol)
+                        entry["sum"] += p_sol
                         entry["count"] += 1
 
-                # Heat Pump
+                # Heat Pump (Direct MQTT MBMD / HA Fallback)
                 elif dev_type == "heat_pump":
-                    p_hp = get_val_w(dev.get("ha_power_entity", "sensor.warmtepomp_power"))
+                    p_hp = None
+                    if src_type == "mqtt":
+                        t_pow = dev.get("mqtt_power_topic", "mbmd/inepro1-102/Power")
+                        if t_pow in self.mqtt_sub.cache:
+                            p_hp = float(self.mqtt_sub.cache[t_pow])
+                    if p_hp is None:
+                        p_hp = get_val_w(dev.get("ha_power_entity", "sensor.warmtepomp_power"))
+
                     if p_hp is not None:
                         k = f"energy_telemetry|{dev_id}|heat_pump|CONSUMPTION|{src_type}|HEAT"
                         entry = self._accumulator.setdefault(k, {"sum": 0.0, "count": 0, "type": "power_w"})
@@ -4976,12 +5085,23 @@ class HemsBackgroundCollector(threading.Thread):
                 entry["sum"] += epex_val
                 entry["count"] += 1
 
-            # Update Live Pipeline Power Balance (10s snapshot)
+            # Update Live Pipeline Power Balance (10s snapshot) with direct MQTT priority
             p1_imp = get_val_w("sensor.power_consumption") or 0.0
             p1_exp = get_val_w("sensor.power_production") or 0.0
-            sol_raw = get_val_w("sensor.zonnepanelen_power") or get_val_w("sensor.zonnepanelen_power_avg_5_minutes") or 0.0
-            sol = abs(sol_raw)
-            wp = get_val_w("sensor.warmtepomp_power") or 0.0
+            
+            # Read Solar (Direct MQTT Inepro 103 -> HA Fallback)
+            if "mbmd/inepro1-103/Power" in self.mqtt_sub.cache:
+                sol = abs(float(self.mqtt_sub.cache["mbmd/inepro1-103/Power"]))
+            else:
+                sol_raw = get_val_w("sensor.zonnepanelen_power") or get_val_w("sensor.zonnepanelen_power_avg_5_minutes") or 0.0
+                sol = abs(sol_raw)
+
+            # Read Heat Pump (Direct MQTT Inepro 102 -> HA Fallback)
+            if "mbmd/inepro1-102/Power" in self.mqtt_sub.cache:
+                wp = float(self.mqtt_sub.cache["mbmd/inepro1-102/Power"])
+            else:
+                wp = get_val_w("sensor.warmtepomp_power") or 0.0
+
             bat = get_val_w("sensor.battery_power") or 0.0
 
             # Mathematical Triple Check:

@@ -17,6 +17,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.26.0] — 2026-09-08 (Direct Inepro Modbus MQTT Streaming Adapters for Heat Pump & Solar)
+
+### Added
+- **Direct MQTT Streaming Adapters for Inepro Modbus Meters:**
+  - Added background MQTT subscriber thread (`HemsMqttSubscriberThread`) in Open HEMS Layer 1 collector connecting directly to Mosquitto with user `openhems`.
+  - Subscribes to live Modbus (MBMD) meter topics:
+    - **Solar Panels:** `mbmd/inepro1-103/Power` (subtopics `L1`, `L2`, `L3`) — reads direct generation in Watt.
+    - **Daikin Heat Pump:** `mbmd/inepro1-102/Power` (subtopics `L1`, `L2`, `L3`) — reads direct consumption in Watt.
+  - Zero-latency in-memory cache feeding the 60-second tumbling window accumulator and realtime power balance pipeline, with automatic fallback to Home Assistant entities.
+  - Updated device registry in `heatpump_config.json` with `source_type: "mqtt"`, `mqtt_power_topic`, and 3-phase parameter metadata.
+
+---
+
 ## [0.25.0] — 2026-09-08 (Self-Learning Unallocated Model in Calibration & Live Data Pipeline Monitor)
 
 ### Added
