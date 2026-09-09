@@ -197,21 +197,50 @@ class EnergyDataCollector:
     # =========================================================================
     # TIER 2: INFLUXDB TIME-SERIES WRITER (database: 'hermes')
     # =========================================================================
-    def write_influx_lines(self, lines: list, db: str = "hermes") -> bool:
+    def _log_event(self, msg: str):
+        log_path = "/config/logs/energy_data_collector.log"
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"[{ts}] {msg}\n")
+        except Exception:
+            pass
+
+    def write_influx_lines(self, lines: list, db: str = "openhems") -> bool:
         if not lines:
             return False
         payload = "\n".join(lines)
-        u = self.influx_cfg.get("username", "hermes")
-        p = self.influx_cfg.get("password", "")
+
+        # Load authoritative credentials from isolated secrets vault
+        u = "openhems"
+        p = ""
+        sec_path = "/config/open_hems_secrets.json"
+        if os.path.exists(sec_path):
+            try:
+                with open(sec_path, "r", encoding="utf-8") as f:
+                    sec_data = json.load(f)
+                    p = sec_data.get("influxdb", {}).get("openhems_db") or sec_data.get("influxdb", {}).get("local_ha_influxdb") or ""
+            except Exception as e_sec:
+                self._log_event(f"Error loading secrets from {sec_path}: {e_sec}")
+
         base_url = self.influx_cfg.get("url", "http://a0d7b954-influxdb:8086")
         params = {"u": u, "p": p, "db": db}
         url = f"{base_url}/write?{urllib.parse.urlencode(params)}"
         try:
             req = urllib.request.Request(url, data=payload.encode("utf-8"), method="POST")
             with urllib.request.urlopen(req, timeout=10) as resp:
-                return resp.status in [200, 204]
+                success = resp.status in [200, 204]
+                if success:
+                    self._log_event(f"Successfully written {len(lines)} lines to InfluxDB ({db})")
+                else:
+                    self._log_event(f"Unexpected status {resp.status} writing {len(lines)} lines to InfluxDB ({db})")
+                return success
+        except urllib.error.HTTPError as e:
+            self._log_event(f"InfluxDB HTTP Error {e.code} {e.reason} writing to {db}. Check open_hems_secrets.json.")
+            return False
         except Exception as e:
-            print(f"Warning: Failed to write {len(lines)} lines to InfluxDB ({db}): {e}")
+            self._log_event(f"InfluxDB Connection error writing to {db}: {e}")
             return False
 
     # =========================================================================
@@ -339,7 +368,7 @@ class EnergyDataCollector:
             ts_ns = int(dt.timestamp() * 1e9)
             lines.append(f"market_spot_prices_1h,source=energyzero spot_price={p:.5f} {ts_ns}")
         if lines:
-            self.write_influx_lines(lines, db="hermes")
+            self.write_influx_lines(lines, db="openhems")
 
     # =========================================================================
     # FEED 2: SOLAR & WEATHER FORECAST (Open-Meteo API -> 48h)
@@ -477,7 +506,7 @@ class EnergyDataCollector:
                 wind = wind_map.get(dt_key, 10.0)
                 lines.append(f"weather_solar_forecast,source=open_meteo solar_kw={sol:.3f},temperature={temp:.1f},humidity={rh:.1f},wind_speed={wind:.1f} {ts_ns}")
         if lines:
-            self.write_influx_lines(lines, db="hermes")
+            self.write_influx_lines(lines, db="openhems")
 
     # =========================================================================
     # UNIFIED DAILY INPUT BUNDLE (Complete dataset with Freshness Verification)

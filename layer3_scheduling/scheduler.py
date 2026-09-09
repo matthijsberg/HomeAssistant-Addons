@@ -244,18 +244,40 @@ class PowerSlotter:
             return False
 
         payload = "\n".join(lines)
+        u = "openhems"
+        p = ""
+        sec_path = "/config/open_hems_secrets.json"
+        if os.path.exists(sec_path):
+            try:
+                with open(sec_path, "r", encoding="utf-8") as f:
+                    sec_data = json.load(f)
+                    p = sec_data.get("influxdb", {}).get("openhems_db") or sec_data.get("influxdb", {}).get("local_ha_influxdb") or ""
+            except Exception:
+                pass
+
         influx_cfg = self.core.config.get("influxdb", {})
-        u = influx_cfg.get("username", "hermes")
-        p = influx_cfg.get("password", "")
         base_url = influx_cfg.get("url", "http://a0d7b954-influxdb:8086")
-        params = {"u": u, "p": p, "db": "hermes"}
+        params = {"u": u, "p": p, "db": "openhems"}
         url = f"{base_url}/write?{urllib.parse.urlencode(params)}"
         try:
             req = urllib.request.Request(url, data=payload.encode("utf-8"), method="POST")
             with urllib.request.urlopen(req, timeout=10) as resp:
-                return resp.status in [200, 204]
+                success = resp.status in [200, 204]
+                log_path = "/config/logs/energy_scheduler.log"
+                os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                with open(log_path, "a", encoding="utf-8") as f_log:
+                    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    if success:
+                        f_log.write(f"[{ts}] Successfully written {len(lines)} schedule lines to InfluxDB (openhems)\n")
+                    else:
+                        f_log.write(f"[{ts}] Status {resp.status} writing schedule lines to InfluxDB (openhems)\n")
+                return success
         except Exception as e:
-            print(f"Warning: Failed to write schedule to InfluxDB hermes db: {e}")
+            log_path = "/config/logs/energy_scheduler.log"
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as f_log:
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                f_log.write(f"[{ts}] Error writing schedule lines to InfluxDB (openhems): {e}\n")
             return False
 
     def sync_to_google_sheets(self, schedule_data: dict, dhw_info: dict, fixed_cost: float, dynamic_cost: float, savings: float):
