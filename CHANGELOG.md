@@ -17,6 +17,27 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.30.0] — 2026-09-08 (Lean & Mean Cleaned Dashboard Architecture with 2 Dedicated Categories)
+
+### Added
+- **Clean Two-Category Dashboard Architecture (Voorspelling vs Historie):**
+  - Restructured the primary dashboard into two clearly delineated, dedicated operational sections:
+    1. **🔮 VOORSPELLING (FORECAST):**
+       - **Verbruiksvoorspelling:** 24-hour rolling predictive scheduling stacked bar chart (`hemsChartAnalytics`), clean optimizer banner, domestic solar recommendation banner, aligned 6-box metrics with projected costs (€), and dual-polarity legend chips.
+       - **Prijzen & Zonnevoorspelling:** Dual-axis EPEX electricity spot prices and solar irradiance curves (`electricityPricesChart`) with 15m/1h resolution selector and 4-metric rate cards.
+       - **Category Filters:** Dedicated 1h/15m resolution toggle and refresh button in the category bar.
+    2. **📊 HISTORIE (HISTORICAL DATA):**
+       - **Verbruikshistorie:** Canonical historical energy telemetry (`powerProducersChart`) with dual-polarity stacked bars or smooth lines, and aligned 6-box metrics with actual accumulated costs (€).
+       - **Category Filters:** Inline diagram type toggle (📊 Staven vs 📈 Lijn), interval resolution toggle (1 Uur vs 15 Min), and timeframe period dropdown (1h, 6h, 24h, 48h, 7d).
+       - **Prestatie & Rapportage:** Integrated automated digest and seasonal COP breakdown.
+- **Top 4 KPI Metrics Preserved:**
+  - `Besparing Vandaag`, `Zelfconsumptie`, `Warmtepomp COP`, and `Prognose Validatie` cleanly pinned at the very top of the page.
+- **Lean & Mean Decluttering:**
+  - Removed redundant filler text, verbose subtitles, and useless labels (such as "openhems" badge on chart).
+  - Shortened all graph titles to direct, punchy Dutch descriptors (`Verbruiksvoorspelling`, `Prijzen & Zonnevoorspelling`, `Verbruikshistorie`).
+
+---
+
 ## [0.29.0] — 2026-09-08 (Interactive Bar/Line Toggle & Grafana-Style Smart Interval Resolution for Power Producers)
 
 ### Added

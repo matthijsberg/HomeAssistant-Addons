@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.29.1
+Version: 0.30.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -989,7 +989,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.29.1",
+                "version": "0.30.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2097,7 +2097,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.29.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.30.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2128,417 +2128,406 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             <!-- TAB 0: INFRASTRUCTURE & CONNECTIVITY (LAAG 1) -->
                         <!-- TAB 5: ANALYTICS & REPORTING (BOVENAAN LAAG 5) -->
             <div id="view-analytics" class="tab-content active space-y-6">
-                <div class="bg-gradient-to-r from-cyan-950/80 via-[#0e1422] to-blue-950/80 border border-cyan-500/30 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div class="flex items-center gap-3 sm:gap-4">
-                        <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 text-xl sm:text-2xl shadow-[0_0_15px_rgba(6,182,212,0.2)] flex-shrink-0">
-                            📊
-                        </div>
-                        <div>
-                            <div class="flex items-center gap-2">
-                                <span class="text-xs uppercase font-bold text-cyan-400 tracking-wider">Laag 5 Analyse & Rapportage</span>
-                                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">AUDIT & KPI</span>
-                            </div>
-                            <div class="text-xs sm:text-sm font-bold text-white mt-1">
-                                Realtime KPI monitoring, besparingsberekeningen en prognose-auditing.
-                            </div>
-                        </div>
-                    </div>
-                </div>
 
-                <!-- 4 KPI CARDS -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <!-- 1. TOP 4 KPI METRIC CARDS -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block">Besparing Vandaag</span>
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Besparing Vandaag</span>
                         <div class="text-xl font-bold text-emerald-400 mt-1" id="kpi-savings-today">€0.85</div>
                         <span class="text-[10px] text-slate-500">t.o.v. standaard verbruik</span>
                     </div>
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block">Zelfconsumptie</span>
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Zelfconsumptie</span>
                         <div class="text-xl font-bold text-amber-400 mt-1" id="kpi-self-consumption">78.4%</div>
                         <span class="text-[10px] text-slate-500">Zon direct lokaal benut</span>
                     </div>
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block">Warmtepomp COP</span>
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Warmtepomp COP</span>
                         <div class="text-xl font-bold text-cyan-400 mt-1" id="kpi-cop-dhw">2.04 <span class="text-xs text-slate-400 font-normal">SWW</span> · 4.80 <span class="text-xs text-slate-400 font-normal">CV</span></div>
-                        <span class="text-[10px] text-slate-500">Gemeten seizoensrendement</span>
+                        <span class="text-[10px] text-slate-500">Gemeten rendement</span>
                     </div>
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block">Prognose Validatie</span>
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Prognose Validatie</span>
                         <div class="text-xl font-bold text-purple-400 mt-1" id="kpi-accuracy">92.6%</div>
                         <span class="text-[10px] text-slate-500">MAE: 0.18 kW</span>
                     </div>
                 </div>
 
-                <!-- EPEX ELECTRICITY RATES & SOLAR FORECAST DUAL-AXIS CHART -->
-                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-2xl space-y-4">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                <!-- ========================================================================= -->
+                <!-- CATEGORIE 1: VOORSPELLING (FORECAST)                                      -->
+                <!-- ========================================================================= -->
+                <div class="space-y-4 pt-2">
+                    <!-- Category Header & Controls Bar -->
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-purple-500/30">
                         <div class="flex items-center gap-2.5">
-                            <span class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></span>
-                            <div>
-                                <h3 class="text-sm font-bold text-white tracking-wide">EPEX Stroomprijzen & Zonnestroom Verwachting</h3>
-                                <p class="text-[11px] text-slate-400">Beurstarieven (€/kWh) en verwachte zonneproductie (kW) over de dag.</p>
-                            </div>
+                            <span class="w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse"></span>
+                            <h2 class="text-sm sm:text-base font-bold text-white tracking-wide uppercase">Voorspelling</h2>
+                            <span class="text-[10px] text-purple-300 font-mono bg-purple-950/80 px-2 py-0.5 rounded border border-purple-800">24H FORECAST</span>
                         </div>
-                        <div class="flex items-center gap-2 text-xs">
-                            <select id="epex-res-select" onchange="loadElectricityPricesChart()" class="bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-medium focus:outline-none focus:border-blue-500 font-mono">
-                                <option value="15m" selected>Kwartiertarieven (15m)</option>
-                                <option value="1h">Uurtarieven (1h)</option>
-                            </select>
-                            <button onclick="loadElectricityPricesChart()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
+                        <div class="flex items-center gap-2 text-xs flex-wrap">
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
+                                <button onclick="setPredictionResolution('1h')" class="res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
+                                <button onclick="setPredictionResolution('15m')" class="res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
+                            </div>
+                            <button onclick="loadChartData(); loadElectricityPricesChart();" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                 <span>Verversen</span>
                             </button>
                         </div>
                     </div>
 
-                    <!-- Dual-Axis Price & Solar Canvas -->
-                    <div class="relative w-full h-64 sm:h-72">
-                        <canvas id="electricityPricesChart"></canvas>
-                    </div>
-
-                    <!-- Price & Solar Stats Cards -->
-                    <div class="pt-2 border-t border-slate-800/80">
-                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-mono">
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
-                                <div class="text-[10px] text-slate-500 uppercase">Laagste Tarief</div>
-                                <div class="text-sm font-bold text-emerald-400 mt-0.5" id="stat-epex-min">--</div>
-                                <div class="text-[10px] text-slate-400" id="stat-epex-min-time">om --:--</div>
+                    <!-- Chart 1.1: Verbruiksvoorspelling (Stacked 24h Prediction) -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-sm font-bold text-white tracking-wide">Verbruiksvoorspelling</h3>
                             </div>
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
-                                <div class="text-[10px] text-slate-500 uppercase">Hoogste Tarief</div>
-                                <div class="text-sm font-bold text-red-400 mt-0.5" id="stat-epex-max">--</div>
-                                <div class="text-[10px] text-slate-400" id="stat-epex-max-time">om --:--</div>
-                            </div>
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
-                                <div class="text-[10px] text-slate-500 uppercase">Piek Zonverwachting</div>
-                                <div class="text-sm font-bold text-amber-400 mt-0.5" id="stat-epex-solar-peak">--</div>
-                                <div class="text-[10px] text-slate-400">Open-Meteo GHI</div>
-                            </div>
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
-                                <div class="text-[10px] text-slate-500 uppercase">Zon Besparingsmarge</div>
-                                <div class="text-sm font-bold text-yellow-400 mt-0.5" id="stat-epex-solar-margin">--</div>
-                                <div class="text-[10px] text-emerald-400">Voordeel t.o.v. net</div>
+                            <div class="flex items-center gap-2 text-xs flex-wrap">
+                                <span class="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2 py-0.5 rounded-md border border-blue-500/40" id="prediction-unallocated-badge">Ongedefinieerd: 7x24</span>
+                                <span class="text-[10px] text-indigo-300 font-mono bg-indigo-950/70 px-2 py-0.5 rounded-md border border-indigo-500/40 font-bold" id="prediction-total-kwh-badge">⚡ Verbruik: -- kWh</span>
+                                <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950/70 px-2 py-0.5 rounded-md border border-emerald-500/40 font-bold" id="prediction-total-cost-badge">💶 Netto: €--</span>
+                                <span class="text-[10px] text-amber-400 font-mono bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-500/30 font-bold" id="prediction-surplus-badge">☀️ Overschot: -- kWh</span>
                             </div>
                         </div>
-                    </div>
-                </div>
 
-                <!-- 24-HOUR AHEAD POWER CONSUMPTION PREDICTION STACKED CHART -->
-                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-2xl space-y-4">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
-                        <div class="flex items-center gap-2.5">
-                            <span class="w-3 h-3 rounded-full bg-purple-500 animate-pulse"></span>
-                            <div>
-                                <h3 class="text-sm font-bold text-white tracking-wide">24-Uurs Vermogens- & Verbruiksprognose (Vooruit)</h3>
-                                <p class="text-[11px] text-slate-400">Gestapelde planning: Basislast + Warm Tapwater (SWW) + Verwarming (CV) + Accu t.o.v. zonne-opwek.</p>
+                        <!-- Dispatch & Solar Advice Banners -->
+                        <div class="bg-gradient-to-r from-purple-950/60 via-[#0B0F17] to-indigo-950/60 p-2.5 rounded-xl border border-purple-500/30 flex items-center justify-between gap-2 text-xs">
+                            <div class="flex items-center gap-2 truncate">
+                                <span>💡</span>
+                                <span class="text-slate-200 font-medium truncate" id="analytics-banner-text">Planning wordt geladen...</span>
                             </div>
+                            <span class="text-[10px] text-purple-300 font-mono font-bold px-2 py-0.5 rounded bg-purple-900/50 border border-purple-800 hidden md:inline flex-shrink-0">OPTIMIZER</span>
                         </div>
-                        <div class="flex items-center gap-2 text-xs flex-wrap">
-                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button onclick="setPredictionResolution('1h')" class="res-btn-1h px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
-                                <button onclick="setPredictionResolution('15m')" class="res-btn-15m px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
-                            </div>
-                            <span class="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2 py-0.5 rounded-md border border-blue-500/40" id="prediction-unallocated-badge">Ongedefinieerd: 7x24</span>
-                            <span class="text-[10px] text-indigo-300 font-mono bg-indigo-950/70 px-2 py-0.5 rounded-md border border-indigo-500/40 font-bold" id="prediction-total-kwh-badge">⚡ Verbruik: -- kWh</span>
-                            <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950/70 px-2 py-0.5 rounded-md border border-emerald-500/40 font-bold" id="prediction-total-cost-badge">💶 Netto: €--</span>
-                            <span class="text-[10px] text-amber-400 font-mono bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-500/30 font-bold" id="prediction-surplus-badge">☀️ Overschot: -- kWh</span>
-                            <button onclick="loadChartData()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                                <span>Herberekenen</span>
-                            </button>
+
+                        <div id="solar-recommendation-banner" class="bg-gradient-to-r from-emerald-950/60 via-[#0B0F17] to-teal-950/60 p-2.5 rounded-xl border border-emerald-500/30 flex items-center gap-2 text-xs text-emerald-200">
+                            <span>🧺</span>
+                            <span id="solar-recommendation-text" class="font-medium truncate">Zonne-overschot advies wordt geladen...</span>
                         </div>
-                    </div>
 
-                    <!-- Dispatch Banner -->
-                    <div class="bg-gradient-to-r from-purple-950/60 via-[#0B0F17] to-indigo-950/60 p-3 rounded-xl border border-purple-500/30 flex items-center justify-between gap-2 text-xs">
-                        <div class="flex items-center gap-2">
-                            <span>💡</span>
-                            <span class="text-slate-200 font-medium" id="analytics-banner-text">Planning wordt geladen...</span>
+                        <!-- Prediction Chart Canvas -->
+                        <div class="relative w-full h-[380px] sm:h-[420px]">
+                            <canvas id="hemsChartAnalytics"></canvas>
                         </div>
-                        <span class="text-[10px] text-purple-300 font-mono font-bold px-2 py-0.5 rounded bg-purple-900/50 border border-purple-800 hidden sm:inline">24H ROLLING OPTIMIZER</span>
-                    </div>
 
-                    <!-- Non-Smart Appliance Solar Advice Banner -->
-                    <div id="solar-recommendation-banner" class="bg-gradient-to-r from-emerald-950/60 via-[#0B0F17] to-teal-950/60 p-3 rounded-xl border border-emerald-500/30 flex items-center gap-2.5 text-xs text-emerald-200">
-                        <span class="text-base">🧺</span>
-                        <span id="solar-recommendation-text" class="font-medium">Zonne-overschot advies wordt geladen...</span>
-                    </div>
-
-                    <!-- Stacked Bar Chart Canvas -->
-                    <div class="relative w-full h-[420px] sm:h-[460px]">
-                        <canvas id="hemsChartAnalytics"></canvas>
-                    </div>
-
-                    <!-- 24H PREDICTION 6-BOX METRIC SUMMARY (ALIGNED WITH HISTORICAL) -->
-                    <div class="pt-2 border-t border-slate-800/80">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs font-mono">
-                            <!-- Zonnepanelen -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-yellow-500"></span>
-                                        <span class="text-slate-300 font-medium">Zonnepanelen</span>
+                        <!-- 24H PREDICTION 6-BOX METRIC SUMMARY (ALIGNED WITH HISTORICAL) -->
+                        <div class="pt-2 border-t border-slate-800/80">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs font-mono">
+                                <!-- Zonnepanelen -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-yellow-500"></span>
+                                            <span class="text-slate-300 font-medium">Zonnepanelen</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-yellow-400 font-bold block" id="pred-stat-solar-total">-- kWh</span>
+                                            <span class="text-[10px] text-yellow-500/90 font-mono font-medium block" id="pred-stat-solar-cost">€--</span>
+                                        </div>
                                     </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-yellow-400 font-bold block" id="pred-stat-solar-total">-- kWh</span>
-                                        <span class="text-[10px] text-yellow-500/90 font-mono font-medium block" id="pred-stat-solar-cost">€--</span>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Nu: <strong class="text-yellow-400 font-normal" id="pred-stat-solar-last">--</strong></span>
+                                        <span>Piek: <span class="text-yellow-500/80" id="pred-stat-solar-min">--</span></span>
                                     </div>
                                 </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Nu: <strong class="text-yellow-400 font-normal" id="pred-stat-solar-last">--</strong></span>
-                                    <span>Piek: <span class="text-yellow-500/80" id="pred-stat-solar-min">--</span></span>
-                                </div>
-                            </div>
-                            <!-- Teruglevering -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-emerald-500"></span>
-                                        <span class="text-slate-300 font-medium">Teruglevering</span>
+                                <!-- Teruglevering -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-emerald-500"></span>
+                                            <span class="text-slate-300 font-medium">Teruglevering</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-emerald-400 font-bold block" id="pred-stat-terug-total">-- kWh</span>
+                                            <span class="text-[10px] text-emerald-500/90 font-mono font-medium block" id="pred-stat-terug-cost">€--</span>
+                                        </div>
                                     </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-emerald-400 font-bold block" id="pred-stat-terug-total">-- kWh</span>
-                                        <span class="text-[10px] text-emerald-500/90 font-mono font-medium block" id="pred-stat-terug-cost">€--</span>
-                                    </div>
-                                </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Nu: <strong class="text-emerald-400 font-normal" id="pred-stat-terug-last">--</strong></span>
-                                    <span>Piek: <span class="text-emerald-500/80" id="pred-stat-terug-min">--</span></span>
-                                </div>
-                            </div>
-                            <!-- Afname -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-red-500"></span>
-                                        <span class="text-slate-300 font-medium">Afname</span>
-                                    </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-red-400 font-bold block" id="pred-stat-afname-total">-- kWh</span>
-                                        <span class="text-[10px] text-red-500/90 font-mono font-medium block" id="pred-stat-afname-cost">€--</span>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Nu: <strong class="text-emerald-400 font-normal" id="pred-stat-terug-last">--</strong></span>
+                                        <span>Piek: <span class="text-emerald-500/80" id="pred-stat-terug-min">--</span></span>
                                     </div>
                                 </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Nu: <strong class="text-red-400 font-normal" id="pred-stat-afname-last">--</strong></span>
-                                    <span>Piek: <span class="text-red-500/80" id="pred-stat-afname-max">--</span></span>
-                                </div>
-                            </div>
-                            <!-- Totaal opgewekt -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-lime-500"></span>
-                                        <span class="text-slate-300 font-medium">Totaal opgewekt</span>
+                                <!-- Afname -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-red-500"></span>
+                                            <span class="text-slate-300 font-medium">Afname</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-red-400 font-bold block" id="pred-stat-afname-total">-- kWh</span>
+                                            <span class="text-[10px] text-red-500/90 font-mono font-medium block" id="pred-stat-afname-cost">€--</span>
+                                        </div>
                                     </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-lime-400 font-bold block" id="pred-stat-opgewekt-total">-- kWh</span>
-                                        <span class="text-[10px] text-lime-500/90 font-mono font-medium block" id="pred-stat-opgewekt-cost">€--</span>
-                                    </div>
-                                </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Nu: <strong class="text-lime-400 font-normal" id="pred-stat-opgewekt-last">--</strong></span>
-                                    <span>Piek: <span class="text-lime-500/80" id="pred-stat-opgewekt-min">--</span></span>
-                                </div>
-                            </div>
-                            <!-- Opgewekt Gebruikt -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-teal-400"></span>
-                                        <span class="text-slate-300 font-medium">Opgewekt Gebruikt</span>
-                                    </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-teal-400 font-bold block" id="pred-stat-selfcons-total">-- kWh</span>
-                                        <span class="text-[10px] text-teal-500/90 font-mono font-medium block" id="pred-stat-selfcons-cost">€--</span>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Nu: <strong class="text-red-400 font-normal" id="pred-stat-afname-last">--</strong></span>
+                                        <span>Piek: <span class="text-red-500/80" id="pred-stat-afname-max">--</span></span>
                                     </div>
                                 </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Nu: <strong class="text-teal-400 font-normal" id="pred-stat-selfcons-last">--</strong></span>
-                                    <span>Piek: <span class="text-teal-500/80" id="pred-stat-selfcons-min">--</span></span>
-                                </div>
-                            </div>
-                            <!-- Totaal Verbruik -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-orange-500"></span>
-                                        <span class="text-slate-300 font-medium">Totaal Verbruik</span>
+                                <!-- Totaal opgewekt -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-lime-500"></span>
+                                            <span class="text-slate-300 font-medium">Totaal opgewekt</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-lime-400 font-bold block" id="pred-stat-opgewekt-total">-- kWh</span>
+                                            <span class="text-[10px] text-lime-500/90 font-mono font-medium block" id="pred-stat-opgewekt-cost">€--</span>
+                                        </div>
                                     </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-orange-400 font-bold block" id="pred-stat-verbruik-total">-- kWh</span>
-                                        <span class="text-[10px] text-orange-500/90 font-mono font-medium block" id="pred-stat-verbruik-cost">€--</span>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Nu: <strong class="text-lime-400 font-normal" id="pred-stat-opgewekt-last">--</strong></span>
+                                        <span>Piek: <span class="text-lime-500/80" id="pred-stat-opgewekt-min">--</span></span>
                                     </div>
                                 </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Nu: <strong class="text-orange-400 font-normal" id="pred-stat-verbruik-last">--</strong></span>
-                                    <span>Piek: <span class="text-orange-500/80" id="pred-stat-verbruik-max">--</span></span>
+                                <!-- Opgewekt Gebruikt -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-teal-400"></span>
+                                            <span class="text-slate-300 font-medium">Opgewekt Gebruikt</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-teal-400 font-bold block" id="pred-stat-selfcons-total">-- kWh</span>
+                                            <span class="text-[10px] text-teal-500/90 font-mono font-medium block" id="pred-stat-selfcons-cost">€--</span>
+                                        </div>
+                                    </div>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Nu: <strong class="text-teal-400 font-normal" id="pred-stat-selfcons-last">--</strong></span>
+                                        <span>Piek: <span class="text-teal-500/80" id="pred-stat-selfcons-min">--</span></span>
+                                    </div>
+                                </div>
+                                <!-- Totaal Verbruik -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-orange-500"></span>
+                                            <span class="text-slate-300 font-medium">Totaal Verbruik</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-orange-400 font-bold block" id="pred-stat-verbruik-total">-- kWh</span>
+                                            <span class="text-[10px] text-orange-500/90 font-mono font-medium block" id="pred-stat-verbruik-cost">€--</span>
+                                        </div>
+                                    </div>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Nu: <strong class="text-orange-400 font-normal" id="pred-stat-verbruik-last">--</strong></span>
+                                        <span>Piek: <span class="text-orange-500/80" id="pred-stat-verbruik-max">--</span></span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Dual Polarity Power Producers Aligned Legend Chips -->
-                    <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-                        <div class="flex items-center gap-3 flex-wrap">
-                            <!-- Consumers Above Horizontal Axis (> 0 kW) -->
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Ongedefinieerd Verbruik (+kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW Tapwater (+kW)</span></div>
+                        <!-- Legend Chips -->
+                        <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-3 text-xs font-mono">
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Ongedefinieerd (+kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW (+kW)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV (+kW)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden (+kW)</span></div>
-                            <!-- Sources Below Horizontal Axis (< 0 kW) -->
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-slate-300">Zon (-kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-teal-400"></span> <span class="text-slate-300">Accu Ontladen (-kW)</span></div>
-                            <!-- Net & Price Lines -->
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500"></span> <span class="text-red-400 font-bold">Verwacht Netto Verbruik (>0 Afname, <0 Export)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500"></span> <span class="text-red-400 font-bold">Verwacht Netto</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400">Prijs (€/kWh)</span></div>
                         </div>
                     </div>
+
+                    <!-- Chart 1.2: Prijzen & Zonnevoorspelling (EPEX Rates & Solar Forecast) -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                            <h3 class="text-sm font-bold text-white tracking-wide">Prijzen & Zonnevoorspelling</h3>
+                            <div class="flex items-center gap-2 text-xs">
+                                <select id="epex-res-select" onchange="loadElectricityPricesChart()" class="bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 text-xs font-medium focus:outline-none focus:border-blue-500 font-mono">
+                                    <option value="15m" selected>Kwartiertarieven (15m)</option>
+                                    <option value="1h">Uurtarieven (1h)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Canvas -->
+                        <div class="relative w-full h-60 sm:h-64">
+                            <canvas id="electricityPricesChart"></canvas>
+                        </div>
+
+                        <!-- Price & Solar Stats Cards -->
+                        <div class="pt-2 border-t border-slate-800/80">
+                            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-mono">
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                    <div class="text-[10px] text-slate-500 uppercase">Laagste Tarief</div>
+                                    <div class="text-sm font-bold text-emerald-400 mt-0.5" id="stat-epex-min">--</div>
+                                    <div class="text-[10px] text-slate-400" id="stat-epex-min-time">om --:--</div>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                    <div class="text-[10px] text-slate-500 uppercase">Hoogste Tarief</div>
+                                    <div class="text-sm font-bold text-red-400 mt-0.5" id="stat-epex-max">--</div>
+                                    <div class="text-[10px] text-slate-400" id="stat-epex-max-time">om --:--</div>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                    <div class="text-[10px] text-slate-500 uppercase">Piek Zonverwachting</div>
+                                    <div class="text-sm font-bold text-amber-400 mt-0.5" id="stat-epex-solar-peak">--</div>
+                                    <div class="text-[10px] text-slate-400">Open-Meteo GHI</div>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                    <div class="text-[10px] text-slate-500 uppercase">Zon Besparingsmarge</div>
+                                    <div class="text-sm font-bold text-yellow-400 mt-0.5" id="stat-epex-solar-margin">--</div>
+                                    <div class="text-[10px] text-emerald-400">Voordeel t.o.v. net</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- GRAFANA-STYLE POWER PRODUCERS CHART (DUAL POLARITY & TIMEFRAME SELECTOR) -->
-                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-2xl space-y-4">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                <!-- ========================================================================= -->
+                <!-- CATEGORIE 2: HISTORIE (HISTORICAL DATA)                                   -->
+                <!-- ========================================================================= -->
+                <div class="space-y-4 pt-4">
+                    <!-- Category Header & Controls Bar -->
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-emerald-500/30">
                         <div class="flex items-center gap-2.5">
-                            <span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
-                            <h3 class="text-sm font-bold text-white tracking-wide">Power Producers & Netstromen</h3>
-                            <span class="text-[10px] text-slate-500 font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800">openhems</span>
+                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <h2 class="text-sm sm:text-base font-bold text-white tracking-wide uppercase">Historie</h2>
+                            <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">TELEMETRIE</span>
                         </div>
                         <div class="flex items-center gap-2 text-xs flex-wrap">
                             <!-- Diagram Type Toggle: Staven vs Lijn -->
                             <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button id="pp-btn-type-bar" onclick="setPowerProducersType('bar')" class="px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow">📊 Staven</button>
-                                <button id="pp-btn-type-line" onclick="setPowerProducersType('line')" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">📈 Lijn</button>
+                                <button id="pp-btn-type-bar" onclick="setPowerProducersType('bar')" class="px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">📊 Staven</button>
+                                <button id="pp-btn-type-line" onclick="setPowerProducersType('line')" class="px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">📈 Lijn</button>
                             </div>
 
                             <!-- Interval / Resolutie Toggle -->
                             <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button id="pp-btn-res-1h" onclick="setPowerProducersResolution('1h')" class="px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow">1 Uur</button>
-                                <button id="pp-btn-res-15m" onclick="setPowerProducersResolution('15m')" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
+                                <button id="pp-btn-res-1h" onclick="setPowerProducersResolution('1h')" class="px-2.5 py-1 rounded transition font-medium bg-blue-600 text-white shadow">1 Uur</button>
+                                <button id="pp-btn-res-15m" onclick="setPowerProducersResolution('15m')" class="px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
                             </div>
 
-                            <label for="pp-range-select" class="text-slate-400 text-xs hidden sm:inline font-mono">Periode:</label>
-                            <select id="pp-range-select" onchange="onPowerProducersRangeChange()" class="bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-medium focus:outline-none focus:border-blue-500 font-mono">
-                                <option value="1h">Laatste 1 uur</option>
-                                <option value="6h">Laatste 6 uur</option>
-                                <option value="24h" selected>Laatste 24 uur</option>
-                                <option value="48h">Laatste 2 dagen</option>
-                                <option value="7d">Laatste 7 dagen</option>
+                            <!-- Periode Selector -->
+                            <select id="pp-range-select" onchange="onPowerProducersRangeChange()" class="bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 text-xs font-medium focus:outline-none focus:border-blue-500 font-mono">
+                                <option value="1h">1 uur</option>
+                                <option value="6h">6 uur</option>
+                                <option value="24h" selected>24 uur</option>
+                                <option value="48h">2 dagen</option>
+                                <option value="7d">7 dagen</option>
                             </select>
-                            <button onclick="loadPowerProducersChart()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
+                            <button onclick="loadPowerProducersChart(); loadAnalytics();" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                 <span>Verversen</span>
                             </button>
                         </div>
                     </div>
 
-                    <!-- Dual Polarity Chart Canvas -->
-                    <div class="relative w-full h-72 sm:h-80">
-                        <canvas id="powerProducersChart"></canvas>
-                    </div>
+                    <!-- Chart 2.1: Verbruikshistorie (Power Producers & Netstromen) -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
+                        <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                            <h3 class="text-sm font-bold text-white tracking-wide">Verbruikshistorie</h3>
+                        </div>
 
-                    <!-- Grafana-Style Legend with Periode Totals (kWh) -->
-                    <div class="pt-2 border-t border-slate-800/80">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs font-mono">
-                            <!-- Zonnepanelen -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-yellow-500"></span>
-                                        <span class="text-slate-300 font-medium">Zonnepanelen</span>
+                        <!-- Dual Polarity Chart Canvas -->
+                        <div class="relative w-full h-72 sm:h-80">
+                            <canvas id="powerProducersChart"></canvas>
+                        </div>
+
+                        <!-- 6-Box Metrics Grid with Euro Costs -->
+                        <div class="pt-2 border-t border-slate-800/80">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs font-mono">
+                                <!-- Zonnepanelen -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-yellow-500"></span>
+                                            <span class="text-slate-300 font-medium">Zonnepanelen</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-yellow-400 font-bold block" id="stat-solar-total">-- kWh</span>
+                                            <span class="text-[10px] text-yellow-500/90 font-mono font-medium block" id="stat-solar-cost">€--</span>
+                                        </div>
                                     </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-yellow-400 font-bold block" id="stat-solar-total">-- kWh</span>
-                                        <span class="text-[10px] text-yellow-500/90 font-mono font-medium block" id="stat-solar-cost">€--</span>
-                                    </div>
-                                </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Last: <strong class="text-yellow-400 font-normal" id="stat-solar-last">--</strong></span>
-                                    <span>Min: <span class="text-yellow-500/80" id="stat-solar-min">--</span></span>
-                                </div>
-                            </div>
-                            <!-- Teruglevering -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-emerald-500"></span>
-                                        <span class="text-slate-300 font-medium">Teruglevering</span>
-                                    </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-emerald-400 font-bold block" id="stat-terug-total">-- kWh</span>
-                                        <span class="text-[10px] text-emerald-500/90 font-mono font-medium block" id="stat-terug-cost">€--</span>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Last: <strong class="text-yellow-400 font-normal" id="stat-solar-last">--</strong></span>
+                                        <span>Min: <span class="text-yellow-500/80" id="stat-solar-min">--</span></span>
                                     </div>
                                 </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Last: <strong class="text-emerald-400 font-normal" id="stat-terug-last">--</strong></span>
-                                    <span>Min: <span class="text-emerald-500/80" id="stat-terug-min">--</span></span>
-                                </div>
-                            </div>
-                            <!-- Afname -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-red-500"></span>
-                                        <span class="text-slate-300 font-medium">Afname</span>
+                                <!-- Teruglevering -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-emerald-500"></span>
+                                            <span class="text-slate-300 font-medium">Teruglevering</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-emerald-400 font-bold block" id="stat-terug-total">-- kWh</span>
+                                            <span class="text-[10px] text-emerald-500/90 font-mono font-medium block" id="stat-terug-cost">€--</span>
+                                        </div>
                                     </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-red-400 font-bold block" id="stat-afname-total">-- kWh</span>
-                                        <span class="text-[10px] text-red-500/90 font-mono font-medium block" id="stat-afname-cost">€--</span>
-                                    </div>
-                                </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Last: <strong class="text-red-400 font-normal" id="stat-afname-last">--</strong></span>
-                                    <span>Max: <span class="text-red-500/80" id="stat-afname-max">--</span></span>
-                                </div>
-                            </div>
-                            <!-- Totaal opgewekt -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-lime-500"></span>
-                                        <span class="text-slate-300 font-medium">Totaal opgewekt</span>
-                                    </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-lime-400 font-bold block" id="stat-opgewekt-total">-- kWh</span>
-                                        <span class="text-[10px] text-lime-500/90 font-mono font-medium block" id="stat-opgewekt-cost">€--</span>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Last: <strong class="text-emerald-400 font-normal" id="stat-terug-last">--</strong></span>
+                                        <span>Min: <span class="text-emerald-500/80" id="stat-terug-min">--</span></span>
                                     </div>
                                 </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Last: <strong class="text-lime-400 font-normal" id="stat-opgewekt-last">--</strong></span>
-                                    <span>Min: <span class="text-lime-500/80" id="stat-opgewekt-min">--</span></span>
-                                </div>
-                            </div>
-                            <!-- Opgewekt Gebruikt -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-teal-400"></span>
-                                        <span class="text-slate-300 font-medium">Opgewekt Gebruikt</span>
+                                <!-- Afname -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-red-500"></span>
+                                            <span class="text-slate-300 font-medium">Afname</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-red-400 font-bold block" id="stat-afname-total">-- kWh</span>
+                                            <span class="text-[10px] text-red-500/90 font-mono font-medium block" id="stat-afname-cost">€--</span>
+                                        </div>
                                     </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-teal-400 font-bold block" id="stat-selfcons-total">-- kWh</span>
-                                        <span class="text-[10px] text-teal-500/90 font-mono font-medium block" id="stat-selfcons-cost">€--</span>
-                                    </div>
-                                </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Last: <strong class="text-teal-400 font-normal" id="stat-selfcons-last">--</strong></span>
-                                    <span>Min: <span class="text-teal-500/80" id="stat-selfcons-min">--</span></span>
-                                </div>
-                            </div>
-                            <!-- Totaal Verbruik -->
-                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <span class="w-3 h-1.5 rounded-sm bg-orange-500"></span>
-                                        <span class="text-slate-300 font-medium">Totaal Verbruik</span>
-                                    </div>
-                                    <div class="text-right">
-                                        <span class="text-xs text-orange-400 font-bold block" id="stat-verbruik-total">-- kWh</span>
-                                        <span class="text-[10px] text-orange-500/90 font-mono font-medium block" id="stat-verbruik-cost">€--</span>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Last: <strong class="text-red-400 font-normal" id="stat-afname-last">--</strong></span>
+                                        <span>Max: <span class="text-red-500/80" id="stat-afname-max">--</span></span>
                                     </div>
                                 </div>
-                                <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
-                                    <span>Last: <strong class="text-orange-400 font-normal" id="stat-verbruik-last">--</strong></span>
-                                    <span>Max: <span class="text-orange-500/80" id="stat-verbruik-max">--</span></span>
+                                <!-- Totaal opgewekt -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-lime-500"></span>
+                                            <span class="text-slate-300 font-medium">Totaal opgewekt</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-lime-400 font-bold block" id="stat-opgewekt-total">-- kWh</span>
+                                            <span class="text-[10px] text-lime-500/90 font-mono font-medium block" id="stat-opgewekt-cost">€--</span>
+                                        </div>
+                                    </div>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Last: <strong class="text-lime-400 font-normal" id="stat-opgewekt-last">--</strong></span>
+                                        <span>Min: <span class="text-lime-500/80" id="stat-opgewekt-min">--</span></span>
+                                    </div>
+                                </div>
+                                <!-- Opgewekt Gebruikt -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-teal-400"></span>
+                                            <span class="text-slate-300 font-medium">Opgewekt Gebruikt</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-teal-400 font-bold block" id="stat-selfcons-total">-- kWh</span>
+                                            <span class="text-[10px] text-teal-500/90 font-mono font-medium block" id="stat-selfcons-cost">€--</span>
+                                        </div>
+                                    </div>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Last: <strong class="text-teal-400 font-normal" id="stat-selfcons-last">--</strong></span>
+                                        <span>Min: <span class="text-teal-500/80" id="stat-selfcons-min">--</span></span>
+                                    </div>
+                                </div>
+                                <!-- Totaal Verbruik -->
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between gap-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-3 h-1.5 rounded-sm bg-orange-500"></span>
+                                            <span class="text-slate-300 font-medium">Totaal Verbruik</span>
+                                        </div>
+                                        <div class="text-right">
+                                            <span class="text-xs text-orange-400 font-bold block" id="stat-verbruik-total">-- kWh</span>
+                                            <span class="text-[10px] text-orange-500/90 font-mono font-medium block" id="stat-verbruik-cost">€--</span>
+                                        </div>
+                                    </div>
+                                    <div class="text-[10px] space-x-2 text-right border-t border-slate-800/60 pt-1 text-slate-500">
+                                        <span>Last: <strong class="text-orange-400 font-normal" id="stat-verbruik-last">--</strong></span>
+                                        <span>Max: <span class="text-orange-500/80" id="stat-verbruik-max">--</span></span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
