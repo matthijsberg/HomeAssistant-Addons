@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.30.0
+Version: 0.30.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -989,7 +989,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.30.0",
+                "version": "0.30.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2097,7 +2097,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.30.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.30.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5636,6 +5636,7 @@ class HemsBackgroundCollector(threading.Thread):
 
             if m_name == "energy_telemetry":
                 dev_id, dev_type, flow, src_type, vector = parts[1], parts[2], parts[3], parts[4], parts[5]
+                mode_tag = f",mode={parts[6]}" if len(parts) > 6 else ""
                 field_name = v["type"]
                 lines.append(f"energy_telemetry,device_id={dev_id},device_type={dev_type},flow={flow},source_type={src_type},vector={vector}{mode_tag} {field_name}={mean_val} {now_ns}")
             elif m_name == "market_tariffs":

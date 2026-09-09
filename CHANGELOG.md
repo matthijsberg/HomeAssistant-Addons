@@ -17,6 +17,18 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.30.1] — 2026-09-08 (Fix Collector InfluxDB Flush Loop Crash & Backfill Missing Historical Window)
+
+### Fixed
+- **Collector Line Protocol Flush Crash:**
+  - Resolved `NameError: name 'mode_tag' is not defined` in `HemsBackgroundCollector.flush_window_to_influx()` when formatting line protocol strings for `energy_telemetry`.
+  - Added safety check `mode_tag = f",mode={parts[6]}" if len(parts) > 6 else ""` before string formatting.
+- **Historical Data Backfill:**
+  - Ingested and synchronized 1,072 missing 1-minute data points between 16:30 CEST and 21:00 CEST from canonical Home Assistant recorder history into InfluxDB `openhems`.
+  - Restored continuous live updates on `Verbruikshistorie` chart up to current wall-clock time (21:00 CEST).
+
+---
+
 ## [0.30.0] — 2026-09-08 (Lean & Mean Cleaned Dashboard Architecture with 2 Dedicated Categories)
 
 ### Added
