@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.30.1
+Version: 0.30.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, "/addons/open-hems")
 sys.path.insert(0, "/opt/open-hems")
 from site_adapters.daikin_p1p2 import DaikinP1P2StateClassifier, HeatPumpDisaggregation
+from models.canonical import normalize_power_reading
 
 CONFIG_FILE = Path("/config/heatpump_config.json")
 PARAMS_FILE = Path("/config/heatpump_model_parameters.json")
@@ -989,7 +990,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.30.1",
+                "version": "0.30.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2097,7 +2098,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.30.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.30.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5429,18 +5430,12 @@ class HemsBackgroundCollector(threading.Thread):
         if not ha_states:
             return
 
-        def get_val_w(eid):
-            """Returns value converted to Watt if sensor reports in kW, or raw float."""
+        def get_val_w(eid, dev=None):
+            """Returns value converted to Watt deterministically via canonical normalization."""
             st_obj = ha_states.get(eid, {})
             val_raw = st_obj.get("state")
             unit = st_obj.get("unit") or st_obj.get("attributes", {}).get("unit_of_measurement", "")
-            try:
-                v = float(val_raw)
-                if unit in ["kW", "kw"]:
-                    v = v * 1000.0  # Convert kW to Watt!
-                return v
-            except (ValueError, TypeError):
-                return None
+            return normalize_power_reading(val_raw, unit=unit, device_cfg=dev or {})
 
         def get_val_raw(eid):
             st_obj = ha_states.get(eid, {})

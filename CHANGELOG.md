@@ -17,6 +17,22 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.30.2] — 2026-09-08 (Deterministic Canonical Unit Normalization & Hardware Contract Enforcement)
+
+### Added
+- **Canonical Unit Normalization (`models/canonical.py`):**
+  - Implemented `normalize_power_reading()` to deterministically convert raw power readings to Watts without arbitrary numerical thresholds.
+  - Contract precedence:
+    1. Device configuration contract: `device_cfg['native_unit'] == 'kW'` strictly converts by multiplying by 1000.0, preserving low-power balancing (e.g. 0.010 kW -> 10 W).
+    2. Entity metadata inspection: converts `unit_of_measurement == 'kW'` to Watts.
+    3. Native Watt sources (Modbus Inepro meters) pass through unaltered.
+- **Hardware Device Contracts in `heatpump_config.json`:**
+  - Added explicit `native_unit` and `storage_unit` fields across all device profiles (`main_grid_meter`: kW, `rooftop_solar`: W, `daikin_heat_pump`: W).
+- **Comprehensive Unit Testing:**
+  - Added test suite in `tests/unit/test_canonical_models.py` verifying small-power balancing (10W), large loads (1.5kW), Modbus passthrough, device contracts, and non-numeric inputs (35/35 tests passing).
+
+---
+
 ## [0.30.1] — 2026-09-08 (Fix Collector InfluxDB Flush Loop Crash & Backfill Missing Historical Window)
 
 ### Fixed

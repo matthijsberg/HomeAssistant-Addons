@@ -68,6 +68,61 @@ class Quality(str, Enum):
     EXCLUDED = "excluded"                    # Flagged as unreliable / maintenance window
 
 
+class PolicyType(str, Enum):
+    """The 3 fundamental HEMS policy archetypes."""
+    SHIFTABLE_CONSUMER = "shiftable_consumer"  # Type 1: Verbruik zonder opslag (vaatwasser, wasmachine)
+    THERMAL_BUFFER = "thermal_buffer"          # Type 2: Buffer zonder teruggave (350L SWW, CV vloerverwarming)
+    BATTERY_ARBITRAGE = "battery_arbitrage"    # Type 3: Accu met teruggave & economische dode zone
+
+
+@dataclass
+class ShiftableConsumerPolicy:
+    """Policy for shiftable non-storage appliances."""
+    policy_id: str
+    name: str
+    target_device_id: str
+    duration_minutes: int
+    power_watts: float
+    can_interrupt: bool = False
+    window_start_hour: int = 8
+    window_end_hour: int = 20
+    prefer_solar_surplus: bool = True
+    min_solar_surplus_watts: float = 1500.0
+
+
+@dataclass
+class ThermalBufferPolicy:
+    """Policy for heat pumps and thermal buffers (one-way storage with leakage)."""
+    policy_id: str
+    name: str
+    target_device_id: str
+    storage_volume_liters: int = 350
+    emergency_threshold_c: float = 38.0       # Hard safety guardrail (overrules all prices)
+    deadband_reheat_c: float = 46.0           # Do not reheat if above this without solar
+    target_temperature_c: float = 50.0        # Standard economic setpoint
+    solar_boost_temperature_c: float = 60.0   # Maximum thermal battery boost
+    min_run_time_minutes: int = 20            # Protect compressor against cycling
+    morning_peak_lockout: bool = True         # SG1 forced off (07:00 - 08:30)
+    evening_peak_lockout: bool = True         # SG1 forced off (17:30 - 20:30)
+    isolate_space_heating_during_dhw: bool = True # Cut CV switch to prevent 9kW BUH activation
+
+
+@dataclass
+class BatteryArbitragePolicy:
+    """Policy for bidirectional electrical batteries with economic deadband logic."""
+    policy_id: str
+    name: str
+    target_device_id: str
+    capacity_kwh: float = 10.0
+    roundtrip_efficiency: float = 0.87        # 13% round-trip conversion loss
+    lcos_depreciation_eur_kwh: float = 0.0741 # Cell degradation cost per throughput kWh
+    min_price_spread_eur_kwh: float = 0.115   # Deadband: Do NOTHING if price delta < €0.115/kWh
+    solar_surplus_priority: bool = True       # Charge from free solar before grid arbitrage
+    min_soc_pct: float = 10.0                 # Reserve floor
+    max_soc_pct: float = 95.0                 # Overcharge ceiling
+    peak_shaving_threshold_amps: float = 20.0 # Discharge if grid phase exceeds 20A (3x25A connection)
+
+
 @dataclass
 class Measurement:
     """
@@ -205,3 +260,50 @@ class DeviceCommand:
             "timeout_seconds": self.timeout_seconds,
             "created_at": self.created_at.isoformat()
         }
+
+
+def normalize_power_reading(
+    value: Any,
+    unit: Optional[str] = None,
+    device_cfg: Optional[Dict[str, Any]] = None
+) -> Optional[float]:
+    """
+    Deterministically normalizes any raw power reading from hardware, MQTT, or Home Assistant
+    to canonical Watts (W).
+    
+    Borging Rules:
+      1. Returns None for None, 'unavailable', 'unknown', or unparseable inputs.
+      2. Device Contract (Priority 1): If device_cfg['native_unit'] == 'kW', strictly multiplies by 1000.0.
+         (Crucial: Preserves 5-10W zero-grid import without threshold distortion).
+      3. Metadata Unit (Priority 2): If unit_of_measurement == 'kW', multiplies by 1000.0.
+      4. Direct Watt (Priority 3): If unit == 'W' or device_cfg['native_unit'] == 'W', returns raw float.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        val_clean = value.strip().lower()
+        if val_clean in ["unknown", "unavailable", "none", "null", ""]:
+            return None
+
+    try:
+        v = float(value)
+    except (ValueError, TypeError):
+        return None
+
+    # 1. Hardware/Device configuration contract (highest priority)
+    if device_cfg:
+        native_unit = str(device_cfg.get("native_unit", "")).strip().lower()
+        if native_unit in ["kw", "kilowatt", "kilo_watt"]:
+            return v * 1000.0
+        if native_unit in ["w", "watt"]:
+            return v
+
+    # 2. Explicit sensor metadata unit
+    if unit:
+        u_clean = str(unit).strip().lower()
+        if u_clean in ["kw", "kilowatt"]:
+            return v * 1000.0
+        if u_clean in ["w", "watt"]:
+            return v
+
+    return v
