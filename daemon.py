@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.25.1
+Version: 0.25.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -911,7 +911,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.25.1",
+                "version": "0.25.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1840,115 +1840,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 }
             }
         }
-        // === PIPELINE & CALIBRATION MONITORS ===
-        let activeUnallocDay = 1; // Default Dinsdag
-        let cachedUnallocModel = null;
-        let pipelinePollInterval = null;
-
-        async function loadPipelineStatus() {
-            try {
-                const res = await fetch('./api/pipeline/status');
-                const d = await res.json();
-                if (d.status !== 'online') return;
-
-                // Badges
-                const progBadge = document.getElementById('pipeline-progress-badge');
-                if (progBadge) progBadge.innerText = `Accumulator: ${d.samples_in_window}/${d.expected_samples} (${d.samples_in_window * d.sample_interval_s}s)`;
-                const flushBadge = document.getElementById('pipeline-flush-badge');
-                if (flushBadge) flushBadge.innerText = `Laatste Flush: ${d.last_flush_time}`;
-
-                // Progress Bar
-                const pct = Math.min(100, Math.round((d.samples_in_window / d.expected_samples) * 100));
-                const pctEl = document.getElementById('pipe-window-pct');
-                if (pctEl) pctEl.innerText = `${pct}%`;
-                const barEl = document.getElementById('pipe-progress-bar');
-                if (barEl) barEl.style.width = `${pct}%`;
-
-                const totalPointsEl = document.getElementById('pipe-total-points');
-                if (totalPointsEl) totalPointsEl.innerText = `Totaal weggeschreven: ${d.total_points_written} punten`;
-
-                // Live Power Balance Numbers
-                const b = d.live_balance || {};
-                if (document.getElementById('live-net-grid')) document.getElementById('live-net-grid').innerText = `${b.net_grid_w >= 0 ? '+' : ''}${b.net_grid_w || 0} W`;
-                if (document.getElementById('live-solar')) document.getElementById('live-solar').innerText = `${b.solar_w || 0} W`;
-                if (document.getElementById('live-direct-solar')) document.getElementById('live-direct-solar').innerText = `${b.direct_solar_w || 0} W`;
-                if (document.getElementById('live-heatpump')) document.getElementById('live-heatpump').innerText = `${b.heatpump_w || 0} W`;
-                if (document.getElementById('live-tot-house')) document.getElementById('live-tot-house').innerText = `${b.total_house_w || 0} W`;
-                if (document.getElementById('live-unallocated')) document.getElementById('live-unallocated').innerText = `${b.unallocated_w || 0} W`;
-            } catch (e) {
-                console.warn("Pipeline poll error:", e);
-            }
-        }
-
-        async function loadUnallocatedModel() {
-            try {
-                const res = await fetch('./api/calibration/unallocated-model');
-                cachedUnallocModel = await res.json();
-                renderUnallocDay(activeUnallocDay);
-            } catch (e) {
-                console.warn("Error loading unallocated model:", e);
-            }
-        }
-
-        function selectUnallocDay(dayIdx) {
-            activeUnallocDay = dayIdx;
-            renderUnallocDay(dayIdx);
-        }
-
-        function renderUnallocDay(dayIdx) {
-            if (!cachedUnallocModel || !cachedUnallocModel.profile_watts) return;
-            const dayNames = cachedUnallocModel.day_names || ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
-            const watts = cachedUnallocModel.profile_watts[String(dayIdx)] || [];
-            if (watts.length === 0) return;
-
-            // Update tab styles
-            const btns = document.querySelectorAll('.unalloc-day-btn');
-            btns.forEach((btn, idx) => {
-                if (idx === dayIdx) {
-                    btn.className = 'unalloc-day-btn px-3 py-1 rounded-lg border border-blue-500 bg-blue-600 text-white font-bold shadow';
-                } else {
-                    btn.className = 'unalloc-day-btn px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200 font-medium';
-                }
-            });
-
-            // Update summary metrics
-            const avg = Math.round(watts.reduce((a, b) => a + b, 0) / watts.length);
-            const nightMin = Math.min(...watts.slice(0, 6));
-            const morningPeak = Math.max(...watts.slice(6, 11));
-            const eveningPeak = Math.max(...watts.slice(17, 23));
-
-            if (document.getElementById('unalloc-metric-avg')) document.getElementById('unalloc-metric-avg').innerText = `${avg} W`;
-            if (document.getElementById('unalloc-metric-night')) document.getElementById('unalloc-metric-night').innerText = `${nightMin} W`;
-            if (document.getElementById('unalloc-metric-morning')) document.getElementById('unalloc-metric-morning').innerText = `${morningPeak} W`;
-            if (document.getElementById('unalloc-metric-evening')) document.getElementById('unalloc-metric-evening').innerText = `${eveningPeak} W`;
-            if (document.getElementById('unalloc-selected-day-label')) document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} Profiel (${avg} W gemiddeld)`;
-
-            // Render hourly bar chart
-            const container = document.getElementById('unalloc-hourly-bars');
-            if (container) {
-                container.innerHTML = '';
-                const maxW = Math.max(1000, ...watts);
-                watts.forEach((w, h) => {
-                    const barHeightPct = Math.round((w / maxW) * 100);
-                    const col = document.createElement('div');
-                    col.className = 'flex flex-col items-center justify-end h-full group relative cursor-pointer';
-                    col.innerHTML = `
-                        <div class="absolute -top-7 bg-slate-900 border border-slate-700 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-20 pointer-events-none">
-                            ${h}:00 · ${w} W
-                        </div>
-                        <div class="w-full bg-blue-500 hover:bg-blue-400 rounded-t transition-all" style="height: ${barHeightPct}%"></div>
-                        <span class="text-[9px] text-slate-500 font-mono mt-1">${h}</span>
-                    `;
-                    container.appendChild(col);
-                });
-            }
-        }
-
-        async function recalculateUnallocatedProfile() {
-            alert("Model herberekening gestart op basis van de 180-dagen HA Energy data...");
-            await loadUnallocatedModel();
-            loadChartData();
-        }
     </script>
     <style>
         .tab-content { display: none; }
@@ -2048,7 +1939,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.25.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.25.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3243,12 +3134,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 loadChartData();
             }
             if (tabId === 'control') loadControl();
-            if (tabId === 'infrastructure') loadInfrastructure();
+            if (tabId === 'infrastructure') {
+                loadInfrastructure();
+                loadPipelineStatus();
+                if (!pipelinePollInterval) pipelinePollInterval = setInterval(loadPipelineStatus, 10000);
+            } else {
+                if (pipelinePollInterval) { clearInterval(pipelinePollInterval); pipelinePollInterval = null; }
+            }
             if (tabId === 'dashboard') loadChartData();
             if (tabId === 'policies') loadPolicies();
             if (tabId === 'devices') loadDevices();
             if (tabId === 'tariffs') loadTariffs();
-            if (tabId === 'calibration') loadCalibration();
+            if (tabId === 'calibration') {
+                loadCalibration();
+                loadUnallocatedModel();
+            }
         }
 
         function refreshCurrentTab() {
