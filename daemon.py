@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.24.1
+Version: 0.24.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -881,7 +881,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.24.1",
+                "version": "0.24.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1154,13 +1154,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 advices[sww_idx] = f"♨️ SWW Boiler 350L Run: Laagste EPEX tarief (€{best_sww_slot['price']:.3f}/kWh)"
 
             # 6. Plan Battery Dispatch: Solar Surplus Charging & Peak Tariff Discharging
-            battery_discharge = [0.0] * 24
+            battery_discharge = [0.0] * total_slots
             min_item = min(timeline_items, key=lambda x: x["price"])
             max_item = max(timeline_items, key=lambda x: x["price"])
             price_delta = max_item["price"] - min_item["price"]
             deadband = float(cfg.get("battery_deadband_eur_kwh", 0.115))
             peak_solar_it = max(timeline_items, key=lambda x: x["solar"])
             bat_msg = ""
+            bat_slots = 4 if is_15m else 1
 
             # Check if there is significant solar surplus available tomorrow
             if peak_solar_it["solar"] >= 1.5:
@@ -1178,27 +1179,33 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     charge_slot = peak_solar_it
                     charge_kw = 2.0
 
-                battery_charge[charge_slot["idx"]] = charge_kw
+                for b_i in range(charge_slot["idx"], min(total_slots, charge_slot["idx"] + bat_slots)):
+                    battery_charge[b_i] = charge_kw
 
                 # Discharge during expensive evening peak (18:00 - 23:00 or morning)
                 evening_slots = [it for it in timeline_items if (18 <= it["dt"].hour <= 23 or 0 <= it["dt"].hour <= 1)]
                 if evening_slots:
                     best_discharge = max(evening_slots, key=lambda x: x["price"])
-                    battery_discharge[best_discharge["idx"]] = 2.0
+                    for d_i in range(best_discharge["idx"], min(total_slots, best_discharge["idx"] + bat_slots)):
+                        battery_discharge[d_i] = 2.0
                     other_evening = [it for it in evening_slots if it["idx"] != best_discharge["idx"]]
                     if other_evening:
                         second_dis = max(other_evening, key=lambda x: x["price"])
-                        battery_discharge[second_dis["idx"]] = 1.5
+                        for d2_i in range(second_dis["idx"], min(total_slots, second_dis["idx"] + bat_slots)):
+                            battery_discharge[d2_i] = 1.5
                     bat_msg = f"☀️ Zonne-Buffer: Accu laadt op gratis zonne-overschot om {charge_slot['label']} ({charge_kw} kW) en ontlaadt in de avondpiek ({best_discharge['label']}, €{best_discharge['price']:.2f}/kWh)."
                 else:
                     bat_msg = f"☀️ Zonne-Buffer: Accu laadt op gratis zonne-overschot om {charge_slot['label']} ({charge_kw} kW)."
             elif price_delta >= deadband:
                 # Mode B: Winter/Cloudy Tariff Arbitrage — charge from grid at lowest price, discharge at highest
-                battery_charge[min_item["idx"]] = 2.0
-                battery_discharge[max_item["idx"]] = 2.0
+                for b_i in range(min_item["idx"], min(total_slots, min_item["idx"] + bat_slots)):
+                    battery_charge[b_i] = 2.0
+                for d_i in range(max_item["idx"], min(total_slots, max_item["idx"] + bat_slots)):
+                    battery_discharge[d_i] = 2.0
                 expensive_slots = sorted(timeline_items, key=lambda x: x["price"], reverse=True)
                 if len(expensive_slots) > 1 and expensive_slots[1]["idx"] != min_item["idx"]:
-                    battery_discharge[expensive_slots[1]["idx"]] = 1.5
+                    for d2_i in range(expensive_slots[1]["idx"], min(total_slots, expensive_slots[1]["idx"] + bat_slots)):
+                        battery_discharge[d2_i] = 1.5
                 bat_msg = f"🔋 Accu-Arbitrage (Bewolkt/Winter): Laden om {min_item['label']} (€{min_item['price']:.2f}), Ontladen om {max_item['label']} (€{max_item['price']:.2f}) [Spread €{price_delta:.3f} > €{deadband:.3f}]."
             else:
                 bat_msg = f"⏸️ Accu Stand-by: Onvoldoende zonne-overschot en prijsdelta €{price_delta:.3f} onder drempel."
@@ -1902,7 +1909,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.24.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.24.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
