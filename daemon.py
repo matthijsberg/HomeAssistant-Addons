@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.32.2
+Version: 0.33.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1013,7 +1013,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.32.2",
+                "version": "0.33.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2127,7 +2127,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.32.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.33.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5218,10 +5218,30 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 if (powerProducersChartInstance) powerProducersChartInstance.destroy();
 
                 const ctx = canvas.getContext('2d');
+
+                // === PURE ENERGY (kWh) STANDARDIZATION ===
+                const intervalH = window.__lastHistoricalIntervalH || 1.0;
+
+                // Convert instantaneous power (Watts) to actual interval energy (kWh = W * hours / 1000)
+                const toKwh = (arr) => (arr || []).map(w => Number(((w * intervalH) / 1000.0).toFixed(3)));
+                const toKwhNeg = (arr) => (arr || []).map(w => Number((-Math.abs(w * intervalH) / 1000.0).toFixed(3)));
+
+                const afnameKwh = toKwh(data.afname);
+                const verbruikKwh = toKwh(data.verbruik);
+                const selfConsKwh = toKwh(data.self_consumption);
+                const terugKwh = toKwhNeg(data.teruglevering_negative);
+                const selfConsNegKwh = toKwhNeg(data.self_consumption);
+                const solarNegKwh = toKwhNeg(data.solar_negative);
+
+                const netKwh = afnameKwh.map((afn, idx) => {
+                    const ter = Math.abs(terugKwh[idx] || 0);
+                    return Number((afn - ter).toFixed(3));
+                });
+
                 let datasets = [];
 
                 if (powerProducersChartType === 'bar') {
-                    // === STAAVEN (BAR) MODUS: EXACT GELIJK AAN DE 24-UURS VOORUIT GRAFIEK ===
+                    // === STAVEN (BAR) MODUS: 100% ZUIVERE ENERGIE (kWh) PER INTERVAL ===
                     // 0. EPEX Stroomprijs All-in Stepped/Dashed Curve (Rechter Y-as)
                     if (data.prices && data.prices.length > 0) {
                         datasets.push({
@@ -5237,10 +5257,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             order: 0
                         });
                     }
-                    // 1. Totaal Verbruik (Oranje overlay lijn)
+                    // 1. Totaal Verbruik Lijn (Oranje) in kWh
                     datasets.push({
-                        label: 'Totaal Verbruik',
-                        data: data.verbruik,
+                        label: 'Totaal Verbruik (kWh)',
+                        data: verbruikKwh,
                         type: 'line',
                         borderColor: '#F97316',
                         backgroundColor: 'transparent',
@@ -5249,14 +5269,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         tension: 0.25,
                         order: 1
                     });
-                    // 2. Netto Grid Afname / Teruglevering Lijn (Felrood)
-                    const netGridArr = (data.afname || []).map((afn, idx) => {
-                        const ter = Math.abs((data.teruglevering_negative && data.teruglevering_negative[idx]) || 0);
-                        return afn - ter;
-                    });
+                    // 2. Netto Grid Stroom Lijn (Felrood) in kWh
                     datasets.push({
-                        label: 'Netto Grid Stroom',
-                        data: netGridArr,
+                        label: 'Netto Grid Stroom (kWh)',
+                        data: netKwh,
                         type: 'line',
                         borderColor: '#EF4444',
                         backgroundColor: 'transparent',
@@ -5265,47 +5281,46 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         tension: 0.25,
                         order: 2
                     });
-                    // 3. Positieve staven (Boven de as: Afname + Opgewekt Gebruikt)
+                    // 3. Positieve gestapelde staven: Afname + Opgewekt Gebruikt = Totaal Verbruik
                     datasets.push({
-                        label: 'Afname',
-                        data: data.afname,
+                        label: 'Afname (kWh)',
+                        data: afnameKwh,
                         backgroundColor: '#EF4444',
                         stack: 'energy',
                         borderRadius: 2,
                         order: 3
                     });
                     datasets.push({
-                        label: 'Opgewekt Gebruikt',
-                        data: data.self_consumption,
+                        label: 'Opgewekt Gebruikt (kWh)',
+                        data: selfConsKwh,
                         backgroundColor: '#06B6D4',
                         stack: 'energy',
                         borderRadius: 2,
                         order: 3
                     });
-                    // 4. Negatieve staven (Onder de as: Teruglevering + Direct Verbruikte Zon)
+                    // 4. Negatieve gestapelde staven: Teruglevering + Direct Benut = Totale Zonneproductie
                     datasets.push({
-                        label: 'Teruglevering',
-                        data: data.teruglevering_negative,
+                        label: 'Teruglevering (kWh)',
+                        data: terugKwh,
                         backgroundColor: '#10B981',
                         stack: 'energy',
                         borderRadius: 2,
                         order: 4
                     });
-                    const selfConsNeg = (data.self_consumption || []).map(v => -Math.abs(v));
                     datasets.push({
-                        label: 'Zon Direct Benut',
-                        data: selfConsNeg,
+                        label: 'Zon Direct Benut (kWh)',
+                        data: selfConsNegKwh,
                         backgroundColor: '#EAB308',
                         stack: 'energy',
                         borderRadius: 2,
                         order: 4
                     });
                 } else {
-                    // === LIJN (LINE / AREA) MODUS: CONTINUE VLOEIENDE LIJNEN ===
+                    // === LIJN (LINE / AREA) MODUS in kWh ===
                     datasets = [
                         {
-                            label: 'Totaal Verbruik',
-                            data: data.verbruik,
+                            label: 'Totaal Verbruik (kWh)',
+                            data: verbruikKwh,
                             borderColor: '#F97316',
                             backgroundColor: 'transparent',
                             borderWidth: 2,
@@ -5314,8 +5329,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             order: 1
                         },
                         {
-                            label: 'Afname',
-                            data: data.afname,
+                            label: 'Afname (kWh)',
+                            data: afnameKwh,
                             borderColor: '#EF4444',
                             backgroundColor: 'rgba(239, 68, 68, 0.45)',
                             fill: true,
@@ -5325,8 +5340,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             order: 2
                         },
                         {
-                            label: 'Opgewekt Gebruikt',
-                            data: data.self_consumption,
+                            label: 'Opgewekt Gebruikt (kWh)',
+                            data: selfConsKwh,
                             borderColor: '#14B8A6',
                             backgroundColor: 'rgba(20, 184, 166, 0.25)',
                             fill: true,
@@ -5336,8 +5351,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             order: 3
                         },
                         {
-                            label: 'Teruglevering',
-                            data: data.teruglevering_negative,
+                            label: 'Teruglevering (kWh)',
+                            data: terugKwh,
                             borderColor: '#10B981',
                             backgroundColor: 'rgba(16, 185, 129, 0.45)',
                             fill: true,
@@ -5347,8 +5362,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             order: 4
                         },
                         {
-                            label: 'Zonnepanelen',
-                            data: data.solar_negative,
+                            label: 'Zonnepanelen (kWh)',
+                            data: solarNegKwh,
                             borderColor: '#EAB308',
                             backgroundColor: 'rgba(234, 179, 8, 0.55)',
                             fill: true,
@@ -5360,17 +5375,17 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     ];
                 }
 
-                // Calculate symmetric center-aligned bounds (0 horizontal line exactly in the middle)
-                const allWattVals = [
-                    ...(data.afname || []),
-                    ...(data.verbruik || []),
-                    ...(data.solar_negative || []).map(Math.abs),
-                    ...(data.teruglevering_negative || []).map(Math.abs),
-                    1000
+                // Symmetrische 0-as schaling in zuivere kWh
+                const allKwhVals = [
+                    ...afnameKwh,
+                    ...verbruikKwh,
+                    ...solarNegKwh.map(Math.abs),
+                    ...terugKwh.map(Math.abs),
+                    1.0
                 ];
-                let maxAbsWatt = Math.max(...allWattVals);
-                maxAbsWatt = Math.ceil(maxAbsWatt / 500) * 500;
-                if (maxAbsWatt < 1500) maxAbsWatt = 1500;
+                let maxAbsKwh = Math.max(...allKwhVals);
+                maxAbsKwh = Math.ceil(maxAbsKwh * 2) / 2; // Stappen van 0.5 kWh
+                if (maxAbsKwh < 1.5) maxAbsKwh = 1.5;
 
                 const allPriceVals = [
                     ...(data.prices || []).map(Math.abs),
@@ -5396,7 +5411,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         },
                         plugins: {
                             legend: {
-                                display: false // Using custom aligned 6-box cards below
+                                display: false // Gekoppeld aan de 6-box overzichtskaarten
                             },
                             tooltip: {
                                 enabled: false,
@@ -5415,9 +5430,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 }
                             },
                             y: {
-                                min: -maxAbsWatt,
-                                max: maxAbsWatt,
-                                title: { display: true, text: 'Opbrengst (-W) < 0 < Verbruik (+W)', color: '#94A3B8', font: { family: 'monospace', size: 10 } },
+                                min: -maxAbsKwh,
+                                max: maxAbsKwh,
+                                title: { display: true, text: 'Opbrengst (-kWh) < 0 < Verbruik (+kWh)', color: '#94A3B8', font: { family: 'monospace', size: 10 } },
                                 grid: {
                                     color: (ctx) => ctx.tick && ctx.tick.value === 0 ? '#CBD5E1' : 'rgba(30, 41, 59, 0.6)',
                                     lineWidth: (ctx) => ctx.tick && ctx.tick.value === 0 ? 2 : 1
@@ -5428,7 +5443,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                     callback: function(val) {
                                         const absV = Math.abs(val);
                                         const prefix = val < 0 ? '-' : '';
-                                        return absV >= 1000 ? `${prefix}${(absV / 1000).toFixed(1)} kW` : `${val} W`;
+                                        return `${prefix}${absV.toFixed(2)} kWh`;
                                     }
                                 }
                             },
