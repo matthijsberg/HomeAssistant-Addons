@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.30.2
+Version: 0.31.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -746,9 +746,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 series_verbruik_pos = []
                 series_selfcons_pos = []
 
-                # Fetch EPEX prices for cost integration across timeframe
+                # Fetch EPEX prices (All-in Import & Dynamic Export) across timeframe
                 now_ams = datetime.now(AMS_TZ)
-                epex_prices_map = {}
+                epex_import_map = {}
+                epex_export_map = {}
                 try:
                     for days_back in range(3):
                         d_str = (now_ams - timedelta(days=days_back)).strftime("%d-%m-%Y")
@@ -756,9 +757,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
                         with urllib.request.urlopen(req_p, timeout=3) as r_p:
                             res_p = json.loads(r_p.read().decode())
+                            # 1. All-in afnametarief (incl. energiebelasting, opslag en btw)
                             for it in res_p.get("all_in_with_vat", []):
                                 dt_p = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
-                                epex_prices_map[dt_p.strftime("%Y-%m-%d %H:00")] = float(it.get("price", {}).get("value", 0.25))
+                                epex_import_map[dt_p.strftime("%Y-%m-%d %H:00")] = float(it.get("price", {}).get("value", 0.28))
+                            # 2. Dynamisch teruglevertarief (kale EPEX spotprijs min verkoopopslag)
+                            for it in res_p.get("base", []):
+                                dt_p = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
+                                base_val = float(it.get("price", {}).get("value", 0.12))
+                                # Powerpeers dynamisch contract: kale prijs min €0.00605 verkoopvergoeding
+                                epex_export_map[dt_p.strftime("%Y-%m-%d %H:00")] = max(0.0, base_val - 0.00605)
                 except Exception as e_pr:
                     pass
 
@@ -805,14 +813,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     tot_verbruik_wh += verbruik * interval_h
                     tot_selfcons_wh += self_cons * interval_h
 
-                    # EPEX cost calculation: kWh * price (€/kWh)
+                    # Differentiated contract pricing:
+                    # - Afname & Eigenverbruik besparing gewaardeerd tegen All-in EPEX inkoopprijs (~€0.28/kWh)
+                    # - Teruglevering gewaardeerd tegen dynamisch teruglevertarief (kale spot min €0.006/kWh, ~€0.11/kWh)
                     hr_key = ts_str[:13].replace('T', ' ') + ':00'
-                    cur_price = epex_prices_map.get(hr_key, 0.25)
-                    tot_afname_eur += (afname / 1000.0) * interval_h * cur_price
-                    tot_terug_eur += (terug / 1000.0) * interval_h * cur_price
-                    tot_solar_eur += (solar / 1000.0) * interval_h * cur_price
-                    tot_verbruik_eur += (verbruik / 1000.0) * interval_h * cur_price
-                    tot_selfcons_eur += (self_cons / 1000.0) * interval_h * cur_price
+                    p_imp = epex_import_map.get(hr_key, 0.28)
+                    p_exp = epex_export_map.get(hr_key, max(0.0, p_imp / 1.21 - 0.11085 - 0.0121 - 0.00605))
+
+                    series_prices.append(round(p_imp, 4))
+                    series_export_prices.append(round(p_exp, 4))
+
+                    tot_afname_eur += (afname / 1000.0) * interval_h * p_imp
+                    tot_selfcons_eur += (self_cons / 1000.0) * interval_h * p_imp
+                    tot_terug_eur += (terug / 1000.0) * interval_h * p_exp
+                    tot_solar_eur += ((self_cons / 1000.0) * interval_h * p_imp) + ((terug / 1000.0) * interval_h * p_exp)
+                    tot_verbruik_eur += (verbruik / 1000.0) * interval_h * p_imp
                 
                 def fmt_w(val):
                     abs_v = abs(val)
@@ -881,11 +896,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 res = {
                     "status": "success",
                     "labels": labels,
+                    "interval_h": interval_h,
                     "afname": series_afname_pos,
                     "verbruik": series_verbruik_pos,
                     "self_consumption": series_selfcons_pos,
                     "solar_negative": series_solar_neg,
                     "teruglevering_negative": series_terug_neg,
+                    "prices": series_prices,
+                    "export_prices": series_export_prices,
                     "stats": stats
                 }
                 self._send_json(res)
@@ -990,7 +1008,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.30.2",
+                "version": "0.31.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1451,9 +1469,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 }
             }
 
+            # Calculate dynamic export prices for forecast (kale spot min opslag)
+            export_prices = [max(0.0, round((p / 1.21) - 0.11085 - 0.0121 - 0.00605, 4)) for p in prices]
+
             self._send_json({
                 "hours": labels,
                 "labels": labels,
+                "interval_h": step_h,
+                "export_prices_eur": export_prices,
                 "datasets": {
                     "unallocated_kw": unallocated,
                     "baseload_kw": unallocated,
@@ -1464,7 +1487,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     "battery_discharge_kw_neg": bat_discharge_neg,
                     "surplus_kw": surplus_kw_list,
                     "net_power_kw": net_power,
-                    "prices_eur": prices
+                    "prices_eur": prices,
+                    "export_prices_eur": export_prices
                 },
                 "advices": advices,
                 "cheapest_hour": cheapest_hour_lbl,
@@ -2098,7 +2122,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.30.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.31.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3880,6 +3904,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             try {
                 const res = await fetch('./api/ha/entities');
                 const data = await res.json();
+                window.__lastPredictionData = data;
                 haEntitiesCache = data.entities || [];
                 populateHaDropdowns();
             } catch (e) {
@@ -3908,10 +3933,188 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             });
         }
 
+        
+        // =========================================================================
+        // CUSTOM STYLED HTML TOOLTIP HANDLER (REAL LINES, BARS & EURO COSTS)
+        // =========================================================================
+        function createOrGetTooltipEl(chart) {
+            let tooltipEl = document.getElementById('chartjs-custom-tooltip');
+            if (!tooltipEl) {
+                tooltipEl = document.createElement('div');
+                tooltipEl.id = 'chartjs-custom-tooltip';
+                tooltipEl.className = 'pointer-events-none fixed z-50 bg-[#0B0F17]/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-3 text-xs font-mono transition-opacity duration-150 text-slate-200';
+                tooltipEl.style.minWidth = '220px';
+                document.body.appendChild(tooltipEl);
+            }
+            return tooltipEl;
+        }
+
+        function customHemsTooltipHandler(context, isPrediction = false) {
+            const { chart, tooltip } = context;
+            const tooltipEl = createOrGetTooltipEl(chart);
+
+            if (tooltip.opacity === 0) {
+                tooltipEl.style.opacity = '0';
+                return;
+            }
+
+            if (!tooltip.body || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
+                tooltipEl.style.opacity = '0';
+                return;
+            }
+
+            const dataIndex = tooltip.dataPoints[0].dataIndex;
+            const label = tooltip.title[0] || '';
+
+            // Extract price and interval
+            let importPrice = 0.28;
+            let exportPrice = 0.11;
+            let intervalH = 1.0;
+
+            if (isPrediction) {
+                const chartData = window.__lastPredictionData;
+                if (chartData) {
+                    importPrice = (chartData.datasets?.prices_eur && chartData.datasets.prices_eur[dataIndex]) || 0.28;
+                    exportPrice = (chartData.export_prices_eur && chartData.export_prices_eur[dataIndex]) || max(0.0, importPrice * 0.45);
+                    intervalH = chartData.interval_h || 1.0;
+                }
+            } else {
+                const histData = window.__lastHistoricalData;
+                if (histData) {
+                    importPrice = (histData.prices && histData.prices[dataIndex]) || 0.28;
+                    exportPrice = (histData.export_prices && histData.export_prices[dataIndex]) || 0.11;
+                    intervalH = histData.interval_h || 1.0;
+                }
+            }
+
+            let html = `
+                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2.5">
+                    <span class="font-bold text-white tracking-wide">${label}</span>
+                    <span class="text-[10px] text-cyan-300 font-semibold px-1.5 py-0.5 rounded bg-cyan-950/70 border border-cyan-800">
+                        €${importPrice.toFixed(3)}/kWh
+                    </span>
+                </div>
+                <div class="space-y-1.5">
+            `;
+
+            let netCostVal = 0.0;
+            let hasNetCost = false;
+
+            tooltip.dataPoints.forEach(dp => {
+                const ds = chart.data.datasets[dp.datasetIndex];
+                if (!ds) return;
+                const rawVal = dp.raw || 0;
+                const isLine = ds.type === 'line' || ds.borderDash;
+                const color = ds.borderColor || ds.backgroundColor;
+
+                // Visual indicator: line for lines, pill for bars
+                let indicatorHtml = '';
+                if (ds.borderDash && ds.borderDash.length > 0) {
+                    indicatorHtml = `<span style="display:inline-block; width:16px; height:0; border-top:2px dashed ${color}; margin-right:6px; vertical-align:middle;"></span>`;
+                } else if (isLine) {
+                    indicatorHtml = `<span style="display:inline-block; width:16px; height:3px; background-color:${color}; border-radius:2px; margin-right:6px; vertical-align:middle;"></span>`;
+                } else {
+                    indicatorHtml = `<span style="display:inline-block; width:10px; height:10px; background-color:${color}; border-radius:2px; margin-right:6px; vertical-align:middle;"></span>`;
+                }
+
+                // Format power value
+                const absVal = Math.abs(rawVal);
+                let powerStr = '';
+                let kwhVal = 0.0;
+
+                if (isPrediction) {
+                    // Prediction values are in kW
+                    powerStr = `${absVal >= 1.0 ? absVal.toFixed(2) + ' kW' : Math.round(absVal * 1000) + ' W'}`;
+                    kwhVal = absVal * intervalH;
+                } else {
+                    // Historical values are in W (or negative W)
+                    powerStr = `${absVal >= 1000 ? (absVal / 1000.0).toFixed(2) + ' kW' : Math.round(absVal) + ' W'}`;
+                    kwhVal = (absVal / 1000.0) * intervalH;
+                }
+
+                // Calculate monetary cost / revenue per dataset type
+                let costBadge = '';
+                const dsLabel = ds.label || '';
+
+                if (dsLabel.includes('Afname')) {
+                    const c = kwhVal * importPrice;
+                    netCostVal += c;
+                    hasNetCost = true;
+                    costBadge = `<span class="text-red-400 font-bold ml-auto">+€${c.toFixed(2)}</span>`;
+                } else if (dsLabel.includes('Teruglevering')) {
+                    const rev = kwhVal * exportPrice;
+                    netCostVal -= rev;
+                    hasNetCost = true;
+                    costBadge = `<span class="text-emerald-400 font-bold ml-auto">-€${rev.toFixed(2)}</span>`;
+                } else if (dsLabel.includes('Opgewekt Gebruikt') || dsLabel.includes('Zon Direct Benut')) {
+                    const sav = kwhVal * importPrice;
+                    costBadge = `<span class="text-cyan-400 font-medium ml-auto">€${sav.toFixed(2)} besp.</span>`;
+                } else if (dsLabel.includes('Totaal Verbruik')) {
+                    const totC = kwhVal * importPrice;
+                    costBadge = `<span class="text-orange-400 font-bold ml-auto">€${totC.toFixed(2)}</span>`;
+                } else if (dsLabel.includes('SWW') || dsLabel.includes('CV') || dsLabel.includes('Accu Laden') || dsLabel.includes('Ongedefinieerd')) {
+                    const c = kwhVal * importPrice;
+                    costBadge = `<span class="text-slate-400 ml-auto">€${c.toFixed(2)}</span>`;
+                } else if (dsLabel.includes('Stroomprijs')) {
+                    costBadge = `<span class="text-cyan-300 font-bold ml-auto">€${Number(rawVal).toFixed(4)}</span>`;
+                } else if (dsLabel.includes('Netto Grid Stroom') || dsLabel.includes('Verwacht Netto')) {
+                    // Covered in total
+                }
+
+                html += `
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            ${indicatorHtml}
+                            <span class="text-slate-300">${dsLabel}</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold text-white">${rawVal < 0 ? '-' : ''}${powerStr}</span>
+                            ${costBadge}
+                        </div>
+                    </div>
+                `;
+            });
+
+            if (hasNetCost) {
+                const isNetProfit = netCostVal < 0;
+                const netColor = isNetProfit ? 'text-emerald-400' : 'text-red-400';
+                const netLabel = isNetProfit ? 'Netto Opbrengst' : 'Netto Kosten';
+                html += `
+                    <div class="mt-2 pt-2 border-t border-slate-700/80 flex items-center justify-between font-bold text-xs">
+                        <span class="text-slate-400 uppercase tracking-wider">${netLabel}:</span>
+                        <span class="${netColor} font-mono text-sm">${isNetProfit ? '+' : ''}€${Math.abs(netCostVal).toFixed(2)}</span>
+                    </div>
+                `;
+            }
+
+            html += `</div>`;
+            tooltipEl.innerHTML = html;
+
+            // Position tooltip smoothly
+            const canvasRect = chart.canvas.getBoundingClientRect();
+            let left = canvasRect.left + tooltip.caretX + 15;
+            let top = canvasRect.top + tooltip.caretY - 20;
+
+            // Prevent overflowing window right
+            if (left + 240 > window.innerWidth) {
+                left = canvasRect.left + tooltip.caretX - 250;
+            }
+            // Prevent overflowing window bottom
+            if (top + 200 > window.innerHeight) {
+                top = window.innerHeight - 210;
+            }
+
+            tooltipEl.style.left = `${Math.max(10, left)}px`;
+            tooltipEl.style.top = `${Math.max(10, top)}px`;
+            tooltipEl.style.opacity = '1';
+        }
+
+
         async function loadChartData() {
             try {
                 const res = await fetch('./api/schedule/chart-data?resolution=' + encodeURIComponent(predictionResolution));
                 const data = await res.json();
+                window.__lastPredictionData = data;
 
                 const adv = data.banner_text || `Beste stroomtarief om ${data.cheapest_hour} (€${Number(data.cheapest_price_eur).toFixed(4)}/kWh)`;
                 if (document.getElementById('banner-text')) document.getElementById('banner-text').innerText = adv;
@@ -4271,6 +4474,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             try {
                 const res = await fetch('./api/devices');
                 const data = await res.json();
+                window.__lastPredictionData = data;
                 const container = document.getElementById('modal-pol-devices-list');
                 container.innerHTML = '';
                 const devices = data.devices || [];
@@ -4693,6 +4897,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         async function loadCalibration() {
             const res = await fetch('./api/calibration');
             const data = await res.json();
+                window.__lastPredictionData = data;
             const tbody = document.getElementById('exclusion-tbody');
             tbody.innerHTML = '';
             (data.exclusion_windows || []).forEach((w, idx) => {
@@ -4757,6 +4962,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const resVal = resSelect ? resSelect.value : '15m';
                 const res = await fetch('./api/analytics/electricity_prices?resolution=' + encodeURIComponent(resVal));
                 const data = await res.json();
+                window.__lastPredictionData = data;
                 if (data.status !== 'success') {
                     console.error('EPEX prices load error:', data.message);
                     return;
@@ -4916,6 +5122,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const resParam = (powerProducersChartType === 'line' && powerProducersResolution === '1h') ? '1h' : powerProducersResolution;
                 const res = await fetch('./api/analytics/power_producers?range=' + encodeURIComponent(rangeVal) + '&resolution=' + encodeURIComponent(resParam));
                 const data = await res.json();
+                window.__lastPredictionData = data;
                 if (data.status !== 'success') {
                     console.error('Power producers error:', data.message);
                     return;
@@ -4968,6 +5175,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                 if (powerProducersChartType === 'bar') {
                     // === STAAVEN (BAR) MODUS: EXACT GELIJK AAN DE 24-UURS VOORUIT GRAFIEK ===
+                    // 0. EPEX Stroomprijs All-in Stepped/Dashed Curve (Rechter Y-as)
+                    if (data.prices && data.prices.length > 0) {
+                        datasets.push({
+                            label: 'Stroomprijs All-in (€/kWh)',
+                            data: data.prices,
+                            type: 'line',
+                            borderColor: '#06B6D4',
+                            borderDash: [4, 4],
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            yAxisID: 'y1',
+                            tension: 0,
+                            order: 0
+                        });
+                    }
                     // 1. Totaal Verbruik (Oranje overlay lijn)
                     datasets.push({
                         label: 'Totaal Verbruik',
@@ -5143,6 +5365,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                         const prefix = val < 0 ? '-' : '';
                                         return absV >= 1000 ? `${prefix}${(absV / 1000).toFixed(1)} kW` : `${val} W`;
                                     }
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                position: 'right',
+                                display: true,
+                                title: { display: true, text: 'Tarief (€/kWh)', color: '#06B6D4', font: { family: 'monospace', size: 10 } },
+                                grid: { drawOnChartArea: false },
+                                ticks: {
+                                    color: '#06B6D4',
+                                    font: { family: 'monospace', size: 10 },
+                                    callback: function(val) { return '€' + Number(val).toFixed(2); }
                                 }
                             }
                         }

@@ -17,6 +17,27 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.31.0] — 2026-09-08 (EPEX Price Overlays in Historical Chart & Modern Styled Tooltips with Actual Lines and Differentiated Dynamic Costs)
+
+### Added
+- **EPEX All-in Stroomprijs Curve in Verbruikshistorie:**
+  - Added cyan dashed curve (`#06B6D4`, `borderDash: [4, 4]`) to the historical `Verbruikshistorie` chart plotted on a dedicated right Y-axis (`Tarief €/kWh`), matching the predictive forecast visualization.
+- **Contractually Differentiated Dynamic Tariffs:**
+  - **Opgewekt Gebruikt (Self-consumption):** Valued against full All-in EPEX import price (avoiding costly grid consumption ~€0.28/kWh).
+  - **Teruglevering (Grid export):** Valued against dynamic export price (EPEX spot base minus €0.00605/kWh Powerpeers verkoopvergoeding, without energy taxes/VAT).
+- **Custom Modern HTML Hover Tooltip:**
+  - Replaced standard generic canvas tooltip with a custom styled HTML tooltip component:
+    - **Visual Line Indicators:** Datasets that are lines (`Totaal Verbruik`, `Netto Grid Stroom`, `Stroomprijs`) display true colored lines (and dashed for tariff) instead of generic square dots.
+    - **Visual Bar Indicators:** Stacked bar components display rounded pills.
+    - **Monetary Costs per Type:** Shows interval euro costs/revenues next to power:
+      - `Afname: +€...` (in red)
+      - `Teruglevering: -€...` (in emerald)
+      - `Opgewekt Gebruikt: €... bespaard` (in cyan)
+      - `Totaal Verbruik: €... bruto` (in orange)
+    - **Netto Interval Balance:** Clear footer calculating exact net costs or revenues (`Netto Kosten: €...` or `Netto Opbrengst: +€...`).
+
+---
+
 ## [0.30.2] — 2026-09-08 (Deterministic Canonical Unit Normalization & Hardware Contract Enforcement)
 
 ### Added
