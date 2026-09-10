@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.45.0
+Version: 0.46.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1231,7 +1231,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.45.0",
+                "version": "0.46.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2653,7 +2653,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.45.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.46.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3546,29 +3546,29 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-500/20 pb-2">
                             <div class="flex items-center gap-2">
                                 <span class="text-base">♨️</span>
-                                <span class="text-xs uppercase font-bold text-amber-400 tracking-wider">Live Boilervat Status & Nachtelijk Laadbesluit</span>
+                                <span class="text-xs uppercase font-bold text-amber-400 tracking-wider">Live Boilervat Thermische Toestand & Nachtlaadbesluit</span>
                             </div>
-                            <span id="dhw-live-temp-badge" class="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">Actueel: 49.2°C</span>
+                            <span id="dhw-live-temp-badge" class="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">Actueel: 48.8°C</span>
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-xs">
                             <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
-                                <div class="text-[10px] text-slate-400 uppercase">Nuttige Warmte (&gt;40°C)</div>
-                                <div class="text-sm font-bold text-amber-300 mt-0.5" id="dhw-usable-heat">3.74 kWh_th (13.5 MJ)</div>
-                                <div class="text-[10px] text-slate-400 font-sans mt-0.5" id="dhw-volume-caption">350L combivat (mengcapaciteit ~450L douchewater van 38°C).</div>
+                                <div class="text-[10px] text-slate-400 uppercase font-bold">Nuttige Warmte (&gt;40°C)</div>
+                                <div class="text-sm font-bold text-amber-300 mt-0.5" id="dhw-usable-heat">3.6 kWh_th (13 MJ)</div>
+                                <div class="text-[10px] text-slate-400 font-sans mt-0.5" id="dhw-volume-caption">350L combivat op 48.8°C (mengcapaciteit ~496L douchewater van 38°C).</div>
                             </div>
                             <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
-                                <div class="text-[10px] text-slate-400 uppercase">Verwachte Ochtenddip</div>
-                                <div class="text-sm font-bold text-white mt-0.5" id="dhw-projected-dip">41.6°C (om 07:45u)</div>
-                                <div class="text-[10px] text-emerald-400 font-sans mt-0.5">Boven 40°C comfortgrens ✓</div>
+                                <div class="text-[10px] text-slate-400 uppercase font-bold">Verwachte Ochtenddip (06-09u)</div>
+                                <div class="text-sm font-bold text-white mt-0.5" id="dhw-projected-dip">43.2°C (om 08:45u)</div>
+                                <div class="text-[10px] font-sans mt-0.5" id="dhw-dip-subtext"><span class="text-emerald-400 font-bold">Boven 40°C comfortgrens ✓</span></div>
                             </div>
                             <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
                                 <div class="text-[10px] text-slate-400 uppercase font-bold" id="dhw-night-header">Nachtbesluit (Do 10 ➔ Vr 11 sep)</div>
                                 <div class="text-xs font-bold text-emerald-300 mt-0.5" id="dhw-night-action">✅ Geen nachtlading nodig</div>
-                                <div class="text-[10px] text-slate-500 font-sans mt-0.5">Wacht op zonnepiek morgenmiddag.</div>
+                                <div class="text-[10px] text-slate-400 font-sans mt-0.5" id="dhw-night-subtext">Wachten tot 12:30u bespaart €0,15 (27%)</div>
                             </div>
                         </div>
-                        <div class="text-[11px] text-slate-300 bg-black/50 p-2.5 rounded-lg border border-slate-800/80 font-sans" id="dhw-decision-explanation">
-                            Verantwoording: De tank bevat voldoende thermische buffer voor de ochtenddouches. Door nachtelijke bijverwarming over te slaan bespaar je stroom en laadt de warmtepomp morgen met hogere COP (~3.2) op gratis zonnestroom.
+                        <div class="text-[11px] text-slate-300 bg-black/50 p-2.5 rounded-lg border border-slate-800/80 font-sans leading-relaxed" id="dhw-decision-explanation">
+                            Verantwoording wordt geladen...
                         </div>
                     </div>
 
@@ -6891,23 +6891,42 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     if (res.ok) {
                         const data = await res.json();
                         const d = data.decision || {};
-                        if (document.getElementById('dhw-live-temp-badge')) document.getElementById('dhw-live-temp-badge').innerText = `Actueel: ${d.current_temp_c}°C`;
-                        if (document.getElementById('dhw-usable-heat')) document.getElementById('dhw-usable-heat').innerText = `${d.usable_heat_kwh_th} kWh_th (${d.usable_heat_mj} MJ)`;
-                        if (document.getElementById('dhw-projected-dip')) {
-                            const isSafe = d.projected_morning_dip_c >= 40.0;
-                            document.getElementById('dhw-projected-dip').innerHTML = `${d.projected_morning_dip_c}°C <span class="${isSafe ? 'text-emerald-400' : 'text-amber-400'} text-xs">(om ${d.morning_dip_time || '07:45'}u)</span>`;
+                        
+                        // Card 1: Temp & Usable Heat
+                        if (document.getElementById('dhw-live-temp-badge')) {
+                            document.getElementById('dhw-live-temp-badge').innerText = `Actueel: ${d.current_temp_c}°C`;
                         }
+                        if (document.getElementById('dhw-usable-heat')) {
+                            document.getElementById('dhw-usable-heat').innerText = `${d.usable_heat_kwh_th} kWh_th (${d.usable_heat_mj} MJ)`;
+                        }
+                        if (document.getElementById('dhw-volume-caption')) {
+                            document.getElementById('dhw-volume-caption').innerText = `350L combivat op ${d.current_temp_c}°C (mengcapaciteit ~${d.shower_liters_38c}L douchewater van 38°C).`;
+                        }
+
+                        // Card 2: Morning Dip & Subtext
+                        if (document.getElementById('dhw-projected-dip')) {
+                            document.getElementById('dhw-projected-dip').innerHTML = `${d.morning_dip_c}°C <span class="text-xs text-slate-400">(om ${d.morning_dip_time || '08:45'}u)</span>`;
+                        }
+                        if (document.getElementById('dhw-dip-subtext')) {
+                            if (d.morning_is_safe) {
+                                document.getElementById('dhw-dip-subtext').innerHTML = '<span class="text-emerald-400 font-bold">Boven 40°C comfortgrens ✓</span> · Eerste dip &lt;40°C om ' + (d.first_sub40_time || '12:30') + 'u';
+                            } else {
+                                document.getElementById('dhw-dip-subtext').innerHTML = '<span class="text-amber-400 font-bold">Onder 40°C comfortgrens ⚠️</span> · Ochtenddouches in risicozone!';
+                            }
+                        }
+
+                        // Card 3: Dynamic Night Header & Comparative Economics
                         if (document.getElementById('dhw-night-header') && d.short_night_label) {
                             document.getElementById('dhw-night-header').innerText = `Nachtbesluit (${d.short_night_label})`;
                         }
-                        if (document.getElementById('dhw-volume-caption') && d.shower_liters_38c) {
-                            document.getElementById('dhw-volume-caption').innerText = `350L combivat op ${d.current_temp_c}°C (mengcapaciteit ~${d.shower_liters_38c}L douchewater van 38°C).`;
-                        }
                         if (document.getElementById('dhw-night-action')) {
-                            document.getElementById('dhw-night-action').innerHTML = d.needs_night_charge
-                                ? '<span class="text-amber-400">⚠️ Nachtlading aanbevolen</span>'
-                                : '<span class="text-emerald-400">✅ Geen nachtlading nodig</span>';
+                            document.getElementById('dhw-night-action').innerHTML = d.decision_title || (d.morning_is_safe ? '✅ Geen nachtlading nodig' : '⚠️ Nachtlading aanbevolen');
                         }
+                        if (document.getElementById('dhw-night-subtext')) {
+                            document.getElementById('dhw-night-subtext').innerText = d.decision_sub || (d.morning_is_safe ? 'Wachten tot daglading bespaart geld' : 'Nachtlading waarborgt ochtendcomfort');
+                        }
+
+                        // Explanation Text
                         if (document.getElementById('dhw-decision-explanation')) {
                             document.getElementById('dhw-decision-explanation').innerText = d.recommendation || '';
                         }

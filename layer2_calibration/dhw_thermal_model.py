@@ -179,7 +179,7 @@ class DhwThermalModel:
         t_current_c: float,
         now_dt: datetime,
         tomorrow_solar_peak_kw: float = 2.5,
-        planned_heat_hour: float = 16.0
+        planned_heat_hour: float = 12.5
     ) -> Dict[str, Any]:
         dt_ams = now_dt.astimezone(AMS_TZ)
         today_name = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"][dt_ams.weekday()]
@@ -188,62 +188,85 @@ class DhwThermalModel:
         night_label = f"{today_name} op {tomorrow_name} nacht ({dt_ams.day}-{tomorrow_dt.day} {['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'][dt_ams.month-1]})"
         short_night_label = f"{today_name[:2]} {dt_ams.day} ➔ {tomorrow_name[:2]} {tomorrow_dt.day} {['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'][dt_ams.month-1]}"
 
-        # Run trajectory without night heat up to planned heat time
+        # Simulate 24h trajectory without night heat
         unheated_sim = self.simulate_trajectory(t_current_c, now_dt, hours_ahead=24, heat_pump_schedule_slots=[])
-        
-        # Calculate pre-heat dip (the true lowest point before tomorrow's afternoon solar charge)
-        # Find minimum temperature between now and planned_heat_hour
         temps = unheated_sim["temperatures_c"]
         labels = unheated_sim["labels"]
-        
-        # Find index corresponding to planned_heat_hour tomorrow
-        target_time_str = f"{int(planned_heat_hour):02d}:00"
-        cutoff_idx = len(temps)
-        for idx, lbl in enumerate(labels):
-            # Tomorrow afternoon slot
-            if idx >= 16 and lbl.startswith(f"{int(planned_heat_hour):02d}:"):
-                cutoff_idx = idx
+
+        # 1. Calculate Morning Dip specifically during morning shower hours (06:00 - 09:45 tomorrow)
+        morning_slots = [
+            (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(labels, temps))
+            if ("06:00" <= lbl <= "09:45" and idx >= 16)
+        ]
+        if morning_slots:
+            min_morn_slot = min(morning_slots, key=lambda x: x[2])
+            morning_dip_c = round(min_morn_slot[2], 1)
+            morning_dip_time = min_morn_slot[1]
+        else:
+            morning_dip_c = round(min(temps[:36]), 1) if temps else t_current_c
+            morning_dip_time = "08:30"
+
+        morning_is_safe = (morning_dip_c >= T_MIN_COMFORT_C)
+
+        # 2. Calculate first moment tank drops below 40.0C
+        first_sub40_time = ""
+        first_sub40_idx = len(temps)
+        for idx, (lbl, t) in enumerate(zip(labels, temps)):
+            if idx >= 12 and t < T_MIN_COMFORT_C:
+                first_sub40_time = lbl
+                first_sub40_idx = idx
                 break
 
-        preheat_temps = temps[:cutoff_idx] if cutoff_idx > 0 else temps
-        min_dip_val = min(preheat_temps) if preheat_temps else t_current_c
-        min_dip_idx = preheat_temps.index(min_dip_val) if preheat_temps else 0
-        min_dip_time = labels[min_dip_idx] if min_dip_idx < len(labels) else "15:45"
+        # 3. Financial Cost Comparison: Night Charge at 03:15 vs Day Charge at first dip / 12:30
+        # Night Option: heat to 50C at 03:15 + 8h standby loss until morning
+        night_price = 0.309   # EUR/kWh (typical EPEX spot night price)
+        cop_night = 2.65      # Lower COP at 11C night air
+        th_need_night = (T_TARGET_C - t_current_c) * C_TANK_KWH_PER_C + (STANDBY_LOSS_KW_PER_HOUR * 8.0)
+        el_kwh_night = max(1.2, th_need_night / cop_night)
+        cost_night = round(el_kwh_night * night_price, 2)
 
-        # Current usable energy
+        # Day Option: heat at 12:30 (when approaching 40C) at warmer air & solar
+        day_price = 0.291     # EUR/kWh (cheaper midday spot tariff + solar self-consumption)
+        cop_day = 3.25        # Higher COP at 16C daytime air
+        th_need_day = (T_TARGET_C - min(40.0, morning_dip_c)) * C_TANK_KWH_PER_C
+        el_kwh_day = max(1.0, th_need_day / cop_day)
+        cost_day = round(el_kwh_day * day_price, 2)
+
+        savings_by_waiting = round(cost_night - cost_day, 2)
+
+        # Current usable energy & shower volume
         q_now_usable = max(0.0, (t_current_c - T_MIN_COMFORT_C) * C_TANK_KWH_PER_C)
         q_now_mj = q_now_usable * 3.6
-
-        # Shower water equivalent at 38C mixed: V_mixed = 350 * (T_tank - 12) / (38 - 12)
         v_mixed_shower_liters = round(350.0 * max(0.0, t_current_c - 12.0) / (38.0 - 12.0))
 
-        # Decision threshold: if dip stays at or above 40.0C, comfort is 100% safe
-        needs_night_charge = (min_dip_val < T_MIN_COMFORT_C)
-
-        if not needs_night_charge:
+        # Final decision logic
+        if morning_is_safe and savings_by_waiting >= 0.0:
             status = "SKIP_NIGHT_CHARGE"
+            decision_title = "✅ Geen nachtlading nodig"
+            decision_sub = f"Wachten tot {first_sub40_time or '12:30'}u bespaart €{savings_by_waiting:.2f} ({(savings_by_waiting/cost_night*100):.0f}%)"
             recommendation = (
                 f"✅ GEEN nachtlading nodig ({night_label}). "
-                f"Het 350L vat blijft tot aan de zonne-opwarming om {int(planned_heat_hour):02d}:00u "
-                f"veilig met {min_dip_val}°C (om {min_dip_time}u) boven de comfortgrens (40°C). "
-                f"Opwarmen om {int(planned_heat_hour):02d}:00u op piekopwek (~{tomorrow_solar_peak_kw:.1f} kW zon, COP ~3.25) "
-                f"kost slechts €0,23 t.o.v. €0,46 's nachts van het net bij COP 2.65."
+                f"Ochtenddouches blijven met {morning_dip_c}°C (om {morning_dip_time}u) ruim warm (>40°C). "
+                f"Wachten tot het eerste laadmoment om {first_sub40_time or '12:30'}u kost €{cost_day:.2f} "
+                f"(bij COP {cop_day}) t.o.v. €{cost_night:.2f} 's nachts bij COP {cop_night} inclusief 8u stilstandsverlies. "
+                f"Je bespaart €{savings_by_waiting:.2f}!"
             )
-            optimal_slot_type = "solar_midday"
-            deficit_kwh_th = 0.0
+            optimal_slot_type = "midday_solar"
         else:
-            deficit_deg = max(0.0, 48.0 - min_dip_val)
-            deficit_kwh_th = round(deficit_deg * C_TANK_KWH_PER_C, 2)
             status = "SCHEDULE_NIGHT_CHARGE"
+            decision_title = "⚠️ Nachtlading aanbevolen"
+            decision_sub = f"Nachtlading (€{cost_night:.2f}) waarborgt ochtendcomfort"
             recommendation = (
-                f"⚠️ Nachtlading aanbevolen ({night_label}): Zonder bijverwarming zakt het vat om {min_dip_time}u "
-                f"naar {min_dip_val}°C (onder de 40°C comfortgrens). Plan een boost van {deficit_kwh_th} kWh thermisch "
-                f"(~0.7 kWh stroom) in het goedkoopste nachtkwartier (bijv. 03:30–04:15)."
+                f"⚠️ Nachtlading aanbevolen ({night_label}): "
+                f"Zonder nachtlading daalt de tank in de ochtend naar {morning_dip_c}°C om {morning_dip_time}u (onder 40°C). "
+                f"Nachtlading in het goedkoopste kwartier (03:15u, €{cost_night:.2f}) waarborgt een warme ochtenddouche."
             )
             optimal_slot_type = "cheapest_night_quarter"
 
         return {
             "status": status,
+            "decision_title": decision_title,
+            "decision_sub": decision_sub,
             "night_label": night_label,
             "short_night_label": short_night_label,
             "current_temp_c": t_current_c,
@@ -251,11 +274,13 @@ class DhwThermalModel:
             "shower_liters_38c": v_mixed_shower_liters,
             "usable_heat_kwh_th": round(q_now_usable, 2),
             "usable_heat_mj": round(q_now_mj, 1),
-            "projected_morning_dip_c": min_dip_val,
-            "morning_dip_time": min_dip_time,
-            "planned_heat_hour": planned_heat_hour,
-            "needs_night_charge": needs_night_charge,
-            "deficit_kwh_th": deficit_kwh_th,
+            "morning_dip_c": morning_dip_c,
+            "morning_dip_time": morning_dip_time,
+            "morning_is_safe": morning_is_safe,
+            "first_sub40_time": first_sub40_time or "12:30",
+            "cost_night_eur": cost_night,
+            "cost_day_eur": cost_day,
+            "savings_by_waiting_eur": savings_by_waiting,
             "recommendation": recommendation,
             "optimal_slot_type": optimal_slot_type
         }
