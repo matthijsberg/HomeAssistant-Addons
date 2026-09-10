@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.33.0
+Version: 0.33.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1013,7 +1013,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.33.0",
+                "version": "0.33.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2127,7 +2127,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.33.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.33.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4032,27 +4032,25 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const ds = chart.data.datasets[dp.datasetIndex];
                 if (!ds) return;
                 const rawVal = dp.raw || 0;
-                const dsLabel = ds.label || '';
+                let dsLabel = ds.label || '';
                 const isLine = ds.type === 'line' || (ds.borderDash && ds.borderDash.length > 0);
                 const color = ds.borderColor || ds.backgroundColor;
 
-                // Visual indicator: ACTUAL line for lines, pill for bars
-                let indicatorHtml = '';
-                if (ds.borderDash && ds.borderDash.length > 0) {
-                    indicatorHtml = `<span style="display:inline-block; width:18px; height:0; border-top:2px dashed ${color}; margin-right:8px; vertical-align:middle;"></span>`;
-                } else if (isLine) {
-                    indicatorHtml = `<span style="display:inline-block; width:18px; height:3px; background-color:${color}; border-radius:2px; margin-right:8px; vertical-align:middle;"></span>`;
-                } else {
-                    indicatorHtml = `<span style="display:inline-block; width:10px; height:10px; background-color:${color}; border-radius:2px; margin-right:8px; vertical-align:middle;"></span>`;
+                // Strip "(kWh)" or "(kW)" from label for clean display
+                const cleanLabel = dsLabel.replace(/\s*\(kWh\)|\s*\(kW\)/g, '').trim();
+
+                // Skip mirror duplicate "Zon Direct Benut" in tooltip (Opgewekt Gebruikt already shows it!)
+                if (cleanLabel.includes('Zon Direct Benut')) {
+                    return;
                 }
 
                 // Handle Stroomprijs row
-                if (dsLabel.includes('Stroomprijs') || dsLabel.includes('Tarief') || dsLabel.includes('Prijs')) {
+                if (cleanLabel.includes('Stroomprijs') || cleanLabel.includes('Tarief') || cleanLabel.includes('Prijs')) {
                     html += `
                         <div class="flex items-center justify-between gap-3 text-xs">
                             <div class="flex items-center truncate">
-                                ${indicatorHtml}
-                                <span class="text-slate-300 truncate">${dsLabel}</span>
+                                <span style="display:inline-block; width:18px; height:0; border-top:2px dashed ${color}; margin-right:8px; vertical-align:middle;"></span>
+                                <span class="text-slate-300 truncate">${cleanLabel}</span>
                             </div>
                             <div class="flex items-center gap-1.5 flex-shrink-0">
                                 <span class="font-bold text-cyan-300 font-mono">€${Number(rawVal).toFixed(4)}/kWh</span>
@@ -4062,56 +4060,65 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     return;
                 }
 
-                // Format power (W / kW) and energy (kWh in that interval)
+                // Format PURE ENERGY (kWh) as primary metric
                 const absVal = Math.abs(rawVal);
-                let powerStr = '';
                 let kwhVal = 0.0;
+                let powerW = 0.0;
 
-                if (isPrediction) {
-                    // Prediction values are in kW
-                    powerStr = absVal >= 1.0 ? `${absVal.toFixed(2)} kW` : `${Math.round(absVal * 1000)} W`;
-                    kwhVal = absVal * intervalH;
+                if (!isPrediction) {
+                    // Historical dataset is ALREADY strictly in kWh!
+                    kwhVal = absVal;
+                    powerW = Math.round((absVal * 1000.0) / intervalH);
                 } else {
-                    // Historical values are in W (or negative W)
-                    powerStr = absVal >= 1000 ? `${(absVal / 1000.0).toFixed(2)} kW` : `${Math.round(absVal)} W`;
-                    kwhVal = (absVal / 1000.0) * intervalH;
+                    // Prediction values are in kW -> convert to kWh
+                    kwhVal = absVal * intervalH;
+                    powerW = Math.round(absVal * 1000.0);
                 }
 
-                const energyStr = `${kwhVal.toFixed(2)} kWh`;
+                const energyStr = `${kwhVal >= 10.0 ? kwhVal.toFixed(1) : kwhVal.toFixed(2)} kWh`;
+                const powerStr = powerW >= 1000 ? `${(powerW / 1000.0).toFixed(2)} kW` : `${powerW} W`;
 
                 // Calculate monetary cost / revenue per dataset type
                 let costBadge = '';
 
-                if (dsLabel.includes('Afname')) {
+                if (cleanLabel.includes('Afname')) {
                     const c = kwhVal * importPrice;
                     netCostVal += c;
                     hasNetCost = true;
                     costBadge = `<span class="text-red-400 font-bold ml-auto">+€${c.toFixed(2)}</span>`;
-                } else if (dsLabel.includes('Teruglevering')) {
+                } else if (cleanLabel.includes('Teruglevering')) {
                     const rev = kwhVal * exportPrice;
                     netCostVal -= rev;
                     hasNetCost = true;
                     costBadge = `<span class="text-emerald-400 font-bold ml-auto">-€${rev.toFixed(2)} opbr.</span>`;
-                } else if (dsLabel.includes('Opgewekt Gebruikt') || dsLabel.includes('Zon Direct Benut')) {
+                } else if (cleanLabel.includes('Opgewekt Gebruikt')) {
                     const sav = kwhVal * importPrice;
                     costBadge = `<span class="text-cyan-400 font-medium ml-auto">€${sav.toFixed(2)} besp.</span>`;
-                } else if (dsLabel.includes('Totaal Verbruik')) {
+                } else if (cleanLabel.includes('Totaal Verbruik')) {
                     const totC = kwhVal * importPrice;
                     costBadge = `<span class="text-orange-400 font-bold ml-auto">€${totC.toFixed(2)}</span>`;
-                } else if (dsLabel.includes('SWW') || dsLabel.includes('CV') || dsLabel.includes('Accu Laden') || dsLabel.includes('Ongedefinieerd')) {
+                } else if (cleanLabel.includes('SWW') || cleanLabel.includes('CV') || cleanLabel.includes('Accu Laden') || cleanLabel.includes('Ongedefinieerd')) {
                     const c = kwhVal * importPrice;
                     costBadge = `<span class="text-slate-400 ml-auto">€${c.toFixed(2)}</span>`;
+                }
+
+                // Visual indicator: ACTUAL line for lines, rounded pill for bars
+                let indicatorHtml = '';
+                if (isLine) {
+                    indicatorHtml = `<span style="display:inline-block; width:18px; height:3px; background-color:${color}; border-radius:2px; margin-right:8px; vertical-align:middle;"></span>`;
+                } else {
+                    indicatorHtml = `<span style="display:inline-block; width:10px; height:10px; background-color:${color}; border-radius:2px; margin-right:8px; vertical-align:middle;"></span>`;
                 }
 
                 html += `
                     <div class="flex items-center justify-between gap-3 text-xs">
                         <div class="flex items-center truncate">
                             ${indicatorHtml}
-                            <span class="text-slate-300 truncate">${dsLabel}</span>
+                            <span class="text-slate-300 truncate">${cleanLabel}</span>
                         </div>
                         <div class="flex items-center gap-2 flex-shrink-0">
-                            <span class="font-bold text-white font-mono">${rawVal < 0 ? '-' : ''}${powerStr}</span>
-                            <span class="text-[10px] text-slate-400 font-mono">(${energyStr})</span>
+                            <span class="font-bold text-white font-mono">${rawVal < 0 ? '-' : ''}${energyStr}</span>
+                            <span class="text-[10px] text-slate-400 font-mono">(${powerStr})</span>
                             ${costBadge}
                         </div>
                     </div>
