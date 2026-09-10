@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.40.6
+Version: 0.41.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -20,6 +20,7 @@ Generic Energy Management Platform:
 import sys
 import os
 import re
+from pathlib import Path
 import argparse
 import json
 import urllib.parse
@@ -1192,7 +1193,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.40.6",
+                "version": "0.41.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1551,23 +1552,64 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 unallocated.append(unalloc_kw)
                 timeline_items.append({"idx": i, "dt": dt_slot, "key": k_full, "label": lbl, "price": p_val, "solar": s_val, "temp": t_val})
 
-            # 4. Plan Space Heating (CV) with calibrated 2R1C building model
+            # 4. Plan Space Heating (CV) with calibrated 2R1C building model & Living Room Sensor Guard
+            max_outdoor_temp = max((it["temp"] for it in timeline_items), default=16.0)
             mean_outdoor_temp = sum(it["temp"] for it in timeline_items) / len(timeline_items) if timeline_items else 16.0
-            is_summer_lockout = (mean_outdoor_temp >= 16.0 or now_ams.month in [6, 7, 8])
+
+            # Query live indoor temperature from Home Assistant (or default 21.0C from current season)
+            indoor_temp_c = 21.0
+            try:
+                ha_sec = load_secrets()
+                ha_tok = ha_sec.get("homeassistant", {}).get("token")
+                ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
+                if ha_tok and ha_url:
+                    req_in = urllib.request.Request(
+                        f"{ha_url}/api/states/sensor.sco2_staging_01_woonkamer_co2_temperature",
+                        headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
+                    )
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    with urllib.request.urlopen(req_in, timeout=3, context=ctx) as r_in:
+                        st_in = json.loads(r_in.read().decode())
+                        val_in = float(st_in.get("state", 21.0))
+                        if 15.0 <= val_in <= 28.0:
+                            indoor_temp_c = val_in
+            except Exception:
+                pass
+
+            # Smart Heating Season & Passive Solar/Thermal Inertia Lockout:
+            # - If indoor temperature is already comfortable (>= 20.0C)
+            # - AND daytime peak outdoors reaches >= 18.5C with solar radiation
+            # - The 16.5h concrete floor buffer keeps the house warm; NO active heating needed!
+            is_heating_needed = True
+            if indoor_temp_c >= 20.0 and (max_outdoor_temp >= 18.5 or mean_outdoor_temp >= 15.5):
+                is_heating_needed = False
+            elif now_ams.month in [6, 7, 8]:
+                is_heating_needed = False
+            elif mean_outdoor_temp >= 16.5:
+                is_heating_needed = False
 
             for it in timeline_items:
                 i = it["idx"]
-                if is_summer_lockout:
+                if not is_heating_needed:
                     heating[i] = 0.0
                 else:
                     if GLOBAL_MODEL:
-                        h_res = GLOBAL_MODEL.predict_space_heating_w(it["dt"], t_outdoor_c=it["temp"])
+                        h_res = GLOBAL_MODEL.predict_space_heating_w(
+                            it["dt"],
+                            t_outdoor_c=it["temp"],
+                            solar_radiation_w_m2=it["solar"] * 1000.0 / 5.5,
+                            is_heating_season=True
+                        )
                         heating[i] = round(h_res.get("electrical_w", 0.0) / 1000.0, 2)
                     else:
                         is_night = it["dt"].hour < 6 or it["dt"].hour >= 23
                         target_temp = 17.5 if is_night else 20.0
                         if it["temp"] < (target_temp - 2.0):
                             heating[i] = round(max(0.0, (target_temp - it["temp"]) * 0.18 / 4.2), 2)
+                        else:
+                            heating[i] = 0.0
 
             # 5. Plan Hot Water Generation (SWW Boiler 350L): Real 45-min Run (3 quarters)
             daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
@@ -2525,7 +2567,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.40.6</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.41.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -6761,6 +6803,12 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 const boilerArr = data.datasets.boiler_kw || [];
                 const solarNegArr = data.datasets.solar_kw_neg || [];
                 const netPowerArr = data.datasets.net_power_kw || [];
+                const pricesArr = data.datasets.prices_eur || [];
+
+                // Calculate symmetric Y-axis boundary centered on zero
+                const maxCons = Math.max(0.1, ...unallocArr.map((u, i) => u + (heatingArr[i] || 0) + (boilerArr[i] || 0)));
+                const maxProd = Math.max(0.1, ...solarNegArr.map(s => Math.abs(s)));
+                const yBoundary = Math.max(1.5, Math.ceil(Math.max(maxCons, maxProd) * 1.15 * 2) / 2);
 
                 const ctx = canvas.getContext('2d');
                 new Chart(ctx, {
@@ -6769,47 +6817,65 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         labels: labels,
                         datasets: [
                             {
-                                label: 'Netto Netafname',
-                                data: netPowerArr,
+                                label: 'All-in Beurstarief (€/kWh)',
+                                data: pricesArr,
                                 type: 'line',
+                                yAxisID: 'y1',
                                 borderColor: '#22D3EE',
                                 backgroundColor: 'transparent',
-                                borderWidth: 2,
-                                tension: 0.2,
+                                borderWidth: 1.75,
+                                tension: 0.25,
                                 pointRadius: 0,
                                 order: 1
                             },
                             {
-                                label: 'Ongedefinieerd (Huis)',
-                                data: unallocArr,
-                                backgroundColor: '#3B82F6',
-                                stack: 'consumption',
-                                borderRadius: 2,
+                                label: 'Netto Netafname',
+                                data: netPowerArr,
+                                type: 'line',
+                                yAxisID: 'y',
+                                borderColor: '#E2E8F0',
+                                borderDash: [4, 4],
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.5,
+                                tension: 0.2,
+                                pointRadius: 0,
                                 order: 2
                             },
                             {
-                                label: 'CV Verwarming (Woning)',
-                                data: heatingArr,
-                                backgroundColor: '#EF4444',
+                                label: 'Ongedefinieerd (Huis)',
+                                data: unallocArr,
+                                yAxisID: 'y',
+                                backgroundColor: '#3B82F6',
                                 stack: 'consumption',
                                 borderRadius: 2,
                                 order: 3
                             },
                             {
-                                label: 'SWW Boiler 350L',
-                                data: boilerArr,
-                                backgroundColor: '#F59E0B',
+                                label: 'CV Verwarming (Woning)',
+                                data: heatingArr,
+                                yAxisID: 'y',
+                                backgroundColor: '#EF4444',
                                 stack: 'consumption',
                                 borderRadius: 2,
                                 order: 4
                             },
                             {
+                                label: 'SWW Boiler 350L',
+                                data: boilerArr,
+                                yAxisID: 'y',
+                                backgroundColor: '#F59E0B',
+                                stack: 'consumption',
+                                borderRadius: 2,
+                                order: 5
+                            },
+                            {
                                 label: 'Zonnepanelen Opwek',
                                 data: solarNegArr,
+                                yAxisID: 'y',
                                 backgroundColor: '#10B981',
                                 stack: 'generation',
                                 borderRadius: 2,
-                                order: 5
+                                order: 6
                             }
                         ]
                     },
@@ -6828,6 +6894,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     label: function(c) {
                                         const val = c.raw;
                                         if (val === 0 || val === -0) return null;
+                                        if (c.dataset.yAxisID === 'y1') {
+                                            return ` 💶 Tarief: €${Number(val).toFixed(4)}/kWh`;
+                                        }
                                         return ` ${c.dataset.label}: ${Math.abs(val).toFixed(2)} kW (${(Math.abs(val)*0.25).toFixed(2)} kWh)`;
                                     }
                                 }
@@ -6841,8 +6910,31 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             },
                             y: {
                                 stacked: true,
-                                grid: { color: 'rgba(30, 41, 59, 0.3)' },
+                                position: 'left',
+                                min: -yBoundary,
+                                max: yBoundary,
+                                title: {
+                                    display: true,
+                                    text: 'Opbrengst (-kW)  <  0  <  Verbruik (+kW)',
+                                    color: '#64748B',
+                                    font: { size: 10, weight: 'bold' }
+                                },
+                                grid: {
+                                    color: (ctx) => ctx.tick.value === 0 ? 'rgba(148, 163, 184, 0.6)' : 'rgba(30, 41, 59, 0.25)',
+                                    lineWidth: (ctx) => ctx.tick.value === 0 ? 1.5 : 1
+                                },
                                 ticks: { color: '#64748B', font: { size: 10 }, callback: v => `${v} kW` }
+                            },
+                            y1: {
+                                position: 'right',
+                                grid: { drawOnChartArea: false },
+                                title: {
+                                    display: true,
+                                    text: 'All-in Beurstarief (€/kWh)',
+                                    color: '#22D3EE',
+                                    font: { size: 10, weight: 'bold' }
+                                },
+                                ticks: { color: '#22D3EE', font: { size: 10 }, callback: v => `€${v.toFixed(2)}` }
                             }
                         }
                     }
