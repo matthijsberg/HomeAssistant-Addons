@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.35.0
+Version: 0.35.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1013,7 +1013,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.35.0",
+                "version": "0.35.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1298,13 +1298,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             bat_msg = ""
             min_item = min(timeline_items, key=lambda x: x["price"])
             max_item = max(timeline_items, key=lambda x: x["price"])
+            peak_solar_it = max(timeline_items, key=lambda x: x["solar"])
 
             if not is_battery_active:
                 bat_msg = "Geen thuisaccu geactiveerd (zuiver echte apparaten)."
             else:
                 price_delta = max_item["price"] - min_item["price"]
                 deadband = float(cfg.get("battery_deadband_eur_kwh", 0.115))
-                peak_solar_it = max(timeline_items, key=lambda x: x["solar"])
                 bat_slots = 4 if is_15m else 1
 
                 # Check if there is significant solar surplus available tomorrow
@@ -1372,7 +1372,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             banner_adv = f"Beste stroomtarief om {cheapest_hour_lbl} (€{cheapest_price:.4f}/kWh)"
             if peak_solar_it["solar"] > 1.0:
                 advices[peak_solar_it["idx"]] = f"☀️ Zonnepiek ({peak_solar_it['solar']:.1f} kW) — Gratis stroom van eigen dak!"
-            advices[max_item["idx"]] = f"⛔ Prijspiek (€{max_item['price']:.2f}/kWh) — Accu ontlaadt om netafname te voorkomen!"
+            if is_battery_active:
+                advices[max_item["idx"]] = f"⛔ Prijspiek (€{max_item['price']:.2f}/kWh) — Accu ontlaadt om netafname te voorkomen!"
+            else:
+                advices[max_item["idx"]] = f"⛔ Prijspiek (€{max_item['price']:.2f}/kWh) — Piekurentarief, vermijd grootverbruik!"
 
             # 7. Compute Unplanned Solar Surplus (Vrij Zonne-overschot voor niet-slimme apparaten)
             surplus_kwh_tot = 0.0
@@ -2140,7 +2143,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.35.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.35.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
