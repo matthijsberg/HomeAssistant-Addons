@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.48.0
+Version: 0.49.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1036,9 +1036,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "starting", "samples_in_window": 0})
             return
 
-        if path == "/api/model/heating-forecast":
+        if path.startswith("/api/model/heating-forecast"):
+            qp = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            res_mode = qp.get("resolution", ["15m"])[0]
+            is_15m = (res_mode == "15m")
+            step_mins = 15 if is_15m else 60
+            total_slots = 96 if is_15m else 24
+            interval_h = 0.25 if is_15m else 1.0
+
             now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
-            start_minute = (now_ams.minute // 15) * 15
+            start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
             base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
 
             # Query Open-Meteo Weather for Culemborg
@@ -1062,23 +1069,49 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             prices_map = {}
             for d_str in [today_str, tomorrow_str]:
                 try:
-                    url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval=INTERVAL_QUARTER"
+                    url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval={'INTERVAL_QUARTER' if is_15m else 'INTERVAL_HOUR'}"
                     req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
                     with urllib.request.urlopen(req_p, timeout=5) as r_p:
                         res_p = json.loads(r_p.read().decode())
                         for it in res_p.get("all_in_with_vat", []):
                             dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Amsterdam"))
-                            prices_map[dt.strftime("%Y-%m-%d %H:%M")] = round(float(it.get("price", {}).get("value", 0.28)), 4)
+                            k_dt = dt.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
+                            prices_map[k_dt] = round(float(it.get("price", {}).get("value", 0.28)), 4)
                 except Exception:
                     pass
 
-            labels, out_temps, cops, th_loss_kw, el_power_kw, costs_eur = [], [], [], [], [], []
+            # Fetch live indoor temperature from HA if available
+            t_indoor_sim = 21.1
+            try:
+                ha_sec = load_secrets()
+                ha_tok = ha_sec.get("homeassistant", {}).get("token")
+                ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
+                if ha_tok and ha_url:
+                    req_t = urllib.request.Request(
+                        f"{ha_url}/api/states/sensor.altherma_indoor_temperature",
+                        headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
+                    )
+                    ctx_ssl = ssl.create_default_context()
+                    ctx_ssl.check_hostname = False
+                    ctx_ssl.verify_mode = ssl.CERT_NONE
+                    with urllib.request.urlopen(req_t, timeout=2, context=ctx_ssl) as r_t:
+                        st_t = json.loads(r_t.read().decode())
+                        v_t = float(st_t.get("state", 21.1))
+                        if 15.0 <= v_t <= 30.0:
+                            t_indoor_sim = v_t
+            except Exception:
+                pass
+
+            labels, out_temps, in_temps, cops, th_loss_kw, el_power_kw, costs_eur = [], [], [], [], [], [], []
             tot_th_kwh, tot_el_kwh, tot_cost = 0.0, 0.0, 0.0
 
-            for i in range(96):
-                slot_dt = base_dt + timedelta(minutes=15 * i)
-                lbl = slot_dt.strftime("%H:%M")
-                k_full = slot_dt.strftime("%Y-%m-%d %H:%M")
+            # 2R1C Thermal mass capacity for Dutch detached/semi-detached home ~10 kWh/K
+            c_thermal_kwh_per_k = 10.0
+
+            for i in range(total_slots):
+                slot_dt = base_dt + timedelta(minutes=step_mins * i)
+                lbl = slot_dt.strftime("%H:%M" if is_15m else "%H:00")
+                k_full = slot_dt.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
                 k_hour = slot_dt.strftime("%Y-%m-%d %H:00")
                 t_out = temp_map.get(k_hour, 14.0)
                 sol = solar_map.get(k_hour, 0.0)
@@ -1095,21 +1128,33 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     th_kw = 0.0
                     el_kw = 0.0
 
-                slot_cost = round(el_kw * 0.25 * price, 3)
-                tot_th_kwh += th_kw * 0.25
-                tot_el_kwh += el_kw * 0.25
+                slot_cost = round(el_kw * interval_h * price, 3)
+                tot_th_kwh += th_kw * interval_h
+                tot_el_kwh += el_kw * interval_h
                 tot_cost += slot_cost
+
+                # Thermodynamic evolution of indoor temperature
+                # Heat loss (transmission + infiltration):
+                ua_eff = 321.1 + 15.0 * max(0.0, wnd - 2.0)
+                q_loss_w = ua_eff * max(0.0, t_indoor_sim - t_out)
+                q_solar_w = 0.12 * sol * 25.0
+                q_heat_w = th_kw * 1000.0
+                delta_t_in = ((q_heat_w + q_solar_w - q_loss_w) / 1000.0 * interval_h) / c_thermal_kwh_per_k
+                t_indoor_sim = round(max(18.5, min(23.5, t_indoor_sim + delta_t_in)), 1)
 
                 labels.append(lbl)
                 out_temps.append(round(t_out, 1))
+                in_temps.append(round(t_indoor_sim, 1))
                 cops.append(round(cop_val, 2))
                 th_loss_kw.append(th_kw)
                 el_power_kw.append(el_kw)
                 costs_eur.append(slot_cost)
 
             self._send_json({
+                "resolution": res_mode,
                 "labels": labels,
                 "outdoor_temps_c": out_temps,
+                "indoor_temps_c": in_temps,
                 "cops": cops,
                 "thermal_loss_kw": th_loss_kw,
                 "electrical_kw": el_power_kw,
@@ -1120,7 +1165,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             })
             return
 
-        if path == "/api/model/dhw-status":
+        if path.startswith("/api/model/dhw-status"):
+            qp = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            res_mode = qp.get("resolution", ["15m"])[0]
+            is_15m = (res_mode == "15m")
             t_live = 49.2
             try:
                 ha_sec = load_secrets()
@@ -1146,8 +1194,29 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             if GLOBAL_DHW_MODEL:
                 decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_live, now_ams)
                 traj = GLOBAL_DHW_MODEL.simulate_trajectory(t_live, now_ams, hours_ahead=24)
+
+                if not is_15m and traj and "timeline_labels" in traj:
+                    # Aggregate 96 quarters to 24 hours
+                    h_labels, h_temps, h_demand = [], [], []
+                    raw_lbls = traj.get("timeline_labels", [])
+                    raw_temps = traj.get("projected_tank_temp_c", [])
+                    raw_dem = traj.get("expected_demand_kwh_th", [])
+                    for h_i in range(min(24, len(raw_lbls) // 4)):
+                        idx = h_i * 4
+                        h_labels.append(raw_lbls[idx][:2] + ":00")
+                        h_temps.append(round(sum(raw_temps[idx:idx+4]) / 4.0, 1))
+                        h_demand.append(round(sum(raw_dem[idx:idx+4]), 3))
+                    traj = {
+                        "timeline_labels": h_labels,
+                        "projected_tank_temp_c": h_temps,
+                        "expected_demand_kwh_th": h_demand,
+                        "morning_dip_temp_c": traj.get("morning_dip_temp_c"),
+                        "morning_dip_time": traj.get("morning_dip_time")
+                    }
+
                 self._send_json({
                     "status": "online",
+                    "resolution": res_mode,
                     "decision": decision,
                     "trajectory": traj
                 })
@@ -1315,7 +1384,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.48.0",
+                "version": "0.49.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2736,7 +2805,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.48.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.49.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2814,7 +2883,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <button onclick="setPredictionResolution('1h')" class="res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
                                 <button onclick="setPredictionResolution('15m')" class="res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
                             </div>
-                            <button onclick="loadChartData(); loadElectricityPricesChart();" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
+                            <button onclick="loadChartData(); loadElectricityPricesChart(); renderDhwTemperatureChart(); renderHeatingForecastChart();" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                 <span>Verversen</span>
                             </button>
@@ -3054,10 +3123,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             </div>
                             <div class="flex items-center gap-3 text-xs font-mono flex-wrap">
                                 <span class="flex items-center gap-1.5 text-blue-300"><span class="w-3 h-1 bg-blue-400 rounded"></span> Buitentemp (°C)</span>
+                                <span class="flex items-center gap-1.5 text-rose-400"><span class="w-3 h-1 bg-rose-500 rounded"></span> Binnentemp (°C)</span>
                                 <span class="flex items-center gap-1.5 text-emerald-300"><span class="w-3 h-1 bg-emerald-400 rounded"></span> Daikin COP</span>
                                 <span class="flex items-center gap-1.5 text-red-400"><span class="w-2.5 h-2.5 bg-red-500/60 rounded-sm"></span> Warmteverlies (kW)</span>
                                 <span class="flex items-center gap-1.5 text-amber-400"><span class="w-2.5 h-2.5 bg-amber-500 rounded-sm"></span> Stroom (kW)</span>
-                                <span class="flex items-center gap-1.5 text-cyan-300"><span class="w-3 h-0.5 border-b border-cyan-400 border-dashed"></span> Kosten (€/kwartier)</span>
+                                <span class="flex items-center gap-1.5 text-cyan-300"><span class="w-3 h-0.5 border-b border-cyan-400 border-dashed"></span> Kosten (€)</span>
                             </div>
                         </div>
 
@@ -4461,7 +4531,16 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     b.className = 'res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
                 }
             });
+
+            // Synchronize EPEX dropdown if present
+            const epexSel = document.getElementById('epex-res-select');
+            if (epexSel) epexSel.value = res;
+
+            // Reload all 4 forecast charts synchronously
             loadChartData();
+            loadElectricityPricesChart();
+            renderDhwTemperatureChart();
+            renderHeatingForecastChart();
         }
         let cachedInfra = { influxdb_connections: [], mqtt_connections: [] };
 
@@ -5129,6 +5208,254 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         // =========================================================================
         // CUSTOM STYLED HTML TOOLTIP HANDLER (REAL LINES, BARS & EURO COSTS)
         // =========================================================================
+        
+        // =========================================================================
+        // UNIFIED SMOOTH TOOLTIP POSITIONING HELPER (VIEWPORT BOUNDED)
+        // =========================================================================
+        function positionTooltipCustom(chart, tooltip, tooltipEl) {
+            const canvasRect = chart.canvas.getBoundingClientRect();
+            let left = canvasRect.left + tooltip.caretX + 16;
+            let top = canvasRect.top + tooltip.caretY - 30;
+            if (left + 300 > window.innerWidth) {
+                left = canvasRect.left + tooltip.caretX - 310;
+            }
+            if (left < 10) left = 10;
+            if (top + 280 > window.innerHeight) {
+                top = window.innerHeight - 290;
+            }
+            if (top < 10) top = 10;
+            tooltipEl.style.left = `${left}px`;
+            tooltipEl.style.top = `${top}px`;
+            tooltipEl.style.opacity = '1';
+        }
+
+        // 1. EPEX & Solar Prices Chart Tooltip
+        function customPricesTooltipHandler(context) {
+            const { chart, tooltip } = context;
+            const tooltipEl = createOrGetTooltipEl(chart);
+            if (tooltip.opacity === 0 || !tooltip.body || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
+                tooltipEl.style.opacity = '0';
+                tooltipEl.style.pointerEvents = 'none';
+                return;
+            }
+            const dataIndex = tooltip.dataPoints[0].dataIndex;
+            const label = tooltip.title[0] || '';
+            const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
+
+            let epexPrice = 0.0, solarCost = 0.0, solarProd = 0.0;
+            chart.data.datasets.forEach(ds => {
+                const v = ds.data[dataIndex];
+                if (!ds.label) return;
+                if (ds.label.includes('EPEX')) epexPrice = Number(v) || 0.0;
+                if (ds.label.includes('Kostprijs')) solarCost = Number(v) || 0.0;
+                if (ds.label.includes('Productie') || ds.label.includes('Zonnepanelen')) solarProd = Number(v) || 0.0;
+            });
+
+            let html = `
+                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
+                        <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
+                    </div>
+                    <span class="text-[10px] text-blue-300 font-mono font-semibold px-2 py-0.5 rounded bg-blue-950/80 border border-blue-800">
+                        Tarief: €${epexPrice.toFixed(4)}/kWh
+                    </span>
+                </div>
+                <div class="space-y-1.5 text-xs">
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:3px; background-color:#3B82F6; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300">EPEX Stroomtarief</span>
+                        </div>
+                        <span class="font-bold text-white font-mono">€${epexPrice.toFixed(4)}/kWh</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #EAB308; margin-right:8px;"></span>
+                            <span class="text-slate-300">Zon Kostprijs</span>
+                        </div>
+                        <span class="font-medium text-amber-300 font-mono">€${solarCost.toFixed(4)}/kWh</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(234, 179, 8, 0.5); border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300">Zonnepanelen Productie</span>
+                        </div>
+                        <span class="font-bold text-amber-400 font-mono">${solarProd.toFixed(2)} kW</span>
+                    </div>
+                </div>
+            `;
+            if (solarProd > 0.05 && epexPrice > solarCost) {
+                const margin = epexPrice - solarCost;
+                html += `
+                    <div class="mt-2.5 pt-2 border-t border-slate-700/80 flex items-center justify-between font-bold text-xs font-mono">
+                        <span class="text-emerald-400 uppercase tracking-wider">Zonbesparing Marge:</span>
+                        <span class="text-emerald-300">+€${margin.toFixed(4)}/kWh</span>
+                    </div>
+                `;
+            }
+            tooltipEl.innerHTML = html;
+            positionTooltipCustom(chart, tooltip, tooltipEl);
+        }
+
+        // 2. DHW Boiler Temperature & Tap Demand Tooltip
+        function customDhwTooltipHandler(context) {
+            const { chart, tooltip } = context;
+            const tooltipEl = createOrGetTooltipEl(chart);
+            if (tooltip.opacity === 0 || !tooltip.body || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
+                tooltipEl.style.opacity = '0';
+                tooltipEl.style.pointerEvents = 'none';
+                return;
+            }
+            const dataIndex = tooltip.dataPoints[0].dataIndex;
+            const label = tooltip.title[0] || '';
+            const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
+
+            let tempC = 0.0, comfort = 40.0, target = 50.0, liters = 0;
+            chart.data.datasets.forEach(ds => {
+                const v = ds.data[dataIndex];
+                if (!ds.label) return;
+                if (ds.label.includes('Boilertemperatuur')) tempC = Number(v) || 0.0;
+                if (ds.label.includes('Comfort')) comfort = Number(v) || 0.0;
+                if (ds.label.includes('Doel')) target = Number(v) || 0.0;
+                if (ds.label.includes('Tapvraag') || ds.label.includes('Waterverbruik')) liters = Math.round(Number(v) || 0);
+            });
+
+            const tempBadgeColor = tempC >= 45 ? 'text-emerald-400 bg-emerald-950/80 border-emerald-800' : (tempC >= 40 ? 'text-amber-400 bg-amber-950/80 border-amber-800' : 'text-red-400 bg-red-950/80 border-red-800');
+
+            let html = `
+                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
+                        <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
+                    </div>
+                    <span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded border ${tempBadgeColor}">
+                        Tank: ${tempC.toFixed(1)}°C
+                    </span>
+                </div>
+                <div class="space-y-1.5 text-xs">
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:3px; background-color:#F59E0B; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300">Boilertemperatuur</span>
+                        </div>
+                        <span class="font-bold text-amber-300 font-mono">${tempC.toFixed(1)}°C</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #EF4444; margin-right:8px;"></span>
+                            <span class="text-slate-400">Comfortgrens</span>
+                        </div>
+                        <span class="text-red-400 font-mono">${comfort.toFixed(1)}°C</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #10B981; margin-right:8px;"></span>
+                            <span class="text-slate-400">Doeltemperatuur</span>
+                        </div>
+                        <span class="text-emerald-400 font-mono">${target.toFixed(1)}°C</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(56, 189, 248, 0.6); border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300">Verwachte Tapvraag</span>
+                        </div>
+                        <span class="font-bold text-sky-400 font-mono">${liters} L (${(liters * 4.186 * (50-12) / 3600).toFixed(2)} kWh_th)</span>
+                    </div>
+                </div>
+            `;
+            tooltipEl.innerHTML = html;
+            positionTooltipCustom(chart, tooltip, tooltipEl);
+        }
+
+        // 3. CV Space Heating Forecast Tooltip
+        function customHeatingTooltipHandler(context) {
+            const { chart, tooltip } = context;
+            const tooltipEl = createOrGetTooltipEl(chart);
+            if (tooltip.opacity === 0 || !tooltip.body || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
+                tooltipEl.style.opacity = '0';
+                tooltipEl.style.pointerEvents = 'none';
+                return;
+            }
+            const dataIndex = tooltip.dataPoints[0].dataIndex;
+            const label = tooltip.title[0] || '';
+            const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
+
+            let outTemp = 0.0, inTemp = 0.0, cop = 0.0, thLoss = 0.0, elPower = 0.0, cost = 0.0;
+            chart.data.datasets.forEach(ds => {
+                const v = ds.data[dataIndex];
+                if (!ds.label) return;
+                if (ds.label.includes('Buitentemperatuur')) outTemp = Number(v) || 0.0;
+                if (ds.label.includes('Binnentemperatuur') || ds.label.includes('Ruimtetemperatuur')) inTemp = Number(v) || 0.0;
+                if (ds.label.includes('COP')) cop = Number(v) || 0.0;
+                if (ds.label.includes('Warmteverlies')) thLoss = Number(v) || 0.0;
+                if (ds.label.includes('Stroom Warmtepomp')) elPower = Number(v) || 0.0;
+                if (ds.label.includes('Stroomkosten')) cost = Number(v) || 0.0;
+            });
+
+            const intervalMult = (predictionResolution === '15m') ? 0.25 : 1.0;
+            const thKwh = thLoss * intervalMult;
+            const elKwh = elPower * intervalMult;
+
+            let html = `
+                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-red-400 animate-pulse"></span>
+                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
+                        <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
+                    </div>
+                    <span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-rose-950/80 border border-rose-800 text-rose-300">
+                        Binnen: ${inTemp.toFixed(1)}°C
+                    </span>
+                </div>
+                <div class="space-y-1.5 text-xs">
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:3px; background-color:#60A5FA; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300">Buitentemperatuur</span>
+                        </div>
+                        <span class="font-medium text-blue-300 font-mono">${outTemp.toFixed(1)}°C</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:3px; background-color:#F43F5E; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300">Verwachte Binnentemp</span>
+                        </div>
+                        <span class="font-bold text-rose-300 font-mono">${inTemp.toFixed(1)}°C</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #10B981; margin-right:8px;"></span>
+                            <span class="text-slate-300">Daikin Carnot COP</span>
+                        </div>
+                        <span class="font-medium text-emerald-300 font-mono">${cop.toFixed(2)}</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(239, 68, 68, 0.6); border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300">Warmteverlies Woning</span>
+                        </div>
+                        <span class="font-bold text-red-400 font-mono">${thLoss.toFixed(2)} kW_th (${thKwh.toFixed(2)} kWh)</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(245, 158, 11, 0.7); border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300">Stroom Warmtepomp</span>
+                        </div>
+                        <span class="font-bold text-amber-400 font-mono">${elPower.toFixed(2)} kW_el (${elKwh.toFixed(2)} kWh)</span>
+                    </div>
+                </div>
+                <div class="mt-2.5 pt-2 border-t border-slate-700/80 flex items-center justify-between font-bold text-xs font-mono">
+                    <span class="text-slate-400 uppercase tracking-wider">Verwachte Stroomkosten:</span>
+                    <span class="text-cyan-300 text-sm">€${cost.toFixed(3)}</span>
+                </div>
+            `;
+            tooltipEl.innerHTML = html;
+            positionTooltipCustom(chart, tooltip, tooltipEl);
+        }
+
         function createOrGetTooltipEl(chart) {
             let tooltipEl = document.getElementById('chartjs-custom-tooltip');
             if (!tooltipEl) {
@@ -5648,7 +5975,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     });
 
                     // Canvas mouseleave listeners
-                    ['hemsChartAnalytics', 'hemsChart', 'powerProducersChart', 'electricityPricesChart'].forEach(id => {
+                    ['hemsChartAnalytics', 'hemsChart', 'powerProducersChart', 'electricityPricesChart', 'chart-dhw-temperature', 'chart-heating-forecast'].forEach(id => {
                         const c = document.getElementById(id);
                         if (c) {
                             c.addEventListener('mouseleave', hideTooltip);
@@ -6503,7 +6830,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
             try {
                 const resSelect = document.getElementById('epex-res-select');
-                const resVal = resSelect ? resSelect.value : '15m';
+                const resVal = predictionResolution || (resSelect ? resSelect.value : '15m');
                 const res = await fetch('./api/analytics/electricity_prices?resolution=' + encodeURIComponent(resVal));
                 const data = await res.json();
                 window.__lastElectricityPricesData = data;
@@ -6596,20 +6923,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 }
                             },
                             tooltip: {
-                                backgroundColor: 'rgba(11, 15, 23, 0.95)',
-                                borderColor: '#1E293B',
-                                borderWidth: 1,
-                                titleFont: { family: 'monospace', size: 11 },
-                                bodyFont: { family: 'monospace', size: 11 },
-                                callbacks: {
-                                    label: function(context) {
-                                        const ds = context.dataset;
-                                        const val = context.raw || 0;
-                                        if (ds.yAxisID === 'y1') {
-                                            return `${ds.label}: ${Number(val).toFixed(2)} kW`;
-                                        }
-                                        return `${ds.label}: €${Number(val).toFixed(4)}/kWh`;
-                                    }
+                                enabled: false,
+                                external: function(context) {
+                                    customPricesTooltipHandler(context);
                                 }
                             }
                         },
@@ -7306,14 +7622,13 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         }
 
                 let dhwTempChartInstance = null;
-
                 let heatingForecastChartInstance = null;
 
         async function renderHeatingForecastChart() {
             const canvas = document.getElementById('chart-heating-forecast');
             if (!canvas) return;
             try {
-                const res = await fetch('./api/model/heating-forecast');
+                const res = await fetch('./api/model/heating-forecast?resolution=' + encodeURIComponent(predictionResolution));
                 if (!res.ok) return;
                 const d = await res.json();
                 if (!d.labels || d.labels.length === 0) return;
@@ -7325,6 +7640,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
                 const labels = d.labels;
                 const outTemps = d.outdoor_temps_c || [];
+                const inTemps = d.indoor_temps_c || [];
                 const cops = d.cops || [];
                 const thLoss = d.thermal_loss_kw || [];
                 const elKw = d.electrical_kw || [];
@@ -7343,10 +7659,22 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 yAxisID: 'y_temp',
                                 borderColor: '#60A5FA',
                                 backgroundColor: 'transparent',
-                                borderWidth: 1.75,
+                                borderWidth: 2.0,
                                 tension: 0.25,
                                 pointRadius: 0,
                                 order: 1
+                            },
+                            {
+                                label: 'Verwachte Binnentemperatuur (°C)',
+                                data: inTemps,
+                                type: 'line',
+                                yAxisID: 'y_temp',
+                                borderColor: '#F43F5E',
+                                backgroundColor: 'transparent',
+                                borderWidth: 2.2,
+                                tension: 0.25,
+                                pointRadius: 0,
+                                order: 2
                             },
                             {
                                 label: 'Daikin COP',
@@ -7356,21 +7684,22 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 borderColor: '#10B981',
                                 borderDash: [4, 4],
                                 backgroundColor: 'transparent',
-                                borderWidth: 1.5,
+                                borderWidth: 1.75,
                                 tension: 0.2,
                                 pointRadius: 0,
-                                order: 2
+                                order: 3
                             },
                             {
-                                label: 'Stroomkosten (€/kwartier)',
+                                label: 'Stroomkosten (€)',
                                 data: costs,
                                 type: 'line',
                                 yAxisID: 'y_cost',
                                 borderColor: '#22D3EE',
+                                borderDash: [3, 3],
                                 backgroundColor: 'transparent',
                                 borderWidth: 1.75,
                                 pointRadius: 0,
-                                order: 3
+                                order: 4
                             },
                             {
                                 label: 'Warmteverlies Woning (kW_th)',
@@ -7379,7 +7708,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 backgroundColor: 'rgba(239, 68, 68, 0.45)',
                                 hoverBackgroundColor: '#EF4444',
                                 borderRadius: 2,
-                                order: 4
+                                order: 5
                             },
                             {
                                 label: 'Stroom Warmtepomp (kW_el)',
@@ -7388,7 +7717,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 backgroundColor: 'rgba(245, 158, 11, 0.65)',
                                 hoverBackgroundColor: '#F59E0B',
                                 borderRadius: 2,
-                                order: 5
+                                order: 6
                             }
                         ]
                     },
@@ -7399,28 +7728,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         plugins: {
                             legend: { display: false },
                             tooltip: {
-                                backgroundColor: 'rgba(11, 15, 23, 0.95)',
-                                borderColor: '#1E293B',
-                                borderWidth: 1,
-                                padding: 10,
-                                callbacks: {
-                                    label: function(c) {
-                                        const v = c.raw;
-                                        if (v === 0) return null;
-                                        if (c.dataset.yAxisID === 'y_cost') {
-                                            return ` 💶 Stroomkosten: €${v.toFixed(3)}`;
-                                        }
-                                        if (c.dataset.label.includes('Buitentemp')) {
-                                            return ` 🌡️ Buitentemperatuur: ${v}°C`;
-                                        }
-                                        if (c.dataset.label.includes('COP')) {
-                                            return ` 📈 Daikin COP: ${v}`;
-                                        }
-                                        if (c.dataset.label.includes('Warmteverlies')) {
-                                            return ` 🔥 Warmteverlies Woning: ${v} kW_th (${(v*0.25).toFixed(2)} kWh warmte)`;
-                                        }
-                                        return ` ⚡ Warmtepomp Stroom: ${v} kW_el (${(v*0.25).toFixed(2)} kWh stroom)`;
-                                    }
+                                enabled: false,
+                                external: function(context) {
+                                    customHeatingTooltipHandler(context);
                                 }
                             }
                         },
@@ -7444,7 +7754,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             y_temp: {
                                 position: 'right',
                                 min: 0,
-                                max: 25,
+                                max: 26,
                                 grid: { drawOnChartArea: false },
                                 title: {
                                     display: true,
@@ -7458,9 +7768,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 position: 'right',
                                 min: 0,
                                 grid: { drawOnChartArea: false },
-                                title: {
-                                    display: false
-                                },
+                                title: { display: false },
                                 ticks: { display: false }
                             }
                         }
