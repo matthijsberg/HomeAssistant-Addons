@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.33.1
+Version: 0.34.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1013,7 +1013,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.33.1",
+                "version": "0.34.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2127,7 +2127,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.33.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.34.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4243,106 +4243,49 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     if (document.getElementById('pred-stat-verbruik-max')) document.getElementById('pred-stat-verbruik-max').innerText = ps.totaal_verbruik.max || '--';
                 }
 
-                // === SYNCHRONIZE 0 LINE ON BOTH Y (kW) AND Y1 (€/kWh) AXES ===
-                let allVals = [...netPowerArr, ...(data.datasets.solar_kw_neg || []), ...(data.datasets.battery_discharge_kw_neg || [])];
-                let consVals = [];
+                // === UNIFIED ENERGY (kWh) STANDARDIZATION & SYMMETRIC 0-AXIS ALIGNMENT ===
+                const intervalH = data.interval_h || (predictionResolution === '15m' ? 0.25 : 1.0);
+
+                // Convert instantaneous power (kW) to actual interval energy (kWh = kW * hours)
+                const toKwh = (arr) => (arr || []).map(kw => Number((kw * intervalH).toFixed(3)));
+                const toKwhNeg = (arr) => (arr || []).map(kw => Number((-Math.abs(kw * intervalH)).toFixed(3)));
+
+                const unallocKwh = toKwh(data.datasets.unallocated_kw || data.datasets.baseload_kw);
+                const boilerKwh = toKwh(data.datasets.boiler_kw);
+                const heatingKwh = toKwh(data.datasets.heating_kw || []);
+                const batteryChargeKwh = toKwh(data.datasets.battery_charge_kw || []);
+                const solarNegKwh = toKwhNeg(data.datasets.solar_kw_neg || []);
+                const batteryDischargeNegKwh = toKwhNeg(data.datasets.battery_discharge_kw_neg || []);
+                const netKwh = toKwh(netPowerArr);
+
+                // Calculate symmetric center-aligned bounds (0 line exactly at 50% height)
+                let consKwhArr = [];
                 for (let i = 0; i < labels.length; i++) {
-                    const b = (data.datasets.unallocated_kw && data.datasets.unallocated_kw[i]) || data.datasets.baseload_kw[i] || 0;
-                    const w = data.datasets.boiler_kw[i] || 0;
-                    const h = (data.datasets.heating_kw && data.datasets.heating_kw[i]) || 0;
-                    const c = (data.datasets.battery_charge_kw && data.datasets.battery_charge_kw[i]) || 0;
-                    consVals.push(b + w + h + c);
+                    consKwhArr.push((unallocKwh[i] || 0) + (boilerKwh[i] || 0) + (heatingKwh[i] || 0) + (batteryChargeKwh[i] || 0));
                 }
 
-                let minY = Math.min(-2.5, ...allVals);
-                let maxY = Math.max(2.5, ...consVals, ...netPowerArr);
-                minY = Math.floor(minY * 2) / 2; // Clean 0.5 steps
-                maxY = Math.ceil(maxY * 2) / 2;
+                let maxAbsKwh = Math.max(
+                    ...consKwhArr,
+                    ...solarNegKwh.map(Math.abs),
+                    ...batteryDischargeNegKwh.map(Math.abs),
+                    ...netKwh.map(Math.abs),
+                    1.0
+                );
+                maxAbsKwh = Math.ceil(maxAbsKwh * 2) / 2; // Stappen van 0.5 kWh
+                if (maxAbsKwh < 1.5) maxAbsKwh = 1.5;
 
-                let maxP = Math.max(...pricesArr, 0.35);
-                let minP = Math.min(0, ...pricesArr);
-                maxP = Math.ceil(maxP * 20) / 20; // Clean 0.05 steps
-
-                // Zero ratio from bottom on left axis
-                const zeroRatio = Math.abs(minY) / (maxY - minY);
-                let syncdMinP = -(zeroRatio / (1.0 - zeroRatio)) * maxP;
-                if (minP < syncdMinP) {
-                    syncdMinP = Math.floor(minP * 20) / 20;
-                    maxP = -syncdMinP * ((1.0 - zeroRatio) / zeroRatio);
-                }
+                let maxAbsPrice = Math.max(...pricesArr.map(Math.abs), 0.30);
+                maxAbsPrice = Math.ceil(maxAbsPrice * 10) / 10;
+                if (maxAbsPrice < 0.30) maxAbsPrice = 0.30;
 
                 const chartConfig = {
                     type: 'bar',
                     data: {
                         labels: labels,
                         datasets: [
-                            // === CONSUMERS (BOVEN DE AS > 0 kW, STACK: CONSUMPTION) ===
+                            // 0. EPEX Stroomprijs All-in Stepped/Dashed Line (Rechter Y-as)
                             {
-                                label: 'Ongedefinieerd Verbruik (kW)',
-                                data: data.datasets.unallocated_kw || data.datasets.baseload_kw,
-                                backgroundColor: '#3B82F6',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 3
-                            },
-                            {
-                                label: 'SWW Tapwater (kW)',
-                                data: data.datasets.boiler_kw,
-                                backgroundColor: '#EC4899',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 3
-                            },
-                            {
-                                label: 'CV Verwarming (kW)',
-                                data: data.datasets.heating_kw || [],
-                                backgroundColor: '#6366F1',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 3
-                            },
-                            {
-                                label: 'Accu Laden (kW)',
-                                data: data.datasets.battery_charge_kw || [],
-                                backgroundColor: '#10B981',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 3
-                            },
-                            // === SOURCES (ONDER DE AS < 0 kW, STACK: PRODUCTION) ===
-                            {
-                                label: 'Zon Productie (-kW)',
-                                data: data.datasets.solar_kw_neg || [],
-                                backgroundColor: '#F59E0B',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 4
-                            },
-                            {
-                                label: 'Accu Ontladen (-kW)',
-                                data: data.datasets.battery_discharge_kw_neg || [],
-                                backgroundColor: '#14B8A6',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 4
-                            },
-                            // === OVERLAY: VERWACHT NETTO VERBRUIK (NETTO LIJN OVER DE BARS) ===
-                            {
-                                label: 'Verwacht Netto Verbruik (kW)',
-                                data: netPowerArr,
-                                type: 'line',
-                                borderColor: '#EF4444',
-                                backgroundColor: 'transparent',
-                                borderWidth: 3,
-                                pointRadius: 2,
-                                pointBackgroundColor: '#EF4444',
-                                tension: 0.25,
-                                yAxisID: 'y',
-                                order: 1
-                            },
-                            // === OVERLAY: STROOMPRIJS (€/kWh) ===
-                            {
-                                label: 'Stroomprijs (€/kWh)',
+                                label: 'Stroomprijs All-in (€/kWh)',
                                 data: pricesArr,
                                 type: 'line',
                                 borderColor: '#06B6D4',
@@ -4350,7 +4293,72 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 borderWidth: 1.5,
                                 pointRadius: 0,
                                 yAxisID: 'y1',
-                                order: 2
+                                tension: 0,
+                                order: 0
+                            },
+                            // 1. Verwacht Netto Verbruik Lijn (Felrood) in kWh
+                            {
+                                label: 'Verwacht Netto (kWh)',
+                                data: netKwh,
+                                type: 'line',
+                                borderColor: '#EF4444',
+                                backgroundColor: 'transparent',
+                                borderWidth: 2.5,
+                                pointRadius: 2,
+                                pointBackgroundColor: '#EF4444',
+                                tension: 0.25,
+                                yAxisID: 'y',
+                                order: 1
+                            },
+                            // === CONSUMERS (BOVEN DE AS > 0, STACK: ENERGY in kWh) ===
+                            {
+                                label: 'Ongedefinieerd (kWh)',
+                                data: unallocKwh,
+                                backgroundColor: '#3B82F6',
+                                stack: 'energy',
+                                borderRadius: 2,
+                                order: 3
+                            },
+                            {
+                                label: 'SWW Tapwater (kWh)',
+                                data: boilerKwh,
+                                backgroundColor: '#EC4899',
+                                stack: 'energy',
+                                borderRadius: 2,
+                                order: 3
+                            },
+                            {
+                                label: 'CV Verwarming (kWh)',
+                                data: heatingKwh,
+                                backgroundColor: '#6366F1',
+                                stack: 'energy',
+                                borderRadius: 2,
+                                order: 3
+                            },
+                            {
+                                label: 'Accu Laden (kWh)',
+                                data: batteryChargeKwh,
+                                backgroundColor: '#10B981',
+                                stack: 'energy',
+                                borderRadius: 2,
+                                order: 3
+                            },
+                            // === SOURCES (ONDER DE AS < 0, STACK: ENERGY in kWh) ===
+                            {
+                                label: 'Zon Productie (kWh)',
+                                data: solarNegKwh,
+                                backgroundColor: '#F59E0B',
+                                stack: 'energy',
+                                borderRadius: 2,
+                                order: 4
+                            },
+                            {
+                                label: 'Accu Ontladen (kWh)',
+                                data: batteryDischargeNegKwh,
+                                backgroundColor: '#14B8A6',
+                                stack: 'energy',
+                                borderRadius: 2,
+                                order: 4
                             }
                         ]
                     },
@@ -4361,53 +4369,51 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         plugins: {
                             legend: { display: false },
                             tooltip: {
-                                enabled: true,
-                                filter: function(tooltipItem) {
-                                    const raw = tooltipItem.raw;
-                                    if (raw === null || raw === undefined) return false;
-                                    return Math.abs(Number(raw)) > 0.02; // Filter out 0 kW entries
-                                },
-                                callbacks: {
-                                    label: function(ctx) {
-                                        const label = ctx.dataset.label || '';
-                                        const val = Number(ctx.raw);
-                                        if (ctx.dataset.yAxisID === 'y1') {
-                                            return `${label}: €${val.toFixed(4)}/kWh`;
-                                        }
-                                        return `${label}: ${val >= 0 ? '+' : ''}${val.toFixed(2)} kW`;
-                                    }
+                                enabled: false,
+                                external: function(context) {
+                                    customHemsTooltipHandler(context, true);
                                 }
                             }
                         },
                         scales: {
                             x: {
                                 stacked: true,
-                                grid: { color: '#1E293B' },
+                                grid: { color: 'rgba(30, 41, 59, 0.4)' },
                                 ticks: { color: '#94A3B8', font: { family: 'monospace', size: 10 } }
                             },
                             y: {
                                 stacked: true,
-                                min: minY,
-                                max: maxY,
-                                title: { display: true, text: 'Opbrengst (-kW) < 0 < Verbruik (+kW)', color: '#94A3B8' },
+                                min: -maxAbsKwh,
+                                max: maxAbsKwh,
+                                title: { display: true, text: 'Opbrengst (-kWh) < 0 < Verbruik (+kWh)', color: '#94A3B8', font: { family: 'monospace', size: 10 } },
                                 grid: {
-                                    color: (ctx) => ctx.tick && ctx.tick.value === 0 ? '#94A3B8' : '#1E293B',
+                                    color: (ctx) => ctx.tick && ctx.tick.value === 0 ? '#CBD5E1' : 'rgba(30, 41, 59, 0.6)',
                                     lineWidth: (ctx) => ctx.tick && ctx.tick.value === 0 ? 2 : 1
                                 },
                                 ticks: {
                                     color: '#94A3B8',
-                                    stepSize: 0.5
+                                    font: { family: 'monospace', size: 10 },
+                                    callback: function(val) {
+                                        const absV = Math.abs(val);
+                                        const prefix = val < 0 ? '-' : '';
+                                        return `${prefix}${absV.toFixed(2)} kWh`;
+                                    }
                                 }
                             },
                             y1: {
+                                type: 'linear',
                                 position: 'right',
-                                min: syncdMinP,
-                                max: maxP,
-                                title: { display: true, text: 'Prijs (€/kWh)', color: '#06B6D4' },
+                                display: true,
+                                min: -maxAbsPrice,
+                                max: maxAbsPrice,
+                                title: { display: true, text: 'Tarief (€/kWh)', color: '#06B6D4', font: { family: 'monospace', size: 10 } },
                                 grid: { drawOnChartArea: false },
                                 ticks: {
                                     color: '#06B6D4',
-                                    callback: function(v) { return v >= 0 ? '€' + v.toFixed(2) : ''; }
+                                    font: { family: 'monospace', size: 10 },
+                                    callback: function(val) {
+                                        return val >= 0 ? '€' + Number(val).toFixed(2) : '';
+                                    }
                                 }
                             }
                         }
