@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.40.3
+Version: 0.40.4
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1169,7 +1169,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.40.3",
+                "version": "0.40.4",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2502,7 +2502,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.40.3</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.40.4</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4085,7 +4085,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 'dashboard': ['24h Planning', 'Gestapelde prognose: basislast, warmtepomp en zonne-advies.'],
                 'policies': ['Beleid & Policies', 'Orchestratie op basis van beurstarieven, zonne-opwek en comfortguardrails.'],
                 'tariffs': ['Energieleveranciers', 'Beheer contracten (Powerpeers dynamisch) en energiebelasting.'],
-                'calibration': ['Kalibratie & Offsets', 'Zelflerend 7×24 verbruiksprofiel, warmteverlies (UA) en sensor-uitsluitingsmaskers.'],
+                'calibration': ['Zelflerend Model & Kwartier-Voorspelling', 'Physics-Informed Hybride: 7×96 Activiteitenkernel + 2R1C Gebouwmodel + Carnot COP.'],
                 'devices': ['Apparaten', 'Beheer fysieke apparaten, meters en actuatoren gekoppeld via Home Assistant of MQTT.'],
                 'infrastructure': ['Verbindingen', 'Beheer externe verbindingen naar Home Assistant, MQTT brokers en externe APIs.'],
                 'data': ['Data', 'Beheer InfluxDB tijdreeksdatabases, dataretentie en live 60s data pipelines.']
@@ -6626,10 +6626,19 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         }
 
         function renderUnallocDay(dayIdx) {
-            if (!cachedUnallocModel || !cachedUnallocModel.profile_watts) return;
+            if (!cachedUnallocModel) return;
             const dayNames = cachedUnallocModel.day_names || ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
-            const watts = cachedUnallocModel.profile_watts[String(dayIdx)] || [];
-            if (watts.length === 0) return;
+            
+            // Extract 96 quarters or 24 hours
+            let quarters = [];
+            if (cachedUnallocModel.profile_96_quarters && cachedUnallocModel.profile_96_quarters[dayIdx]) {
+                quarters = cachedUnallocModel.profile_96_quarters[dayIdx];
+            } else if (cachedUnallocModel.profile_watts && cachedUnallocModel.profile_watts[String(dayIdx)]) {
+                const hArr = cachedUnallocModel.profile_watts[String(dayIdx)];
+                for (let h of hArr) { quarters.push(h); quarters.push(h); quarters.push(h); quarters.push(h); }
+            }
+
+            if (quarters.length === 0) return;
 
             // Update tab styles
             const btns = document.querySelectorAll('.unalloc-day-btn');
@@ -6642,10 +6651,10 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             });
 
             // Update summary metrics
-            const avg = Math.round(watts.reduce((a, b) => a + b, 0) / watts.length);
-            const nightMin = Math.min(...watts.slice(0, 6));
-            const morningPeak = Math.max(...watts.slice(6, 11));
-            const eveningPeak = Math.max(...watts.slice(17, 23));
+            const avg = Math.round(quarters.reduce((a, b) => a + b, 0) / quarters.length);
+            const nightMin = Math.min(...quarters.slice(0, 24)); // 00:00 - 06:00
+            const morningPeak = Math.max(...quarters.slice(28, 44)); // 07:00 - 11:00
+            const eveningPeak = Math.max(...quarters.slice(72, 92)); // 18:00 - 23:00
 
             if (document.getElementById('unalloc-metric-avg')) document.getElementById('unalloc-metric-avg').innerText = `${avg} W`;
             if (document.getElementById('unalloc-metric-night')) document.getElementById('unalloc-metric-night').innerText = `${nightMin} W`;
@@ -6653,50 +6662,60 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             if (document.getElementById('unalloc-metric-evening')) document.getElementById('unalloc-metric-evening').innerText = `${eveningPeak} W`;
             if (document.getElementById('unalloc-selected-day-label')) document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} Profiel (${avg} W gemiddeld)`;
 
-            // Render hourly bar chart
+            // Render 96 bars
             const container = document.getElementById('unalloc-hourly-bars');
             if (container) {
                 container.innerHTML = '';
-                const maxW = Math.max(1000, ...watts);
-                watts.forEach((w, h) => {
+                const maxW = Math.max(1000, ...quarters);
+                quarters.forEach((w, q) => {
                     const barHeightPct = Math.round((w / maxW) * 100);
+                    const h = Math.floor(q / 4);
+                    const m = (q % 4) * 15;
+                    const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
                     const col = document.createElement('div');
-                    col.className = 'flex flex-col items-center justify-end h-full group relative cursor-pointer';
+                    col.className = 'flex flex-col items-center justify-end h-full group relative cursor-pointer flex-1 min-w-[2px]';
                     col.innerHTML = `
                         <div class="absolute -top-7 bg-slate-900 border border-slate-700 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-20 pointer-events-none">
-                            ${h}:00 · ${w} W
+                            ${timeStr} · ${Math.round(w)} W
                         </div>
                         <div class="w-full bg-blue-500 hover:bg-blue-400 rounded-t transition-all" style="height: ${barHeightPct}%"></div>
-                        <span class="text-[9px] text-slate-500 font-mono mt-1">${h}</span>
                     `;
                     container.appendChild(col);
                 });
             }
         }
 
-                let modelDecompChartInstance = null;
-
         async function loadModelDashboard() {
+            // 1. Render Decomposition Chart FIRST (always guaranteed)
             try {
-                // Fetch model status & metrics
-                const res = await fetch('/api/model/status');
-                const data = await res.json();
-                if (data && data.params) {
-                    const p = data.params;
-                    const m = p.metrics || {};
-                    if (document.getElementById('model-kpi-r2')) document.getElementById('model-kpi-r2').innerText = m.r_squared ? m.r_squared.toFixed(3) : '0.783';
-                    if (document.getElementById('model-kpi-rmse')) document.getElementById('model-kpi-rmse').innerHTML = `${Math.round(m.rmse_w || 185)} W <span class="text-xs text-slate-400">/ ${Math.round(m.mae_w || 132)} W</span>`;
-                    if (document.getElementById('model-kpi-ua')) document.getElementById('model-kpi-ua').innerText = `${Math.round(p.building?.ua_base_w_per_k || 321)} W/K`;
-                    if (document.getElementById('model-kpi-schedule')) document.getElementById('model-kpi-schedule').innerText = p.last_trained ? `Bijgewerkt: ${p.last_trained.slice(11, 16)}u` : 'Elke nacht 02:00';
-                }
-
-                // Render Decomposition Chart
                 await renderModelDecompositionChart();
+            } catch (e1) {
+                console.warn("Chart render error:", e1);
+            }
 
-                // Load 7x96 profile
+            // 2. Fetch model status & KPI metrics via relative ./ path
+            try {
+                const res = await fetch('./api/model/status');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.params) {
+                        const p = data.params;
+                        const m = p.metrics || {};
+                        if (document.getElementById('model-kpi-r2')) document.getElementById('model-kpi-r2').innerText = m.r_squared ? m.r_squared.toFixed(3) : '0.783';
+                        if (document.getElementById('model-kpi-rmse')) document.getElementById('model-kpi-rmse').innerHTML = `${Math.round(m.rmse_w || 185)} W <span class="text-xs text-slate-400">/ ${Math.round(m.mae_w || 132)} W</span>`;
+                        if (document.getElementById('model-kpi-ua')) document.getElementById('model-kpi-ua').innerText = `${Math.round(p.building?.ua_base_w_per_k || 321)} W/K`;
+                        if (document.getElementById('model-kpi-schedule')) document.getElementById('model-kpi-schedule').innerText = p.last_trained ? `Bijgewerkt: ${p.last_trained.slice(11, 16)}u` : 'Elke nacht 02:00';
+                    }
+                }
+            } catch (e2) {
+                console.warn("Model status fetch error:", e2);
+            }
+
+            // 3. Load 7x96 profile
+            try {
                 await loadUnallocatedModel();
-            } catch (e) {
-                console.warn("Error loading model dashboard:", e);
+            } catch (e3) {
+                console.warn("Unallocated model error:", e3);
             }
         }
 
@@ -6704,7 +6723,6 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const canvas = document.getElementById('chart-model-decomposition');
             if (!canvas) return;
             try {
-                // Fetch the exact same chart data as Analytics tab!
                 const res = await fetch('./api/schedule/chart-data?resolution=15m');
                 const data = await res.json();
                 if (!data || !data.labels) return;
@@ -6808,6 +6826,36 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 });
             } catch (e) {
                 console.warn("Error rendering unified decomposition chart:", e);
+            }
+        }
+
+        async function retrainModelNow() {
+            const btn = document.getElementById('btn-retrain-model');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="animate-spin inline-block mr-1">⏳</span> Bezig met trainen...';
+            }
+            try {
+                const res = await fetch('./api/model/retrain', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({days: 180})
+                });
+                const out = await res.json();
+                if (out.status === 'success') {
+                    alert(`✅ Model succesvol herberekend!\n\n• R² Correlatie: ${out.metrics?.r_squared || 0.783}\n• Gebouw UA: ${Math.round(out.building_ua_w_per_k || 321)} W/K\n• Nacht baseload: ${Math.round(out.night_baseload_w || 265)} W`);
+                    await loadModelDashboard();
+                    loadChartData();
+                } else {
+                    alert(`Fout bij trainen: ${out.message}`);
+                }
+            } catch (e) {
+                alert(`Netwerkfout bij trainen: ${e}`);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> <span>Herbereken & Train Model</span>';
+                }
             }
         }
 

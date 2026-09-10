@@ -1,0 +1,50 @@
+{
+  "ua_base": 7.75896,
+  "c_wind": 0.005,
+  "c_solar": 0.05626,
+  "dhw_average_cop": 2.04,
+  "heating_average_cop": 4.8,
+  "calibration_timestamp": "2026-09-06 08:02:06",
+  "building": {
+    "ua_base_w_per_k": 321.1,
+    "c_wind_w_per_k_ms": 0.20833333333333334,
+    "c_solar_passive": 0.05626,
+    "target_temp_day_c": 20.0,
+    "target_temp_night_c": 17.5,
+    "summer_lockout_mean_c": 15.5,
+    "summer_lockout_max_c": 18.0
+  },
+  "heat_pump": {
+    "carnot_efficiency": 0.48,
+    "flow_temp_cv_c": 35.0,
+    "flow_temp_dhw_c": 52.0,
+    "defrost_threshold_c": 4.5,
+    "defrost_cop_penalty": 0.82,
+    "nominal_power_w": 18000.0,
+    "standby_power_w": 34.0,
+    "average_heating_cop": 4.8
+  },
+  "dhw_tank": {
+    "volume_liters": 350.0,
+    "target_temp_c": 50.0,
+    "winter_inlet_temp_c": 10.0,
+    "summer_inlet_temp_c": 16.5,
+    "standby_loss_w_per_k": 2.5,
+    "typical_daily_thermal_kwh": 6.8
+  },
+  "unallocated": {
+    "night_baseload_floor_w": 265.0,
+    "seasonal_amplitude": 0.22,
+    "peak_phase_day_of_year": 15
+  },
+  "metrics": {
+    "samples_evaluated": 11521,
+    "r_squared": 0.783,
+    "rmse_w": 185.4,
+    "mae_w": 132.0,
+    "mape_pct": 14.8
+  },
+  "version": "1.0.0",
+  "learning_rate_ewma": 0.05,
+  "last_trained": "2026-09-10T18:09:04.867858+02:00"
+}
