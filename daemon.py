@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.35.4
+Version: 0.36.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1030,7 +1030,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.35.4",
+                "version": "0.36.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1069,7 +1069,97 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 cc["password"] = "••••••••" if has_pw else ""
                 mq_conns.append(cc)
 
+            # Home Assistant Core Connection info (Bi-directional: Bron & Doel)
+            ha_token = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASS_TOKEN")
+            ha_base_url = "http://supervisor/core" if os.environ.get("SUPERVISOR_TOKEN") else (os.environ.get("HASS_URL") or "https://hass.b3rg.nl:8123")
+            
+            ha_sources = []
+            ha_targets = []
+            ha_latency_ms = 0.0
+            ha_status = "offline"
+            ha_version = "2026.x"
+            ha_location = "Home Assistant"
+
+            if ha_token:
+                headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                t0 = time.time()
+                try:
+                    req_cfg = urllib.request.Request(f"{ha_base_url}/api/config", headers=headers)
+                    with urllib.request.urlopen(req_cfg, timeout=3, context=ctx) as r_c:
+                        c_data = json.loads(r_c.read().decode())
+                        ha_status = "connected"
+                        ha_version = c_data.get("version", "2026.x")
+                        ha_location = c_data.get("location_name", "Home Assistant")
+                        ha_latency_ms = round((time.time() - t0) * 1000, 1)
+                except Exception as e_ha:
+                    ha_status = f"error: {e_ha}"
+
+            # Collect source entities from configured devices
+            for d in cfg.get("devices", []):
+                src_ent = d.get("ha_power_entity") or d.get("ha_temp_entity")
+                if src_ent:
+                    ha_sources.append({
+                        "device_name": d.get("name"),
+                        "device_id": d.get("id"),
+                        "entity_id": src_ent,
+                        "type": d.get("type"),
+                        "live_state": "--"
+                    })
+                tgt_ent = d.get("ha_control_entity")
+                if tgt_ent:
+                    ha_targets.append({
+                        "device_name": d.get("name"),
+                        "device_id": d.get("id"),
+                        "entity_id": tgt_ent,
+                        "type": d.get("type"),
+                        "live_state": "--"
+                    })
+
+            # Add Daikin Altherma SG Relais & SWW Boost defaults if not already present
+            default_targets = [
+                {"device_name": "Daikin Smart Grid 1 (S10S)", "device_id": "sg1_relais", "entity_id": "switch.warmtepomp_smart_grid_1_s10s", "type": "heatpump_relay", "live_state": "--"},
+                {"device_name": "Daikin Smart Grid 2 (S11S)", "device_id": "sg2_relais", "entity_id": "switch.warmtepomp_smart_grid_2_s11s", "type": "heatpump_relay", "live_state": "--"},
+                {"device_name": "Daikin SWW Boost (Altherma)", "device_id": "altherma_switch", "entity_id": "switch.hc_mode_altherma_on", "type": "heatpump_switch", "live_state": "--"}
+            ]
+            for dt in default_targets:
+                if not any(t["entity_id"] == dt["entity_id"] for t in ha_targets):
+                    ha_targets.append(dt)
+
+            # Fetch live states for configured HA entities
+            if ha_status == "connected" and ha_token:
+                all_eids = list(set([s["entity_id"] for s in ha_sources] + [t["entity_id"] for t in ha_targets]))
+                states_map = {}
+                for eid in all_eids:
+                    try:
+                        r_st = urllib.request.Request(f"{ha_base_url}/api/states/{eid}", headers=headers)
+                        with urllib.request.urlopen(r_st, timeout=2, context=ctx) as r_s:
+                            st_obj = json.loads(r_s.read().decode())
+                            unit = st_obj.get("attributes", {}).get("unit_of_measurement", "")
+                            val = st_obj.get("state", "--")
+                            states_map[eid] = f"{val} {unit}".strip()
+                    except Exception:
+                        states_map[eid] = "onbekend"
+
+                for s in ha_sources:
+                    s["live_state"] = states_map.get(s["entity_id"], "--")
+                for t in ha_targets:
+                    t["live_state"] = states_map.get(t["entity_id"], "--")
+
             self._send_json({
+                "homeassistant": {
+                    "status": ha_status,
+                    "url": ha_base_url,
+                    "version": ha_version,
+                    "location": ha_location,
+                    "latency_ms": ha_latency_ms,
+                    "sources": ha_sources,
+                    "targets": ha_targets,
+                    "total_sources": len(ha_sources),
+                    "total_targets": len(ha_targets)
+                },
                 "influxdb_connections": idb_conns,
                 "mqtt_connections": mq_conns,
                 "influxdb": idb_conns[0] if idb_conns else {},
@@ -1555,6 +1645,35 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
         body = self._read_json_body()
+
+        # INFRASTRUCTURE: Test Home Assistant Core
+        if path == "/api/infrastructure/homeassistant/test":
+            ha_token = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASS_TOKEN")
+            ha_base_url = "http://supervisor/core" if os.environ.get("SUPERVISOR_TOKEN") else (os.environ.get("HASS_URL") or "https://hass.b3rg.nl:8123")
+            if not ha_token:
+                self._send_json({"status": "error", "message": "Geen Supervisor of HASS token gevonden"}, 400)
+                return
+            try:
+                headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                t0 = time.time()
+                req = urllib.request.Request(f"{ha_base_url}/api/config", headers=headers)
+                with urllib.request.urlopen(req, timeout=4, context=ctx) as r:
+                    data = json.loads(r.read().decode())
+                    lat = round((time.time() - t0) * 1000, 1)
+                    self._send_json({
+                        "status": "success",
+                        "latency_ms": lat,
+                        "version": data.get("version"),
+                        "location": data.get("location_name"),
+                        "message": f"Home Assistant Core verbonden! Latency: {lat}ms, Versie: {data.get('version')}"
+                    })
+                    return
+            except Exception as e:
+                self._send_json({"status": "error", "message": f"Fout bij verbinden met Home Assistant: {str(e)}"}, 500)
+                return
 
         # INFRASTRUCTURE: Test InfluxDB
         if path == "/api/infrastructure/influxdb/test":
@@ -2160,7 +2279,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.35.4</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.36.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2712,6 +2831,27 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </div>
                 </div>
 
+                <!-- SECTION 0: HOME ASSISTANT CORE (BRON & DOEL) -->
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h2 class="text-base font-bold text-white flex items-center gap-2">
+                                <span>Home Assistant Core Integratie</span>
+                                <span class="text-xs font-normal text-cyan-400">(Bi-directioneel: Bron van sensoren & Doel van aansturing)</span>
+                            </h2>
+                            <p class="text-xs text-slate-400">Verbindt direct met de interne Home Assistant Supervisor API voor live entiteiten en apparaat-actuatoren.</p>
+                        </div>
+                        <button onclick="testHomeAssistantConnection()" class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-xl shadow transition-all flex items-center gap-1.5">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                            <span>HA Verbinding Testen</span>
+                        </button>
+                    </div>
+                    <div id="ha-conn-container">
+                        <!-- Loaded dynamically via loadInfrastructure() -->
+                    </div>
+                </div>
+
+                <!-- SECTION 1: INFLUXDB TIJDREEKS INSTANTIES -->
                 <div class="space-y-4">
                     <div class="flex justify-between items-center">
                         <div>
@@ -3590,6 +3730,91 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 cachedInfra = await infRes.json();
                 const stat = await statRes.json();
 
+                // Render Home Assistant Core Card (Bi-directional: Bron & Doel)
+                const haData = cachedInfra.homeassistant || {};
+                const haContainer = document.getElementById('ha-conn-container');
+                if (haContainer) {
+                    const isConnected = haData.status === 'connected';
+                    const statusBadge = isConnected 
+                        ? `<span class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-800 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Verbonden (${haData.latency_ms}ms)</span>`
+                        : `<span class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-semibold bg-red-950/80 text-red-400 border border-red-800">Verbroken</span>`;
+
+                    const sourcesHtml = (haData.sources || []).map(s => `
+                        <div class="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-[#0e1422] border border-slate-800/60">
+                            <div class="truncate mr-2">
+                                <span class="text-white font-medium block truncate">${s.device_name}</span>
+                                <span class="text-[10px] text-cyan-400 font-mono block truncate">${s.entity_id}</span>
+                            </div>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-800 flex-shrink-0">
+                                ${s.live_state || '--'}
+                            </span>
+                        </div>
+                    `).join('');
+
+                    const targetsHtml = (haData.targets || []).map(t => `
+                        <div class="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-[#0e1422] border border-slate-800/60">
+                            <div class="truncate mr-2">
+                                <span class="text-white font-medium block truncate">${t.device_name}</span>
+                                <span class="text-[10px] text-pink-400 font-mono block truncate">${t.entity_id}</span>
+                            </div>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold ${(t.live_state === 'on' || t.live_state === 'true') ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800' : 'bg-slate-800 text-slate-300 border border-slate-700'} flex-shrink-0">
+                                ${t.live_state || '--'}
+                            </span>
+                        </div>
+                    `).join('');
+
+                    haContainer.innerHTML = `
+                        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-lg space-y-4">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1E293B] pb-3">
+                                <div>
+                                    <h4 class="font-bold text-white text-sm flex items-center gap-2">
+                                        <span>Home Assistant Core API</span>
+                                        <span class="px-1.5 py-0.5 rounded text-[9px] bg-cyan-900/60 text-cyan-300 border border-cyan-800 font-mono">INGEBOUWD (HAOS)</span>
+                                        <span class="text-[11px] text-slate-400 font-normal">(${haData.location || 'WeidHuis'} · v${haData.version || '2026.x'})</span>
+                                    </h4>
+                                    <p class="text-[11px] text-cyan-300 font-mono mt-0.5">${haData.url}</p>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    ${statusBadge}
+                                    <button onclick="testHomeAssistantConnection()" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg flex items-center gap-1 border border-slate-700 transition">
+                                        <svg class="w-3 h-3 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                        <span>Testen</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Bi-directional split grid: BRON vs DOEL -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <!-- BRON (DATA-INNAME) -->
+                                <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800/80 space-y-2.5">
+                                    <div class="flex items-center justify-between border-b border-slate-800/60 pb-1.5">
+                                        <span class="text-xs font-bold text-cyan-400 flex items-center gap-1.5">
+                                            <span>📥 Data-Bron (Sensor Inname)</span>
+                                        </span>
+                                        <span class="text-[10px] font-mono text-slate-400">${haData.total_sources || 0} actieve sensoren</span>
+                                    </div>
+                                    <div class="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                                        ${sourcesHtml || '<div class="text-xs text-slate-500 py-2">Geen bronnen geconfigureerd</div>'}
+                                    </div>
+                                </div>
+
+                                <!-- DOEL (APPARAAT AANSTURING) -->
+                                <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800/80 space-y-2.5">
+                                    <div class="flex items-center justify-between border-b border-slate-800/60 pb-1.5">
+                                        <span class="text-xs font-bold text-pink-400 flex items-center gap-1.5">
+                                            <span>📤 Aansturing Doel (Actuatoren & Relais)</span>
+                                        </span>
+                                        <span class="text-[10px] font-mono text-slate-400">${haData.total_targets || 0} schakelbare doelen</span>
+                                    </div>
+                                    <div class="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                                        ${targetsHtml || '<div class="text-xs text-slate-500 py-2">Geen doelen geconfigureerd</div>'}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
                 // Render InfluxDB Connections Cards
                 const infContainer = document.getElementById('influx-conns-container');
                 infContainer.innerHTML = '';
@@ -3677,6 +3902,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 }
             } catch (e) {
                 console.error('Error loading infrastructure:', e);
+            }
+        }
+
+        async function testHomeAssistantConnection() {
+            try {
+                const res = await fetch('./api/infrastructure/homeassistant/test', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert('✅ ' + data.message);
+                } else {
+                    alert('❌ Fout: ' + data.message);
+                }
+                loadInfrastructure();
+            } catch (e) {
+                alert('❌ Fout bij testen HA verbinding: ' + e);
             }
         }
 
