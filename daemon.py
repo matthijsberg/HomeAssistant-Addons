@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.40.2
+Version: 0.40.3
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1169,7 +1169,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.40.2",
+                "version": "0.40.3",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1463,44 +1463,33 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             except Exception as e_m:
                 print(f"Warning fetching Open-Meteo forecast: {e_m}")
 
-            # 3. Load 7x24 Learned Hourly Unallocated Consumption Profile (P1 - Solar - Heatpump)
-            profile_matrix = {}
-            for prof_cand in [
-                Path(__file__).parent / "data" / "unallocated_load_profile.json",
-                Path("/config/unallocated_load_profile.json"),
-                Path("/config/addons/open-hems/data/unallocated_load_profile.json"),
-                Path("/config/projects/energy-scheduler/data/unallocated_load_profile.json"),
-                Path("/opt/open-hems/data/unallocated_load_profile.json"),
-                Path("/data/unallocated_load_profile.json")
-            ]:
-                if prof_cand.exists():
-                    try:
-                        with open(prof_cand) as fp:
-                            profile_matrix = json.load(fp).get("profile_watts", {})
-                        break
-                    except Exception as e_p:
-                        print(f"Warning loading unallocated load profile from {prof_cand}: {e_p}")
+            # 3. Load 7x96 Learned Quarters & Hybrid Physics Model
+            grid_96 = []
+            if GLOBAL_MODEL and GLOBAL_MODEL.profile:
+                grid_96 = GLOBAL_MODEL.profile.get("profile_96_quarters", [])
 
-            # Build rolling timeline (24 slots for 1h, 96 slots for 15m)
-            labels = []
-            prices = []
-            solar = []
-            unallocated = []
-            boiler = []
-            heating = []
-            battery_charge = []
-            advices = []
-
+            # Interpolate Open-Meteo Hourly Solar to 15-minute quarters
+            # Build continuous solar map and temp map per 15-minute slot
             total_slots = 96 if is_15m else 24
             step_mins = 15 if is_15m else 60
             start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
             base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
 
+            labels = []
+            prices = []
+            solar = []
+            unallocated = []
+            boiler = [0.0] * total_slots
+            heating = [0.0] * total_slots
+            battery_charge = [0.0] * total_slots
+            advices = [""] * total_slots
             timeline_items = []
+
             for i in range(total_slots):
                 dt_slot = base_dt + timedelta(minutes=step_mins * i)
                 k_full = dt_slot.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
                 k_hour = dt_slot.strftime("%Y-%m-%d %H:00")
+                k_next_hour = (dt_slot + timedelta(hours=1)).strftime("%Y-%m-%d %H:00")
 
                 if i == 0:
                     lbl = dt_slot.strftime("Nu (%H:%M)" if is_15m else "Nu (%H:00)")
@@ -1510,68 +1499,79 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     lbl = dt_slot.strftime("%H:%M" if is_15m else "%H:00")
 
                 p_val = prices_map.get(k_full, prices_map.get(k_hour, 0.28))
-                s_val = solar_map.get(k_hour, 0.0)
-                t_val = temp_map.get(k_hour, 18.0)
+                
+                # Solar interpolation across quarters
+                s_h0 = solar_map.get(k_hour, 0.0)
+                s_h1 = solar_map.get(k_next_hour, s_h0)
+                frac = (dt_slot.minute / 60.0) if is_15m else 0.0
+                s_val = round(max(0.0, s_h0 + (s_h1 - s_h0) * frac), 2)
 
-                wd_str = str(dt_slot.weekday())
-                hr_idx = dt_slot.hour
-                unalloc_w = profile_matrix.get(wd_str, [350] * 24)[hr_idx] if profile_matrix else 350
+                t_h0 = temp_map.get(k_hour, 16.0)
+                t_h1 = temp_map.get(k_next_hour, t_h0)
+                t_val = round(t_h0 + (t_h1 - t_h0) * frac, 1)
+
+                # Unallocated load from exact 7x96 matrix
+                dow = dt_slot.weekday()
+                q_idx = dt_slot.hour * 4 + dt_slot.minute // 15
+                if grid_96 and len(grid_96) > dow and len(grid_96[dow]) > q_idx:
+                    unalloc_w = grid_96[dow][q_idx]
+                elif GLOBAL_MODEL:
+                    unalloc_w = GLOBAL_MODEL.predict_unallocated_w(dt_slot)
+                else:
+                    unalloc_w = 300.0
+
                 unalloc_kw = round(float(unalloc_w) / 1000.0, 2)
 
                 labels.append(lbl)
                 prices.append(p_val)
                 solar.append(s_val)
                 unallocated.append(unalloc_kw)
-                boiler.append(0.0)
-                heating.append(0.0)
-                battery_charge.append(0.0)
-                advices.append("")
                 timeline_items.append({"idx": i, "dt": dt_slot, "key": k_full, "label": lbl, "price": p_val, "solar": s_val, "temp": t_val})
 
-            # 4. Plan Space Heating (CV) with Summer Lockout & Night Setback Guards
-            mean_outdoor_temp = sum(it["temp"] for it in timeline_items) / len(timeline_items) if timeline_items else 18.0
-            max_outdoor_temp = max(it["temp"] for it in timeline_items) if timeline_items else 20.0
-            summer_lockout_mean = float(cfg.get("space_heating", {}).get("summer_lockout_mean_temp", 15.0))
-            summer_lockout_max = float(cfg.get("space_heating", {}).get("summer_lockout_max_temp", 18.0))
-            is_summer_lockout = (mean_outdoor_temp >= summer_lockout_mean or max_outdoor_temp >= summer_lockout_max or now_ams.month in [5, 6, 7, 8, 9])
+            # 4. Plan Space Heating (CV) with calibrated 2R1C building model
+            mean_outdoor_temp = sum(it["temp"] for it in timeline_items) / len(timeline_items) if timeline_items else 16.0
+            is_summer_lockout = (mean_outdoor_temp >= 16.0 or now_ams.month in [6, 7, 8])
 
             for it in timeline_items:
                 i = it["idx"]
                 if is_summer_lockout:
                     heating[i] = 0.0
                 else:
-                    # Active heating season: space heating modulated during waking/day hours, night setback at night
-                    is_night = it["dt"].hour < 6 or it["dt"].hour >= 23
-                    target_temp = 17.5 if is_night else 20.0
-                    if it["temp"] < (target_temp - 2.0):
-                        cop = 4.2
-                        heat_kw = round(max(0.0, (target_temp - it["temp"]) * 0.18 / cop), 2)
-                        heating[i] = heat_kw
+                    if GLOBAL_MODEL:
+                        h_res = GLOBAL_MODEL.predict_space_heating_w(it["dt"], t_outdoor_c=it["temp"])
+                        heating[i] = round(h_res.get("electrical_w", 0.0) / 1000.0, 2)
                     else:
-                        heating[i] = 0.0
+                        is_night = it["dt"].hour < 6 or it["dt"].hour >= 23
+                        target_temp = 17.5 if is_night else 20.0
+                        if it["temp"] < (target_temp - 2.0):
+                            heating[i] = round(max(0.0, (target_temp - it["temp"]) * 0.18 / 4.2), 2)
 
-            # 5. Plan Hot Water Generation (SWW Boiler 350L) with Solar Priority
-            daylight_slots = [it for it in timeline_items if 9 <= it["dt"].hour <= 17]
-            solar_rich_slots = [it for it in daylight_slots if it["solar"] >= 1.0]
+            # 5. Plan Hot Water Generation (SWW Boiler 350L): Real 45-min Run (3 quarters)
+            daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
+            solar_rich_slots = [it for it in daylight_slots if it["solar"] >= 1.2]
             best_sww_slot = None
+
             if solar_rich_slots:
-                # Prioritize peak solar production for free self-consumption
                 best_sww_slot = max(solar_rich_slots, key=lambda x: x["solar"])
-                sww_idx = best_sww_slot["idx"]
-                boiler[sww_idx] = 1.2  # 1.2 kW electrical (~3.6 kW thermal for 350L tank)
-                advices[sww_idx] = f"♨️ SWW Boiler 350L Run: 100% Zonne-opwek ({best_sww_slot['solar']:.1f} kW zon) om {best_sww_slot['label']}"
+                sww_start_idx = best_sww_slot["idx"]
+                reason = f"100% Zonne-opwek ({best_sww_slot['solar']:.1f} kW zon)"
             elif daylight_slots:
-                # Shoulder day: pick slot with best combination of solar and price
                 best_sww_slot = min(daylight_slots, key=lambda x: (x["price"] - (x["solar"] * 0.15)))
-                sww_idx = best_sww_slot["idx"]
-                boiler[sww_idx] = 1.2
-                advices[sww_idx] = f"♨️ SWW Boiler 350L Run: Laag tarief (€{best_sww_slot['price']:.3f}/kWh) & {best_sww_slot['solar']:.1f} kW zon"
+                sww_start_idx = best_sww_slot["idx"]
+                reason = f"Laag tarief (€{best_sww_slot['price']:.3f}) & {best_sww_slot['solar']:.1f} kW zon"
             else:
                 best_sww_slot = min(timeline_items, key=lambda x: x["price"])
-                sww_idx = best_sww_slot["idx"]
-                boiler[sww_idx] = 1.2
-                advices[sww_idx] = f"♨️ SWW Boiler 350L Run: Laagste EPEX tarief (€{best_sww_slot['price']:.3f}/kWh)"
+                sww_start_idx = best_sww_slot["idx"]
+                reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh)"
 
+            slots_to_fill = 3 if is_15m else 1  # 3 x 15m = 45 min run
+            for k in range(slots_to_fill):
+                target_slot = sww_start_idx + k
+                if target_slot < total_slots:
+                    boiler[target_slot] = 1.6  # 1.6 kW electrical compressor run
+                    advices[target_slot] = f"♨️ SWW Boiler 350L Run: {reason}"
+
+            
             # 6. Plan Battery Dispatch: ONLY IF BATTERY IS PHYSICALLY INSTALLED OR SIMULATION EXPLICITLY ACTIVATED
             battery_discharge = [0.0] * total_slots
             bat_msg = ""
@@ -2502,7 +2502,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.40.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.40.3</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -6704,59 +6704,71 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const canvas = document.getElementById('chart-model-decomposition');
             if (!canvas) return;
             try {
-                const res = await fetch('/api/model/decomposition');
-                const d = await res.json();
-                if (!d || !d.labels) return;
+                // Fetch the exact same chart data as Analytics tab!
+                const res = await fetch('./api/schedule/chart-data?resolution=15m');
+                const data = await res.json();
+                if (!data || !data.labels) return;
 
-                if (modelDecompChartInstance) {
-                    modelDecompChartInstance.destroy();
-                    modelDecompChartInstance = null;
+                const existingChart = Chart.getChart(canvas);
+                if (existingChart) {
+                    existingChart.destroy();
                 }
 
+                const labels = data.labels;
+                const unallocArr = data.datasets.unallocated_kw || data.datasets.baseload_kw || [];
+                const heatingArr = data.datasets.heating_kw || [];
+                const boilerArr = data.datasets.boiler_kw || [];
+                const solarNegArr = data.datasets.solar_kw_neg || [];
+                const netPowerArr = data.datasets.net_power_kw || [];
+
                 const ctx = canvas.getContext('2d');
-                modelDecompChartInstance = new Chart(ctx, {
-                    type: 'line',
+                new Chart(ctx, {
+                    type: 'bar',
                     data: {
-                        labels: d.labels,
+                        labels: labels,
                         datasets: [
                             {
-                                label: 'Totaal Verwacht (W)',
-                                data: d.total_consumption_w,
+                                label: 'Netto Netafname',
+                                data: netPowerArr,
+                                type: 'line',
                                 borderColor: '#22D3EE',
                                 backgroundColor: 'transparent',
-                                borderWidth: 2.5,
-                                tension: 0.3,
-                                pointRadius: 0
+                                borderWidth: 2,
+                                tension: 0.2,
+                                pointRadius: 0,
+                                order: 1
                             },
                             {
-                                label: 'Ongedefinieerd (W)',
-                                data: d.unallocated_w,
-                                borderColor: '#3B82F6',
-                                backgroundColor: 'rgba(59, 130, 246, 0.25)',
-                                fill: true,
-                                borderWidth: 1.5,
-                                tension: 0.3,
-                                pointRadius: 0
+                                label: 'Ongedefinieerd (Huis)',
+                                data: unallocArr,
+                                backgroundColor: '#3B82F6',
+                                stack: 'consumption',
+                                borderRadius: 2,
+                                order: 2
                             },
                             {
-                                label: 'CV Verwarming (W)',
-                                data: d.heating_w,
-                                borderColor: '#EF4444',
-                                backgroundColor: 'rgba(239, 68, 68, 0.25)',
-                                fill: true,
-                                borderWidth: 1.5,
-                                tension: 0.3,
-                                pointRadius: 0
+                                label: 'CV Verwarming (Woning)',
+                                data: heatingArr,
+                                backgroundColor: '#EF4444',
+                                stack: 'consumption',
+                                borderRadius: 2,
+                                order: 3
                             },
                             {
-                                label: 'SWW Boiler 350L (W)',
-                                data: d.boiler_w,
-                                borderColor: '#F59E0B',
-                                backgroundColor: 'rgba(245, 158, 11, 0.4)',
-                                fill: true,
-                                borderWidth: 1.5,
-                                tension: 0.1,
-                                pointRadius: 0
+                                label: 'SWW Boiler 350L',
+                                data: boilerArr,
+                                backgroundColor: '#F59E0B',
+                                stack: 'consumption',
+                                borderRadius: 2,
+                                order: 4
+                            },
+                            {
+                                label: 'Zonnepanelen Opwek',
+                                data: solarNegArr,
+                                backgroundColor: '#10B981',
+                                stack: 'generation',
+                                borderRadius: 2,
+                                order: 5
                             }
                         ]
                     },
@@ -6773,25 +6785,29 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 padding: 10,
                                 callbacks: {
                                     label: function(c) {
-                                        return ` ${c.dataset.label}: ${Math.round(c.raw)} W`;
+                                        const val = c.raw;
+                                        if (val === 0 || val === -0) return null;
+                                        return ` ${c.dataset.label}: ${Math.abs(val).toFixed(2)} kW (${(Math.abs(val)*0.25).toFixed(2)} kWh)`;
                                     }
                                 }
                             }
                         },
                         scales: {
                             x: {
-                                grid: { color: 'rgba(30, 41, 59, 0.4)' },
-                                ticks: { color: '#64748B', font: { size: 10 }, maxTicksLimit: 12 }
+                                stacked: true,
+                                grid: { color: 'rgba(30, 41, 59, 0.3)' },
+                                ticks: { color: '#64748B', font: { size: 10 }, maxTicksLimit: 16 }
                             },
                             y: {
-                                grid: { color: 'rgba(30, 41, 59, 0.4)' },
-                                ticks: { color: '#64748B', font: { size: 10 }, callback: v => `${v} W` }
+                                stacked: true,
+                                grid: { color: 'rgba(30, 41, 59, 0.3)' },
+                                ticks: { color: '#64748B', font: { size: 10 }, callback: v => `${v} kW` }
                             }
                         }
                     }
                 });
             } catch (e) {
-                console.warn("Error rendering decomposition chart:", e);
+                console.warn("Error rendering unified decomposition chart:", e);
             }
         }
 
