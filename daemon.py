@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.32.0
+Version: 0.32.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1010,7 +1010,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.32.0",
+                "version": "0.32.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2124,7 +2124,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.32.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.32.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3956,15 +3956,22 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             const { chart, tooltip } = context;
             const tooltipEl = createOrGetTooltipEl(chart);
 
+            // On mobile / tap: don't hide immediately if user just tapped
             if (tooltip.opacity === 0) {
-                tooltipEl.style.opacity = '0';
+                if (!window.__tooltipPinned) {
+                    tooltipEl.style.opacity = '0';
+                    tooltipEl.style.pointerEvents = 'none';
+                }
                 return;
             }
 
             if (!tooltip.body || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
-                tooltipEl.style.opacity = '0';
+                if (!window.__tooltipPinned) tooltipEl.style.opacity = '0';
                 return;
             }
+
+            // Pin tooltip on active touch/click so user can comfortably read it
+            window.__tooltipPinned = true;
 
             const dataIndex = tooltip.dataPoints[0].dataIndex;
             const label = tooltip.title[0] || '';
@@ -3978,7 +3985,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const chartData = window.__lastPredictionData;
                 if (chartData) {
                     importPrice = (chartData.datasets?.prices_eur && chartData.datasets.prices_eur[dataIndex]) || 0.28;
-                    exportPrice = (chartData.export_prices_eur && chartData.export_prices_eur[dataIndex]) || max(0.0, importPrice * 0.45);
+                    exportPrice = (chartData.export_prices_eur && chartData.export_prices_eur[dataIndex]) || Math.max(0.0, importPrice * 0.45);
                     intervalH = chartData.interval_h || 1.0;
                 }
             } else {
@@ -3991,10 +3998,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             }
 
             let html = `
-                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2.5">
-                    <span class="font-bold text-white tracking-wide">${label}</span>
-                    <span class="text-[10px] text-cyan-300 font-semibold px-1.5 py-0.5 rounded bg-cyan-950/70 border border-cyan-800">
-                        €${importPrice.toFixed(3)}/kWh
+                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
+                    </div>
+                    <span class="text-[10px] text-cyan-300 font-mono font-semibold px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-800">
+                        Inkoop: €${importPrice.toFixed(3)}/kWh
                     </span>
                 </div>
                 <div class="space-y-1.5">
@@ -4007,17 +4017,17 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const ds = chart.data.datasets[dp.datasetIndex];
                 if (!ds) return;
                 const rawVal = dp.raw || 0;
-                const isLine = ds.type === 'line' || ds.borderDash;
+                const isLine = ds.type === 'line' || (ds.borderDash && ds.borderDash.length > 0);
                 const color = ds.borderColor || ds.backgroundColor;
 
-                // Visual indicator: line for lines, pill for bars
+                // Visual indicator: ACTUAL line for lines, pill for bars
                 let indicatorHtml = '';
                 if (ds.borderDash && ds.borderDash.length > 0) {
-                    indicatorHtml = `<span style="display:inline-block; width:16px; height:0; border-top:2px dashed ${color}; margin-right:6px; vertical-align:middle;"></span>`;
+                    indicatorHtml = `<span style="display:inline-block; width:18px; height:0; border-top:2px dashed ${color}; margin-right:8px; vertical-align:middle;"></span>`;
                 } else if (isLine) {
-                    indicatorHtml = `<span style="display:inline-block; width:16px; height:3px; background-color:${color}; border-radius:2px; margin-right:6px; vertical-align:middle;"></span>`;
+                    indicatorHtml = `<span style="display:inline-block; width:18px; height:3px; background-color:${color}; border-radius:2px; margin-right:8px; vertical-align:middle;"></span>`;
                 } else {
-                    indicatorHtml = `<span style="display:inline-block; width:10px; height:10px; background-color:${color}; border-radius:2px; margin-right:6px; vertical-align:middle;"></span>`;
+                    indicatorHtml = `<span style="display:inline-block; width:10px; height:10px; background-color:${color}; border-radius:2px; margin-right:8px; vertical-align:middle;"></span>`;
                 }
 
                 // Format power value
@@ -4052,7 +4062,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     const rev = kwhVal * exportPrice;
                     netCostVal -= rev;
                     hasNetCost = true;
-                    costBadge = `<span class="text-emerald-400 font-bold ml-auto">-€${rev.toFixed(2)}</span>`;
+                    costBadge = `<span class="text-emerald-400 font-bold ml-auto">-€${rev.toFixed(2)} opbr.</span>`;
                 } else if (dsLabel.includes('Opgewekt Gebruikt') || dsLabel.includes('Zon Direct Benut')) {
                     const sav = kwhVal * importPrice;
                     costBadge = `<span class="text-cyan-400 font-medium ml-auto">€${sav.toFixed(2)} besp.</span>`;
@@ -4062,20 +4072,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 } else if (dsLabel.includes('SWW') || dsLabel.includes('CV') || dsLabel.includes('Accu Laden') || dsLabel.includes('Ongedefinieerd')) {
                     const c = kwhVal * importPrice;
                     costBadge = `<span class="text-slate-400 ml-auto">€${c.toFixed(2)}</span>`;
-                } else if (dsLabel.includes('Stroomprijs')) {
-                    costBadge = `<span class="text-cyan-300 font-bold ml-auto">€${Number(rawVal).toFixed(4)}</span>`;
-                } else if (dsLabel.includes('Netto Grid Stroom') || dsLabel.includes('Verwacht Netto')) {
-                    // Covered in total
                 }
 
                 html += `
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
+                    <div class="flex items-center justify-between gap-3 text-xs">
+                        <div class="flex items-center truncate">
                             ${indicatorHtml}
-                            <span class="text-slate-300">${dsLabel}</span>
+                            <span class="text-slate-300 truncate">${dsLabel}</span>
                         </div>
-                        <div class="flex items-center gap-2">
-                            <span class="font-bold text-white">${rawVal < 0 ? '-' : ''}${powerStr}</span>
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            <span class="font-bold text-white font-mono">${rawVal < 0 ? '-' : ''}${powerStr}</span>
                             ${costBadge}
                         </div>
                     </div>
@@ -4087,9 +4093,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const netColor = isNetProfit ? 'text-emerald-400' : 'text-red-400';
                 const netLabel = isNetProfit ? 'Netto Opbrengst' : 'Netto Kosten';
                 html += `
-                    <div class="mt-2 pt-2 border-t border-slate-700/80 flex items-center justify-between font-bold text-xs">
+                    <div class="mt-2.5 pt-2 border-t border-slate-700/80 flex items-center justify-between font-bold text-xs font-mono">
                         <span class="text-slate-400 uppercase tracking-wider">${netLabel}:</span>
-                        <span class="${netColor} font-mono text-sm">${isNetProfit ? '+' : ''}€${Math.abs(netCostVal).toFixed(2)}</span>
+                        <span class="${netColor} text-sm">${isNetProfit ? '+' : ''}€${Math.abs(netCostVal).toFixed(2)}</span>
                     </div>
                 `;
             }
@@ -4097,22 +4103,25 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             html += `</div>`;
             tooltipEl.innerHTML = html;
 
-            // Position tooltip smoothly
+            // Position tooltip smoothly relative to viewport
             const canvasRect = chart.canvas.getBoundingClientRect();
-            let left = canvasRect.left + tooltip.caretX + 15;
-            let top = canvasRect.top + tooltip.caretY - 20;
+            let left = canvasRect.left + tooltip.caretX + 16;
+            let top = canvasRect.top + tooltip.caretY - 30;
 
             // Prevent overflowing window right
-            if (left + 240 > window.innerWidth) {
-                left = canvasRect.left + tooltip.caretX - 250;
+            if (left + 260 > window.innerWidth) {
+                left = canvasRect.left + tooltip.caretX - 270;
             }
-            // Prevent overflowing window bottom
-            if (top + 200 > window.innerHeight) {
-                top = window.innerHeight - 210;
-            }
+            if (left < 10) left = 10;
 
-            tooltipEl.style.left = `${Math.max(10, left)}px`;
-            tooltipEl.style.top = `${Math.max(10, top)}px`;
+            // Prevent overflowing window bottom
+            if (top + 220 > window.innerHeight) {
+                top = window.innerHeight - 230;
+            }
+            if (top < 10) top = 10;
+
+            tooltipEl.style.left = `${left}px`;
+            tooltipEl.style.top = `${top}px`;
             tooltipEl.style.opacity = '1';
         }
 
