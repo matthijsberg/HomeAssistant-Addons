@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.41.1
+Version: 0.42.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1193,7 +1193,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.41.1",
+                "version": "0.42.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2577,7 +2577,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.41.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.42.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3437,17 +3437,32 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </div>
                 </div>
 
-                <!-- CARD 2: 7x96 LEARNED UNALLOCATED CONSUMPTION MATRIX -->
+                <!-- CARD 2: 7x96 LEARNED HISTORICAL BEHAVIOR PROFILES (3-WAY SELECTOR) -->
                 <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-xl space-y-4">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
                         <div class="flex items-center gap-2.5">
-                            <span class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></span>
+                            <span class="w-3 h-3 rounded-full bg-blue-500 animate-pulse" id="profile-status-indicator"></span>
                             <div>
-                                <h3 class="text-sm font-bold text-white tracking-wide">Zelflerend Ongedefinieerd Verbruik (7×96 Kwartieren Matrix)</h3>
-                                <p class="text-[11px] text-slate-400">Geleerd leefprofiel per kwartier: nachtbodem (~260W), ochtendopstart, middagrust en avondpiek (~850-930W).</p>
+                                <h3 class="text-sm font-bold text-white tracking-wide" id="profile-section-title">Zelflerende Verbruiksbehoefte & Historische Profielen (7×96 Kwartieren)</h3>
+                                <p class="text-[11px] text-slate-400" id="profile-section-sub">Geleerd uit 374 dagen continue InfluxDB data in Open HEMS. Schakel tussen ongedefinieerd leefprofiel, warm tapwater en CV.</p>
                             </div>
                         </div>
-                        <span class="text-xs text-slate-400 font-mono" id="unalloc-last-update-badge">Laatst bijgewerkt: Vandaag</span>
+                        
+                        <!-- 3-WAY PROFILE SELECTOR BUTTONS -->
+                        <div class="flex items-center gap-1.5 bg-[#0B0F17] p-1 rounded-xl border border-slate-800 text-xs font-mono flex-wrap">
+                            <button onclick="switchProfileType('unallocated')" id="btn-prof-unallocated" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold transition flex items-center gap-1.5">
+                                <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+                                <span>Ongedefinieerd (Huis)</span>
+                            </button>
+                            <button onclick="switchProfileType('dhw')" id="btn-prof-dhw" class="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition flex items-center gap-1.5">
+                                <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+                                <span>Warm Tapwater (SWW 350L)</span>
+                            </button>
+                            <button onclick="switchProfileType('cv')" id="btn-prof-cv" class="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition flex items-center gap-1.5">
+                                <span class="w-2 h-2 rounded-full bg-red-400"></span>
+                                <span>CV Woningverwarming</span>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- DAY OF WEEK SELECTOR TABS -->
@@ -3464,19 +3479,19 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <!-- SELECTED DAY METRICS STRIP -->
                     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
                         <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
-                            <div class="text-[10px] text-slate-500 uppercase">Dag Gemiddelde</div>
+                            <div class="text-[10px] text-slate-400 uppercase font-bold" id="metric-title-1">Dag Gemiddelde</div>
                             <div class="text-base font-bold text-white mt-0.5" id="unalloc-metric-avg">-- W</div>
                         </div>
                         <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
-                            <div class="text-[10px] text-blue-400 uppercase">Nacht Stand-by (00-06u)</div>
+                            <div class="text-[10px] text-blue-400 uppercase font-bold" id="metric-title-2">Nacht Stand-by (00-06u)</div>
                             <div class="text-base font-bold text-blue-300 mt-0.5" id="unalloc-metric-night">-- W</div>
                         </div>
                         <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
-                            <div class="text-[10px] text-amber-400 uppercase">Ochtendpiek (07-09u)</div>
+                            <div class="text-[10px] text-amber-400 uppercase font-bold" id="metric-title-3">Ochtendpiek (07-11u)</div>
                             <div class="text-base font-bold text-amber-300 mt-0.5" id="unalloc-metric-morning">-- W</div>
                         </div>
                         <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
-                            <div class="text-[10px] text-pink-400 uppercase">Avondpiek (18-22u)</div>
+                            <div class="text-[10px] text-pink-400 uppercase font-bold" id="metric-title-4">Avondpiek (18-23u)</div>
                             <div class="text-base font-bold text-pink-300 mt-0.5" id="unalloc-metric-evening">-- W</div>
                         </div>
                     </div>
@@ -3484,11 +3499,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <!-- 96-QUARTERS BAR CHART -->
                     <div class="space-y-1.5 pt-1">
                         <div class="flex justify-between items-center text-[11px] text-slate-400 font-mono">
-                            <span>Kwartierse Verbruikscurve (96 kwartieren over 24 uur)</span>
-                            <span id="unalloc-selected-day-label">Geselecteerde dag</span>
+                            <span id="profile-chart-heading">Kwartierse Verbruikscurve (96 kwartieren over 24 uur)</span>
+                            <span id="unalloc-selected-day-label" class="text-slate-300 font-semibold">Geselecteerde dag</span>
                         </div>
-                        <div id="unalloc-hourly-bars" class="grid grid-cols-24 sm:grid-cols-48 md:grid-cols-96 gap-0.5 h-32 items-end bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800 overflow-x-auto">
-                            <!-- Bars rendered dynamically in JS -->
+                        <div id="unalloc-hourly-bars" class="flex gap-0.5 h-32 items-end bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800 overflow-x-auto w-full">
+                            <!-- 96 Bars rendered dynamically in JS -->
                         </div>
                     </div>
                 </div>
@@ -6695,6 +6710,33 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             }
         }
 
+        let currentProfileType = 'unallocated';
+
+        function switchProfileType(pType) {
+            currentProfileType = pType;
+            
+            // Update button styles
+            ['unallocated', 'dhw', 'cv'].forEach(t => {
+                const btn = document.getElementById('btn-prof-' + t);
+                if (btn) {
+                    if (t === pType) {
+                        const bgCol = t === 'unallocated' ? 'bg-blue-600' : (t === 'dhw' ? 'bg-amber-600' : 'bg-red-600');
+                        btn.className = `px-3 py-1.5 rounded-lg ${bgCol} text-white font-bold transition flex items-center gap-1.5 shadow`;
+                    } else {
+                        btn.className = 'px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition flex items-center gap-1.5';
+                    }
+                }
+            });
+
+            // Update status indicator dot color
+            const dot = document.getElementById('profile-status-indicator');
+            if (dot) {
+                dot.className = `w-3 h-3 rounded-full animate-pulse ${pType === 'unallocated' ? 'bg-blue-500' : (pType === 'dhw' ? 'bg-amber-500' : 'bg-red-500')}`;
+            }
+
+            renderUnallocDay(activeUnallocDay);
+        }
+
         function selectUnallocDay(dayIdx) {
             activeUnallocDay = dayIdx;
             renderUnallocDay(dayIdx);
@@ -6704,13 +6746,20 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             if (!cachedUnallocModel) return;
             const dayNames = cachedUnallocModel.day_names || ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
             
-            // Extract 96 quarters or 24 hours
+            // Select active dataset
             let quarters = [];
-            if (cachedUnallocModel.profile_96_quarters && cachedUnallocModel.profile_96_quarters[dayIdx]) {
-                quarters = cachedUnallocModel.profile_96_quarters[dayIdx];
-            } else if (cachedUnallocModel.profile_watts && cachedUnallocModel.profile_watts[String(dayIdx)]) {
-                const hArr = cachedUnallocModel.profile_watts[String(dayIdx)];
-                for (let h of hArr) { quarters.push(h); quarters.push(h); quarters.push(h); quarters.push(h); }
+            let colorClass = 'bg-blue-500 hover:bg-blue-400';
+            let unitLabel = 'W';
+
+            if (currentProfileType === 'dhw') {
+                quarters = cachedUnallocModel.dhw_profile_96_quarters?.[dayIdx] || [];
+                colorClass = 'bg-amber-500 hover:bg-amber-400';
+            } else if (currentProfileType === 'cv') {
+                quarters = cachedUnallocModel.cv_profile_96_quarters?.[dayIdx] || [];
+                colorClass = 'bg-red-500 hover:bg-red-400';
+            } else {
+                quarters = cachedUnallocModel.profile_96_quarters?.[dayIdx] || [];
+                colorClass = 'bg-blue-500 hover:bg-blue-400';
             }
 
             if (quarters.length === 0) return;
@@ -6719,31 +6768,64 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const btns = document.querySelectorAll('.unalloc-day-btn');
             btns.forEach((btn, idx) => {
                 if (idx === dayIdx) {
-                    btn.className = 'unalloc-day-btn px-3 py-1 rounded-lg border border-blue-500 bg-blue-600 text-white font-bold shadow';
+                    const bgActive = currentProfileType === 'unallocated' ? 'bg-blue-600 border-blue-500' : (currentProfileType === 'dhw' ? 'bg-amber-600 border-amber-500' : 'bg-red-600 border-red-500');
+                    btn.className = `unalloc-day-btn px-3 py-1 rounded-lg border ${bgActive} text-white font-bold shadow`;
                 } else {
                     btn.className = 'unalloc-day-btn px-3 py-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200 font-medium';
                 }
             });
 
-            // Update summary metrics
+            // Update summary metric titles and values
             const avg = Math.round(quarters.reduce((a, b) => a + b, 0) / quarters.length);
-            const nightMin = Math.min(...quarters.slice(0, 24)); // 00:00 - 06:00
-            const morningPeak = Math.max(...quarters.slice(28, 44)); // 07:00 - 11:00
-            const eveningPeak = Math.max(...quarters.slice(72, 92)); // 18:00 - 23:00
+            const totKwh = (quarters.reduce((a, b) => a + b, 0) * 0.25 / 1000).toFixed(2);
+            const maxVal = Math.max(...quarters);
+            const peakQ = quarters.indexOf(maxVal);
+            const peakTime = `${String(Math.floor(peakQ/4)).padStart(2,'0')}:${String((peakQ%4)*15).padStart(2,'0')}`;
 
-            if (document.getElementById('unalloc-metric-avg')) document.getElementById('unalloc-metric-avg').innerText = `${avg} W`;
-            if (document.getElementById('unalloc-metric-night')) document.getElementById('unalloc-metric-night').innerText = `${nightMin} W`;
-            if (document.getElementById('unalloc-metric-morning')) document.getElementById('unalloc-metric-morning').innerText = `${morningPeak} W`;
-            if (document.getElementById('unalloc-metric-evening')) document.getElementById('unalloc-metric-evening').innerText = `${eveningPeak} W`;
-            if (document.getElementById('unalloc-selected-day-label')) document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} Profiel (${avg} W gemiddeld)`;
+            if (currentProfileType === 'dhw') {
+                document.getElementById('metric-title-1').innerText = 'Dagbehoefte Warmte';
+                document.getElementById('unalloc-metric-avg').innerText = `${totKwh} kWh/dag`;
+                document.getElementById('metric-title-2').innerText = 'Stand-by Verlies (350L)';
+                document.getElementById('unalloc-metric-night').innerText = '1.92 kWh/dag';
+                document.getElementById('metric-title-3').innerText = 'Piek Opwarmmoment';
+                document.getElementById('unalloc-metric-morning').innerText = `${peakTime} (${Math.round(maxVal)} W)`;
+                document.getElementById('metric-title-4').innerText = 'Typische Laadduur';
+                document.getElementById('unalloc-metric-evening').innerText = '45 minuten';
+                document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} SWW Boiler Behoefte (${totKwh} kWh/dag)`;
+            } else if (currentProfileType === 'cv') {
+                const nightAvg = Math.round(quarters.slice(0, 24).reduce((a,b)=>a+b,0)/24);
+                const dayAvg = Math.round(quarters.slice(24, 92).reduce((a,b)=>a+b,0)/68);
+                document.getElementById('metric-title-1').innerText = 'Stookseizoen Behoefte';
+                document.getElementById('unalloc-metric-avg').innerText = `${totKwh} kWh/dag`;
+                document.getElementById('metric-title-2').innerText = 'Nachtverlaging (23-06u)';
+                document.getElementById('unalloc-metric-night').innerText = `${nightAvg} W`;
+                document.getElementById('metric-title-3').innerText = 'Ochtend Opstookpiek';
+                document.getElementById('unalloc-metric-morning').innerText = `${peakTime} (${Math.round(maxVal)} W)`;
+                document.getElementById('metric-title-4').innerText = 'Overdag Modulatie';
+                document.getElementById('unalloc-metric-evening').innerText = `${dayAvg} W gem`;
+                document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} CV Stookseizoen Profiel (${totKwh} kWh/dag)`;
+            } else {
+                const nightMin = Math.min(...quarters.slice(0, 24));
+                const morningPeak = Math.max(...quarters.slice(28, 44));
+                const eveningPeak = Math.max(...quarters.slice(72, 92));
+                document.getElementById('metric-title-1').innerText = 'Dag Gemiddelde';
+                document.getElementById('unalloc-metric-avg').innerText = `${avg} W`;
+                document.getElementById('metric-title-2').innerText = 'Nacht Stand-by (00-06u)';
+                document.getElementById('unalloc-metric-night').innerText = `${nightMin} W`;
+                document.getElementById('metric-title-3').innerText = 'Ochtendpiek (07-11u)';
+                document.getElementById('unalloc-metric-morning').innerText = `${morningPeak} W`;
+                document.getElementById('metric-title-4').innerText = 'Avondpiek (18-23u)';
+                document.getElementById('unalloc-metric-evening').innerText = `${eveningPeak} W`;
+                document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} Huisprofiel (${avg} W gemiddeld)`;
+            }
 
             // Render 96 bars
             const container = document.getElementById('unalloc-hourly-bars');
             if (container) {
                 container.innerHTML = '';
-                const maxW = Math.max(1000, ...quarters);
+                const displayMax = Math.max(100, ...quarters);
                 quarters.forEach((w, q) => {
-                    const barHeightPct = Math.round((w / maxW) * 100);
+                    const barHeightPct = Math.max(2, Math.round((w / displayMax) * 100));
                     const h = Math.floor(q / 4);
                     const m = (q % 4) * 15;
                     const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
@@ -6753,7 +6835,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         <div class="absolute -top-7 bg-slate-900 border border-slate-700 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-20 pointer-events-none">
                             ${timeStr} · ${Math.round(w)} W
                         </div>
-                        <div class="w-full bg-blue-500 hover:bg-blue-400 rounded-t transition-all" style="height: ${barHeightPct}%"></div>
+                        <div class="w-full ${colorClass} rounded-t transition-all" style="height: ${barHeightPct}%"></div>
                     `;
                     container.appendChild(col);
                 });
