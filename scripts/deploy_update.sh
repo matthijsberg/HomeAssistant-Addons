@@ -32,6 +32,12 @@ echo "✓ Snapshot saved at: ${SNAPSHOT_DIR}"
 
 # 1. Bump Version
 echo "Step 1: Bumping version (${BUMP_TYPE})..."
+
+# Pre-flight: Mandatory Bytecode Compilation & Syntax Check
+echo "Pre-flight: Verifying Python bytecode and syntax..."
+python3 -m py_compile "${ADDON_DIR}/daemon.py"
+echo "✓ Python bytecode compilation passed!"
+
 NEW_VER=$(python3 "${ADDON_DIR}/scripts/version_manager.py" bump "${BUMP_TYPE}")
 
 # 2. Run Pre-Commit Security & Secret Scanner
