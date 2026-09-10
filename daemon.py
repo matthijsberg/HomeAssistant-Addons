@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.40.5
+Version: 0.40.6
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1141,24 +1141,43 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/calibration/unallocated-model":
+            prof_data = {}
             if GLOBAL_MODEL and GLOBAL_MODEL.profile and GLOBAL_MODEL.profile.get("profile_96_quarters"):
-                prof_data = dict(GLOBAL_MODEL.profile)
+                grid_96 = GLOBAL_MODEL.profile.get("profile_96_quarters", [])
             else:
-                prof_path = Path("/config/unallocated_load_profile.json")
-                if not prof_path.exists():
-                    prof_path = Path(__file__).parent / "data" / "unallocated_load_profile.json"
-                prof_data = load_json(prof_path) if prof_path.exists() else {}
-            
-            # Ensure 7x24 profile_watts is present for backward compatibility
-            profile_watts_24 = {}
-            grid_96 = prof_data.get("profile_96_quarters", [])
-            for dow in range(len(grid_96)):
-                dow_q = grid_96[dow]
-                hourly_avgs = []
-                for h in range(24):
-                    chunk = dow_q[h*4:(h+1)*4]
-                    hourly_avgs.append(round(sum(chunk)/len(chunk)) if chunk else 300)
-                profile_watts_24[str(dow)] = hourly_avgs
+                grid_96 = []
+
+            for cand in [
+                Path(__file__).parent / "data" / "unallocated_load_profile.json",
+                Path("/config/unallocated_load_profile.json"),
+                Path("/homeassistant/unallocated_load_profile.json")
+            ]:
+                if cand.exists():
+                    d = load_json(cand)
+                    if d:
+                        prof_data = d
+                        if not grid_96 and d.get("profile_96_quarters"):
+                            grid_96 = d.get("profile_96_quarters", [])
+                        break
+
+            profile_watts_24 = prof_data.get("profile_watts", {})
+            if grid_96:
+                profile_watts_24 = {}
+                for dow in range(len(grid_96)):
+                    dow_q = grid_96[dow]
+                    hourly_avgs = []
+                    for h in range(24):
+                        chunk = dow_q[h*4:(h+1)*4]
+                        hourly_avgs.append(round(sum(chunk)/len(chunk)) if chunk else 300)
+                    profile_watts_24[str(dow)] = hourly_avgs
+            elif profile_watts_24:
+                grid_96 = []
+                for dow in range(7):
+                    h_arr = profile_watts_24.get(str(dow), [300] * 24)
+                    q_arr = []
+                    for h_val in h_arr:
+                        q_arr.extend([h_val, h_val, h_val, h_val])
+                    grid_96.append(q_arr)
 
             prof_data["profile_watts"] = profile_watts_24
             prof_data["profile_96_quarters"] = grid_96
@@ -1173,7 +1192,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.40.5",
+                "version": "0.40.6",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2506,7 +2525,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.40.5</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.40.6</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
