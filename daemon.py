@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.35.2
+Version: 0.35.3
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1030,7 +1030,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.35.2",
+                "version": "0.35.3",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2160,7 +2160,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.35.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.35.3</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5091,7 +5091,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const resVal = resSelect ? resSelect.value : '15m';
                 const res = await fetch('./api/analytics/electricity_prices?resolution=' + encodeURIComponent(resVal));
                 const data = await res.json();
-                window.__lastPredictionData = data;
+                window.__lastHistoricalData = data;
+                window.__lastHistoricalIntervalH = data.interval_h || (resParam === '15m' ? 0.25 : 1.0);
                 if (data.status !== 'success') {
                     console.error('EPEX prices load error:', data.message);
                     return;
@@ -5251,7 +5252,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const resParam = (powerProducersChartType === 'line' && powerProducersResolution === '1h') ? '1h' : powerProducersResolution;
                 const res = await fetch('./api/analytics/power_producers?range=' + encodeURIComponent(rangeVal) + '&resolution=' + encodeURIComponent(resParam));
                 const data = await res.json();
-                window.__lastPredictionData = data;
+                window.__lastHistoricalData = data;
+                window.__lastHistoricalIntervalH = data.interval_h || (resParam === '15m' ? 0.25 : 1.0);
                 if (data.status !== 'success') {
                     console.error('Power producers error:', data.message);
                     return;
@@ -5302,7 +5304,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const ctx = canvas.getContext('2d');
 
                 // === PURE ENERGY (kWh) STANDARDIZATION ===
-                const intervalH = window.__lastHistoricalIntervalH || 1.0;
+                const intervalH = data.interval_h || window.__lastHistoricalIntervalH || (resParam === '15m' ? 0.25 : 1.0);
 
                 // Convert instantaneous power (Watts) to actual interval energy (kWh = W * hours / 1000)
                 const toKwh = (arr) => (arr || []).map(w => Number(((w * intervalH) / 1000.0).toFixed(3)));
