@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.37.0
+Version: 0.38.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1039,7 +1039,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.37.0",
+                "version": "0.38.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2319,28 +2319,27 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <span>Kalibratie & Offsets</span>
                 </a>
 
-                <!-- LAAG 1: DATA & VERBINDINGEN (ONDERAAN) -->
+                <!-- INSTELLINGEN -->
                 <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                    <span>Laag 1: Data & Verbindingen</span>
+                    <span>Instellingen</span>
                 </div>
                 <a href="#devices" onclick="showTab('devices')" id="nav-devices" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
-                    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
-                    <span>Apparaten (Hardware Links)</span>
-                    <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-blue-900/40 text-blue-300 font-medium rounded border border-blue-800" id="badge-dev-count">0</span>
+                    <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
+                    <span>Apparaten</span>
+                    <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-blue-900/40 text-blue-300 font-medium rounded border border-blue-800" id="badge-dev-count">5</span>
                 </a>
                 <a href="#infrastructure" onclick="showTab('infrastructure')" id="nav-infrastructure" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
-                    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
-                    <span>Verbindingen & Opslag (DB & MQTT)</span>
-                    <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-slate-800 text-slate-300 font-medium rounded border border-slate-700" id="badge-infra-conns">2</span>
+                    <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    <span>Verbindingen</span>
                 </a>
-                <a href="#providers" onclick="showTab('providers')" id="nav-providers" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
-                    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
-                    <span>Open APIs (EPEX / Meteo)</span>
+                <a href="#data" onclick="showTab('data')" id="nav-data" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
+                    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+                    <span>Data</span>
                 </a></nav>
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.37.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.38.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2792,20 +2791,78 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 </div>
             </div>
 
+                        <!-- TAB: VERBINDINGEN (CONNECTORS: HA, MQTT & EXTERNE APIS) -->
             <div id="view-infrastructure" class="tab-content space-y-6">
+                <!-- SECTION 1: HOME ASSISTANT CORE (BRON & DOEL) -->
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h2 class="text-base font-bold text-white flex items-center gap-2">
+                                <span>Home Assistant Core Integratie</span>
+                                <span class="text-xs font-normal text-cyan-400">(Bi-directioneel: Bron van sensoren & Doel van aansturing)</span>
+                            </h2>
+                            <p class="text-xs text-slate-400">Verbindt direct met de interne Home Assistant Supervisor API voor live entiteiten en apparaat-actuatoren.</p>
+                        </div>
+                    </div>
+                    <div id="ha-conn-container">
+                        <!-- Loaded dynamically via loadInfrastructure() -->
+                    </div>
+                </div>
+
+                <!-- SECTION 2: MQTT BROKERS CRUD -->
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h2 class="text-base font-bold text-white flex items-center gap-2">
+                                <span>MQTT Message Brokers</span>
+                                <span class="text-xs font-normal text-amber-400">(Streaming data-inname en modbus topics)</span>
+                            </h2>
+                            <p class="text-xs text-slate-400">Verbind met lokale Mosquitto broker (core-mosquitto:1883) of externe gateways voor real-time meters.</p>
+                        </div>
+                        <button onclick="openMqttModal()" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-xl shadow transition-all">
+                            + MQTT Broker Toevoegen
+                        </button>
+                    </div>
+                    <div id="mqtt-conns-container" class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <!-- Loaded dynamically -->
+                    </div>
+                </div>
+
+                <!-- SECTION 3: EXTERNE DATA APIS & FEEDS (EPEX & METEO) -->
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h2 class="text-base font-bold text-white flex items-center gap-2">
+                                <span>Externe Data APIs & Feeds</span>
+                                <span class="text-xs font-normal text-purple-400">(Beurstarieven & Weersvoorspelling)</span>
+                            </h2>
+                            <p class="text-xs text-slate-400">Publieke data-interfaces voor dynamische stroomprijzen (EPEX Spot) en zonnestralingsvoorspellingen (Open-Meteo).</p>
+                        </div>
+                        <button onclick="loadProviders()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs rounded-lg font-medium">
+                            🔄 Verversen
+                        </button>
+                    </div>
+                    <div id="providers-container" class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <!-- Loaded dynamically via loadProviders() -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: DATA (DATABASES, PIPELINES & TELEMETRIE) -->
+            <div id="view-data" class="tab-content space-y-6">
                 <!-- Status & Telemetry Header Banner -->
                 <div class="bg-gradient-to-r from-emerald-950/80 via-[#0e1422] to-blue-950/80 border border-emerald-500/30 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div class="flex items-start sm:items-center gap-3 sm:gap-4">
                         <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xl sm:text-2xl shadow-[0_0_15px_rgba(16,185,129,0.2)] flex-shrink-0">
-                            🔌
+                            📊
                         </div>
                         <div class="min-w-0">
                             <div class="flex items-center gap-2 flex-wrap">
-                                <span class="text-xs uppercase font-bold text-emerald-400 tracking-wider">Laag 1 Dataverzameling & Connectiviteit</span>
-                                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">STANDALONE & MULTI-INSTANCE</span>
+                                <span class="text-xs uppercase font-bold text-emerald-400 tracking-wider">Tijdreeksdatabases & Datapipelines</span>
+                                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">100% PURE INFLUXDB</span>
                             </div>
                             <div class="text-xs sm:text-sm font-bold text-white mt-1 break-words" id="infra-summary-text">
-                                InfluxDB tijdreeksopslag & MQTT streaming gereed voor realtime datastromen.
+                                InfluxDB tijdreeksopslag & 60-seconden achtergrond accumulator actief.
                             </div>
                         </div>
                     </div>
@@ -2814,8 +2871,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </button>
                 </div>
 
-                <!-- SECTION 1: INFLUXDB CONNECTIONS CRUD -->
-                <!-- LIVE 60-SECOND TUMBLING WINDOW DATA PIPELINE & ACCUMULATOR MONITOR -->
+                <!-- 1. LIVE 60-SECOND TUMBLING WINDOW DATA PIPELINE & ACCUMULATOR MONITOR -->
                 <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-xl space-y-4">
                     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
                         <div class="flex items-center gap-2.5">
@@ -2867,15 +2923,15 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 font-mono text-xs pt-1">
                         <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800">
                             <div class="text-[10px] text-slate-500 uppercase">P1 Netto</div>
-                            <div class="text-sm font-bold text-slate-200 mt-0.5" id="live-net-grid">-- W</div>
+                            <div class="text-sm font-bold text-red-400 mt-0.5" id="live-p1-power">-- W</div>
                         </div>
                         <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800">
-                            <div class="text-[10px] text-amber-500/80 uppercase">Zon Productie</div>
-                            <div class="text-sm font-bold text-amber-400 mt-0.5" id="live-solar">-- W</div>
+                            <div class="text-[10px] text-emerald-500/80 uppercase">Zonnepanelen</div>
+                            <div class="text-sm font-bold text-emerald-400 mt-0.5" id="live-solar-power">-- W</div>
                         </div>
                         <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800">
-                            <div class="text-[10px] text-teal-500/80 uppercase">Direct Zonne-Verbruik</div>
-                            <div class="text-sm font-bold text-teal-400 mt-0.5" id="live-direct-solar">-- W</div>
+                            <div class="text-[10px] text-teal-500/80 uppercase">Thuisaccu</div>
+                            <div class="text-sm font-bold text-teal-400 mt-0.5" id="live-battery-power">0 W</div>
                         </div>
                         <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800">
                             <div class="text-[10px] text-pink-500/80 uppercase">Warmtepomp</div>
@@ -2892,27 +2948,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </div>
                 </div>
 
-                <!-- SECTION 0: HOME ASSISTANT CORE (BRON & DOEL) -->
-                <div class="space-y-4">
-                    <div class="flex justify-between items-center">
-                        <div>
-                            <h2 class="text-base font-bold text-white flex items-center gap-2">
-                                <span>Home Assistant Core Integratie</span>
-                                <span class="text-xs font-normal text-cyan-400">(Bi-directioneel: Bron van sensoren & Doel van aansturing)</span>
-                            </h2>
-                            <p class="text-xs text-slate-400">Verbindt direct met de interne Home Assistant Supervisor API voor live entiteiten en apparaat-actuatoren.</p>
-                        </div>
-                        <button onclick="testHomeAssistantConnection()" class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-xl shadow transition-all flex items-center gap-1.5">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                            <span>HA Verbinding Testen</span>
-                        </button>
-                    </div>
-                    <div id="ha-conn-container">
-                        <!-- Loaded dynamically via loadInfrastructure() -->
-                    </div>
-                </div>
-
-                <!-- SECTION 1: INFLUXDB TIJDREEKS INSTANTIES -->
+                <!-- 2. INFLUXDB TIJDREEKS INSTANTIES CRUD -->
                 <div class="space-y-4">
                     <div class="flex justify-between items-center">
                         <div>
@@ -2931,26 +2967,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </div>
                 </div>
 
-                <!-- SECTION 2: MQTT BROKERS CRUD -->
-                <div class="space-y-4">
-                    <div class="flex justify-between items-center">
-                        <div>
-                            <h2 class="text-base font-bold text-white flex items-center gap-2">
-                                <span>MQTT Message Brokers</span>
-                                <span class="text-xs font-normal text-slate-400">(Streaming data-inname en events)</span>
-                            </h2>
-                            <p class="text-xs text-slate-400">Verbind met lokale Home Assistant Mosquitto brokers, externe cloud brokers of omvormer gateways.</p>
-                        </div>
-                        <button onclick="openMqttModal()" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-xl shadow transition-all">
-                            + MQTT Broker Toevoegen
-                        </button>
-                    </div>
-                    <div id="mqtt-conns-container" class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                        <!-- Loaded dynamically -->
-                    </div>
-                </div>
-
-                <!-- SECTION 3: LIVE TELEMETRY STREAM STATUS CARD -->
+                <!-- 3. LIVE DATA-INNAME TELEMETRIE MONITOR -->
                 <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-6 shadow-xl space-y-4">
                     <div class="flex justify-between items-center">
                         <div>
@@ -2959,130 +2976,26 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         </div>
                         <span class="text-[11px] font-mono text-emerald-400" id="last-write-status">Gereed voor datastromen</span>
                     </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
-                        <div class="bg-[#0B0F17] border border-slate-800 p-4 rounded-xl">
-                            <span class="text-slate-500 block text-[10px] uppercase">Open HEMS Metingen</span>
-                            <span class="text-xl font-bold text-emerald-400 mt-1 block" id="stat-openhems-count">Actief</span>
-                            <span class="text-[10px] text-cyan-400">Database: openhems (Canonical HEMS Store)</span>
-                        </div>
-                        <div class="bg-[#0B0F17] border border-slate-800 p-4 rounded-xl">
-                            <span class="text-slate-500 block text-[10px] uppercase">Tumble Window Buffer</span>
-                            <span class="text-xl font-bold text-purple-400 mt-1 block">60s Gemiddelde</span>
-                            <span class="text-[10px] text-purple-300">Anti-Spike Filter Actief</span>
-                        </div>
-                        <div class="bg-[#0B0F17] border border-slate-800 p-4 rounded-xl">
-                            <span class="text-slate-500 block text-[10px] uppercase">Integriteit & Protocol</span>
-                            <span class="text-xl font-bold text-emerald-400 mt-1 block">Line Protocol</span>
-                            <span class="text-[10px] text-slate-400">Nanoseconde precisie</span>
-                        </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead>
+                                <tr class="text-slate-400 border-b border-[#1E293B] font-mono text-[10px]">
+                                    <th class="pb-2">TIJD</th>
+                                    <th class="pb-2">INSTANTIE</th>
+                                    <th class="pb-2">DATABASE</th>
+                                    <th class="pb-2">METING / TOPIC</th>
+                                    <th class="pb-2">WAARDE</th>
+                                    <th class="pb-2">STATUS</th>
+                                </tr>
+                            </thead>
+                            <tbody class="font-mono text-slate-300 divide-y divide-[#1E293B]/40" id="telemetry-table-body">
+                                <tr>
+                                    <td class="py-2.5 text-slate-500 text-[11px]" colspan="6">Verbinden met telemetriestroom...</td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-            </div>
-
-            <!-- TAB 1: 24H STACKED BAR GRAPH -->
-            <div id="view-dashboard" class="tab-content space-y-6">
-                <div id="recommendation-banner" class="bg-gradient-to-r from-emerald-950/80 via-[#0e1422] to-amber-950/80 border border-emerald-500/40 rounded-2xl p-4 shadow-xl flex items-center justify-between">
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xl shadow-[0_0_15px_rgba(16,185,129,0.3)]">💡</div>
-                        <div>
-                            <span class="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">Dynamisch Verbruiksadvies</span>
-                            <div class="text-sm font-bold text-white mt-0.5" id="banner-text">Bezig met laden...</div>
-                        </div>
-                    </div>
-                    <span class="px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40" id="banner-tag">OPTIMAL DISPATCH</span>
-                </div>
-
-                <div class="bg-[#0e1422] border border-[#1E293B] rounded-xl p-3.5 flex items-center gap-3 text-xs text-slate-300">
-                    <span class="text-base">🔋</span>
-                    <span id="battery-status-banner" class="font-mono text-emerald-400">Accu-beleid wordt geëvalueerd...</span>
-                </div>
-
-                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-800/80 pb-3">
-                        <div class="flex items-center gap-2.5">
-                            <span class="w-3 h-3 rounded-full bg-purple-500 animate-pulse"></span>
-                            <div>
-                                <h3 class="text-sm font-bold text-white tracking-wide">24-Uurs Vermogens- & Verbruiksprognose</h3>
-                                <p class="text-[11px] text-slate-400">Gestapeld verbruik (kW) t.o.v. zonne-opwek en dynamische stroomprijs</p>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2 text-xs flex-wrap">
-                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button onclick="setPredictionResolution('1h')" class="res-btn-1h px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
-                                <button onclick="setPredictionResolution('15m')" class="res-btn-15m px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
-                            </div>
-                            <span class="text-[10px] text-blue-400 font-mono bg-blue-950/60 px-2 py-0.5 rounded-md border border-blue-500/40" id="dash-prediction-unallocated-badge">Ongedefinieerd: 7x24</span>
-                            <span class="text-[10px] text-indigo-300 font-mono bg-indigo-950/70 px-2 py-0.5 rounded-md border border-indigo-500/40 font-bold" id="dash-prediction-total-kwh-badge">⚡ Verbruik: -- kWh</span>
-                            <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950/70 px-2 py-0.5 rounded-md border border-emerald-500/40 font-bold" id="dash-prediction-total-cost-badge">💶 Netto: €--</span>
-                            <span class="text-[10px] text-amber-400 font-mono bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-500/30 font-bold" id="dash-prediction-surplus-badge">☀️ Overschot: -- kWh</span>
-                        </div>
-                    </div>
-
-                    <div class="relative w-full h-[380px] sm:h-[420px]">
-                        <canvas id="hemsChart"></canvas>
-                    </div>
-
-                    <!-- Clean Wrapping Legend Underneath Canvas (Never overflows on mobile!) -->
-                    <div class="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-start gap-2.5 text-xs font-mono">
-                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-blue-500"></span> <span class="text-slate-300">Ongedefinieerd (+kW)</span></div>
-                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-pink-500"></span> <span class="text-slate-300">SWW (+kW)</span></div>
-                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-indigo-500"></span> <span class="text-slate-300">CV (+kW)</span></div>
-                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden (+kW)</span></div>
-                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-amber-400"></span> <span class="text-slate-300">Zon (-kW)</span></div>
-                        <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded bg-teal-400"></span> <span class="text-slate-300">Accu Ontladen (-kW)</span></div>
-                        <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-red-500"></span> <span class="text-red-400 font-bold">Netto Lijn</span></div>
-                        <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400">Prijs (€/kWh)</span></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- TAB 2: POLICIES CRUD & MULTI-DEVICE ORCHESTRATION -->
-            <div id="view-policies" class="tab-content space-y-6">
-                <!-- System-wide Multi-Device Constraints (Peak Shaving & Interlocks) -->
-                <div class="bg-gradient-to-r from-purple-950/60 via-[#0e1422] to-indigo-950/60 border border-purple-500/30 rounded-2xl p-5 shadow-xl">
-                    <div class="flex justify-between items-start mb-4">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400 text-xl">
-                                ⚖️
-                            </div>
-                            <div>
-                                <h3 class="text-sm font-bold text-white">Systeembrede Limieten & Peak Shaving (Multi-Device)</h3>
-                                <p class="text-xs text-slate-400">Beperkingen die over meerdere apparaten tegelijk gelden.</p>
-                            </div>
-                        </div>
-                        <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">BELEIDSREGELS</span>
-                    </div>
-                    
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
-                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
-                            <div class="text-[10px] text-slate-400 uppercase">⚡ Max Netafname (Peak Shaving)</div>
-                            <div class="text-base font-bold text-white mt-1">17.250 W <span class="text-xs text-slate-500">(3x25A)</span></div>
-                            <div class="text-[10px] text-emerald-400 mt-1">✓ Smoor laadpaal/accu bij pieken</div>
-                        </div>
-                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
-                            <div class="text-[10px] text-slate-400 uppercase">🔀 Hydraulische Uitsluiting</div>
-                            <div class="text-base font-bold text-white mt-1">CV Uit bij SWW Boost</div>
-                            <div class="text-[10px] text-emerald-400 mt-1">✓ Voorkomt 9 kW Backup Heater</div>
-                        </div>
-                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
-                            <div class="text-[10px] text-slate-400 uppercase">☀️ Zonne-Overschot Volgorde</div>
-                            <div class="text-base font-bold text-white mt-1">1. SWW → 2. Accu → 3. Net</div>
-                            <div class="text-[10px] text-purple-400 mt-1">✓ Maximale eigen consumptie</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex justify-between items-center pt-2">
-                    <div>
-                        <h2 class="text-base font-bold text-white">Beleidsregels per Archetype</h2>
-                        <p class="text-xs text-slate-400">Koppel apparaten aan shiftable, thermische of batterij-arbitrage policies.</p>
-                    </div>
-                    <button onclick="openPolicyModal()" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-xl shadow transition-all">
-                        + Nieuwe Policy Aanmaken
-                    </button>
-                </div>
-                <div id="policies-container" class="grid grid-cols-1 md:grid-cols-3 gap-5"></div>
             </div>
 
             <!-- TAB 3: APPARATEN CRUD (GROUPED PER CONNECTION TYPE) -->
@@ -3194,19 +3107,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 <div id="tariffs-container" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
             </div>
 
-            <!-- TAB 5: OPEN APIS & FEEDS -->
-            <div id="view-providers" class="tab-content space-y-4">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <h2 class="text-base font-bold text-white">Open API Providers & Omgevingsfeeds</h2>
-                        <p class="text-xs text-slate-400">Publieke en lokale databronnen voor beursprijzen, zonnestraling en weerscondities.</p>
-                    </div>
-                    <button onclick="loadProviders()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs rounded-lg font-medium">
-                        🔄 Verversen
-                    </button>
-                </div>
-                <div id="providers-container" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
-            </div>
+            <!-- APIs now integrated inside Verbindingen tab -->
 
             <!-- TAB 6: CALIBRATION & EXCLUSION WINDOWS -->
             <div id="view-calibration" class="tab-content space-y-6">
@@ -3834,13 +3735,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             if (link) link.classList.add('active');
 
             const titles = {
-                'analytics': ['Analyse & Rapportage (Laag 5)', 'Kostenbesparingen, COP seizoensrendementen en prognose-auditing.'], 'control': ['Veiligheid & Aansturing (Laag 4)', 'Hardware guardrails, compressor dwell-time status en Smart Grid relais.'], 'infrastructure': ['Verbindingen & Opslag (Laag 1)', 'Beheer InfluxDB en MQTT instanties voor tijdreeksopslag en streaming connectiviteit.'],
-                'dashboard': ['24h Verwachting & Gestapeld Verbruik', 'Gestapelde uurgrafiek: basislast, warmtepomp, accu en zonne-advies'],
-                'policies': ['Beleidsregels & Orchestratie (Policy Engine)', 'Definieer overkoepelend beleid op basis van kosten, zonne-opwek en comfortguardrails.'],
-                'devices': ['Apparaten & Hardware (Physical Resources)', 'Koppel Home Assistant entiteiten en technische limieten.'],
-                'tariffs': ['Energieleveranciers & Tariefstructuren', 'Beheer contracten (Powerpeers, Tibber, vast/dynamisch) en opslagen.'],
-                'providers': ['Standaard Open API Providers', 'Breed toepasbare publieke databronnen die het framework out-of-the-box ontsluit.'],
-                'calibration': ['Zelflerende Feedback & Sensor-Downtime', 'Beheer data-uitsluitingsmaskers en empirische gebouw-/dakparameters.']
+                'analytics': ['Analyse & Besparing', 'Kostenbesparingen, COP seizoensrendementen en prognose-auditing.'],
+                'dashboard': ['24h Planning', 'Gestapelde prognose: basislast, warmtepomp en zonne-advies.'],
+                'policies': ['Beleid & Policies', 'Orchestratie op basis van beurstarieven, zonne-opwek en comfortguardrails.'],
+                'tariffs': ['Energieleveranciers', 'Beheer contracten (Powerpeers dynamisch) en energiebelasting.'],
+                'calibration': ['Kalibratie & Offsets', 'Zelflerend 7×24 verbruiksprofiel, warmteverlies (UA) en sensor-uitsluitingsmaskers.'],
+                'devices': ['Apparaten', 'Beheer fysieke apparaten, meters en actuatoren gekoppeld via Home Assistant of MQTT.'],
+                'infrastructure': ['Verbindingen', 'Beheer externe verbindingen naar Home Assistant, MQTT brokers en externe APIs.'],
+                'data': ['Data', 'Beheer InfluxDB tijdreeksdatabases, dataretentie en live 60s data pipelines.']
             };
             const t = titles[tabId] || ['Open HEMS', ''];
             document.getElementById('header-title').innerText = t[0];
@@ -3855,9 +3757,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             if (tabId === 'control') loadControl();
             if (tabId === 'infrastructure') {
                 loadInfrastructure();
+                loadProviders();
+            }
+            if (tabId === 'data') {
+                loadInfrastructure();
                 loadPipelineStatus();
                 if (!pipelinePollInterval) pipelinePollInterval = setInterval(loadPipelineStatus, 10000);
-            } else {
+            } else if (tabId !== 'infrastructure') {
                 if (pipelinePollInterval) { clearInterval(pipelinePollInterval); pipelinePollInterval = null; }
             }
             if (tabId === 'dashboard') loadChartData();
