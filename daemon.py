@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.40.4
+Version: 0.40.5
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1141,10 +1141,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/calibration/unallocated-model":
-            prof_path = Path("/config/unallocated_load_profile.json")
-            if not prof_path.exists():
-                prof_path = Path(__file__).parent / "data" / "unallocated_load_profile.json"
-            prof_data = load_json(prof_path) if prof_path.exists() else {}
+            if GLOBAL_MODEL and GLOBAL_MODEL.profile and GLOBAL_MODEL.profile.get("profile_96_quarters"):
+                prof_data = dict(GLOBAL_MODEL.profile)
+            else:
+                prof_path = Path("/config/unallocated_load_profile.json")
+                if not prof_path.exists():
+                    prof_path = Path(__file__).parent / "data" / "unallocated_load_profile.json"
+                prof_data = load_json(prof_path) if prof_path.exists() else {}
             
             # Ensure 7x24 profile_watts is present for backward compatibility
             profile_watts_24 = {}
@@ -1159,6 +1162,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             prof_data["profile_watts"] = profile_watts_24
             prof_data["profile_96_quarters"] = grid_96
+            prof_data["day_names"] = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag']
             prof_data["model_params"] = GLOBAL_MODEL.params if GLOBAL_MODEL else {}
             self._send_json(prof_data)
             return
@@ -1169,7 +1173,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.40.4",
+                "version": "0.40.5",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2502,7 +2506,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.40.4</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.40.5</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
