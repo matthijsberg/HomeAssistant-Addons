@@ -17,6 +17,22 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.32.2] — 2026-09-08 (Fix Physical Self-Consumption Overcounting & Synchronize Exact Spot Pricing in Tooltips)
+
+### Fixed
+- **Physical Solar Self-Consumption Overcounting:**
+  - Corrected interval energy balance formula from `self_cons = min(solar, verbruik)` to `self_cons = max(0.0, solar - terug)`.
+  - Guarantees `Afname + Opgewekt Gebruikt == Totaal Verbruik` strictly across all hours, resolving discrepancy where both Afname (262 W) and Opgewekt Gebruikt (896 W) were double-counted against total load (896 W).
+- **Exact Interval Spot Pricing in Hover Tooltips:**
+  - Fixed fallback bug where tooltip fell back to `€0.280/kWh` instead of reading the exact live price curve (`€0.2155/kWh`).
+  - Extracted exact interval price directly from the chart's `Stroomprijs All-in` dataset.
+  - Now accurately calculates costs: e.g. `896 W (0.90 kWh) * €0.2155/kWh = €0.19` (not €0.25).
+- **Power (W/kW) + Energy (kWh) Dual Display:**
+  - Added explicit energy in kWh alongside power in Watts in every tooltip row: e.g. `896 W (0.90 kWh) · €0.19`.
+  - Added interval duration badge in tooltip header (`1 uur` vs `15 min`).
+
+---
+
 ## [0.32.0] — 2026-09-08 (Perfect Center-Aligned Horizontal 0-Axis for Watt & Tariffs, and Active Custom Tooltips Across Charts)
 
 ### Added

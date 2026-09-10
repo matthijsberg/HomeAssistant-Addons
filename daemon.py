@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.32.1
+Version: 0.32.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -799,8 +799,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     terug = m.get("terug", 0.0)
                     solar = m.get("solar", 0.0)
                     
-                    verbruik = afname + max(0.0, solar - terug)
-                    self_cons = min(solar, verbruik)
+                    # Exact Physical Balance within interval:
+                    # Direct self-consumption from PV = solar generated that was consumed on-site (solar - export)
+                    self_cons = max(0.0, solar - terug)
+                    # Total real house consumption = grid import + direct solar self-consumption
+                    verbruik = afname + self_cons
                     
                     series_afname_pos.append(round(afname))
                     series_verbruik_pos.append(round(verbruik))
@@ -1010,7 +1013,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.32.1",
+                "version": "0.32.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2124,7 +2127,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.32.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.32.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3976,25 +3979,36 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             const dataIndex = tooltip.dataPoints[0].dataIndex;
             const label = tooltip.title[0] || '';
 
-            // Extract price and interval
-            let importPrice = 0.28;
-            let exportPrice = 0.11;
+            // Extract EXACT interval duration (hours)
             let intervalH = 1.0;
-
             if (isPrediction) {
-                const chartData = window.__lastPredictionData;
-                if (chartData) {
-                    importPrice = (chartData.datasets?.prices_eur && chartData.datasets.prices_eur[dataIndex]) || 0.28;
-                    exportPrice = (chartData.export_prices_eur && chartData.export_prices_eur[dataIndex]) || Math.max(0.0, importPrice * 0.45);
-                    intervalH = chartData.interval_h || 1.0;
-                }
+                intervalH = window.__lastPredictionIntervalH || 1.0;
             } else {
-                const histData = window.__lastHistoricalData;
-                if (histData) {
-                    importPrice = (histData.prices && histData.prices[dataIndex]) || 0.28;
-                    exportPrice = (histData.export_prices && histData.export_prices[dataIndex]) || 0.11;
-                    intervalH = histData.interval_h || 1.0;
-                }
+                intervalH = window.__lastHistoricalIntervalH || (chart.data.labels.length > 50 ? 0.25 : 1.0);
+            }
+
+            // Extract EXACT prices directly from the dataset or data cache (NEVER use hardcoded defaults)
+            let importPrice = 0.25;
+            let exportPrice = 0.10;
+
+            // Priority 1: Check if Stroomprijs dataset exists in the chart itself
+            const priceDataset = chart.data.datasets.find(ds => ds.label && ds.label.includes('Stroomprijs'));
+            if (priceDataset && priceDataset.data && priceDataset.data[dataIndex] !== undefined) {
+                importPrice = Number(priceDataset.data[dataIndex]);
+            } else if (isPrediction && window.__lastPredictionData?.datasets?.prices_eur) {
+                importPrice = Number(window.__lastPredictionData.datasets.prices_eur[dataIndex]);
+            } else if (!isPrediction && window.__lastHistoricalData?.prices) {
+                importPrice = Number(window.__lastHistoricalData.prices[dataIndex]);
+            }
+
+            // Priority 2: Extract export price (Powerpeers dynamic: kale beurs min verkoopopslag)
+            if (!isPrediction && window.__lastHistoricalData?.export_prices && window.__lastHistoricalData.export_prices[dataIndex] !== undefined) {
+                exportPrice = Number(window.__lastHistoricalData.export_prices[dataIndex]);
+            } else if (isPrediction && window.__lastPredictionData?.export_prices_eur && window.__lastPredictionData.export_prices_eur[dataIndex] !== undefined) {
+                exportPrice = Number(window.__lastPredictionData.export_prices_eur[dataIndex]);
+            } else {
+                // Approximate dynamic export: (All-in - BTW - Energiebelasting - Opslag)
+                exportPrice = Math.max(0.0, (importPrice / 1.21) - 0.11085 - 0.0121 - 0.00605);
             }
 
             let html = `
@@ -4002,9 +4016,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <div class="flex items-center gap-2">
                         <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
                         <span class="font-bold text-white text-xs tracking-wide">${label}</span>
+                        <span class="text-[10px] text-slate-400 font-mono">(${intervalH === 0.25 ? '15 min' : '1 uur'})</span>
                     </div>
                     <span class="text-[10px] text-cyan-300 font-mono font-semibold px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-800">
-                        Inkoop: €${importPrice.toFixed(3)}/kWh
+                        Inkoop: €${importPrice.toFixed(4)}/kWh
                     </span>
                 </div>
                 <div class="space-y-1.5">
@@ -4017,6 +4032,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const ds = chart.data.datasets[dp.datasetIndex];
                 if (!ds) return;
                 const rawVal = dp.raw || 0;
+                const dsLabel = ds.label || '';
                 const isLine = ds.type === 'line' || (ds.borderDash && ds.borderDash.length > 0);
                 const color = ds.borderColor || ds.backgroundColor;
 
@@ -4030,30 +4046,43 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     indicatorHtml = `<span style="display:inline-block; width:10px; height:10px; background-color:${color}; border-radius:2px; margin-right:8px; vertical-align:middle;"></span>`;
                 }
 
-                // Format power value
+                // Handle Stroomprijs row
+                if (dsLabel.includes('Stroomprijs') || dsLabel.includes('Tarief') || dsLabel.includes('Prijs')) {
+                    html += `
+                        <div class="flex items-center justify-between gap-3 text-xs">
+                            <div class="flex items-center truncate">
+                                ${indicatorHtml}
+                                <span class="text-slate-300 truncate">${dsLabel}</span>
+                            </div>
+                            <div class="flex items-center gap-1.5 flex-shrink-0">
+                                <span class="font-bold text-cyan-300 font-mono">€${Number(rawVal).toFixed(4)}/kWh</span>
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // Format power (W / kW) and energy (kWh in that interval)
                 const absVal = Math.abs(rawVal);
                 let powerStr = '';
                 let kwhVal = 0.0;
-                const dsLabel = ds.label || '';
 
-                if (dsLabel.includes('Stroomprijs') || dsLabel.includes('Tarief') || dsLabel.includes('Prijs')) {
-                    powerStr = `€${Number(rawVal).toFixed(4)}/kWh`;
-                } else if (isPrediction) {
+                if (isPrediction) {
                     // Prediction values are in kW
-                    powerStr = `${absVal >= 1.0 ? absVal.toFixed(2) + ' kW' : Math.round(absVal * 1000) + ' W'}`;
+                    powerStr = absVal >= 1.0 ? `${absVal.toFixed(2)} kW` : `${Math.round(absVal * 1000)} W`;
                     kwhVal = absVal * intervalH;
                 } else {
                     // Historical values are in W (or negative W)
-                    powerStr = `${absVal >= 1000 ? (absVal / 1000.0).toFixed(2) + ' kW' : Math.round(absVal) + ' W'}`;
+                    powerStr = absVal >= 1000 ? `${(absVal / 1000.0).toFixed(2)} kW` : `${Math.round(absVal)} W`;
                     kwhVal = (absVal / 1000.0) * intervalH;
                 }
+
+                const energyStr = `${kwhVal.toFixed(2)} kWh`;
 
                 // Calculate monetary cost / revenue per dataset type
                 let costBadge = '';
 
-                if (dsLabel.includes('Stroomprijs') || dsLabel.includes('Tarief') || dsLabel.includes('Prijs')) {
-                    costBadge = '';
-                } else if (dsLabel.includes('Afname')) {
+                if (dsLabel.includes('Afname')) {
                     const c = kwhVal * importPrice;
                     netCostVal += c;
                     hasNetCost = true;
@@ -4082,6 +4111,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         </div>
                         <div class="flex items-center gap-2 flex-shrink-0">
                             <span class="font-bold text-white font-mono">${rawVal < 0 ? '-' : ''}${powerStr}</span>
+                            <span class="text-[10px] text-slate-400 font-mono">(${energyStr})</span>
                             ${costBadge}
                         </div>
                     </div>
@@ -4109,14 +4139,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             let top = canvasRect.top + tooltip.caretY - 30;
 
             // Prevent overflowing window right
-            if (left + 260 > window.innerWidth) {
-                left = canvasRect.left + tooltip.caretX - 270;
+            if (left + 280 > window.innerWidth) {
+                left = canvasRect.left + tooltip.caretX - 290;
             }
             if (left < 10) left = 10;
 
             // Prevent overflowing window bottom
-            if (top + 220 > window.innerHeight) {
-                top = window.innerHeight - 230;
+            if (top + 240 > window.innerHeight) {
+                top = window.innerHeight - 250;
             }
             if (top < 10) top = 10;
 
@@ -4131,6 +4161,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const res = await fetch('./api/schedule/chart-data?resolution=' + encodeURIComponent(predictionResolution));
                 const data = await res.json();
                 window.__lastPredictionData = data;
+                window.__lastPredictionIntervalH = data.interval_h || (predictionResolution === '15m' ? 0.25 : 1.0);
 
                 const adv = data.banner_text || `Beste stroomtarief om ${data.cheapest_hour} (€${Number(data.cheapest_price_eur).toFixed(4)}/kWh)`;
                 if (document.getElementById('banner-text')) document.getElementById('banner-text').innerText = adv;
