@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.49.0
+Version: 0.49.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1195,21 +1195,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_live, now_ams)
                 traj = GLOBAL_DHW_MODEL.simulate_trajectory(t_live, now_ams, hours_ahead=24)
 
-                if not is_15m and traj and "timeline_labels" in traj:
+                if not is_15m and traj and "labels" in traj:
                     # Aggregate 96 quarters to 24 hours
                     h_labels, h_temps, h_demand = [], [], []
-                    raw_lbls = traj.get("timeline_labels", [])
-                    raw_temps = traj.get("projected_tank_temp_c", [])
-                    raw_dem = traj.get("expected_demand_kwh_th", [])
+                    raw_lbls = traj.get("labels", [])
+                    raw_temps = traj.get("temperatures_c", [])
+                    raw_dem = traj.get("demand_kwh_th", [])
                     for h_i in range(min(24, len(raw_lbls) // 4)):
                         idx = h_i * 4
                         h_labels.append(raw_lbls[idx][:2] + ":00")
                         h_temps.append(round(sum(raw_temps[idx:idx+4]) / 4.0, 1))
                         h_demand.append(round(sum(raw_dem[idx:idx+4]), 3))
                     traj = {
-                        "timeline_labels": h_labels,
-                        "projected_tank_temp_c": h_temps,
-                        "expected_demand_kwh_th": h_demand,
+                        "labels": h_labels,
+                        "temperatures_c": h_temps,
+                        "demand_kwh_th": h_demand,
                         "morning_dip_temp_c": traj.get("morning_dip_temp_c"),
                         "morning_dip_time": traj.get("morning_dip_time")
                     }
@@ -1384,7 +1384,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.49.0",
+                "version": "0.49.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2805,7 +2805,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.49.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.49.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -7783,7 +7783,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const canvas = document.getElementById('chart-dhw-temperature');
             if (!canvas) return;
             try {
-                const res = await fetch('./api/model/dhw-status');
+                const res = await fetch('./api/model/dhw-status?resolution=' + encodeURIComponent(predictionResolution));
                 if (!res.ok) return;
                 const data = await res.json();
                 const traj = data.trajectory || {};
@@ -7862,21 +7862,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         plugins: {
                             legend: { display: false },
                             tooltip: {
-                                backgroundColor: 'rgba(11, 15, 23, 0.95)',
-                                borderColor: '#1E293B',
-                                borderWidth: 1,
-                                padding: 10,
-                                callbacks: {
-                                    label: function(c) {
-                                        if (c.dataset.label.includes('Comfort') || c.dataset.label.includes('Doel')) return null;
-                                        if (c.dataset.yAxisID === 'y1') {
-                                            const lit = c.raw;
-                                            if (lit === 0) return null;
-                                            const kwhTh = (lit * 4.186 * 38 / 3600).toFixed(2);
-                                            return ` 🚿 Tapvraag: ${lit} Liter (${kwhTh} kWh thermisch)`;
-                                        }
-                                        return ` 🌡️ Boilertemperatuur: ${c.raw}°C`;
-                                    }
+                                enabled: false,
+                                external: function(context) {
+                                    customDhwTooltipHandler(context);
                                 }
                             }
                         },
