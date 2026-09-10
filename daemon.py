@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.39.2
+Version: 0.39.3
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1039,7 +1039,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.39.2",
+                "version": "0.39.3",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2360,7 +2360,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.39.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.39.3</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5495,9 +5495,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 document.getElementById('modal-dev-mqtt-json-key').value = '';
                 document.getElementById('modal-dev-mqtt-control-topic').value = '';
             }
-            document.getElementById('modal-dev-min-runtime').value = (dev && dev.parameters) ? (dev.parameters.min_runtime_minutes || '') : '';
-            document.getElementById('modal-dev-max-power').value = (dev && dev.parameters) ? (dev.parameters.max_power_w || '') : '';
-            document.getElementById('modal-dev-emergency-threshold').value = (dev && dev.parameters) ? (dev.parameters.emergency_threshold || '') : '';
+            const elMin = document.getElementById('modal-dev-min-runtime');
+            if (elMin) elMin.value = (dev && dev.parameters) ? (dev.parameters.min_runtime_minutes || '') : '';
+            const elMax = document.getElementById('modal-dev-max-power');
+            if (elMax) elMax.value = (dev && dev.parameters) ? (dev.parameters.max_power_w || '') : '';
+            const elEm = document.getElementById('modal-dev-emergency-threshold');
+            if (elEm) elEm.value = (dev && dev.parameters) ? (dev.parameters.emergency_threshold || '') : '';
             toggleDeviceSourceFields();
             document.getElementById('device-modal').classList.remove('hidden');
         }
@@ -5520,11 +5523,17 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 mqtt_power_topic: document.getElementById('modal-dev-mqtt-power-topic').value,
                 mqtt_power_json_key: document.getElementById('modal-dev-mqtt-json-key').value,
                 mqtt_control_topic: document.getElementById('modal-dev-mqtt-control-topic').value,
-                parameters: {
-                    min_runtime_minutes: parseInt(document.getElementById('modal-dev-min-runtime').value) || 0,
-                    max_power_w: parseFloat(document.getElementById('modal-dev-max-power').value) || 0,
-                    emergency_threshold: parseFloat(document.getElementById('modal-dev-emergency-threshold').value) || 0
-                }
+                parameters: (() => {
+                    const dev = (window.__cachedDevicesMap && window.__cachedDevicesMap[id]) || {};
+                    const p = (dev && dev.parameters) ? Object.assign({}, dev.parameters) : {};
+                    const elMin = document.getElementById('modal-dev-min-runtime');
+                    if (elMin && elMin.value) p.min_runtime_minutes = parseInt(elMin.value) || 0;
+                    const elMax = document.getElementById('modal-dev-max-power');
+                    if (elMax && elMax.value) p.max_power_w = parseFloat(elMax.value) || 0;
+                    const elEm = document.getElementById('modal-dev-emergency-threshold');
+                    if (elEm && elEm.value) p.emergency_threshold = parseFloat(elEm.value) || 0;
+                    return p;
+                })()
             };
             // Automatically construct/update canonical sensors and actuators based on entered entities
             const existingDev = (window.__cachedDevicesMap && window.__cachedDevicesMap[id]) || {};
