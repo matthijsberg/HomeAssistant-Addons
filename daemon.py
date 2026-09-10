@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.35.3
+Version: 0.35.4
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1030,7 +1030,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.35.3",
+                "version": "0.35.4",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2160,7 +2160,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.35.3</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.35.4</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4011,22 +4011,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             const { chart, tooltip } = context;
             const tooltipEl = createOrGetTooltipEl(chart);
 
-            // On mobile / tap: don't hide immediately if user just tapped
-            if (tooltip.opacity === 0) {
-                if (!window.__tooltipPinned) {
-                    tooltipEl.style.opacity = '0';
-                    tooltipEl.style.pointerEvents = 'none';
-                }
+            // Hide immediately when cursor moves away or outside graph area
+            if (tooltip.opacity === 0 || !tooltip.body || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
+                tooltipEl.style.opacity = '0';
+                tooltipEl.style.pointerEvents = 'none';
                 return;
             }
 
-            if (!tooltip.body || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
-                if (!window.__tooltipPinned) tooltipEl.style.opacity = '0';
-                return;
-            }
-
-            // Pin tooltip on active touch/click so user can comfortably read it
-            window.__tooltipPinned = true;
+            tooltipEl.style.opacity = '1';
 
             const dataIndex = tooltip.dataPoints[0].dataIndex;
             const label = tooltip.title[0] || '';
@@ -4503,19 +4495,33 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     window.chartInstance = chartInstance;
                 }
 
-                // Add document tap/click listener to dismiss tooltip when clicking outside canvas
+                // Add mouseleave & tap dismissal listeners to cleanly hide tooltip when leaving graph
                 if (!window.__tooltipDismissAttached) {
                     window.__tooltipDismissAttached = true;
-                    const dismissFn = (e) => {
-                        if (!e.target.closest('canvas')) {
-                            if (window.analyticsChartInstance && window.analyticsChartInstance.tooltip) {
-                                window.analyticsChartInstance.tooltip.setActiveElements([], { x: 0, y: 0 });
-                                window.analyticsChartInstance.update('none');
-                            }
+
+                    const hideTooltip = () => {
+                        const tip = document.getElementById('chartjs-custom-tooltip');
+                        if (tip) {
+                            tip.style.opacity = '0';
+                            tip.style.pointerEvents = 'none';
                         }
                     };
-                    document.addEventListener('click', dismissFn);
-                    document.addEventListener('touchstart', dismissFn, { passive: true });
+
+                    // Global pointer/click outside canvas dismisses tooltip
+                    document.addEventListener('pointerdown', (e) => {
+                        if (!e.target.closest('canvas')) hideTooltip();
+                    });
+
+                    // Canvas mouseleave listeners
+                    ['hemsChartAnalytics', 'hemsChart', 'powerProducersChart', 'electricityPricesChart'].forEach(id => {
+                        const c = document.getElementById(id);
+                        if (c) {
+                            c.addEventListener('mouseleave', hideTooltip);
+                            c.addEventListener('mouseout', (e) => {
+                                if (!c.contains(e.relatedTarget)) hideTooltip();
+                            });
+                        }
+                    });
                 }
             } catch (e) {
                 console.error('Chart load error:', e);
