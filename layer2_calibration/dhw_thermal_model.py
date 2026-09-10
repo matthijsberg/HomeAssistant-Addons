@@ -104,9 +104,14 @@ class DhwThermalModel:
         ambient_temp = 18.0  # indoor utility room / technical room temp
 
         current_temp = t_start_c
+        current_p05 = t_start_c  # Minimal tap usage (P05) - Upper boundary
+        current_p95 = t_start_c  # Heavy tap usage (P95) - Lower boundary
         min_projected_temp = t_start_c
         min_projected_slot_idx = 0
         min_projected_time = ""
+
+        temps_p05 = []
+        temps_p95 = []
 
         # Tracking morning dip (between 06:00 and 09:00 next day)
         morning_dip_temp = 99.0
@@ -118,31 +123,35 @@ class DhwThermalModel:
             dow = slot_dt.weekday()
             q_idx = slot_dt.hour * 4 + slot_dt.minute // 15
 
-            # Standby loss during 15 minutes (0.25h)
-            # Q_loss = UA * (T_tank - T_amb) * dt_hours / 1000  [kWh]
-            q_standby_kwh = (UA_TANK_W_PER_K * max(0.0, current_temp - ambient_temp) * 0.25) / 1000.0
-            dt_standby = q_standby_kwh / C_TANK_KWH_PER_C
-
-            # Tap draw-off demand
-            q_tap_th = self.get_learned_tap_kwh_th(dow, q_idx)
-            dt_tap = q_tap_th / C_TANK_KWH_PER_C
-
             # Heat pump addition (if active in this slot)
             q_hp_th = 0.0
             dt_hp = 0.0
             if i in heat_pump_schedule_slots:
-                # 1.6 kW electrical compressor run * 2.8 COP * 0.25h = ~1.12 kWh_th
                 q_hp_th = 1.6 * 2.8 * 0.25
                 dt_hp = q_hp_th / C_TANK_KWH_PER_C
 
-            # New temperature at end of 15 min
-            current_temp = max(15.0, min(T_TARGET_C + 2.0, current_temp - dt_standby - dt_tap + dt_hp))
+            # Tap draw-off demand: Normal (P50), Minimal (P05), Heavy (P95)
+            q_tap_th = self.get_learned_tap_kwh_th(dow, q_idx)
+            q_tap_p05 = q_tap_th * 0.25  # Light usage
+            q_tap_p95 = q_tap_th * 1.50  # Heavy usage (multiple long showers)
+
+            # Standby losses
+            dt_standby = ((UA_TANK_W_PER_K * max(0.0, current_temp - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
+            dt_standby_p05 = ((UA_TANK_W_PER_K * max(0.0, current_p05 - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
+            dt_standby_p95 = ((UA_TANK_W_PER_K * max(0.0, current_p95 - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
+
+            # Advance temperatures
+            current_temp = max(15.0, min(T_TARGET_C + 2.0, current_temp - dt_standby - (q_tap_th / C_TANK_KWH_PER_C) + dt_hp))
+            current_p05 = max(15.0, min(T_TARGET_C + 2.0, current_p05 - dt_standby_p05 - (q_tap_p05 / C_TANK_KWH_PER_C) + dt_hp))
+            current_p95 = max(15.0, min(T_TARGET_C + 2.0, current_p95 - dt_standby_p95 - (q_tap_p95 / C_TANK_KWH_PER_C) + dt_hp))
 
             # Usable heat above comfort minimum (40°C)
             q_usable = max(0.0, (current_temp - T_MIN_COMFORT_C) * C_TANK_KWH_PER_C)
 
             timeline_labels.append(lbl)
             temps.append(round(current_temp, 1))
+            temps_p05.append(round(current_p05, 1))
+            temps_p95.append(round(current_p95, 1))
             energy_usable_kwh.append(round(q_usable, 2))
             demand_kwh_th.append(round(q_tap_th, 3))
 
@@ -166,6 +175,8 @@ class DhwThermalModel:
             "initial_temp_c": t_start_c,
             "labels": timeline_labels,
             "temperatures_c": temps,
+            "temperatures_p05_c": temps_p05,
+            "temperatures_p95_c": temps_p95,
             "energy_usable_kwh": energy_usable_kwh,
             "demand_kwh_th": demand_kwh_th,
             "min_projected_temp_c": round(min_projected_temp, 1),

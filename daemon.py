@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.50.1
+Version: 0.51.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1197,18 +1197,24 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                 if not is_15m and traj and "labels" in traj:
                     # Aggregate 96 quarters to 24 hours
-                    h_labels, h_temps, h_demand = [], [], []
+                    h_labels, h_temps, h_p05, h_p95, h_demand = [], [], [], [], []
                     raw_lbls = traj.get("labels", [])
                     raw_temps = traj.get("temperatures_c", [])
+                    raw_p05 = traj.get("temperatures_p05_c", raw_temps)
+                    raw_p95 = traj.get("temperatures_p95_c", raw_temps)
                     raw_dem = traj.get("demand_kwh_th", [])
                     for h_i in range(min(24, len(raw_lbls) // 4)):
                         idx = h_i * 4
                         h_labels.append(raw_lbls[idx][:2] + ":00")
                         h_temps.append(round(sum(raw_temps[idx:idx+4]) / 4.0, 1))
+                        h_p05.append(round(sum(raw_p05[idx:idx+4]) / 4.0, 1))
+                        h_p95.append(round(sum(raw_p95[idx:idx+4]) / 4.0, 1))
                         h_demand.append(round(sum(raw_dem[idx:idx+4]), 3))
                     traj = {
                         "labels": h_labels,
                         "temperatures_c": h_temps,
+                        "temperatures_p05_c": h_p05,
+                        "temperatures_p95_c": h_p95,
                         "demand_kwh_th": h_demand,
                         "morning_dip_temp_c": traj.get("morning_dip_temp_c"),
                         "morning_dip_time": traj.get("morning_dip_time")
@@ -1384,7 +1390,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.50.1",
+                "version": "0.51.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2805,7 +2811,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.50.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.51.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3098,7 +3104,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 </div>
                             </div>
                             <div class="flex items-center gap-3 text-xs font-mono flex-wrap">
-                                <span class="flex items-center gap-1.5 text-amber-300"><span class="w-3 h-1 bg-amber-400 rounded"></span> Temperatuur (°C)</span>
+                                <span class="flex items-center gap-1.5 text-amber-300"><span class="w-3 h-1 bg-amber-400 rounded"></span> Verwacht (°C)</span>
+                                <span class="flex items-center gap-1.5 text-amber-200/80"><span class="w-3 h-2 bg-amber-400/20 border border-amber-400/40 rounded-sm"></span> Marge (P05–P95)</span>
                                 <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-0.5 border-b border-red-500 border-dashed"></span> Comfort 40°C</span>
                                 <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-0.5 border-b border-emerald-500 border-dashed"></span> Doel 50°C</span>
                                 <span class="flex items-center gap-1.5 text-sky-300"><span class="w-2.5 h-2.5 bg-sky-500/50 rounded-sm"></span> Vraag (Liter)</span>
@@ -5349,11 +5356,14 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const label = tooltip.title[0] || '';
             const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
 
-            let tempC = 0.0, comfort = 40.0, target = 50.0, liters = 0;
+            let tempC = 0.0, comfort = 40.0, target = 50.0, liters = 0, p05 = 0.0, p95 = 0.0;
             chart.data.datasets.forEach(ds => {
                 const v = ds.data[dataIndex];
                 if (!ds.label) return;
-                if (ds.label.includes('Boilertemperatuur')) tempC = Number(v) || 0.0;
+                if (ds.label.includes('Verwacht')) tempC = Number(v) || 0.0;
+                else if (ds.label.includes('Boilertemperatuur')) tempC = Number(v) || 0.0;
+                if (ds.label.includes('P05') || ds.label.includes('Minimaal')) p05 = Number(v) || 0.0;
+                if (ds.label.includes('P95') || ds.label.includes('Piekverbruik')) p95 = Number(v) || 0.0;
                 if (ds.label.includes('Comfort')) comfort = Number(v) || 0.0;
                 if (ds.label.includes('Doel')) target = Number(v) || 0.0;
                 if (ds.label.includes('Tapvraag') || ds.label.includes('Waterverbruik')) liters = Math.round(Number(v) || 0);
@@ -5376,10 +5386,18 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
                             <span style="display:inline-block; width:18px; height:3px; background-color:#F59E0B; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Boilertemperatuur</span>
+                            <span class="text-slate-300">Boilertemperatuur (P50)</span>
                         </div>
                         <span class="font-bold text-amber-300 font-mono">${tempC.toFixed(1)}°C</span>
                     </div>
+                    ${p95 > 0 ? `
+                    <div class="flex items-center justify-between gap-3 text-[11px]">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:14px; height:8px; background-color:rgba(251, 191, 36, 0.25); border:1px solid rgba(245, 158, 11, 0.5); border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-amber-200/80">Bandbreedte (P95–P05)</span>
+                        </div>
+                        <span class="font-mono text-amber-300/90">${p95.toFixed(1)}°C (veel) – ${p05.toFixed(1)}°C (weinig)</span>
+                    </div>` : ''}
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
                             <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #EF4444; margin-right:8px;"></span>
@@ -7833,6 +7851,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
                 const labels = traj.labels;
                 const temps = traj.temperatures_c || [];
+                const tempsP05 = traj.temperatures_p05_c || temps;
+                const tempsP95 = traj.temperatures_p95_c || temps;
                 const demandsKwh = traj.demand_kwh_th || [];
                 
                 // Convert kWh_th demand to liters of 50C water: liters = kwh * 3600 / (4.186 * 38)
@@ -7846,18 +7866,47 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     data: {
                         labels: labels,
                         datasets: [
+                            // 1. Upper boundary: Minimaal Verbruik P05
                             {
-                                label: 'Boilertemperatuur (°C)',
+                                label: 'Minimaal Verbruik P05 (°C)',
+                                data: tempsP05,
+                                yAxisID: 'y',
+                                borderColor: 'rgba(245, 158, 11, 0.35)',
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.2,
+                                borderDash: [3, 3],
+                                fill: false,
+                                pointRadius: 0,
+                                tension: 0.25,
+                                order: 1
+                            },
+                            // 2. Lower boundary: Piekverbruik P95 with filled yellow margin to P05
+                            {
+                                label: 'Piekverbruik P95 (°C)',
+                                data: tempsP95,
+                                yAxisID: 'y',
+                                borderColor: 'rgba(245, 158, 11, 0.45)',
+                                backgroundColor: 'rgba(251, 191, 36, 0.15)',
+                                borderWidth: 1.2,
+                                borderDash: [4, 4],
+                                fill: '-1',  // Fills area between P05 and P95!
+                                pointRadius: 0,
+                                tension: 0.25,
+                                order: 2
+                            },
+                            // 3. Expected Boiler Temperature P50 (Solid bright amber)
+                            {
+                                label: 'Verwachte Temperatuur P50 (°C)',
                                 data: temps,
                                 yAxisID: 'y',
                                 borderColor: '#F59E0B',
-                                backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                                fill: true,
+                                backgroundColor: 'transparent',
                                 borderWidth: 2.5,
                                 tension: 0.25,
                                 pointRadius: 0,
-                                order: 1
+                                order: 3
                             },
+                            // 4. Comfortgrens (40°C)
                             {
                                 label: 'Comfortgrens (40°C)',
                                 data: comfortLine,
@@ -7867,8 +7916,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 backgroundColor: 'transparent',
                                 borderWidth: 1.5,
                                 pointRadius: 0,
-                                order: 2
+                                order: 4
                             },
+                            // 5. Doeltemperatuur (50°C)
                             {
                                 label: 'Doeltemperatuur (50°C)',
                                 data: targetLine,
@@ -7878,8 +7928,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 backgroundColor: 'transparent',
                                 borderWidth: 1.5,
                                 pointRadius: 0,
-                                order: 3
+                                order: 5
                             },
+                            // 6. Expected Liter Tap Demand
                             {
                                 label: 'Verwachte Tapvraag (Liters)',
                                 data: litersArr,
@@ -7888,7 +7939,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 backgroundColor: 'rgba(56, 189, 248, 0.5)',
                                 hoverBackgroundColor: '#38BDF8',
                                 borderRadius: 2,
-                                order: 4
+                                order: 6
                             }
                         ]
                     },
