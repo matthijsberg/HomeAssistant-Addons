@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.51.0
+Version: 0.52.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -618,7 +618,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
                         for t, rad in zip(m_times, m_rads):
                             k_t = t.replace('T', ' ')[:13] + ':00'
-                            solar_hourly[k_t] = round((rad / 1000.0) * 5.5 * 0.90, 2)
+                            s_cfg = load_json(CONFIG_FILE).get("solar", {})
+                        s_kwp = float(s_cfg.get("kwp", 5.76))
+                        s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
+                        s_tilt = float(s_cfg.get("tilt_degrees", 34))
+                        s_az = float(s_cfg.get("azimuth_degrees", 225))
+                        s_eff = float(s_cfg.get("efficiency_factor", 0.88))
+                        dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
+                        solar_hourly[k_t] = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
                 except Exception as e_m:
                     print(f"Warning fetching Open-Meteo solar forecast: {e_m}")
 
@@ -957,6 +964,22 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({"status": "error", "message": f"Fout bij ophalen InfluxDB telemetrie: {str(e)}"}, 500)
                 return
+
+        if path == "/api/config/solar":
+            cfg = load_json(CONFIG_FILE)
+            sol = cfg.get("solar", {})
+            self._send_json({
+                "status": "success",
+                "solar": {
+                    "kwp": float(sol.get("kwp", 5.76)),
+                    "inverter_max_w": int(sol.get("inverter_max_w", 5500)),
+                    "tilt_degrees": float(sol.get("tilt_degrees", 34)),
+                    "azimuth_degrees": float(sol.get("azimuth_degrees", 225)),
+                    "efficiency_factor": float(sol.get("efficiency_factor", 0.88)),
+                    "opportunity_cost_per_kwh": float(sol.get("opportunity_cost_per_kwh", 0.06))
+                }
+            })
+            return
 
         if path == "/api/providers":
             cfg = load_json(CONFIG_FILE)
@@ -1390,7 +1413,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.51.0",
+                "version": "0.52.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1683,7 +1706,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     m_rhs = m_data.get("hourly", {}).get("relative_humidity_2m", [])
                     for t, rad, tmp, wnd, rh in zip(m_times, m_rads, m_temps, m_winds, m_rhs):
                         k_t = t.replace('T', ' ')[:13] + ':00'
-                        solar_map[k_t] = round((rad / 1000.0) * 5.5 * 0.90, 2)
+                        s_cfg = load_json(CONFIG_FILE).get("solar", {})
+                        s_kwp = float(s_cfg.get("kwp", 5.76))
+                        s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
+                        s_tilt = float(s_cfg.get("tilt_degrees", 34))
+                        s_az = float(s_cfg.get("azimuth_degrees", 225))
+                        s_eff = float(s_cfg.get("efficiency_factor", 0.88))
+                        dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
+                        solar_map[k_t] = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
                         temp_map[k_t] = round(float(tmp), 1)
                         wind_map[k_t] = round(float(wnd), 1)
                         rh_map[k_t] = round(float(rh), 1)
@@ -2127,6 +2157,20 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
         body = self._read_json_body()
+
+        if path == "/api/config/solar":
+            data = body or {}
+            cfg = load_json(CONFIG_FILE)
+            if "solar" not in cfg:
+                cfg["solar"] = {}
+            if "kwp" in data: cfg["solar"]["kwp"] = float(data["kwp"])
+            if "inverter_max_w" in data: cfg["solar"]["inverter_max_w"] = int(data["inverter_max_w"])
+            if "tilt_degrees" in data: cfg["solar"]["tilt_degrees"] = float(data["tilt_degrees"])
+            if "azimuth_degrees" in data: cfg["solar"]["azimuth_degrees"] = float(data["azimuth_degrees"])
+            if "efficiency_factor" in data: cfg["solar"]["efficiency_factor"] = float(data["efficiency_factor"])
+            save_json(CONFIG_FILE, cfg)
+            self._send_json({"status": "success", "message": "Zonnepanelen configuratie opgeslagen", "solar": cfg["solar"]})
+            return
         if path == "/api/model/retrain":
             if not GLOBAL_MODEL:
                 self._send_json({"status": "error", "message": "Model niet geladen"}, 500)
@@ -2811,7 +2855,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.51.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.52.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3487,6 +3531,59 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <div id="providers-container" class="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <!-- Loaded dynamically via loadProviders() -->
                     </div>
+
+                    <!-- SECTION 3B: ZONNEPANELEN & DAKCONFIGURATIE (POA FYSISCH MODEL) -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-xl space-y-4 col-span-1 md:col-span-2">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-500/20 pb-3">
+                            <div class="flex items-center gap-2.5">
+                                <span class="text-xl">☀️</span>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white tracking-wide">Zonnepanelen &amp; Dakconfiguratie (Plane-of-Array Fysisch Model)</h3>
+                                    <p class="text-[11px] text-slate-400">Parameters voor de zonnestroomvoorspelling via NOAA zonnehoek-projectie op jouw hellende dak.</p>
+                                </div>
+                            </div>
+                            <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">34° Dakhelling · 225° Zuid-West</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 font-mono text-xs">
+                            <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
+                                <label class="text-[10px] text-slate-400 uppercase font-bold block">Vermogen (Wp)</label>
+                                <input type="number" id="solar-cfg-wp" step="10" value="5760" class="w-full bg-[#0B0F17] border border-slate-700 rounded-lg px-2 py-1 text-white font-bold text-sm focus:border-amber-500 focus:outline-none">
+                                <span class="text-[10px] text-slate-500 font-sans block">Totaal Wattpiek dak</span>
+                            </div>
+                            <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
+                                <label class="text-[10px] text-slate-400 uppercase font-bold block">Omvormer Max (W)</label>
+                                <input type="number" id="solar-cfg-inv" step="50" value="5500" class="w-full bg-[#0B0F17] border border-slate-700 rounded-lg px-2 py-1 text-white font-bold text-sm focus:border-amber-500 focus:outline-none">
+                                <span class="text-[10px] text-slate-500 font-sans block">Aftoppingslimiet AC</span>
+                            </div>
+                            <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
+                                <label class="text-[10px] text-slate-400 uppercase font-bold block">Dakhelling / Tilt (°)</label>
+                                <input type="number" id="solar-cfg-tilt" step="1" value="34" class="w-full bg-[#0B0F17] border border-slate-700 rounded-lg px-2 py-1 text-amber-300 font-bold text-sm focus:border-amber-500 focus:outline-none">
+                                <span class="text-[10px] text-slate-500 font-sans block">0° = plat, 90° = gevel</span>
+                            </div>
+                            <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
+                                <label class="text-[10px] text-slate-400 uppercase font-bold block">Oriëntatie / Azimuth (°)</label>
+                                <input type="number" id="solar-cfg-azimuth" step="1" value="225" class="w-full bg-[#0B0F17] border border-slate-700 rounded-lg px-2 py-1 text-amber-300 font-bold text-sm focus:border-amber-500 focus:outline-none">
+                                <span class="text-[10px] text-slate-500 font-sans block">180° = Z, 225° = ZW</span>
+                            </div>
+                            <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
+                                <label class="text-[10px] text-slate-400 uppercase font-bold block">Systeem Rendement</label>
+                                <input type="number" id="solar-cfg-eff" step="0.01" min="0.5" max="1.0" value="0.88" class="w-full bg-[#0B0F17] border border-slate-700 rounded-lg px-2 py-1 text-emerald-300 font-bold text-sm focus:border-amber-500 focus:outline-none">
+                                <span class="text-[10px] text-slate-500 font-sans block">Verliezen &amp; temp.</span>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between pt-2 border-t border-slate-800/80">
+                            <div class="text-[11px] text-slate-400 font-sans flex items-center gap-1.5">
+                                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                <span>NOAA Plane-of-Array stralingsprojectie actief op Open-Meteo GHI data.</span>
+                            </div>
+                            <button onclick="saveSolarRoofConfig()" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow-lg transition flex items-center gap-1.5">
+                                <span>💾 Opslaan &amp; Direct Toepassen</span>
+                            </button>
+                        </div>
+                    </div>
+
                 </div>
             </div>
 
@@ -4653,6 +4750,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             if (tabId === 'infrastructure') {
                 loadInfrastructure();
                 loadProviders();
+                loadSolarRoofConfig();
             }
             if (tabId === 'data') {
                 loadInfrastructure();
@@ -4665,6 +4763,55 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
         function refreshCurrentTab() {
             showTab(activeTabId);
+        }
+
+        
+        async function loadSolarRoofConfig() {
+            try {
+                const res = await fetch('./api/config/solar');
+                if (!res.ok) return;
+                const d = await res.json();
+                const s = d.solar || {};
+                if (document.getElementById('solar-cfg-wp')) document.getElementById('solar-cfg-wp').value = s.kwp ? s.kwp * 1000 : 5760;
+                if (document.getElementById('solar-cfg-inv')) document.getElementById('solar-cfg-inv').value = s.inverter_max_w || 5500;
+                if (document.getElementById('solar-cfg-tilt')) document.getElementById('solar-cfg-tilt').value = s.tilt_degrees || 34;
+                if (document.getElementById('solar-cfg-azimuth')) document.getElementById('solar-cfg-azimuth').value = s.azimuth_degrees || 225;
+                if (document.getElementById('solar-cfg-eff')) document.getElementById('solar-cfg-eff').value = s.efficiency_factor || 0.88;
+            } catch (e) {
+                console.warn("Error loading solar roof config:", e);
+            }
+        }
+
+        async function saveSolarRoofConfig() {
+            const wp = parseFloat(document.getElementById('solar-cfg-wp')?.value || 5760);
+            const inv = parseInt(document.getElementById('solar-cfg-inv')?.value || 5500);
+            const tilt = parseFloat(document.getElementById('solar-cfg-tilt')?.value || 34);
+            const az = parseFloat(document.getElementById('solar-cfg-azimuth')?.value || 225);
+            const eff = parseFloat(document.getElementById('solar-cfg-eff')?.value || 0.88);
+
+            try {
+                const res = await fetch('./api/config/solar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        kwp: wp / 1000.0,
+                        inverter_max_w: inv,
+                        tilt_degrees: tilt,
+                        azimuth_degrees: az,
+                        efficiency_factor: eff
+                    })
+                });
+                const d = await res.json();
+                if (res.ok) {
+                    alert("✅ Zonnepanelen & dakconfiguratie succesvol opgeslagen! De voorspellingen worden direct opnieuw berekend.");
+                    loadChartData();
+                    loadElectricityPricesChart();
+                } else {
+                    alert("❌ Fout bij opslaan: " + (d.message || 'Onbekend'));
+                }
+            } catch (e) {
+                alert("❌ Netwerkfout bij opslaan dakconfiguratie");
+            }
         }
 
         async function loadProviders() {
