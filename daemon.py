@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.38.1
+Version: 0.39.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1039,7 +1039,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.38.1",
+                "version": "0.39.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1115,36 +1115,56 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 except Exception as e_ha:
                     ha_status = f"error: {e_ha}"
 
-            # Collect source entities from configured devices
+            # Extract sensors and actuators across all devices for live state caching
+            total_ha_devs = 0
             for d in cfg.get("devices", []):
-                src_ent = d.get("ha_power_entity") or d.get("ha_temp_entity")
-                if src_ent:
-                    ha_sources.append({
-                        "device_name": d.get("name"),
-                        "device_id": d.get("id"),
-                        "entity_id": src_ent,
-                        "type": d.get("type"),
-                        "live_state": "--"
-                    })
-                tgt_ent = d.get("ha_control_entity")
-                if tgt_ent:
-                    ha_targets.append({
-                        "device_name": d.get("name"),
-                        "device_id": d.get("id"),
-                        "entity_id": tgt_ent,
-                        "type": d.get("type"),
-                        "live_state": "--"
-                    })
+                is_ha_dev = (d.get("source_type") == "homeassistant") or any(s.get("connector") == "homeassistant" for s in d.get("sensors", []))
+                if is_ha_dev:
+                    total_ha_devs += 1
+                
+                # Iterate over rich sensors list if present, else fallback
+                if d.get("sensors"):
+                    for s in d["sensors"]:
+                        if s.get("connector") == "homeassistant" and s.get("entity_id"):
+                            ha_sources.append({
+                                "device_name": d.get("name"),
+                                "sensor_name": s.get("name", s.get("id")),
+                                "role": s.get("role", "consumer"),
+                                "entity_id": s["entity_id"],
+                                "live_state": "--"
+                            })
+                else:
+                    src_ent = d.get("ha_power_entity") or d.get("ha_temp_entity")
+                    if src_ent:
+                        ha_sources.append({
+                            "device_name": d.get("name"),
+                            "sensor_name": "Vermogen / Temp",
+                            "role": "consumer",
+                            "entity_id": src_ent,
+                            "live_state": "--"
+                        })
 
-            # Add Daikin Altherma SG Relais & SWW Boost defaults if not already present
-            default_targets = [
-                {"device_name": "Daikin Smart Grid 1 (S10S)", "device_id": "sg1_relais", "entity_id": "switch.warmtepomp_smart_grid_1_s10s", "type": "heatpump_relay", "live_state": "--"},
-                {"device_name": "Daikin Smart Grid 2 (S11S)", "device_id": "sg2_relais", "entity_id": "switch.warmtepomp_smart_grid_2_s11s", "type": "heatpump_relay", "live_state": "--"},
-                {"device_name": "Daikin SWW Boost (Altherma)", "device_id": "altherma_switch", "entity_id": "switch.hc_mode_altherma_on", "type": "heatpump_switch", "live_state": "--"}
-            ]
-            for dt in default_targets:
-                if not any(t["entity_id"] == dt["entity_id"] for t in ha_targets):
-                    ha_targets.append(dt)
+                # Iterate over rich actuators list if present, else fallback
+                if d.get("actuators"):
+                    for a in d["actuators"]:
+                        if a.get("connector") == "homeassistant" and a.get("entity_id"):
+                            ha_targets.append({
+                                "device_name": d.get("name"),
+                                "actuator_name": a.get("name", a.get("id")),
+                                "type": a.get("type", "switch"),
+                                "entity_id": a["entity_id"],
+                                "live_state": "--"
+                            })
+                else:
+                    tgt_ent = d.get("ha_control_entity")
+                    if tgt_ent:
+                        ha_targets.append({
+                            "device_name": d.get("name"),
+                            "actuator_name": "Aansturing",
+                            "type": "switch",
+                            "entity_id": tgt_ent,
+                            "live_state": "--"
+                        })
 
             # Fetch live states for configured HA entities
             if ha_status == "connected" and ha_token:
@@ -1176,10 +1196,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     "has_token": bool(ha_cfg_tok or os.environ.get("SUPERVISOR_TOKEN")),
                     "verify_ssl": cfg.get("homeassistant", {}).get("verify_ssl", False),
                     "timeout_seconds": cfg.get("homeassistant", {}).get("timeout_seconds", 5),
-                    "sources": ha_sources,
-                    "targets": ha_targets,
+                    "total_devices": total_ha_devs,
                     "total_sources": len(ha_sources),
-                    "total_targets": len(ha_targets)
+                    "total_targets": len(ha_targets),
+                    "sources": ha_sources,
+                    "targets": ha_targets
                 },
                 "influxdb_connections": idb_conns,
                 "mqtt_connections": mq_conns,
@@ -2339,7 +2360,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.38.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.39.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3868,7 +3889,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1E293B] pb-3">
                                 <div>
                                     <h4 class="font-bold text-white text-sm flex items-center gap-2">
-                                        <span>Home Assistant Core API</span>
+                                        <span>Home Assistant Core Connector</span>
                                         <span class="px-1.5 py-0.5 rounded text-[9px] bg-cyan-900/60 text-cyan-300 border border-cyan-800 font-mono">INGEBOUWD (HAOS)</span>
                                         <span class="text-[11px] text-slate-400 font-normal">(${haData.location || 'WeidHuis'} · v${haData.version || '2026.x'})</span>
                                     </h4>
@@ -3887,34 +3908,22 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 </div>
                             </div>
 
-                            <!-- Bi-directional split grid: BRON vs DOEL -->
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <!-- BRON (DATA-INNAME) -->
-                                <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800/80 space-y-2.5">
-                                    <div class="flex items-center justify-between border-b border-slate-800/60 pb-1.5">
-                                        <span class="text-xs font-bold text-cyan-400 flex items-center gap-1.5">
-                                            <span>📥 Data-Bron (Sensor Inname)</span>
-                                        </span>
-                                        <span class="text-[10px] font-mono text-slate-400">${haData.total_sources || 0} actieve sensoren</span>
-                                    </div>
-                                    <div class="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-                                        ${sourcesHtml || '<div class="text-xs text-slate-500 py-2">Geen bronnen geconfigureerd</div>'}
-                                    </div>
+                            <!-- Lean & Mean Connector Metrics Strip -->
+                            <div class="grid grid-cols-3 gap-3 font-mono text-xs">
+                                <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
+                                    <div class="text-[10px] text-slate-500 uppercase">Gekoppelde Apparaten</div>
+                                    <div class="text-base font-bold text-white mt-0.5">${haData.total_devices || 4} apparaten</div>
                                 </div>
-
-                                <!-- DOEL (APPARAAT AANSTURING) -->
-                                <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800/80 space-y-2.5">
-                                    <div class="flex items-center justify-between border-b border-slate-800/60 pb-1.5">
-                                        <span class="text-xs font-bold text-pink-400 flex items-center gap-1.5">
-                                            <span>📤 Aansturing Doel (Actuatoren & Relais)</span>
-                                        </span>
-                                        <span class="text-[10px] font-mono text-slate-400">${haData.total_targets || 0} schakelbare doelen</span>
-                                    </div>
-                                    <div class="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-                                        ${targetsHtml || '<div class="text-xs text-slate-500 py-2">Geen doelen geconfigureerd</div>'}
-                                    </div>
+                                <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
+                                    <div class="text-[10px] text-cyan-400 uppercase">Data-Inname Sensoren</div>
+                                    <div class="text-base font-bold text-cyan-300 mt-0.5">${haData.total_sources || 0} actieve stromen</div>
+                                </div>
+                                <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800">
+                                    <div class="text-[10px] text-pink-400 uppercase">Aansturing Actuatoren</div>
+                                    <div class="text-base font-bold text-pink-300 mt-0.5">${haData.total_targets || 0} regiepunten</div>
                                 </div>
                             </div>
+                            <p class="text-[11px] text-slate-400 italic">De specifieke sensoren en stuuractuatoren worden per apparaat beheerd op het tabblad <strong>Apparaten</strong>.</p>
                         </div>
                     `;
                 }
@@ -5309,8 +5318,66 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     const cState = dev.ha_control_entity ? (haStateMap[dev.ha_control_entity] || '--') : '';
                     const tState = dev.ha_temp_entity ? (haStateMap[dev.ha_temp_entity] || '--') : '';
 
+                    // Render multi-sensors list
+                    let sensorsHtml = '';
+                    const devSensors = dev.sensors || [];
+                    if (devSensors.length > 0) {
+                        sensorsHtml = devSensors.map(s => {
+                            const val = s.entity_id ? (haStateMap[s.entity_id] || '--') : '--';
+                            const roleColor = s.role === 'producer' ? 'text-emerald-400' : (s.role === 'consumer' ? 'text-red-400' : 'text-cyan-400');
+                            const roleLabel = s.role === 'producer' ? 'PRODUCENT' : (s.role === 'consumer' ? 'VERBRUIKER' : 'STATUS');
+                            const connLabel = s.connector === 'mqtt' ? '⚡ MQTT' : '🏠 HA';
+                            const targetStr = s.connector === 'mqtt' ? s.topic : s.entity_id;
+                            return `
+                                <div class="flex items-center justify-between py-1 px-2 rounded bg-[#0e1422] border border-slate-800/70 text-[10px]">
+                                    <div class="truncate mr-2">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="px-1 py-0.2 rounded text-[8px] font-bold ${roleColor} bg-slate-900 border border-slate-800">${roleLabel}</span>
+                                            <span class="text-slate-300 font-medium truncate">${s.name}</span>
+                                        </div>
+                                        <span class="text-[9px] text-slate-500 font-mono block truncate">${connLabel}: ${targetStr}</span>
+                                    </div>
+                                    <span class="font-bold text-white font-mono flex-shrink-0">${val}</span>
+                                </div>
+                            `;
+                        }).join('');
+                    } else {
+                        // Fallback legacy display
+                        sensorsHtml = `
+                            <div class="text-[10px] text-slate-400 py-1">
+                                ${dev.ha_power_entity ? `<div>🏠 ${dev.ha_power_entity}: <strong class="text-white">${pState}</strong></div>` : ''}
+                                ${dev.ha_temp_entity ? `<div>🌡️ ${dev.ha_temp_entity}: <strong class="text-white">${tState}</strong></div>` : ''}
+                                ${dev.mqtt_power_topic ? `<div>⚡ ${dev.mqtt_power_topic}</div>` : ''}
+                            </div>
+                        `;
+                    }
+
+                    // Render multi-actuators list
+                    let actuatorsHtml = '';
+                    const devActuators = dev.actuators || [];
+                    if (devActuators.length > 0) {
+                        actuatorsHtml = devActuators.map(a => {
+                            const val = a.entity_id ? (haStateMap[a.entity_id] || a.default_state || '--') : (a.default_state || '--');
+                            const typeLabel = a.type === 'select' ? 'MODUS' : (a.type === 'range' ? 'BEREIK' : 'SCHAKELAAR');
+                            return `
+                                <div class="flex items-center justify-between py-1 px-2 rounded bg-[#0e1422] border border-slate-800/70 text-[10px]">
+                                    <div class="truncate mr-2">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="px-1 py-0.2 rounded text-[8px] font-bold text-pink-400 bg-slate-900 border border-slate-800">${typeLabel}</span>
+                                            <span class="text-slate-300 font-medium truncate">${a.name}</span>
+                                        </div>
+                                        <span class="text-[9px] text-slate-500 font-mono block truncate">🏠 HA: ${a.entity_id}</span>
+                                    </div>
+                                    <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${val === 'on' || val.includes('aan') || val.includes('Aan') ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-900 text-slate-300 border border-slate-700'} font-mono flex-shrink-0">${val}</span>
+                                </div>
+                            `;
+                        }).join('');
+                    } else {
+                        actuatorsHtml = `<div class="text-[10px] text-slate-500 italic py-1">Geen aansturing (puur meetapparaat)</div>`;
+                    }
+
                     const card = document.createElement('div');
-                    card.className = 'bg-[#0e1422] border border-[#1E293B] hover:border-slate-700 rounded-2xl p-4 flex flex-col justify-between shadow-lg transition';
+                    card.className = 'bg-[#0e1422] border border-[#1E293B] hover:border-slate-700 rounded-2xl p-4 flex flex-col justify-between shadow-lg transition space-y-3';
                     card.innerHTML = `
                         <div>
                             <div class="flex justify-between items-start gap-2 mb-2">
@@ -5328,34 +5395,26 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span class="font-medium">Beleid:</span> ${policyBadge}
                             </div>
 
-                            <div class="text-[11px] text-slate-300 bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/80 mb-3 font-mono space-y-1.5">
-                                <div class="flex justify-between items-center text-[10px]">
-                                    <span class="text-slate-400">Verbinding:</span>
-                                    <span class="${dev.source_type === 'mqtt' ? 'text-amber-400 font-bold' : 'text-cyan-400 font-bold'}">${dev.source_type === 'mqtt' ? '⚡ Direct MQTT' : '🏠 Home Assistant'}</span>
+                            <!-- SENSORS BLOCK -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/80 mb-2 space-y-1.5">
+                                <div class="flex justify-between items-center text-[10px] font-mono border-b border-slate-800/60 pb-1">
+                                    <span class="text-cyan-400 font-bold">📥 Databronnen (${devSensors.length || 1})</span>
+                                    <span class="text-slate-500 text-[9px]">Logging: Producer / Consumer</span>
                                 </div>
-                                <div class="flex justify-between items-center text-[10px]">
-                                    <span class="text-slate-400">Eenheid:</span>
-                                    <span class="text-white font-bold">${dev.native_unit || 'W'}</span>
+                                <div class="space-y-1">
+                                    ${sensorsHtml}
                                 </div>
-                                ${dev.ha_power_entity ? `
-                                    <div class="flex justify-between items-center text-[10px] pt-1 border-t border-slate-800/60">
-                                        <span class="text-slate-400 truncate mr-2">Sensor: ${dev.ha_power_entity}</span>
-                                        <span class="text-cyan-300 font-bold flex-shrink-0">${pState}</span>
-                                    </div>` : ''}
-                                ${dev.ha_temp_entity ? `
-                                    <div class="flex justify-between items-center text-[10px] pt-1 border-t border-slate-800/60">
-                                        <span class="text-slate-400 truncate mr-2">Temp: ${dev.ha_temp_entity}</span>
-                                        <span class="text-cyan-300 font-bold flex-shrink-0">${tState}</span>
-                                    </div>` : ''}
-                                ${dev.ha_control_entity ? `
-                                    <div class="flex justify-between items-center text-[10px] pt-1 border-t border-slate-800/60">
-                                        <span class="text-slate-400 truncate mr-2">Doel: ${dev.ha_control_entity}</span>
-                                        <span class="${cState === 'on' ? 'text-emerald-400' : 'text-slate-400'} font-bold flex-shrink-0">${cState}</span>
-                                    </div>` : ''}
-                                ${dev.mqtt_power_topic ? `
-                                    <div class="text-[10px] text-slate-400 truncate pt-1 border-t border-slate-800/60">
-                                        <span class="text-slate-500">Topic:</span> ${dev.mqtt_power_topic}
-                                    </div>` : ''}
+                            </div>
+
+                            <!-- ACTUATORS BLOCK -->
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/80 mb-2 space-y-1.5">
+                                <div class="flex justify-between items-center text-[10px] font-mono border-b border-slate-800/60 pb-1">
+                                    <span class="text-pink-400 font-bold">📤 Aansturing & Regie (${devActuators.length})</span>
+                                    <span class="text-slate-500 text-[9px]">Automatiseringslaag</span>
+                                </div>
+                                <div class="space-y-1">
+                                    ${actuatorsHtml}
+                                </div>
                             </div>
                         </div>
                         <div class="flex justify-end gap-2 pt-2.5 border-t border-[#1E293B]">
