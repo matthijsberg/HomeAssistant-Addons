@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.42.0
+Version: 0.43.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1193,7 +1193,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.42.0",
+                "version": "0.43.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2577,7 +2577,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.42.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.43.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3437,20 +3437,20 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </div>
                 </div>
 
-                <!-- CARD 2: 7x96 LEARNED HISTORICAL BEHAVIOR PROFILES (3-WAY SELECTOR) -->
+                <!-- CARD 2: 7x96 LEARNED HISTORICAL BEHAVIOR PROFILES (MONTH + DAY + 3-WAY SELECTOR) -->
                 <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-xl space-y-4">
                     <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
                         <div class="flex items-center gap-2.5">
                             <span class="w-3 h-3 rounded-full bg-blue-500 animate-pulse" id="profile-status-indicator"></span>
                             <div>
                                 <h3 class="text-sm font-bold text-white tracking-wide" id="profile-section-title">Zelflerende Verbruiksbehoefte & Historische Profielen (7×96 Kwartieren)</h3>
-                                <p class="text-[11px] text-slate-400" id="profile-section-sub">Geleerd uit 374 dagen continue InfluxDB data in Open HEMS. Schakel tussen ongedefinieerd leefprofiel, warm tapwater en CV.</p>
+                                <p class="text-[11px] text-slate-400" id="profile-section-sub">Geleerd uit 374 dagen continue InfluxDB data. Schakel tussen categorie, seizoen/maand en weekdag.</p>
                             </div>
                         </div>
                         
                         <!-- 3-WAY PROFILE SELECTOR BUTTONS -->
                         <div class="flex items-center gap-1.5 bg-[#0B0F17] p-1 rounded-xl border border-slate-800 text-xs font-mono flex-wrap">
-                            <button onclick="switchProfileType('unallocated')" id="btn-prof-unallocated" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold transition flex items-center gap-1.5">
+                            <button onclick="switchProfileType('unallocated')" id="btn-prof-unallocated" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold transition flex items-center gap-1.5 shadow">
                                 <span class="w-2 h-2 rounded-full bg-blue-400"></span>
                                 <span>Ongedefinieerd (Huis)</span>
                             </button>
@@ -3462,6 +3462,17 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span class="w-2 h-2 rounded-full bg-red-400"></span>
                                 <span>CV Woningverwarming</span>
                             </button>
+                        </div>
+                    </div>
+
+                    <!-- 12-MONTH SEASONAL SELECTOR STRIP -->
+                    <div class="space-y-1.5">
+                        <div class="flex justify-between items-center text-[10px] text-slate-400 font-mono uppercase tracking-wider">
+                            <span>📅 Seizoen / Maand van het Jaar (Impact op Warmtevraag & Buitentemperatuur)</span>
+                            <span id="month-impact-summary" class="text-amber-400 font-bold font-sans">September: Zachte overgang</span>
+                        </div>
+                        <div class="grid grid-cols-6 sm:grid-cols-12 gap-1 font-mono text-xs" id="month-selector-grid">
+                            <!-- Rendered in JS: Jan t/m Dec -->
                         </div>
                     </div>
 
@@ -3496,14 +3507,34 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         </div>
                     </div>
 
-                    <!-- 96-QUARTERS BAR CHART -->
-                    <div class="space-y-1.5 pt-1">
-                        <div class="flex justify-between items-center text-[11px] text-slate-400 font-mono">
-                            <span id="profile-chart-heading">Kwartierse Verbruikscurve (96 kwartieren over 24 uur)</span>
-                            <span id="unalloc-selected-day-label" class="text-slate-300 font-semibold">Geselecteerde dag</span>
+                    <!-- 96-QUARTERS BAR CHART WITH TIME AXIS & LIVE HOVER BADGE -->
+                    <div class="space-y-2 pt-1">
+                        <div class="flex justify-between items-center text-[11px] text-slate-400 font-mono flex-wrap gap-2">
+                            <span id="unalloc-selected-day-label" class="text-slate-200 font-semibold">Geselecteerde dag</span>
+                            <span id="unalloc-hover-badge" class="px-2.5 py-1 rounded-lg bg-slate-800/90 text-cyan-300 font-mono text-xs border border-slate-700 shadow flex items-center gap-1.5">
+                                <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping"></span>
+                                <span>Beweeg over een kwartier voor details</span>
+                            </span>
                         </div>
-                        <div id="unalloc-hourly-bars" class="flex gap-0.5 h-32 items-end bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800 overflow-x-auto w-full">
-                            <!-- 96 Bars rendered dynamically in JS -->
+                        
+                        <!-- Bars Container -->
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800 space-y-1.5">
+                            <div id="unalloc-hourly-bars" class="flex gap-0.5 h-32 items-end overflow-hidden w-full relative">
+                                <!-- 96 Bars rendered dynamically in JS -->
+                            </div>
+                            
+                            <!-- TIME AXIS: Visible Hours below the bars -->
+                            <div class="flex justify-between text-[10px] text-slate-500 font-mono pt-1.5 px-0.5 border-t border-slate-800/60 select-none">
+                                <span>00:00</span>
+                                <span>03:00</span>
+                                <span>06:00</span>
+                                <span>09:00</span>
+                                <span>12:00</span>
+                                <span>15:00</span>
+                                <span>18:00</span>
+                                <span>21:00</span>
+                                <span>24:00</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -6711,11 +6742,39 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         }
 
         let currentProfileType = 'unallocated';
+        let activeMonthNum = (new Date()).getMonth() + 1; // 1-12 (current month)
+
+        function renderMonthSelector() {
+            const container = document.getElementById('month-selector-grid');
+            if (!container) return;
+            const months = [
+                { num: 1, name: 'Jan' }, { num: 2, name: 'Feb' }, { num: 3, name: 'Mrt' },
+                { num: 4, name: 'Apr' }, { num: 5, name: 'Mei' }, { num: 6, name: 'Jun' },
+                { num: 7, name: 'Jul' }, { num: 8, name: 'Aug' }, { num: 9, name: 'Sep' },
+                { num: 10, name: 'Okt' }, { num: 11, name: 'Nov' }, { num: 12, name: 'Dec' }
+            ];
+
+            container.innerHTML = '';
+            months.forEach(m => {
+                const btn = document.createElement('button');
+                const isActive = (m.num === activeMonthNum);
+                btn.className = isActive
+                    ? 'month-btn py-1.5 px-1 rounded-lg bg-amber-600 border border-amber-500 text-white font-bold shadow text-center transition'
+                    : 'month-btn py-1.5 px-1 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 text-center transition';
+                btn.innerText = m.name;
+                btn.onclick = () => selectMonth(m.num);
+                container.appendChild(btn);
+            });
+        }
+
+        function selectMonth(mNum) {
+            activeMonthNum = mNum;
+            renderMonthSelector();
+            renderUnallocDay(activeUnallocDay);
+        }
 
         function switchProfileType(pType) {
             currentProfileType = pType;
-            
-            // Update button styles
             ['unallocated', 'dhw', 'cv'].forEach(t => {
                 const btn = document.getElementById('btn-prof-' + t);
                 if (btn) {
@@ -6728,7 +6787,6 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 }
             });
 
-            // Update status indicator dot color
             const dot = document.getElementById('profile-status-indicator');
             if (dot) {
                 dot.className = `w-3 h-3 rounded-full animate-pulse ${pType === 'unallocated' ? 'bg-blue-500' : (pType === 'dhw' ? 'bg-amber-500' : 'bg-red-500')}`;
@@ -6745,26 +6803,56 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         function renderUnallocDay(dayIdx) {
             if (!cachedUnallocModel) return;
             const dayNames = cachedUnallocModel.day_names || ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
-            
-            // Select active dataset
-            let quarters = [];
-            let colorClass = 'bg-blue-500 hover:bg-blue-400';
-            let unitLabel = 'W';
+            const mData = cachedUnallocModel.monthly_profiles?.[String(activeMonthNum)] || {};
+            const mName = mData.name_full || 'September';
 
-            if (currentProfileType === 'dhw') {
-                quarters = cachedUnallocModel.dhw_profile_96_quarters?.[dayIdx] || [];
-                colorClass = 'bg-amber-500 hover:bg-amber-400';
-            } else if (currentProfileType === 'cv') {
-                quarters = cachedUnallocModel.cv_profile_96_quarters?.[dayIdx] || [];
-                colorClass = 'bg-red-500 hover:bg-red-400';
+            // Get seasonal multiplier for active month
+            let multiplier = 1.0;
+            if (currentProfileType === 'cv') {
+                multiplier = (mData.cv_multiplier !== undefined) ? mData.cv_multiplier : 1.0;
+            } else if (currentProfileType === 'dhw') {
+                multiplier = (mData.dhw_multiplier !== undefined) ? mData.dhw_multiplier : 1.0;
             } else {
-                quarters = cachedUnallocModel.profile_96_quarters?.[dayIdx] || [];
-                colorClass = 'bg-blue-500 hover:bg-blue-400';
+                multiplier = (mData.unalloc_multiplier !== undefined) ? mData.unalloc_multiplier : 1.0;
             }
 
-            if (quarters.length === 0) return;
+            // Update month summary text
+            const mSumEl = document.getElementById('month-impact-summary');
+            if (mSumEl) {
+                if (currentProfileType === 'cv') {
+                    mSumEl.innerText = `${mName}: Gemiddeld ${mData.cv_daily_kwh || 0} kWh CV/dag (${Math.round(multiplier * 100)}% van stookseizoen)`;
+                } else if (currentProfileType === 'dhw') {
+                    mSumEl.innerText = `${mName}: Gemiddeld ${mData.dhw_daily_kwh || 3.0} kWh SWW/dag (${Math.round(multiplier * 100)}% van basis)`;
+                } else {
+                    mSumEl.innerText = `${mName}: Gemiddelde basislast ${mData.unalloc_avg_w || 495} W (${Math.round(multiplier * 100)}% van jaarbasis)`;
+                }
+            }
 
-            // Update tab styles
+            // Select base dataset and apply monthly factor
+            let baseQuarters = [];
+            let colorClass = 'bg-blue-500 hover:bg-cyan-400';
+            let catName = 'Huishoudelijk';
+
+            if (currentProfileType === 'dhw') {
+                baseQuarters = cachedUnallocModel.dhw_profile_96_quarters?.[dayIdx] || [];
+                colorClass = 'bg-amber-500 hover:bg-yellow-300';
+                catName = 'Tapwater SWW';
+            } else if (currentProfileType === 'cv') {
+                baseQuarters = cachedUnallocModel.cv_profile_96_quarters?.[dayIdx] || [];
+                colorClass = 'bg-red-500 hover:bg-rose-300';
+                catName = 'CV Verwarming';
+            } else {
+                baseQuarters = cachedUnallocModel.profile_96_quarters?.[dayIdx] || [];
+                colorClass = 'bg-blue-500 hover:bg-cyan-400';
+                catName = 'Huishoudelijk';
+            }
+
+            if (baseQuarters.length === 0) return;
+
+            // Apply seasonal multiplier
+            const quarters = baseQuarters.map(v => Math.round(v * multiplier * 10) / 10);
+
+            // Update weekday tab styles
             const btns = document.querySelectorAll('.unalloc-day-btn');
             btns.forEach((btn, idx) => {
                 if (idx === dayIdx) {
@@ -6783,7 +6871,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const peakTime = `${String(Math.floor(peakQ/4)).padStart(2,'0')}:${String((peakQ%4)*15).padStart(2,'0')}`;
 
             if (currentProfileType === 'dhw') {
-                document.getElementById('metric-title-1').innerText = 'Dagbehoefte Warmte';
+                document.getElementById('metric-title-1').innerText = `Dagbehoefte (${mName})`;
                 document.getElementById('unalloc-metric-avg').innerText = `${totKwh} kWh/dag`;
                 document.getElementById('metric-title-2').innerText = 'Stand-by Verlies (350L)';
                 document.getElementById('unalloc-metric-night').innerText = '1.92 kWh/dag';
@@ -6791,11 +6879,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 document.getElementById('unalloc-metric-morning').innerText = `${peakTime} (${Math.round(maxVal)} W)`;
                 document.getElementById('metric-title-4').innerText = 'Typische Laadduur';
                 document.getElementById('unalloc-metric-evening').innerText = '45 minuten';
-                document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} SWW Boiler Behoefte (${totKwh} kWh/dag)`;
+                document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} in ${mName}: SWW Behoefte (${totKwh} kWh/dag)`;
             } else if (currentProfileType === 'cv') {
                 const nightAvg = Math.round(quarters.slice(0, 24).reduce((a,b)=>a+b,0)/24);
                 const dayAvg = Math.round(quarters.slice(24, 92).reduce((a,b)=>a+b,0)/68);
-                document.getElementById('metric-title-1').innerText = 'Stookseizoen Behoefte';
+                document.getElementById('metric-title-1').innerText = `Stookbehoefte (${mName})`;
                 document.getElementById('unalloc-metric-avg').innerText = `${totKwh} kWh/dag`;
                 document.getElementById('metric-title-2').innerText = 'Nachtverlaging (23-06u)';
                 document.getElementById('unalloc-metric-night').innerText = `${nightAvg} W`;
@@ -6803,12 +6891,12 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 document.getElementById('unalloc-metric-morning').innerText = `${peakTime} (${Math.round(maxVal)} W)`;
                 document.getElementById('metric-title-4').innerText = 'Overdag Modulatie';
                 document.getElementById('unalloc-metric-evening').innerText = `${dayAvg} W gem`;
-                document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} CV Stookseizoen Profiel (${totKwh} kWh/dag)`;
+                document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} in ${mName}: CV Stookprofiel (${totKwh} kWh/dag)`;
             } else {
                 const nightMin = Math.min(...quarters.slice(0, 24));
                 const morningPeak = Math.max(...quarters.slice(28, 44));
                 const eveningPeak = Math.max(...quarters.slice(72, 92));
-                document.getElementById('metric-title-1').innerText = 'Dag Gemiddelde';
+                document.getElementById('metric-title-1').innerText = `Basislast (${mName})`;
                 document.getElementById('unalloc-metric-avg').innerText = `${avg} W`;
                 document.getElementById('metric-title-2').innerText = 'Nacht Stand-by (00-06u)';
                 document.getElementById('unalloc-metric-night').innerText = `${nightMin} W`;
@@ -6816,33 +6904,53 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 document.getElementById('unalloc-metric-morning').innerText = `${morningPeak} W`;
                 document.getElementById('metric-title-4').innerText = 'Avondpiek (18-23u)';
                 document.getElementById('unalloc-metric-evening').innerText = `${eveningPeak} W`;
-                document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} Huisprofiel (${avg} W gemiddeld)`;
+                document.getElementById('unalloc-selected-day-label').innerText = `${dayNames[dayIdx]} in ${mName}: Huisprofiel (${avg} W gemiddeld)`;
             }
 
-            // Render 96 bars
+            // Render 96 bars with interactive hover and touch readout
             const container = document.getElementById('unalloc-hourly-bars');
+            const hoverBadge = document.getElementById('unalloc-hover-badge');
             if (container) {
                 container.innerHTML = '';
-                const displayMax = Math.max(100, ...quarters);
+                const displayMax = Math.max(50, ...quarters);
                 quarters.forEach((w, q) => {
                     const barHeightPct = Math.max(2, Math.round((w / displayMax) * 100));
                     const h = Math.floor(q / 4);
                     const m = (q % 4) * 15;
                     const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                    const kwhVal = (w * 0.25 / 1000).toFixed(3);
+
                     const col = document.createElement('div');
-                    col.className = 'flex flex-col items-center justify-end h-full group relative cursor-pointer flex-1 min-w-[2px]';
-                    col.innerHTML = `
-                        <div class="absolute -top-7 bg-slate-900 border border-slate-700 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition whitespace-nowrap z-20 pointer-events-none">
-                            ${timeStr} · ${Math.round(w)} W
-                        </div>
-                        <div class="w-full ${colorClass} rounded-t transition-all" style="height: ${barHeightPct}%"></div>
-                    `;
+                    col.className = 'flex flex-col items-center justify-end h-full flex-1 min-w-[2px] cursor-pointer group py-0.5';
+                    
+                    const barDiv = document.createElement('div');
+                    barDiv.className = `w-full ${colorClass} rounded-t transition-all group-hover:brightness-125`;
+                    barDiv.style.height = `${barHeightPct}%`;
+                    col.appendChild(barDiv);
+
+                    // Hover / Touch interaction
+                    const showHover = () => {
+                        if (hoverBadge) {
+                            hoverBadge.innerHTML = `<span class="font-bold text-white">📌 ${timeStr}</span> · <span class="font-bold text-cyan-300">${Math.round(w)} W</span> <span class="text-slate-400">(${kwhVal} kWh ${catName})</span>`;
+                        }
+                    };
+
+                    col.onmouseenter = showHover;
+                    col.ontouchstart = showHover;
+
                     container.appendChild(col);
                 });
+
+                container.onmouseleave = () => {
+                    if (hoverBadge) {
+                        hoverBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping"></span> <span>Beweeg over een kwartier voor details</span>';
+                    }
+                };
             }
         }
 
         async function loadModelDashboard() {
+            renderMonthSelector();
             // 1. Render Decomposition Chart FIRST (always guaranteed)
             try {
                 await renderModelDecompositionChart();

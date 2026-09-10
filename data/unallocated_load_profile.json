@@ -1,7 +1,7 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "resolution": "15m",
-  "last_updated": "2026-09-10T19:13:01.173292+02:00",
+  "last_updated": "2026-09-10T19:49:23.770812+02:00",
   "day_names": [
     "Maandag",
     "Dinsdag",
@@ -2074,5 +2074,139 @@
       99.6,
       106.8
     ]
-  ]
+  ],
+  "monthly_profiles": {
+    "1": {
+      "month_num": 1,
+      "name_short": "Jan",
+      "name_full": "Januari",
+      "cv_daily_kwh": 40.6,
+      "cv_multiplier": 2.12,
+      "dhw_daily_kwh": 5.48,
+      "dhw_multiplier": 1.83,
+      "unalloc_avg_w": 502.8,
+      "unalloc_multiplier": 1.02
+    },
+    "2": {
+      "month_num": 2,
+      "name_short": "Feb",
+      "name_full": "Februari",
+      "cv_daily_kwh": 26.1,
+      "cv_multiplier": 1.36,
+      "dhw_daily_kwh": 4.54,
+      "dhw_multiplier": 1.51,
+      "unalloc_avg_w": 460.5,
+      "unalloc_multiplier": 0.93
+    },
+    "3": {
+      "month_num": 3,
+      "name_short": "Mrt",
+      "name_full": "Maart",
+      "cv_daily_kwh": 15.6,
+      "cv_multiplier": 0.82,
+      "dhw_daily_kwh": 5.2,
+      "dhw_multiplier": 1.73,
+      "unalloc_avg_w": 560.3,
+      "unalloc_multiplier": 1.13
+    },
+    "4": {
+      "month_num": 4,
+      "name_short": "Apr",
+      "name_full": "April",
+      "cv_daily_kwh": 9.1,
+      "cv_multiplier": 0.47,
+      "dhw_daily_kwh": 2.11,
+      "dhw_multiplier": 0.7,
+      "unalloc_avg_w": 555.6,
+      "unalloc_multiplier": 1.12
+    },
+    "5": {
+      "month_num": 5,
+      "name_short": "Mei",
+      "name_full": "Mei",
+      "cv_daily_kwh": 0.0,
+      "cv_multiplier": 0.0,
+      "dhw_daily_kwh": 2.5,
+      "dhw_multiplier": 0.83,
+      "unalloc_avg_w": 531.8,
+      "unalloc_multiplier": 1.07
+    },
+    "6": {
+      "month_num": 6,
+      "name_short": "Jun",
+      "name_full": "Juni",
+      "cv_daily_kwh": 0.0,
+      "cv_multiplier": 0.0,
+      "dhw_daily_kwh": 2.5,
+      "dhw_multiplier": 0.83,
+      "unalloc_avg_w": 622.1,
+      "unalloc_multiplier": 1.26
+    },
+    "7": {
+      "month_num": 7,
+      "name_short": "Jul",
+      "name_full": "Juli",
+      "cv_daily_kwh": 0.0,
+      "cv_multiplier": 0.0,
+      "dhw_daily_kwh": 2.5,
+      "dhw_multiplier": 0.83,
+      "unalloc_avg_w": 678.9,
+      "unalloc_multiplier": 1.37
+    },
+    "8": {
+      "month_num": 8,
+      "name_short": "Aug",
+      "name_full": "Augustus",
+      "cv_daily_kwh": 0.0,
+      "cv_multiplier": 0.0,
+      "dhw_daily_kwh": 2.5,
+      "dhw_multiplier": 0.83,
+      "unalloc_avg_w": 450.0,
+      "unalloc_multiplier": 0.91
+    },
+    "9": {
+      "month_num": 9,
+      "name_short": "Sep",
+      "name_full": "September",
+      "cv_daily_kwh": 0.0,
+      "cv_multiplier": 0.0,
+      "dhw_daily_kwh": 3.87,
+      "dhw_multiplier": 1.29,
+      "unalloc_avg_w": 512.8,
+      "unalloc_multiplier": 1.04
+    },
+    "10": {
+      "month_num": 10,
+      "name_short": "Okt",
+      "name_full": "Oktober",
+      "cv_daily_kwh": 7.1,
+      "cv_multiplier": 0.37,
+      "dhw_daily_kwh": 3.53,
+      "dhw_multiplier": 1.18,
+      "unalloc_avg_w": 519.8,
+      "unalloc_multiplier": 1.05
+    },
+    "11": {
+      "month_num": 11,
+      "name_short": "Nov",
+      "name_full": "November",
+      "cv_daily_kwh": 18.0,
+      "cv_multiplier": 0.94,
+      "dhw_daily_kwh": 4.04,
+      "dhw_multiplier": 1.35,
+      "unalloc_avg_w": 543.3,
+      "unalloc_multiplier": 1.1
+    },
+    "12": {
+      "month_num": 12,
+      "name_short": "Dec",
+      "name_full": "December",
+      "cv_daily_kwh": 17.8,
+      "cv_multiplier": 0.93,
+      "dhw_daily_kwh": 3.21,
+      "dhw_multiplier": 1.07,
+      "unalloc_avg_w": 327.3,
+      "unalloc_multiplier": 0.66
+    }
+  }
 }
