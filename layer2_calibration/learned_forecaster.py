@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 from typing import Dict, List, Any, Tuple, Optional
 import urllib.request
 import urllib.parse
-import numpy as np
+import statistics
 
 AMSTERDAM_TZ = ZoneInfo("Europe/Amsterdam")
 
@@ -335,7 +335,7 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
             for q in range(96):
                 sample_list = grid[dow][q]
                 if sample_list:
-                    new_median = float(np.median(sample_list))
+                    new_median = float(statistics.median(sample_list))
                     if existing_grid and len(existing_grid) > dow and len(existing_grid[dow]) > q:
                         old_val = existing_grid[dow][q]
                         blended = (1.0 - ewma_alpha) * old_val + ewma_alpha * new_median
@@ -366,10 +366,9 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
                     x_dt.append(dt_k)
                     y_kwh.append(kwh)
             if len(x_dt) >= 14:
-                slope, intercept = np.polyfit(x_dt, y_kwh, 1)
-                r_matrix = np.corrcoef(x_dt, y_kwh)
-                if r_matrix.shape == (2, 2):
-                    r_squared = round(float(r_matrix[0, 1] ** 2), 3)
+                slope, intercept = statistics.linear_regression(x_dt, y_kwh)
+                r_val = statistics.correlation(x_dt, y_kwh)
+                r_squared = round(float(r_val ** 2), 3)
                 # Convert kWh/day per degree to W/K: (slope * 1000 / 24) * average COP (approx 3.8)
                 calibrated_ua = round((slope * 1000.0 / 24.0) * 3.8, 1)
                 if 180.0 <= calibrated_ua <= 450.0:

@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.40.1
+Version: 0.40.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1060,32 +1060,82 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/model/decomposition":
-            if not GLOBAL_MODEL:
-                self._send_json({"status": "error", "message": "Model niet geladen"}, 500)
-                return
+            # Harmonized endpoint: returns 96-slot 15m decomposition identical to /api/schedule/chart-data
+            params_q = urllib.parse.parse_qs(parsed.query)
+            resolution = params_q.get("resolution", ["15m"])[0]
+            is_15m = (resolution == "15m")
+            step_mins = 15 if is_15m else 60
+            total_slots = 96 if is_15m else 24
+
             now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
-            start_minute = (now_ams.minute // 15) * 15
+            start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
             base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
-            labels, unalloc_w, heating_w, boiler_w, total_w = [], [], [], [], []
-            for i in range(96):
-                slot_dt = base_dt + timedelta(minutes=15 * i)
+
+            # Fetch weather forecast for Culemborg
+            temp_map, solar_map, wind_map = {}, {}, {}
+            try:
+                url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m&timezone=Europe%2FAmsterdam&forecast_days=2"
+                req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
+                with urllib.request.urlopen(req_m, timeout=5) as r_m:
+                    m_data = json.loads(r_m.read().decode())
+                    m_times = m_data.get("hourly", {}).get("time", [])
+                    m_temps = m_data.get("hourly", {}).get("temperature_2m", [])
+                    m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
+                    m_winds = m_data.get("hourly", {}).get("wind_speed_10m", [])
+                    for t, tmp, rad, wnd in zip(m_times, m_temps, m_rads, m_winds):
+                        k_t = t.replace('T', ' ')[:13] + ':00'
+                        temp_map[k_t] = float(tmp)
+                        solar_map[k_t] = float(rad)
+                        wind_map[k_t] = float(wnd)
+            except Exception as e_w:
+                print(f"Weather fetch error in decomposition: {e_w}")
+
+            labels, unalloc_w, heating_w, boiler_w, solar_w, total_w = [], [], [], [], [], []
+            timeline_slots = []
+            for i in range(total_slots):
+                slot_dt = base_dt + timedelta(minutes=step_mins * i)
                 lbl = slot_dt.strftime("%H:%M")
-                u_w = GLOBAL_MODEL.predict_unallocated_w(slot_dt)
-                h_res = GLOBAL_MODEL.predict_space_heating_w(slot_dt, t_outdoor_c=14.0)
-                h_w = h_res["electrical_w"]
-                # 350L tank heated in 45-min slot (13:00 - 13:45)
-                b_w = 1600.0 if (13 <= slot_dt.hour < 14 and slot_dt.minute < 45) else 0.0
+                k_hour = slot_dt.strftime("%Y-%m-%d %H:00")
+                t_out = temp_map.get(k_hour, 14.0)
+                sol_rad = solar_map.get(k_hour, 0.0)
+                wnd_spd = wind_map.get(k_hour, 3.0)
+
+                u_w = GLOBAL_MODEL.predict_unallocated_w(slot_dt) if GLOBAL_MODEL else 300.0
+                h_res = GLOBAL_MODEL.predict_space_heating_w(slot_dt, t_outdoor_c=t_out, solar_radiation_w_m2=sol_rad, wind_speed_m_s=wnd_spd) if GLOBAL_MODEL else {"electrical_w": 0.0}
+                h_w = h_res.get("electrical_w", 0.0)
+                s_w = round((sol_rad / 1000.0) * 5.5 * 0.90 * 1000.0, 1) # Watts solar
+
                 labels.append(lbl)
                 unalloc_w.append(round(u_w, 1))
                 heating_w.append(round(h_w, 1))
-                boiler_w.append(round(b_w, 1))
-                total_w.append(round(u_w + h_w + b_w, 1))
+                solar_w.append(s_w)
+                boiler_w.append(0.0)
+                timeline_slots.append({"idx": i, "dt": slot_dt, "solar": s_w})
+
+            # Plan SWW Boiler 350L (3 consecutive 15m slots = 45 mins at 1600W electrical)
+            daylight = [s for s in timeline_slots if 10 <= s["dt"].hour <= 16]
+            if daylight:
+                best_slot = max(daylight, key=lambda s: s["solar"])
+                sww_start = best_slot["idx"]
+            else:
+                sww_start = 48 if is_15m else 12 # 12:00 default
+            
+            slots_to_fill = 3 if is_15m else 1
+            for k in range(slots_to_fill):
+                if sww_start + k < len(boiler_w):
+                    boiler_w[sww_start + k] = 1600.0
+
+            for i in range(total_slots):
+                tot = unalloc_w[i] + heating_w[i] + boiler_w[i]
+                total_w.append(round(tot, 1))
+
             self._send_json({
-                "resolution": "15m",
+                "resolution": resolution,
                 "labels": labels,
                 "unallocated_w": unalloc_w,
                 "heating_w": heating_w,
                 "boiler_w": boiler_w,
+                "solar_w": solar_w,
                 "total_consumption_w": total_w
             })
             return
@@ -1119,7 +1169,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.40.1",
+                "version": "0.40.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2452,7 +2502,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.40.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.40.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
