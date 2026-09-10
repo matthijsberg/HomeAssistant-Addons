@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.36.1
+Version: 0.36.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1031,7 +1031,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.36.1",
+                "version": "0.36.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1072,8 +1072,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             # Home Assistant Core Connection info (Bi-directional: Bron & Doel)
             ha_sec = load_secrets()
-    token = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASSIO_TOKEN") or os.environ.get("HASS_TOKEN") or sec.get("homeassistant", {}).get("token")
-            ha_base_url = "http://supervisor/core" if os.environ.get("SUPERVISOR_TOKEN") else (os.environ.get("HASS_URL") or "https://hass.b3rg.nl:8123")
+            ha_token = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASSIO_TOKEN") or os.environ.get("HASS_TOKEN") or ha_sec.get("homeassistant", {}).get("token")
+            ha_base_url = "http://supervisor/core" if os.environ.get("SUPERVISOR_TOKEN") else (os.environ.get("HASS_URL") or ha_sec.get("homeassistant", {}).get("url") or "https://hass.b3rg.nl:8123")
             
             ha_sources = []
             ha_targets = []
@@ -1651,8 +1651,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         # INFRASTRUCTURE: Test Home Assistant Core
         if path == "/api/infrastructure/homeassistant/test":
             ha_sec = load_secrets()
-    token = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASSIO_TOKEN") or os.environ.get("HASS_TOKEN") or sec.get("homeassistant", {}).get("token")
-            ha_base_url = "http://supervisor/core" if os.environ.get("SUPERVISOR_TOKEN") else (os.environ.get("HASS_URL") or "https://hass.b3rg.nl:8123")
+            ha_token = os.environ.get("SUPERVISOR_TOKEN") or os.environ.get("HASSIO_TOKEN") or os.environ.get("HASS_TOKEN") or ha_sec.get("homeassistant", {}).get("token")
+            ha_base_url = "http://supervisor/core" if os.environ.get("SUPERVISOR_TOKEN") else (os.environ.get("HASS_URL") or ha_sec.get("homeassistant", {}).get("url") or "https://hass.b3rg.nl:8123")
             if not ha_token:
                 self._send_json({"status": "error", "message": "Geen Supervisor of HASS token gevonden"}, 400)
                 return
@@ -2282,7 +2282,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.36.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.36.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
