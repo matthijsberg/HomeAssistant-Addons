@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.34.1
+Version: 0.35.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1013,7 +1013,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.34.1",
+                "version": "0.35.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1134,6 +1134,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             qp = urllib.parse.parse_qs(parsed_url.query)
             res_mode = qp.get("resolution", ["1h"])[0]
             is_15m = (res_mode == "15m")
+            sim_battery_param = qp.get("simulate_battery", ["0"])[0] in ["1", "true", "True"]
+
+            # Battery is active ONLY if physically installed & enabled in config, OR explicitly requested as simulation
+            battery_installed = any(
+                d.get("type") == "home_battery" and d.get("installed", False) and d.get("enabled", False)
+                for d in cfg.get("devices", [])
+            )
+            is_battery_active = battery_installed or sim_battery_param or cfg.get("simulate_battery", False)
 
             baseload_w = float(cfg.get("baseload_watts", 300.0))
             baseload_kw = round(baseload_w / 1000.0, 3)
@@ -1285,62 +1293,65 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 boiler[sww_idx] = 1.2
                 advices[sww_idx] = f"♨️ SWW Boiler 350L Run: Laagste EPEX tarief (€{best_sww_slot['price']:.3f}/kWh)"
 
-            # 6. Plan Battery Dispatch: Solar Surplus Charging & Peak Tariff Discharging
+            # 6. Plan Battery Dispatch: ONLY IF BATTERY IS PHYSICALLY INSTALLED OR SIMULATION EXPLICITLY ACTIVATED
             battery_discharge = [0.0] * total_slots
+            bat_msg = ""
             min_item = min(timeline_items, key=lambda x: x["price"])
             max_item = max(timeline_items, key=lambda x: x["price"])
-            price_delta = max_item["price"] - min_item["price"]
-            deadband = float(cfg.get("battery_deadband_eur_kwh", 0.115))
-            peak_solar_it = max(timeline_items, key=lambda x: x["solar"])
-            bat_msg = ""
-            bat_slots = 4 if is_15m else 1
 
-            # Check if there is significant solar surplus available tomorrow
-            if peak_solar_it["solar"] >= 1.5:
-                # Mode A: Solar Buffer Priority — charge exclusively from free solar surplus
-                # Find daylight slot with surplus above baseload and SWW
-                surplus_candidates = [
-                    it for it in daylight_slots
-                    if (it["solar"] - (unallocated[it["idx"]] + boiler[it["idx"]])) >= 0.5
-                ]
-                if surplus_candidates:
-                    charge_slot = max(surplus_candidates, key=lambda x: (x["solar"] - (unallocated[x["idx"]] + boiler[x["idx"]])))
-                    avail_surplus = charge_slot["solar"] - (unallocated[charge_slot["idx"]] + boiler[charge_slot["idx"]])
-                    charge_kw = round(min(2.5, max(1.0, avail_surplus)), 2)
-                else:
-                    charge_slot = peak_solar_it
-                    charge_kw = 2.0
-
-                for b_i in range(charge_slot["idx"], min(total_slots, charge_slot["idx"] + bat_slots)):
-                    battery_charge[b_i] = charge_kw
-
-                # Discharge during expensive evening peak (18:00 - 23:00 or morning)
-                evening_slots = [it for it in timeline_items if (18 <= it["dt"].hour <= 23 or 0 <= it["dt"].hour <= 1)]
-                if evening_slots:
-                    best_discharge = max(evening_slots, key=lambda x: x["price"])
-                    for d_i in range(best_discharge["idx"], min(total_slots, best_discharge["idx"] + bat_slots)):
-                        battery_discharge[d_i] = 2.0
-                    other_evening = [it for it in evening_slots if it["idx"] != best_discharge["idx"]]
-                    if other_evening:
-                        second_dis = max(other_evening, key=lambda x: x["price"])
-                        for d2_i in range(second_dis["idx"], min(total_slots, second_dis["idx"] + bat_slots)):
-                            battery_discharge[d2_i] = 1.5
-                    bat_msg = f"☀️ Zonne-Buffer: Accu laadt op gratis zonne-overschot om {charge_slot['label']} ({charge_kw} kW) en ontlaadt in de avondpiek ({best_discharge['label']}, €{best_discharge['price']:.2f}/kWh)."
-                else:
-                    bat_msg = f"☀️ Zonne-Buffer: Accu laadt op gratis zonne-overschot om {charge_slot['label']} ({charge_kw} kW)."
-            elif price_delta >= deadband:
-                # Mode B: Winter/Cloudy Tariff Arbitrage — charge from grid at lowest price, discharge at highest
-                for b_i in range(min_item["idx"], min(total_slots, min_item["idx"] + bat_slots)):
-                    battery_charge[b_i] = 2.0
-                for d_i in range(max_item["idx"], min(total_slots, max_item["idx"] + bat_slots)):
-                    battery_discharge[d_i] = 2.0
-                expensive_slots = sorted(timeline_items, key=lambda x: x["price"], reverse=True)
-                if len(expensive_slots) > 1 and expensive_slots[1]["idx"] != min_item["idx"]:
-                    for d2_i in range(expensive_slots[1]["idx"], min(total_slots, expensive_slots[1]["idx"] + bat_slots)):
-                        battery_discharge[d2_i] = 1.5
-                bat_msg = f"🔋 Accu-Arbitrage (Bewolkt/Winter): Laden om {min_item['label']} (€{min_item['price']:.2f}), Ontladen om {max_item['label']} (€{max_item['price']:.2f}) [Spread €{price_delta:.3f} > €{deadband:.3f}]."
+            if not is_battery_active:
+                bat_msg = "Geen thuisaccu geactiveerd (zuiver echte apparaten)."
             else:
-                bat_msg = f"⏸️ Accu Stand-by: Onvoldoende zonne-overschot en prijsdelta €{price_delta:.3f} onder drempel."
+                price_delta = max_item["price"] - min_item["price"]
+                deadband = float(cfg.get("battery_deadband_eur_kwh", 0.115))
+                peak_solar_it = max(timeline_items, key=lambda x: x["solar"])
+                bat_slots = 4 if is_15m else 1
+
+                # Check if there is significant solar surplus available tomorrow
+                if peak_solar_it["solar"] >= 1.5:
+                    # Mode A: Solar Buffer Priority — charge exclusively from free solar surplus
+                    surplus_candidates = [
+                        it for it in daylight_slots
+                        if (it["solar"] - (unallocated[it["idx"]] + boiler[it["idx"]])) >= 0.5
+                    ]
+                    if surplus_candidates:
+                        charge_slot = max(surplus_candidates, key=lambda x: (x["solar"] - (unallocated[x["idx"]] + boiler[x["idx"]])))
+                        avail_surplus = charge_slot["solar"] - (unallocated[charge_slot["idx"]] + boiler[charge_slot["idx"]])
+                        charge_kw = round(min(2.5, max(1.0, avail_surplus)), 2)
+                    else:
+                        charge_slot = peak_solar_it
+                        charge_kw = 2.0
+
+                    for b_i in range(charge_slot["idx"], min(total_slots, charge_slot["idx"] + bat_slots)):
+                        battery_charge[b_i] = charge_kw
+
+                    # Discharge during expensive evening peak (18:00 - 23:00 or morning)
+                    evening_slots = [it for it in timeline_items if (18 <= it["dt"].hour <= 23 or 0 <= it["dt"].hour <= 1)]
+                    if evening_slots:
+                        best_discharge = max(evening_slots, key=lambda x: x["price"])
+                        for d_i in range(best_discharge["idx"], min(total_slots, best_discharge["idx"] + bat_slots)):
+                            battery_discharge[d_i] = 2.0
+                        other_evening = [it for it in evening_slots if it["idx"] != best_discharge["idx"]]
+                        if other_evening:
+                            second_dis = max(other_evening, key=lambda x: x["price"])
+                            for d2_i in range(second_dis["idx"], min(total_slots, second_dis["idx"] + bat_slots)):
+                                battery_discharge[d2_i] = 1.5
+                        bat_msg = f"☀️ Zonne-Buffer: Accu laadt op gratis zonne-overschot om {charge_slot['label']} ({charge_kw} kW) en ontlaadt in de avondpiek ({best_discharge['label']}, €{best_discharge['price']:.2f}/kWh)."
+                    else:
+                        bat_msg = f"☀️ Zonne-Buffer: Accu laadt op gratis zonne-overschot om {charge_slot['label']} ({charge_kw} kW)."
+                elif price_delta >= deadband:
+                    # Mode B: Winter/Cloudy Tariff Arbitrage — charge from grid at lowest price, discharge at highest
+                    for b_i in range(min_item["idx"], min(total_slots, min_item["idx"] + bat_slots)):
+                        battery_charge[b_i] = 2.0
+                    for d_i in range(max_item["idx"], min(total_slots, max_item["idx"] + bat_slots)):
+                        battery_discharge[d_i] = 2.0
+                    expensive_slots = sorted(timeline_items, key=lambda x: x["price"], reverse=True)
+                    if len(expensive_slots) > 1 and expensive_slots[1]["idx"] != min_item["idx"]:
+                        for d2_i in range(expensive_slots[1]["idx"], min(total_slots, expensive_slots[1]["idx"] + bat_slots)):
+                            battery_discharge[d2_i] = 1.5
+                    bat_msg = f"🔋 Accu-Arbitrage (Bewolkt/Winter): Laden om {min_item['label']} (€{min_item['price']:.2f}), Ontladen om {max_item['label']} (€{max_item['price']:.2f}) [Spread €{price_delta:.3f} > €{deadband:.3f}]."
+                else:
+                    bat_msg = f"⏸️ Accu Stand-by: Onvoldoende zonne-overschot en prijsdelta €{price_delta:.3f} onder drempel."
 
             # Calculate Dual-Polarity Datasets
             # Negative stack: Solar generation and Battery discharge (< 0 kW)
@@ -1481,6 +1492,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "hours": labels,
                 "labels": labels,
                 "interval_h": step_h,
+                "battery_enabled": is_battery_active,
+                "battery_simulated": bool(sim_battery_param and not battery_installed),
                 "export_prices_eur": export_prices,
                 "datasets": {
                     "unallocated_kw": unallocated,
@@ -2127,7 +2140,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.34.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.35.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2195,6 +2208,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <span class="text-[10px] text-purple-300 font-mono bg-purple-950/80 px-2 py-0.5 rounded border border-purple-800">24H FORECAST</span>
                         </div>
                         <div class="flex items-center gap-2 text-xs flex-wrap">
+                            <!-- Battery Simulation Toggle (Default: UIT / Geen Mock) -->
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono items-center">
+                                <span class="px-2 text-slate-400 font-medium">🔋 Accu:</span>
+                                <button id="bat-btn-off" onclick="setBatterySimulation(false)" class="bat-btn-off px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow">Uit</button>
+                                <button id="bat-btn-on" onclick="setBatterySimulation(true)" class="bat-btn-on px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">Simuleer</button>
+                            </div>
                             <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
                                 <button onclick="setPredictionResolution('1h')" class="res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
                                 <button onclick="setPredictionResolution('15m')" class="res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
@@ -3439,20 +3458,33 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             loadPowerProducersChart();
         }
 
+        window.__simulateBattery = false;
+
+        function setBatterySimulation(enable) {
+            window.__simulateBattery = enable;
+            document.querySelectorAll('.bat-btn-off').forEach(b => {
+                b.className = !enable ? 'bat-btn-off px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow' : 'bat-btn-off px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
+            });
+            document.querySelectorAll('.bat-btn-on').forEach(b => {
+                b.className = enable ? 'bat-btn-on px-2 py-0.5 rounded transition font-medium bg-amber-600 text-white shadow' : 'bat-btn-on px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
+            });
+            loadChartData();
+        }
+
         function setPredictionResolution(res) {
             predictionResolution = res;
             document.querySelectorAll('.res-btn-1h').forEach(b => {
                 if (res === '1h') {
-                    b.className = 'res-btn-1h px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow';
+                    b.className = 'res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow';
                 } else {
-                    b.className = 'res-btn-1h px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                    b.className = 'res-btn-1h px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
                 }
             });
             document.querySelectorAll('.res-btn-15m').forEach(b => {
                 if (res === '15m') {
-                    b.className = 'res-btn-15m px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow';
+                    b.className = 'res-btn-15m px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow';
                 } else {
-                    b.className = 'res-btn-15m px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                    b.className = 'res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
                 }
             });
             loadChartData();
@@ -4173,7 +4205,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
         async function loadChartData() {
             try {
-                const res = await fetch('./api/schedule/chart-data?resolution=' + encodeURIComponent(predictionResolution));
+                const simParam = window.__simulateBattery ? '&simulate_battery=1' : '';
+                const res = await fetch('./api/schedule/chart-data?resolution=' + encodeURIComponent(predictionResolution) + simParam);
                 const data = await res.json();
                 window.__lastPredictionData = data;
                 window.__lastPredictionIntervalH = data.interval_h || (predictionResolution === '15m' ? 0.25 : 1.0);
@@ -4290,85 +4323,89 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     type: 'bar',
                     data: {
                         labels: labels,
-                        datasets: [
-                            // 0. EPEX Stroomprijs All-in Stepped/Dashed Line (Rechter Y-as)
-                            {
-                                label: 'Stroomprijs All-in (€/kWh)',
-                                data: pricesArr,
-                                type: 'line',
-                                borderColor: '#06B6D4',
-                                borderDash: [4, 4],
-                                borderWidth: 1.5,
-                                pointRadius: 0,
-                                yAxisID: 'y1',
-                                tension: 0,
-                                order: 0
-                            },
-                            // 1. Verwacht Netto Verbruik Lijn (Felrood) in kWh
-                            {
-                                label: 'Verwacht Netto (kWh)',
-                                data: netKwh,
-                                type: 'line',
-                                borderColor: '#EF4444',
-                                backgroundColor: 'transparent',
-                                borderWidth: 2.5,
-                                pointRadius: 2,
-                                pointBackgroundColor: '#EF4444',
-                                tension: 0.25,
-                                yAxisID: 'y',
-                                order: 1
-                            },
-                            // === CONSUMERS (BOVEN DE AS > 0, STACK: ENERGY in kWh) ===
-                            {
-                                label: 'Ongedefinieerd (kWh)',
-                                data: unallocKwh,
-                                backgroundColor: '#3B82F6',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 3
-                            },
-                            {
-                                label: 'SWW Tapwater (kWh)',
-                                data: boilerKwh,
-                                backgroundColor: '#EC4899',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 3
-                            },
-                            {
-                                label: 'CV Verwarming (kWh)',
-                                data: heatingKwh,
-                                backgroundColor: '#6366F1',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 3
-                            },
-                            {
-                                label: 'Accu Laden (kWh)',
-                                data: batteryChargeKwh,
-                                backgroundColor: '#10B981',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 3
-                            },
-                            // === SOURCES (ONDER DE AS < 0, STACK: ENERGY in kWh) ===
-                            {
+                        datasets: (() => {
+                            const ds = [
+                                {
+                                    label: 'Stroomprijs All-in (€/kWh)',
+                                    data: pricesArr,
+                                    type: 'line',
+                                    borderColor: '#06B6D4',
+                                    borderDash: [4, 4],
+                                    borderWidth: 1.5,
+                                    pointRadius: 0,
+                                    yAxisID: 'y1',
+                                    tension: 0,
+                                    order: 0
+                                },
+                                {
+                                    label: 'Verwacht Netto (kWh)',
+                                    data: netKwh,
+                                    type: 'line',
+                                    borderColor: '#EF4444',
+                                    backgroundColor: 'transparent',
+                                    borderWidth: 2.5,
+                                    pointRadius: 2,
+                                    pointBackgroundColor: '#EF4444',
+                                    tension: 0.25,
+                                    yAxisID: 'y',
+                                    order: 1
+                                },
+                                {
+                                    label: 'Ongedefinieerd (kWh)',
+                                    data: unallocKwh,
+                                    backgroundColor: '#3B82F6',
+                                    stack: 'energy',
+                                    borderRadius: 2,
+                                    order: 3
+                                },
+                                {
+                                    label: 'SWW Tapwater (kWh)',
+                                    data: boilerKwh,
+                                    backgroundColor: '#EC4899',
+                                    stack: 'energy',
+                                    borderRadius: 2,
+                                    order: 3
+                                },
+                                {
+                                    label: 'CV Verwarming (kWh)',
+                                    data: heatingKwh,
+                                    backgroundColor: '#6366F1',
+                                    stack: 'energy',
+                                    borderRadius: 2,
+                                    order: 3
+                                }
+                            ];
+                            // Only include battery datasets if physically installed or simulation active
+                            if (data.battery_enabled) {
+                                ds.push({
+                                    label: 'Accu Laden (kWh)',
+                                    data: batteryChargeKwh,
+                                    backgroundColor: '#10B981',
+                                    stack: 'energy',
+                                    borderRadius: 2,
+                                    order: 3
+                                });
+                            }
+                            ds.push({
                                 label: 'Zon Productie (kWh)',
                                 data: solarNegKwh,
                                 backgroundColor: '#F59E0B',
                                 stack: 'energy',
                                 borderRadius: 2,
                                 order: 4
-                            },
-                            {
-                                label: 'Accu Ontladen (kWh)',
-                                data: batteryDischargeNegKwh,
-                                backgroundColor: '#14B8A6',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 4
+                            });
+                            if (data.battery_enabled) {
+                                ds.push({
+                                    label: 'Accu Ontladen (kWh)',
+                                    data: batteryDischargeNegKwh,
+                                    backgroundColor: '#14B8A6',
+                                    stack: 'energy',
+                                    borderRadius: 2,
+                                    order: 4
+                                });
                             }
-                        ]
+                            return ds;
+                        })()
                     },
                     options: {
                         responsive: true,
