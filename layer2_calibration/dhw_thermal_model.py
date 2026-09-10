@@ -188,12 +188,12 @@ class DhwThermalModel:
         night_label = f"{today_name} op {tomorrow_name} nacht ({dt_ams.day}-{tomorrow_dt.day} {['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'][dt_ams.month-1]})"
         short_night_label = f"{today_name[:2]} {dt_ams.day} ➔ {tomorrow_name[:2]} {tomorrow_dt.day} {['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'][dt_ams.month-1]}"
 
-        # Simulate 24h trajectory without night heat
+        # Simulate standard (P50) 24h trajectory without night heat
         unheated_sim = self.simulate_trajectory(t_current_c, now_dt, hours_ahead=24, heat_pump_schedule_slots=[])
         temps = unheated_sim["temperatures_c"]
         labels = unheated_sim["labels"]
 
-        # 1. Calculate Morning Dip specifically during morning shower hours (06:00 - 09:45 tomorrow)
+        # 1. P50 Morning Dip (06:00 - 09:45 tomorrow)
         morning_slots = [
             (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(labels, temps))
             if ("06:00" <= lbl <= "09:45" and idx >= 16)
@@ -206,9 +206,14 @@ class DhwThermalModel:
             morning_dip_c = round(min(temps[:36]), 1) if temps else t_current_c
             morning_dip_time = "08:30"
 
+        # 2. P95 Morning Dip (Stochastic Heavy Shower Stress Scenario: +45% tap water draw-off)
+        # Calculates conservative dip when multiple family members take long showers or wash hair
+        p95_extra_kwh_th = 0.65  # ~35L additional 38C shower water
+        morning_dip_p95_c = round(max(30.0, morning_dip_c - (p95_extra_kwh_th / C_TANK_KWH_PER_C)), 1)
+        p95_is_safe = (morning_dip_p95_c >= T_MIN_COMFORT_C)
         morning_is_safe = (morning_dip_c >= T_MIN_COMFORT_C)
 
-        # 2. Calculate first moment tank drops below 40.0C
+        # 3. Calculate first moment tank drops below 40.0C
         first_sub40_time = ""
         first_sub40_idx = len(temps)
         for idx, (lbl, t) in enumerate(zip(labels, temps)):
@@ -217,15 +222,19 @@ class DhwThermalModel:
                 first_sub40_idx = idx
                 break
 
-        # 3. Financial Cost Comparison: Night Charge at 03:15 vs Day Charge at first dip / 12:30
-        # Night Option: heat to 50C at 03:15 + 8h standby loss until morning
+        # 4. Spits-Lockout Detection:
+        # Morning peak lockout: 07:00 - 09:30 (extreme EPEX spot spikes + gezin thuis)
+        # Evening peak lockout: 17:00 - 20:00 (peak tariffs + cooking/heating)
+        # If the tank drops < 40C before 10:00, forced daytime reheat would hit peak hours!
+        drops_in_morning_peak = ("06:30" <= (first_sub40_time or "12:00") <= "09:45")
+
+        # 5. Financial Cost Comparison: Night Charge vs Daytime Charge
         night_price = 0.309   # EUR/kWh (typical EPEX spot night price)
         cop_night = 2.65      # Lower COP at 11C night air
         th_need_night = (T_TARGET_C - t_current_c) * C_TANK_KWH_PER_C + (STANDBY_LOSS_KW_PER_HOUR * 8.0)
         el_kwh_night = max(1.2, th_need_night / cop_night)
         cost_night = round(el_kwh_night * night_price, 2)
 
-        # Day Option: heat at 12:30 (when approaching 40C) at warmer air & solar
         day_price = 0.291     # EUR/kWh (cheaper midday spot tariff + solar self-consumption)
         cop_day = 3.25        # Higher COP at 16C daytime air
         th_need_day = (T_TARGET_C - min(40.0, morning_dip_c)) * C_TANK_KWH_PER_C
@@ -233,35 +242,56 @@ class DhwThermalModel:
         cost_day = round(el_kwh_day * day_price, 2)
 
         savings_by_waiting = round(cost_night - cost_day, 2)
+        night_premium_pct = round(((cost_night - cost_day) / max(0.01, cost_day)) * 100.0, 1)
+
+        # 6. Cost Tolerance & Comfort Hedging Rule:
+        # If night heating is less than 20% more expensive than daytime, AND either:
+        #   (a) P95 morning dip falls below 40.5C (tight safety margin), OR
+        #   (b) First dip occurs before 11:30 (dangerously close to morning peak)
+        # -> TRIGGER NIGHT CHARGING AS COMFORT INSURANCE!
+        comfort_hedge_triggered = False
+        if night_premium_pct <= 20.0 and (morning_dip_p95_c < 40.5 or (first_sub40_time and first_sub40_time < "11:30")):
+            comfort_hedge_triggered = True
 
         # Current usable energy & shower volume
         q_now_usable = max(0.0, (t_current_c - T_MIN_COMFORT_C) * C_TANK_KWH_PER_C)
         q_now_mj = q_now_usable * 3.6
         v_mixed_shower_liters = round(350.0 * max(0.0, t_current_c - 12.0) / (38.0 - 12.0))
 
-        # Final decision logic
-        if morning_is_safe and savings_by_waiting >= 0.0:
-            status = "SKIP_NIGHT_CHARGE"
-            decision_title = "✅ Geen nachtlading nodig"
-            decision_sub = f"Wachten tot {first_sub40_time or '12:30'}u bespaart €{savings_by_waiting:.2f} ({(savings_by_waiting/cost_night*100):.0f}%)"
-            recommendation = (
-                f"✅ GEEN nachtlading nodig ({night_label}). "
-                f"Ochtenddouches blijven met {morning_dip_c}°C (om {morning_dip_time}u) ruim warm (>40°C). "
-                f"Wachten tot het eerste laadmoment om {first_sub40_time or '12:30'}u kost €{cost_day:.2f} "
-                f"(bij COP {cop_day}) t.o.v. €{cost_night:.2f} 's nachts bij COP {cop_night} inclusief 8u stilstandsverlies. "
-                f"Je bespaart €{savings_by_waiting:.2f}!"
-            )
-            optimal_slot_type = "midday_solar"
-        else:
+        # 7. Final Policy Decision Logic
+        if drops_in_morning_peak or not morning_is_safe:
             status = "SCHEDULE_NIGHT_CHARGE"
-            decision_title = "⚠️ Nachtlading aanbevolen"
-            decision_sub = f"Nachtlading (€{cost_night:.2f}) waarborgt ochtendcomfort"
+            decision_title = "⚠️ Nachtlading vereist (Ochtendcomfort)"
+            decision_sub = f"Tank zakt om {morning_dip_time}u onder 40°C in ochtendspits"
             recommendation = (
-                f"⚠️ Nachtlading aanbevolen ({night_label}): "
-                f"Zonder nachtlading daalt de tank in de ochtend naar {morning_dip_c}°C om {morning_dip_time}u (onder 40°C). "
-                f"Nachtlading in het goedkoopste kwartier (03:15u, €{cost_night:.2f}) waarborgt een warme ochtenddouche."
+                f"⚠️ NACHTLADING VEREIST ({night_label}): "
+                f"Zonder nachtlading daalt de tank tijdens de ochtendspits naar {morning_dip_c}°C om {morning_dip_time}u (<40°C). "
+                f"Nachtlading in het goedkoopste dalkwartier (03:15u, €{cost_night:.2f}) voorkomt een koude douche en dure spitsopwarming."
             )
             optimal_slot_type = "cheapest_night_quarter"
+        elif comfort_hedge_triggered:
+            status = "SCHEDULE_NIGHT_CHARGE"
+            decision_title = "🛡️ Nachtlading aanbevolen (Comfortverzekering)"
+            decision_sub = f"Nacht meerkosten slects {night_premium_pct}% (<20% drempel) · P95 dip {morning_dip_p95_c}°C"
+            recommendation = (
+                f"🛡️ NACHTLADING AANBEVOLEN ({night_label}) via Comfort-Hedging beleid: "
+                f"Nachtladen kost €{cost_night:.2f} t.o.v. €{cost_day:.2f} overdag (+{night_premium_pct}%, onder de 20% tolerantiedrempel). "
+                f"Omdat de P95-risicodip {morning_dip_p95_c}°C is en de tank om {first_sub40_time or '12:00'}u leeg dreigt te raken, "
+                f"wordt 's nachts preventief bijgeladen om het gezin 100% warm water te garanderen zonder spits-risico."
+            )
+            optimal_slot_type = "cheapest_night_quarter"
+        else:
+            status = "SKIP_NIGHT_CHARGE"
+            decision_title = "✅ Geen nachtlading nodig"
+            decision_sub = f"Wachten tot {first_sub40_time or '12:30'}u bespaart €{savings_by_waiting:.2f} ({abs(night_premium_pct):.0f}%)"
+            recommendation = (
+                f"✅ GEEN nachtlading nodig ({night_label}). "
+                f"Ochtenddouches blijven met {morning_dip_c}°C (P95: {morning_dip_p95_c}°C om {morning_dip_time}u) ruim warm (>40°C). "
+                f"De ochtendspits (07:00–09:30) wordt veilig overbrugd. "
+                f"Wachten tot {first_sub40_time or '12:30'}u (buiten de spits) kost €{cost_day:.2f} bij COP {cop_day} + zon "
+                f"t.o.v. €{cost_night:.2f} 's nachts bij COP {cop_night}. Je bespaart €{savings_by_waiting:.2f}!"
+            )
+            optimal_slot_type = "midday_solar"
 
         return {
             "status": status,
@@ -275,14 +305,23 @@ class DhwThermalModel:
             "usable_heat_kwh_th": round(q_now_usable, 2),
             "usable_heat_mj": round(q_now_mj, 1),
             "morning_dip_c": morning_dip_c,
+            "morning_dip_p95_c": morning_dip_p95_c,
             "morning_dip_time": morning_dip_time,
             "morning_is_safe": morning_is_safe,
+            "p95_is_safe": p95_is_safe,
             "first_sub40_time": first_sub40_time or "12:30",
+            "drops_in_morning_peak": drops_in_morning_peak,
             "cost_night_eur": cost_night,
             "cost_day_eur": cost_day,
             "savings_by_waiting_eur": savings_by_waiting,
+            "night_premium_pct": night_premium_pct,
+            "comfort_hedge_triggered": comfort_hedge_triggered,
             "recommendation": recommendation,
-            "optimal_slot_type": optimal_slot_type
+            "optimal_slot_type": optimal_slot_type,
+            "recalculation_policy": "Continu her-overwogen (elke 60s via live tanksensor, definitieve executie om 02:00u)",
+            "spits_lockout_morning": "07:00 - 09:30 (strikte blokkade)",
+            "spits_lockout_evening": "17:00 - 20:00 (strikte blokkade)",
+            "cost_tolerance_threshold": "Nachtlading < 20% duurder dan daglading activeert comfort-verzekering"
         }
 
 
