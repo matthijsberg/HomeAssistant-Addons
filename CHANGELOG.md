@@ -17,6 +17,20 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.32.0] — 2026-09-08 (Perfect Center-Aligned Horizontal 0-Axis for Watt & Tariffs, and Active Custom Tooltips Across Charts)
+
+### Added
+- **Exact Center-Aligned Horizontal 0-Axis (`min = -max`):**
+  - Configured symmetric dynamic range on both the primary left axis (`y` in Watts) and secondary right axis (`y1` in €/kWh).
+  - Guarantees that the horizontal 0 Watt line and the horizontal 0 €/kWh line are positioned on the exact same vertical center pixel height (50.0% of canvas height) across all screen widths.
+- **Active Custom HTML Tooltip Delivery:**
+  - Fully wired `customHemsTooltipHandler` into both `powerProducersChart` (Verbruikshistorie) and `hemsChartAnalytics` (Verbruiksvoorspelling) via `options.plugins.tooltip.external`.
+  - Added ultra-high z-index (`z-[9999]`) and smooth mobile touch dismissal.
+  - Verified actual line indicators for curves (`Totaal Verbruik`, `Netto Grid Stroom`, `Stroomprijs All-in`) and rounded bar pills for stacked loads.
+  - Formatted interval euro amounts (`Afname: +€...`, `Teruglevering: -€...`, `Opgewekt Gebruikt: €... besp.`, `Netto: €...`).
+
+---
+
 ## [0.31.0] — 2026-09-08 (EPEX Price Overlays in Historical Chart & Modern Styled Tooltips with Actual Lines and Differentiated Dynamic Costs)
 
 ### Added

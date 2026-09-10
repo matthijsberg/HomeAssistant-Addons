@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.31.2
+Version: 0.32.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1010,7 +1010,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.31.2",
+                "version": "0.32.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2124,7 +2124,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.31.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.32.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3944,8 +3944,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             if (!tooltipEl) {
                 tooltipEl = document.createElement('div');
                 tooltipEl.id = 'chartjs-custom-tooltip';
-                tooltipEl.className = 'pointer-events-none fixed z-50 bg-[#0B0F17]/95 backdrop-blur-md border border-slate-700/80 rounded-xl shadow-2xl p-3 text-xs font-mono transition-opacity duration-150 text-slate-200';
-                tooltipEl.style.minWidth = '220px';
+                tooltipEl.className = 'pointer-events-none fixed z-[9999] bg-[#0B0F17]/95 backdrop-blur-md border border-slate-700/90 rounded-2xl shadow-2xl p-3.5 text-xs font-mono transition-opacity duration-100 text-slate-200';
+                tooltipEl.style.minWidth = '250px';
+                tooltipEl.style.maxWidth = '320px';
                 document.body.appendChild(tooltipEl);
             }
             return tooltipEl;
@@ -5319,6 +5320,27 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     ];
                 }
 
+                // Calculate symmetric center-aligned bounds (0 horizontal line exactly in the middle)
+                const allWattVals = [
+                    ...(data.afname || []),
+                    ...(data.verbruik || []),
+                    ...(data.solar_negative || []).map(Math.abs),
+                    ...(data.teruglevering_negative || []).map(Math.abs),
+                    1000
+                ];
+                let maxAbsWatt = Math.max(...allWattVals);
+                maxAbsWatt = Math.ceil(maxAbsWatt / 500) * 500;
+                if (maxAbsWatt < 1500) maxAbsWatt = 1500;
+
+                const allPriceVals = [
+                    ...(data.prices || []).map(Math.abs),
+                    ...(data.export_prices || []).map(Math.abs),
+                    0.25
+                ];
+                let maxAbsPrice = Math.max(...allPriceVals);
+                maxAbsPrice = Math.ceil(maxAbsPrice * 10) / 10;
+                if (maxAbsPrice < 0.30) maxAbsPrice = 0.30;
+
                 powerProducersChartInstance = new Chart(ctx, {
                     type: powerProducersChartType === 'bar' ? 'bar' : 'line',
                     data: {
@@ -5337,18 +5359,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 display: false // Using custom aligned 6-box cards below
                             },
                             tooltip: {
-                                backgroundColor: 'rgba(11, 15, 23, 0.95)',
-                                borderColor: '#1E293B',
-                                borderWidth: 1,
-                                titleFont: { family: 'monospace', size: 12 },
-                                bodyFont: { family: 'monospace', size: 11 },
-                                callbacks: {
-                                    label: function(context) {
-                                        const val = context.raw || 0;
-                                        const absV = Math.abs(val);
-                                        const str = absV >= 1000 ? `${(absV / 1000).toFixed(2)} kW` : `${absV} W`;
-                                        return `${context.dataset.label}: ${val < 0 ? '-' : ''}${str}`;
-                                    }
+                                enabled: false,
+                                external: function(context) {
+                                    customHemsTooltipHandler(context, false);
                                 }
                             }
                         },
@@ -5362,7 +5375,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 }
                             },
                             y: {
-                                grid: { color: 'rgba(30, 41, 59, 0.6)' },
+                                min: -maxAbsWatt,
+                                max: maxAbsWatt,
+                                title: { display: true, text: 'Opbrengst (-W) < 0 < Verbruik (+W)', color: '#94A3B8', font: { family: 'monospace', size: 10 } },
+                                grid: {
+                                    color: (ctx) => ctx.tick && ctx.tick.value === 0 ? '#CBD5E1' : 'rgba(30, 41, 59, 0.6)',
+                                    lineWidth: (ctx) => ctx.tick && ctx.tick.value === 0 ? 2 : 1
+                                },
                                 ticks: {
                                     color: '#94A3B8',
                                     font: { family: 'monospace', size: 10 },
@@ -5377,12 +5396,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 type: 'linear',
                                 position: 'right',
                                 display: true,
+                                min: -maxAbsPrice,
+                                max: maxAbsPrice,
                                 title: { display: true, text: 'Tarief (€/kWh)', color: '#06B6D4', font: { family: 'monospace', size: 10 } },
                                 grid: { drawOnChartArea: false },
                                 ticks: {
                                     color: '#06B6D4',
                                     font: { family: 'monospace', size: 10 },
-                                    callback: function(val) { return '€' + Number(val).toFixed(2); }
+                                    callback: function(val) {
+                                        return val >= 0 ? '€' + Number(val).toFixed(2) : '';
+                                    }
                                 }
                             }
                         }
