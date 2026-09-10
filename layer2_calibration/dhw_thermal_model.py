@@ -272,7 +272,7 @@ class DhwThermalModel:
         elif comfort_hedge_triggered:
             status = "SCHEDULE_NIGHT_CHARGE"
             decision_title = "🛡️ Nachtlading aanbevolen (Comfortverzekering)"
-            decision_sub = f"Nacht meerkosten slects {night_premium_pct}% (<20% drempel) · P95 dip {morning_dip_p95_c}°C"
+            decision_sub = f"Nacht meerkosten slechts {night_premium_pct}% (<20% drempel) · P95 dip {morning_dip_p95_c}°C"
             recommendation = (
                 f"🛡️ NACHTLADING AANBEVOLEN ({night_label}) via Comfort-Hedging beleid: "
                 f"Nachtladen kost €{cost_night:.2f} t.o.v. €{cost_day:.2f} overdag (+{night_premium_pct}%, onder de 20% tolerantiedrempel). "
