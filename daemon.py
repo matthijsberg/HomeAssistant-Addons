@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.46.0
+Version: 0.47.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1231,7 +1231,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.46.0",
+                "version": "0.47.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2596,37 +2596,32 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             <!-- Nav Links (Streamlined 4-Layer Hierarchy) -->
             <nav class="p-3 space-y-1">
-                <!-- LAAG 4: ANALYSE & RAPPORTAGE (BOVENAAN) -->
-                <div class="px-3 pt-2 pb-1 text-[10px] font-bold text-cyan-400 uppercase tracking-wider flex items-center justify-between">
-                    <span>Laag 4: Analyse & Rapport</span>
-                    <span class="px-1.5 py-0.2 bg-cyan-950 text-cyan-300 text-[9px] rounded border border-cyan-800">KPI</span>
+                <!-- ANALYSE -->
+                <div class="px-3 pt-2 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    <span>Analyse</span>
                 </div>
-                <a href="#analytics" onclick="showTab('analytics')" id="nav-analytics" class="nav-link active flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
-                    <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-                    <span>Analyse & Besparing</span>
+                <a href="#prediction" onclick="showTab('prediction')" id="nav-prediction" class="nav-link active flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
+                    <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    <span>Voorspelling</span>
+                </a>
+                <a href="#history" onclick="showTab('history')" id="nav-history" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
+                    <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                    <span>Historie</span>
                 </a>
 
-                <!-- LAAG 3: OPTIMALISATIE & BELEID (INCLUSIEF PEAK SHAVING) -->
-                <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-purple-400 uppercase tracking-wider">
-                    <span>Laag 3: Optimalisatie & Beleid</span>
+                <!-- POLICY -->
+                <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    <span>Policy</span>
                 </div>
-                <a href="#dashboard" onclick="showTab('dashboard')" id="nav-dashboard" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
-                    <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                    <span>24h Planning & Grafiek</span>
-                </a>
                 <a href="#policies" onclick="showTab('policies')" id="nav-policies" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
                     <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
-                    <span>Beleid & Policies</span>
+                    <span>Apparaat Policies</span>
                     <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-purple-900/40 text-purple-300 font-medium rounded border border-purple-800" id="badge-pol-count">3</span>
                 </a>
-                <a href="#tariffs" onclick="showTab('tariffs')" id="nav-tariffs" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
-                    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    <span>Energieleveranciers (Tarieven)</span>
-                </a>
 
-                <!-- LAAG 2: ZELFLEREND & KALIBRATIE -->
-                <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-amber-400 uppercase tracking-wider">
-                    <span>Laag 2: Zelflerend & Fysica</span>
+                <!-- ZELFLEREND -->
+                <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    <span>Zelflerend</span>
                 </div>
                 <a href="#calibration" onclick="showTab('calibration')" id="nav-calibration" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
                     <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
@@ -2646,6 +2641,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                     <span>Verbindingen</span>
                 </a>
+                <a href="#tariffs" onclick="showTab('tariffs')" id="nav-tariffs" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
+                    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <span>Energieleveranciers</span>
+                </a>
                 <a href="#data" onclick="showTab('data')" id="nav-data" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
                     <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
                     <span>Data</span>
@@ -2653,7 +2652,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.46.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.47.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2683,7 +2682,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             <!-- TAB 0: INFRASTRUCTURE & CONNECTIVITY (LAAG 1) -->
                         <!-- TAB 5: ANALYTICS & REPORTING (BOVENAAN LAAG 5) -->
-            <div id="view-analytics" class="tab-content active space-y-6">
+            <div id="view-prediction" class="tab-content active space-y-6">
 
                 <!-- 1. TOP 4 KPI METRIC CARDS -->
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
@@ -2937,6 +2936,34 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 </div>
 
                 <!-- ========================================================================= -->
+                
+            </div>
+
+            <div id="view-history" class="tab-content space-y-6">
+                <!-- TOP 4 KPI METRIC CARDS FOR HISTORIE -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Besparing Vandaag</span>
+                        <div class="text-xl font-bold text-emerald-400 mt-1" id="kpi-savings-today">€0.85</div>
+                        <span class="text-[10px] text-slate-500">t.o.v. standaard verbruik</span>
+                    </div>
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Zelfconsumptie</span>
+                        <div class="text-xl font-bold text-amber-400 mt-1" id="kpi-self-consumption">78.4%</div>
+                        <span class="text-[10px] text-slate-500">Zon direct lokaal benut</span>
+                    </div>
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Warmtepomp COP</span>
+                        <div class="text-xl font-bold text-cyan-400 mt-1" id="kpi-cop-dhw">2.04 <span class="text-xs text-slate-400 font-normal">SWW</span> · 4.80 <span class="text-xs text-slate-400 font-normal">CV</span></div>
+                        <span class="text-[10px] text-slate-500">Gemeten rendement</span>
+                    </div>
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Prognose Validatie</span>
+                        <div class="text-xl font-bold text-purple-400 mt-1" id="kpi-accuracy">92.6%</div>
+                        <span class="text-[10px] text-slate-500">MAE: 0.18 kW</span>
+                    </div>
+                </div>
+
                 <!-- CATEGORIE 2: HISTORIE (HISTORICAL DATA)                                   -->
                 <!-- ========================================================================= -->
                 <div class="space-y-4 pt-4">
@@ -3106,6 +3133,62 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             </div>
 
                         <!-- TAB: VERBINDINGEN (CONNECTORS: HA, MQTT & EXTERNE APIS) -->
+            </div>
+
+            <!-- TAB: APPARAAT POLICIES & AANSTURING -->
+            <div id="view-policies" class="tab-content space-y-6">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-purple-500/30 pb-3">
+                    <div>
+                        <h2 class="text-base font-bold text-white">Apparaat Policies & Aansturing</h2>
+                        <p class="text-xs text-slate-400">Automatische beslisregels voor slimme sturing van de boiler, warmtepomp en verschuifbare apparaten.</p>
+                    </div>
+                    <button onclick="openPolicyModal()" class="px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-xl shadow-lg transition-all flex items-center gap-1.5 flex-shrink-0">
+                        <span>+ Nieuwe Policy Aanmaken</span>
+                    </button>
+                </div>
+
+                <!-- MOVED DHW NIGHT DECISION BANNER (Beleid & Sturing) -->
+                <div id="dhw-decision-banner" class="bg-gradient-to-r from-amber-950/70 via-[#0e1422] to-amber-900/40 border border-amber-500/40 rounded-2xl p-5 shadow-xl space-y-3.5">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-500/20 pb-2.5">
+                        <div class="flex items-center gap-2.5">
+                            <span class="text-xl">♨️</span>
+                            <div>
+                                <h3 class="text-sm font-bold text-white tracking-wide">Actueel Nachtelijk Laadbesluit: Warm Tapwater (350L Vat)</h3>
+                                <p class="text-[11px] text-slate-400">Automatische beleidsafweging: nachtlading tegen daltarief vs. wachten op zonne-energie & hogere COP overdag.</p>
+                            </div>
+                        </div>
+                        <span id="dhw-live-temp-badge" class="px-3 py-1 rounded-lg text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 self-start sm:self-auto">Actueel: 48.8°C</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-xs">
+                        <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
+                            <div class="text-[10px] text-slate-400 uppercase font-bold">Nuttige Warmte (&gt;40°C)</div>
+                            <div class="text-base font-bold text-amber-300" id="dhw-usable-heat">3.6 kWh_th (13 MJ)</div>
+                            <div class="text-[10px] text-slate-400 font-sans" id="dhw-volume-caption">350L combivat op 48.8°C (mengcapaciteit ~496L douchewater van 38°C).</div>
+                        </div>
+                        <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
+                            <div class="text-[10px] text-slate-400 uppercase font-bold">Verwachte Ochtenddip (06-09u)</div>
+                            <div class="text-base font-bold text-white" id="dhw-projected-dip">43.3°C (om 09:41u)</div>
+                            <div class="text-[10px] font-sans" id="dhw-dip-subtext"><span class="text-emerald-400 font-bold">Boven 40°C comfortgrens ✓</span> · Eerste dip &lt;40°C om 12:56u</div>
+                        </div>
+                        <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
+                            <div class="text-[10px] text-slate-400 uppercase font-bold" id="dhw-night-header">Nachtbesluit (Do 10 ➔ Vr 11 sep)</div>
+                            <div class="text-sm font-bold text-emerald-300" id="dhw-night-action">✅ Geen nachtlading nodig</div>
+                            <div class="text-[10px] text-slate-400 font-sans" id="dhw-night-subtext">Wachten tot 12:56u bespaart geld</div>
+                        </div>
+                    </div>
+
+                    <div class="text-xs text-slate-300 bg-black/60 p-3 rounded-xl border border-slate-800/80 font-sans leading-relaxed" id="dhw-decision-explanation">
+                        Verantwoording wordt geladen...
+                    </div>
+                </div>
+
+                <!-- POLICIES GRID CONTAINER -->
+                <div id="policies-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    <!-- Loaded dynamically via loadPolicies() -->
+                </div>
+            </div>
+
             <div id="view-infrastructure" class="tab-content space-y-6">
                 <!-- SECTION 1: HOME ASSISTANT CORE (BRON & DOEL) -->
                 <div class="space-y-4">
@@ -3541,38 +3624,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         </div>
                     </div>
 
-                                        <!-- LIVE BOILERVAT STATUS & NACHTLAAD BESLISSER (Alleen zichtbaar bij SWW) -->
-                    <div id="dhw-decision-banner" class="hidden bg-gradient-to-r from-amber-950/60 via-[#0B0F17] to-amber-900/30 border border-amber-500/30 rounded-xl p-4 space-y-2.5">
-                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-500/20 pb-2">
-                            <div class="flex items-center gap-2">
-                                <span class="text-base">♨️</span>
-                                <span class="text-xs uppercase font-bold text-amber-400 tracking-wider">Live Boilervat Thermische Toestand & Nachtlaadbesluit</span>
-                            </div>
-                            <span id="dhw-live-temp-badge" class="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">Actueel: 48.8°C</span>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-xs">
-                            <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
-                                <div class="text-[10px] text-slate-400 uppercase font-bold">Nuttige Warmte (&gt;40°C)</div>
-                                <div class="text-sm font-bold text-amber-300 mt-0.5" id="dhw-usable-heat">3.6 kWh_th (13 MJ)</div>
-                                <div class="text-[10px] text-slate-400 font-sans mt-0.5" id="dhw-volume-caption">350L combivat op 48.8°C (mengcapaciteit ~496L douchewater van 38°C).</div>
-                            </div>
-                            <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
-                                <div class="text-[10px] text-slate-400 uppercase font-bold">Verwachte Ochtenddip (06-09u)</div>
-                                <div class="text-sm font-bold text-white mt-0.5" id="dhw-projected-dip">43.2°C (om 08:45u)</div>
-                                <div class="text-[10px] font-sans mt-0.5" id="dhw-dip-subtext"><span class="text-emerald-400 font-bold">Boven 40°C comfortgrens ✓</span></div>
-                            </div>
-                            <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
-                                <div class="text-[10px] text-slate-400 uppercase font-bold" id="dhw-night-header">Nachtbesluit (Do 10 ➔ Vr 11 sep)</div>
-                                <div class="text-xs font-bold text-emerald-300 mt-0.5" id="dhw-night-action">✅ Geen nachtlading nodig</div>
-                                <div class="text-[10px] text-slate-400 font-sans mt-0.5" id="dhw-night-subtext">Wachten tot 12:30u bespaart €0,15 (27%)</div>
-                            </div>
-                        </div>
-                        <div class="text-[11px] text-slate-300 bg-black/50 p-2.5 rounded-lg border border-slate-800/80 font-sans leading-relaxed" id="dhw-decision-explanation">
-                            Verantwoording wordt geladen...
-                        </div>
-                    </div>
-
-                    <!-- 12-MONTH SEASONAL SELECTOR STRIP -->
+                                        <!-- 12-MONTH SEASONAL SELECTOR STRIP -->
                     <div class="space-y-1.5">
                         <div class="flex justify-between items-center text-[10px] text-slate-400 font-mono uppercase tracking-wider">
                             <span>📅 Seizoen / Maand van het Jaar (Impact op Warmtevraag & Buitentemperatuur)</span>
@@ -3643,6 +3695,30 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span>24:00</span>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- CARD 2B: DEDICATED BOILER TEMPERATURE TRAJECTORY & TAP DEMAND (24H FORECAST IN °C & LITERS) -->
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-xl space-y-4" id="dhw-temp-chart-container">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-2.5">
+                            <span class="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
+                            <div>
+                                <h3 class="text-sm font-bold text-white tracking-wide">Boilervat Temperatuurtraject &amp; Verwachte Warmwatervraag (24 Uur Vooruit)</h3>
+                                <p class="text-[11px] text-slate-400">Simulatie in graden Celsius (°C) vanaf de live tanksensor en de geleerde getapte liters per kwartier.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-xs font-mono flex-wrap">
+                            <span class="flex items-center gap-1.5 text-amber-300"><span class="w-3 h-1 bg-amber-400 rounded"></span> Temperatuur (°C)</span>
+                            <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-0.5 border-b border-red-500 border-dashed"></span> Comfort 40°C</span>
+                            <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-0.5 border-b border-emerald-500 border-dashed"></span> Doel 50°C</span>
+                            <span class="flex items-center gap-1.5 text-sky-300"><span class="w-2.5 h-2.5 bg-sky-500/50 rounded-sm"></span> Vraag (Liter)</span>
+                        </div>
+                    </div>
+
+                    <!-- Canvas for Boiler Temperature -->
+                    <div class="relative w-full h-64 sm:h-72">
+                        <canvas id="chart-dhw-temperature"></canvas>
                     </div>
                 </div>
 
@@ -4309,26 +4385,39 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             if (link) link.classList.add('active');
 
             const titles = {
-                'analytics': ['Analyse & Besparing', 'Kostenbesparingen, COP seizoensrendementen en prognose-auditing.'],
-                'dashboard': ['24h Planning', 'Gestapelde prognose: basislast, warmtepomp en zonne-advies.'],
-                'policies': ['Beleid & Policies', 'Orchestratie op basis van beurstarieven, zonne-opwek en comfortguardrails.'],
-                'tariffs': ['Energieleveranciers', 'Beheer contracten (Powerpeers dynamisch) en energiebelasting.'],
-                'calibration': ['Zelflerend Model & Kwartier-Voorspelling', 'Physics-Informed Hybride: 7×96 Activiteitenkernel + 2R1C Gebouwmodel + Carnot COP.'],
+                'prediction': ['Voorspelling & Optimalisatie', '24-uurs kwartier-vooruitblik met dynamische beurstarieven en sturingsadviezen.'],
+                'history': ['Historie & Verbruiksstatistieken', 'Werkelijke energiestromen, kosten, opbrengsten en COP-prestaties.'],
+                'policies': ['Apparaat Policies & Aansturing', 'Automatische beslisregels, nachtelijk boilerlaadbesluit en beleidsarchetypen.'],
+                'calibration': ['Zelflerend Model & Fysica', 'Physics-informed gebouwmodel, 7×96 kwartieren matrices en boilertemperatuurtraject.'],
                 'devices': ['Apparaten', 'Beheer fysieke apparaten, meters en actuatoren gekoppeld via Home Assistant of MQTT.'],
                 'infrastructure': ['Verbindingen', 'Beheer externe verbindingen naar Home Assistant, MQTT brokers en externe APIs.'],
-                'data': ['Data', 'Beheer InfluxDB tijdreeksdatabases, dataretentie en live 60s data pipelines.']
+                'tariffs': ['Energieleveranciers & Tarieven', 'Beheer contracten (Powerpeers dynamisch) en energiebelasting.'],
+                'data': ['Data & Pipelines', 'Beheer InfluxDB tijdreeksdatabases, dataretentie en live 60s data pipelines.']
             };
             const t = titles[tabId] || ['Open HEMS', ''];
             document.getElementById('header-title').innerText = t[0];
             document.getElementById('header-sub').innerText = t[1];
 
-            if (tabId === 'analytics') {
-                loadAnalytics();
-                loadElectricityPricesChart();
-                loadPowerProducersChart();
+            if (tabId === 'prediction' || tabId === 'analytics') {
                 loadChartData();
+                loadElectricityPricesChart();
             }
-            if (tabId === 'control') loadControl();
+            if (tabId === 'history') {
+                loadAnalytics();
+                loadPowerProducersChart();
+            }
+            if (tabId === 'policies') {
+                loadPolicies();
+                updateDhwLiveCard();
+            }
+            if (tabId === 'calibration') {
+                loadModelDashboard();
+                loadCalibration();
+                loadUnallocatedModel();
+                renderDhwTemperatureChart();
+            }
+            if (tabId === 'devices') loadDevices();
+            if (tabId === 'tariffs') loadTariffs();
             if (tabId === 'infrastructure') {
                 loadInfrastructure();
                 loadProviders();
@@ -4337,17 +4426,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 loadInfrastructure();
                 loadPipelineStatus();
                 if (!pipelinePollInterval) pipelinePollInterval = setInterval(loadPipelineStatus, 10000);
-            } else if (tabId !== 'infrastructure') {
+            } else if (tabId !== 'infrastructure' && tabId !== 'data') {
                 if (pipelinePollInterval) { clearInterval(pipelinePollInterval); pipelinePollInterval = null; }
-            }
-            if (tabId === 'dashboard') loadChartData();
-            if (tabId === 'policies') loadPolicies();
-            if (tabId === 'devices') loadDevices();
-            if (tabId === 'tariffs') loadTariffs();
-            if (tabId === 'calibration') loadModelDashboard();
-            if (tabId === 'calibration') {
-                loadCalibration();
-                loadUnallocatedModel();
             }
         }
 
@@ -6800,7 +6880,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
         // Boot
         fetchHaEntities();
-        showTab("analytics");
+        showTab("prediction");
         // === PIPELINE & CALIBRATION MONITORS ===
                         
         async function loadPipelineStatus() {
@@ -7113,6 +7193,148 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         hoverBadge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping"></span> <span>Beweeg over een kwartier voor details</span>';
                     }
                 };
+            }
+        }
+
+                let dhwTempChartInstance = null;
+
+        async function renderDhwTemperatureChart() {
+            const canvas = document.getElementById('chart-dhw-temperature');
+            if (!canvas) return;
+            try {
+                const res = await fetch('./api/model/dhw-status');
+                if (!res.ok) return;
+                const data = await res.json();
+                const traj = data.trajectory || {};
+                if (!traj.labels || traj.labels.length === 0) return;
+
+                const existingChart = Chart.getChart(canvas);
+                if (existingChart) {
+                    existingChart.destroy();
+                }
+
+                const labels = traj.labels;
+                const temps = traj.temperatures_c || [];
+                const demandsKwh = traj.demand_kwh_th || [];
+                
+                // Convert kWh_th demand to liters of 50C water: liters = kwh * 3600 / (4.186 * 38)
+                const litersArr = demandsKwh.map(k => Math.round(k * 3600 / (4.186 * 38)));
+                const comfortLine = Array(labels.length).fill(40.0);
+                const targetLine = Array(labels.length).fill(50.0);
+
+                const ctx = canvas.getContext('2d');
+                dhwTempChartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Boilertemperatuur (°C)',
+                                data: temps,
+                                yAxisID: 'y',
+                                borderColor: '#F59E0B',
+                                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                                fill: true,
+                                borderWidth: 2.5,
+                                tension: 0.25,
+                                pointRadius: 0,
+                                order: 1
+                            },
+                            {
+                                label: 'Comfortgrens (40°C)',
+                                data: comfortLine,
+                                yAxisID: 'y',
+                                borderColor: 'rgba(239, 68, 68, 0.75)',
+                                borderDash: [5, 5],
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.5,
+                                pointRadius: 0,
+                                order: 2
+                            },
+                            {
+                                label: 'Doeltemperatuur (50°C)',
+                                data: targetLine,
+                                yAxisID: 'y',
+                                borderColor: 'rgba(16, 185, 129, 0.75)',
+                                borderDash: [5, 5],
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.5,
+                                pointRadius: 0,
+                                order: 3
+                            },
+                            {
+                                label: 'Verwachte Tapvraag (Liters)',
+                                data: litersArr,
+                                type: 'bar',
+                                yAxisID: 'y1',
+                                backgroundColor: 'rgba(56, 189, 248, 0.5)',
+                                hoverBackgroundColor: '#38BDF8',
+                                borderRadius: 2,
+                                order: 4
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: 'rgba(11, 15, 23, 0.95)',
+                                borderColor: '#1E293B',
+                                borderWidth: 1,
+                                padding: 10,
+                                callbacks: {
+                                    label: function(c) {
+                                        if (c.dataset.label.includes('Comfort') || c.dataset.label.includes('Doel')) return null;
+                                        if (c.dataset.yAxisID === 'y1') {
+                                            const lit = c.raw;
+                                            if (lit === 0) return null;
+                                            const kwhTh = (lit * 4.186 * 38 / 3600).toFixed(2);
+                                            return ` 🚿 Tapvraag: ${lit} Liter (${kwhTh} kWh thermisch)`;
+                                        }
+                                        return ` 🌡️ Boilertemperatuur: ${c.raw}°C`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: 'rgba(30, 41, 59, 0.3)' },
+                                ticks: { color: '#64748B', font: { size: 10 }, maxTicksLimit: 16 }
+                            },
+                            y: {
+                                position: 'left',
+                                min: 35.0,
+                                max: 55.0,
+                                title: {
+                                    display: true,
+                                    text: 'Boilertemperatuur (°C)',
+                                    color: '#F59E0B',
+                                    font: { size: 10, weight: 'bold' }
+                                },
+                                grid: { color: 'rgba(30, 41, 59, 0.25)' },
+                                ticks: { color: '#F59E0B', font: { size: 10 }, callback: v => `${v}°C` }
+                            },
+                            y1: {
+                                position: 'right',
+                                min: 0,
+                                max: 40,
+                                grid: { drawOnChartArea: false },
+                                title: {
+                                    display: true,
+                                    text: 'Tapvraag (Liters / 15 min)',
+                                    color: '#38BDF8',
+                                    font: { size: 10, weight: 'bold' }
+                                },
+                                ticks: { color: '#38BDF8', font: { size: 10 }, callback: v => `${v} L` }
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.warn("Error rendering DHW temperature chart:", e);
             }
         }
 
