@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.34.0
+Version: 0.34.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1013,7 +1013,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.34.0",
+                "version": "0.34.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2127,7 +2127,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.34.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.34.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4060,20 +4060,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     return;
                 }
 
-                // Format PURE ENERGY (kWh) as primary metric
+                // Format PURE ENERGY (kWh) as primary metric (both charts now store kWh!)
                 const absVal = Math.abs(rawVal);
-                let kwhVal = 0.0;
-                let powerW = 0.0;
-
-                if (!isPrediction) {
-                    // Historical dataset is ALREADY strictly in kWh!
-                    kwhVal = absVal;
-                    powerW = Math.round((absVal * 1000.0) / intervalH);
-                } else {
-                    // Prediction values are in kW -> convert to kWh
-                    kwhVal = absVal * intervalH;
-                    powerW = Math.round(absVal * 1000.0);
-                }
+                const kwhVal = absVal;
+                const powerW = Math.round((absVal * 1000.0) / intervalH);
 
                 const energyStr = `${kwhVal >= 10.0 ? kwhVal.toFixed(1) : kwhVal.toFixed(2)} kWh`;
                 const powerStr = powerW >= 1000 ? `${(powerW / 1000.0).toFixed(2)} kW` : `${powerW} W`;
@@ -4091,9 +4081,27 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     netCostVal -= rev;
                     hasNetCost = true;
                     costBadge = `<span class="text-emerald-400 font-bold ml-auto">-€${rev.toFixed(2)} opbr.</span>`;
+                } else if (cleanLabel.includes('Verwacht Netto')) {
+                    if (rawVal >= 0) {
+                        const c = kwhVal * importPrice;
+                        netCostVal = c;
+                        hasNetCost = true;
+                        costBadge = `<span class="text-red-400 font-bold ml-auto">+€${c.toFixed(2)}</span>`;
+                    } else {
+                        const rev = kwhVal * exportPrice;
+                        netCostVal = -rev;
+                        hasNetCost = true;
+                        costBadge = `<span class="text-emerald-400 font-bold ml-auto">-€${rev.toFixed(2)} opbr.</span>`;
+                    }
                 } else if (cleanLabel.includes('Opgewekt Gebruikt')) {
                     const sav = kwhVal * importPrice;
                     costBadge = `<span class="text-cyan-400 font-medium ml-auto">€${sav.toFixed(2)} besp.</span>`;
+                } else if (cleanLabel.includes('Zon Productie')) {
+                    const rev = kwhVal * exportPrice;
+                    costBadge = `<span class="text-amber-400 font-medium ml-auto">€${rev.toFixed(2)} opbr.</span>`;
+                } else if (cleanLabel.includes('Accu Ontladen')) {
+                    const sav = kwhVal * importPrice;
+                    costBadge = `<span class="text-teal-400 font-medium ml-auto">€${sav.toFixed(2)} besp.</span>`;
                 } else if (cleanLabel.includes('Totaal Verbruik')) {
                     const totC = kwhVal * importPrice;
                     costBadge = `<span class="text-orange-400 font-bold ml-auto">€${totC.toFixed(2)}</span>`;
@@ -4424,14 +4432,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 const canvasAnalytics = document.getElementById('hemsChartAnalytics');
                 if (canvasAnalytics) {
                     if (analyticsChartInstance) analyticsChartInstance.destroy();
-                    analyticsChartInstance = new Chart(canvasAnalytics.getContext('2d'), JSON.parse(JSON.stringify(chartConfig)));
+                    analyticsChartInstance = new Chart(canvasAnalytics.getContext('2d'), chartConfig);
+                    window.analyticsChartInstance = analyticsChartInstance;
+                    window.hemsChartAnalytics = analyticsChartInstance;
                 }
 
                 // Render on Dashboard Tab
                 const canvasDash = document.getElementById('hemsChart');
                 if (canvasDash) {
                     if (chartInstance) chartInstance.destroy();
-                    chartInstance = new Chart(canvasDash.getContext('2d'), JSON.parse(JSON.stringify(chartConfig)));
+                    // Clone datasets for dashboard canvas if present
+                    chartInstance = new Chart(canvasDash.getContext('2d'), Object.assign({}, chartConfig));
+                    window.chartInstance = chartInstance;
                 }
 
                 // Add document tap/click listener to dismiss tooltip when clicking outside canvas
