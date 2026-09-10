@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.44.1
+Version: 0.45.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1231,7 +1231,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.44.1",
+                "version": "0.45.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1698,17 +1698,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     sww_start_idx = best_sww_slot["idx"]
                     reason = f"Nachtelijke Comfort-Lading tegen €{best_sww_slot['price']:.3f}/kWh"
             else:
-                # Night is skipped! Buffer is sufficient; defer to midday free solar or lowest spot price
+                # Night is skipped! Buffer is sufficient; place run at optimal midday window (12:00 - 14:30)
+                midday_slots = [it for it in timeline_items if 12 <= it["dt"].hour <= 14]
                 daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
-                solar_rich_slots = [it for it in daylight_slots if it["solar"] >= 1.2]
-                if solar_rich_slots:
-                    best_sww_slot = max(solar_rich_slots, key=lambda x: x["solar"])
+                if midday_slots:
+                    # Prefer midday slot with best solar or lowest price
+                    best_sww_slot = max(midday_slots, key=lambda x: (x["solar"] - x["price"] * 0.5))
                     sww_start_idx = best_sww_slot["idx"]
-                    reason = f"Zonne-Optimalisatie (Nacht overgeslagen, tank {t_dhw_live:.1f}°C): 100% Zonne-opwek ({best_sww_slot['solar']:.1f} kW zon)"
+                    reason = f"Middag Zonne-Optimalisatie (Nacht overgeslagen, tank {t_dhw_live:.1f}°C): Laadt op {best_sww_slot['solar']:.1f} kW zon & laag tarief (€{best_sww_slot['price']:.3f})"
                 elif daylight_slots:
-                    best_sww_slot = min(daylight_slots, key=lambda x: (x["price"] - (x["solar"] * 0.15)))
+                    best_sww_slot = max(daylight_slots, key=lambda x: x["solar"])
                     sww_start_idx = best_sww_slot["idx"]
-                    reason = f"Dag-Optimalisatie (Nacht overgeslagen): Laag tarief (€{best_sww_slot['price']:.3f}) & {best_sww_slot['solar']:.1f} kW zon"
+                    reason = f"Dag Zonne-Optimalisatie (Nacht overgeslagen): Laadt om {best_sww_slot['label']} op {best_sww_slot['solar']:.1f} kW zon"
                 else:
                     best_sww_slot = min(timeline_items, key=lambda x: x["price"])
                     sww_start_idx = best_sww_slot["idx"]
@@ -2652,7 +2653,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.44.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.45.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3553,7 +3554,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
                                 <div class="text-[10px] text-slate-400 uppercase">Nuttige Warmte (&gt;40°C)</div>
                                 <div class="text-sm font-bold text-amber-300 mt-0.5" id="dhw-usable-heat">3.74 kWh_th (13.5 MJ)</div>
-                                <div class="text-[10px] text-slate-500 font-sans mt-0.5">Capaciteit voor ~90L water van 50°C.</div>
+                                <div class="text-[10px] text-slate-400 font-sans mt-0.5" id="dhw-volume-caption">350L combivat (mengcapaciteit ~450L douchewater van 38°C).</div>
                             </div>
                             <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
                                 <div class="text-[10px] text-slate-400 uppercase">Verwachte Ochtenddip</div>
@@ -3561,7 +3562,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <div class="text-[10px] text-emerald-400 font-sans mt-0.5">Boven 40°C comfortgrens ✓</div>
                             </div>
                             <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
-                                <div class="text-[10px] text-slate-400 uppercase">Nachtbesluit (bv. Wo/Do nacht)</div>
+                                <div class="text-[10px] text-slate-400 uppercase font-bold" id="dhw-night-header">Nachtbesluit (Do 10 ➔ Vr 11 sep)</div>
                                 <div class="text-xs font-bold text-emerald-300 mt-0.5" id="dhw-night-action">✅ Geen nachtlading nodig</div>
                                 <div class="text-[10px] text-slate-500 font-sans mt-0.5">Wacht op zonnepiek morgenmiddag.</div>
                             </div>
@@ -6895,6 +6896,12 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         if (document.getElementById('dhw-projected-dip')) {
                             const isSafe = d.projected_morning_dip_c >= 40.0;
                             document.getElementById('dhw-projected-dip').innerHTML = `${d.projected_morning_dip_c}°C <span class="${isSafe ? 'text-emerald-400' : 'text-amber-400'} text-xs">(om ${d.morning_dip_time || '07:45'}u)</span>`;
+                        }
+                        if (document.getElementById('dhw-night-header') && d.short_night_label) {
+                            document.getElementById('dhw-night-header').innerText = `Nachtbesluit (${d.short_night_label})`;
+                        }
+                        if (document.getElementById('dhw-volume-caption') && d.shower_liters_38c) {
+                            document.getElementById('dhw-volume-caption').innerText = `350L combivat op ${d.current_temp_c}°C (mengcapaciteit ~${d.shower_liters_38c}L douchewater van 38°C).`;
                         }
                         if (document.getElementById('dhw-night-action')) {
                             document.getElementById('dhw-night-action').innerHTML = d.needs_night_charge

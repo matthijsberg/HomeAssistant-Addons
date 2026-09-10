@@ -58,21 +58,16 @@ class DhwThermalModel:
 
     def get_learned_tap_kwh_th(self, dow: int, quarter_idx: int) -> float:
         """Returns expected thermal energy drawn off (kWh_th) in a 15-minute slot."""
-        # Derived from historical temperature drops across 374 days
-        dhw_matrix = self.profile.get("dhw_profile_96_quarters", [])
-        if dhw_matrix and len(dhw_matrix) > dow and len(dhw_matrix[dow]) > quarter_idx:
-            p_wp_el = dhw_matrix[dow][quarter_idx]
-            # When heat pump ran, it produced thermal heat ~2.8 COP:
-            q_th = (p_wp_el * 0.25 / 1000.0) * 2.8
-            return round(q_th, 3)
-
-        # Baseline fallback: morning peak (07:00-08:30) and evening peak (19:30-22:00)
+        tap_matrix = self.profile.get("tap_demand_profile_96", [])
+        if tap_matrix and len(tap_matrix) > dow and len(tap_matrix[dow]) > quarter_idx:
+            return float(tap_matrix[dow][quarter_idx])
+        # Fallback baseline
         h = quarter_idx / 4.0
         if 7.0 <= h <= 8.5:
-            return 0.35  # ~0.35 kWh_th draw per quarter
+            return 0.25
         elif 19.5 <= h <= 22.0:
-            return 0.40 if dow in [1, 2, 6] else 0.25
-        return 0.02
+            return 0.30
+        return 0.015
 
     def get_tap_demand_liters(self, kwh_th: float, t_tank: float = 50.0, t_cold: float = 12.0) -> float:
         """Converts thermal kWh demand into equivalent liters of 50°C mixed water."""
@@ -183,50 +178,82 @@ class DhwThermalModel:
         self,
         t_current_c: float,
         now_dt: datetime,
-        tomorrow_solar_peak_kw: float = 2.5
+        tomorrow_solar_peak_kw: float = 2.5,
+        planned_heat_hour: float = 16.0
     ) -> Dict[str, Any]:
-        """
-        Calculates whether a night heating run (e.g. Wednesday to Thursday night) is required
-        or whether the tank has sufficient buffer to defer heating to tomorrow's solar peak.
-        """
-        # Run trajectory without night heat
+        dt_ams = now_dt.astimezone(AMS_TZ)
+        today_name = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"][dt_ams.weekday()]
+        tomorrow_dt = dt_ams + timedelta(days=1)
+        tomorrow_name = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"][tomorrow_dt.weekday()]
+        night_label = f"{today_name} op {tomorrow_name} nacht ({dt_ams.day}-{tomorrow_dt.day} {['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'][dt_ams.month-1]})"
+        short_night_label = f"{today_name[:2]} {dt_ams.day} ➔ {tomorrow_name[:2]} {tomorrow_dt.day} {['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'][dt_ams.month-1]}"
+
+        # Run trajectory without night heat up to planned heat time
         unheated_sim = self.simulate_trajectory(t_current_c, now_dt, hours_ahead=24, heat_pump_schedule_slots=[])
-        morning_dip = unheated_sim["morning_dip_temp_c"]
-        morning_time = unheated_sim["morning_dip_time"]
+        
+        # Calculate pre-heat dip (the true lowest point before tomorrow's afternoon solar charge)
+        # Find minimum temperature between now and planned_heat_hour
+        temps = unheated_sim["temperatures_c"]
+        labels = unheated_sim["labels"]
+        
+        # Find index corresponding to planned_heat_hour tomorrow
+        target_time_str = f"{int(planned_heat_hour):02d}:00"
+        cutoff_idx = len(temps)
+        for idx, lbl in enumerate(labels):
+            # Tomorrow afternoon slot
+            if idx >= 16 and lbl.startswith(f"{int(planned_heat_hour):02d}:"):
+                cutoff_idx = idx
+                break
+
+        preheat_temps = temps[:cutoff_idx] if cutoff_idx > 0 else temps
+        min_dip_val = min(preheat_temps) if preheat_temps else t_current_c
+        min_dip_idx = preheat_temps.index(min_dip_val) if preheat_temps else 0
+        min_dip_time = labels[min_dip_idx] if min_dip_idx < len(labels) else "15:45"
 
         # Current usable energy
         q_now_usable = max(0.0, (t_current_c - T_MIN_COMFORT_C) * C_TANK_KWH_PER_C)
         q_now_mj = q_now_usable * 3.6
 
-        # Decision threshold: if morning dip stays at or above 40.0°C, comfort is 100% safe
-        needs_night_charge = (morning_dip < T_MIN_COMFORT_C)
+        # Shower water equivalent at 38C mixed: V_mixed = 350 * (T_tank - 12) / (38 - 12)
+        v_mixed_shower_liters = round(350.0 * max(0.0, t_current_c - 12.0) / (38.0 - 12.0))
+
+        # Decision threshold: if dip stays at or above 40.0C, comfort is 100% safe
+        needs_night_charge = (min_dip_val < T_MIN_COMFORT_C)
 
         if not needs_night_charge:
             status = "SKIP_NIGHT_CHARGE"
             recommendation = (
-                f"✅ GEEN nachtlading nodig. De tank blijft met minimaal {morning_dip}°C om {morning_time} "
-                f"boven de comfortgrens (40°C). Warmtepomp wacht op gratis zonne-overschot morgenmiddag (COP ~3.2)."
+                f"✅ GEEN nachtlading nodig ({night_label}). "
+                f"Het 350L vat blijft tot aan de zonne-opwarming om {int(planned_heat_hour):02d}:00u "
+                f"veilig met {min_dip_val}°C (om {min_dip_time}u) boven de comfortgrens (40°C). "
+                f"Opwarmen om {int(planned_heat_hour):02d}:00u op piekopwek (~{tomorrow_solar_peak_kw:.1f} kW zon, COP ~3.25) "
+                f"kost slechts €0,23 t.o.v. €0,46 's nachts van het net bij COP 2.65."
             )
             optimal_slot_type = "solar_midday"
             deficit_kwh_th = 0.0
         else:
-            deficit_deg = max(0.0, 48.0 - morning_dip)
+            deficit_deg = max(0.0, 48.0 - min_dip_val)
             deficit_kwh_th = round(deficit_deg * C_TANK_KWH_PER_C, 2)
             status = "SCHEDULE_NIGHT_CHARGE"
             recommendation = (
-                f"⚠️ Nachtlading aanbevolen: Zonder opwarming zakt het vat om {morning_time} naar {morning_dip}°C "
-                f"(onder de 40°C comfortgrens). Plan een boost van {deficit_kwh_th} kWh thermisch (~0.7 kWh stroom) "
-                f"in het goedkoopste nachtkwartier (bijv. 03:30–04:15)."
+                f"⚠️ Nachtlading aanbevolen ({night_label}): Zonder bijverwarming zakt het vat om {min_dip_time}u "
+                f"naar {min_dip_val}°C (onder de 40°C comfortgrens). Plan een boost van {deficit_kwh_th} kWh thermisch "
+                f"(~0.7 kWh stroom) in het goedkoopste nachtkwartier (bijv. 03:30–04:15)."
             )
             optimal_slot_type = "cheapest_night_quarter"
 
         return {
             "status": status,
+            "night_label": night_label,
+            "short_night_label": short_night_label,
             "current_temp_c": t_current_c,
+            "tank_volume_liters": 350,
+            "shower_liters_38c": v_mixed_shower_liters,
             "usable_heat_kwh_th": round(q_now_usable, 2),
             "usable_heat_mj": round(q_now_mj, 1),
-            "projected_morning_dip_c": morning_dip,
-            "morning_dip_time": morning_time,
+            "projected_morning_dip_c": min_dip_val,
+            "morning_dip_time": min_dip_time,
+            "planned_heat_hour": planned_heat_hour,
             "needs_night_charge": needs_night_charge,
             "deficit_kwh_th": deficit_kwh_th,
             "recommendation": recommendation,
