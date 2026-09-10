@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.39.1
+Version: 0.39.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1039,7 +1039,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.39.1",
+                "version": "0.39.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2360,7 +2360,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.39.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.39.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5318,7 +5318,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     const cState = dev.ha_control_entity ? (haStateMap[dev.ha_control_entity] || '--') : '';
                     const tState = dev.ha_temp_entity ? (haStateMap[dev.ha_temp_entity] || '--') : '';
 
-                    // Render multi-sensors list
+                    // Cache device in memory for safe, bug-free editing by ID
+                    window.__cachedDevicesMap = window.__cachedDevicesMap || {};
+                    window.__cachedDevicesMap[dev.id] = dev;
+
+                    // Render multi-sensors list (No favicons, clean typography)
                     let sensorsHtml = '';
                     const devSensors = dev.sensors || [];
                     if (devSensors.length > 0) {
@@ -5326,13 +5330,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             const val = s.entity_id ? (haStateMap[s.entity_id] || '--') : '--';
                             const roleColor = s.role === 'producer' ? 'text-emerald-400' : (s.role === 'consumer' ? 'text-red-400' : 'text-cyan-400');
                             const roleLabel = s.role === 'producer' ? 'PRODUCENT' : (s.role === 'consumer' ? 'VERBRUIKER' : 'STATUS');
-                            const connLabel = s.connector === 'mqtt' ? '⚡ MQTT' : '🏠 HA';
+                            const connLabel = s.connector === 'mqtt' ? 'MQTT' : 'HA';
                             const targetStr = s.connector === 'mqtt' ? s.topic : s.entity_id;
                             return `
                                 <div class="flex items-center justify-between py-1 px-2 rounded bg-[#0e1422] border border-slate-800/70 text-[10px]">
-                                    <div class="truncate mr-2">
+                                    <div class="min-w-0 flex-1 mr-2">
                                         <div class="flex items-center gap-1.5">
-                                            <span class="px-1 py-0.2 rounded text-[8px] font-bold ${roleColor} bg-slate-900 border border-slate-800">${roleLabel}</span>
+                                            <span class="px-1 py-0.2 rounded text-[8px] font-bold ${roleColor} bg-slate-900 border border-slate-800 flex-shrink-0">${roleLabel}</span>
                                             <span class="text-slate-300 font-medium truncate">${s.name}</span>
                                         </div>
                                         <span class="text-[9px] text-slate-500 font-mono block truncate">${connLabel}: ${targetStr}</span>
@@ -5342,31 +5346,25 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             `;
                         }).join('');
                     } else {
-                        // Fallback legacy display
-                        sensorsHtml = `
-                            <div class="text-[10px] text-slate-400 py-1">
-                                ${dev.ha_power_entity ? `<div>🏠 ${dev.ha_power_entity}: <strong class="text-white">${pState}</strong></div>` : ''}
-                                ${dev.ha_temp_entity ? `<div>🌡️ ${dev.ha_temp_entity}: <strong class="text-white">${tState}</strong></div>` : ''}
-                                ${dev.mqtt_power_topic ? `<div>⚡ ${dev.mqtt_power_topic}</div>` : ''}
-                            </div>
-                        `;
+                        sensorsHtml = `<div class="text-[10px] text-slate-500 italic py-1">Geen sensoren geconfigureerd</div>`;
                     }
 
-                    // Render multi-actuators list
+                    // Render multi-actuators list (No favicons, clean typography)
                     let actuatorsHtml = '';
                     const devActuators = dev.actuators || [];
                     if (devActuators.length > 0) {
                         actuatorsHtml = devActuators.map(a => {
                             const val = a.entity_id ? (haStateMap[a.entity_id] || a.default_state || '--') : (a.default_state || '--');
                             const typeLabel = a.type === 'select' ? 'MODUS' : (a.type === 'range' ? 'BEREIK' : 'SCHAKELAAR');
+                            const connLabel = a.connector === 'mqtt' ? 'MQTT' : 'HA';
                             return `
                                 <div class="flex items-center justify-between py-1 px-2 rounded bg-[#0e1422] border border-slate-800/70 text-[10px]">
-                                    <div class="truncate mr-2">
+                                    <div class="min-w-0 flex-1 mr-2">
                                         <div class="flex items-center gap-1.5">
-                                            <span class="px-1 py-0.2 rounded text-[8px] font-bold text-pink-400 bg-slate-900 border border-slate-800">${typeLabel}</span>
+                                            <span class="px-1 py-0.2 rounded text-[8px] font-bold text-pink-400 bg-slate-900 border border-slate-800 flex-shrink-0">${typeLabel}</span>
                                             <span class="text-slate-300 font-medium truncate">${a.name}</span>
                                         </div>
-                                        <span class="text-[9px] text-slate-500 font-mono block truncate">🏠 HA: ${a.entity_id}</span>
+                                        <span class="text-[9px] text-slate-500 font-mono block truncate">${connLabel}: ${a.entity_id || a.topic}</span>
                                     </div>
                                     <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${val === 'on' || val.includes('aan') || val.includes('Aan') ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-900 text-slate-300 border border-slate-700'} font-mono flex-shrink-0">${val}</span>
                                 </div>
@@ -5376,17 +5374,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         actuatorsHtml = `<div class="text-[10px] text-slate-500 italic py-1">Geen aansturing (puur meetapparaat)</div>`;
                     }
 
+                    // Clean card header: Title truncates properly, badges never overflow, no id subtitle, no favicons, no section subtitles
                     const card = document.createElement('div');
                     card.className = 'bg-[#0e1422] border border-[#1E293B] hover:border-slate-700 rounded-2xl p-4 flex flex-col justify-between shadow-lg transition space-y-3';
                     card.innerHTML = `
                         <div>
-                            <div class="flex justify-between items-start gap-2 mb-2">
-                                <div>
-                                    <h4 class="font-bold text-white text-sm truncate">${dev.name}</h4>
-                                    <span class="text-[10px] text-slate-400 font-mono">${dev.id}</span>
+                            <!-- Header: Title + Badges aligned horizontally without overflow -->
+                            <div class="flex justify-between items-start gap-2 mb-2.5">
+                                <div class="min-w-0 flex-1 mr-2">
+                                    <h4 class="font-bold text-white text-sm truncate" title="${dev.name}">${dev.name}</h4>
                                 </div>
-                                <div class="flex flex-col items-end gap-1">
-                                    <span class="px-2 py-0.5 rounded text-[9px] font-mono font-semibold bg-blue-900/40 text-blue-300 border border-blue-800">${dev.type}</span>
+                                <div class="flex items-center gap-1.5 flex-shrink-0">
+                                    <span class="px-2 py-0.5 rounded text-[9px] font-mono font-semibold bg-blue-900/40 text-blue-300 border border-blue-800 flex-shrink-0">${dev.type}</span>
                                     ${statusPill}
                                 </div>
                             </div>
@@ -5395,22 +5394,20 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span class="font-medium">Beleid:</span> ${policyBadge}
                             </div>
 
-                            <!-- SENSORS BLOCK -->
+                            <!-- DATABRONNEN (Geen favicons, geen subtitels) -->
                             <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/80 mb-2 space-y-1.5">
-                                <div class="flex justify-between items-center text-[10px] font-mono border-b border-slate-800/60 pb-1">
-                                    <span class="text-cyan-400 font-bold">📥 Databronnen (${devSensors.length || 1})</span>
-                                    <span class="text-slate-500 text-[9px]">Logging: Producer / Consumer</span>
+                                <div class="text-[10px] font-mono border-b border-slate-800/60 pb-1 font-bold text-cyan-400">
+                                    Databronnen (${devSensors.length || 0})
                                 </div>
                                 <div class="space-y-1">
                                     ${sensorsHtml}
                                 </div>
                             </div>
 
-                            <!-- ACTUATORS BLOCK -->
+                            <!-- AANSTURING & REGIE (Geen favicons, geen subtitels) -->
                             <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/80 mb-2 space-y-1.5">
-                                <div class="flex justify-between items-center text-[10px] font-mono border-b border-slate-800/60 pb-1">
-                                    <span class="text-pink-400 font-bold">📤 Aansturing & Regie (${devActuators.length})</span>
-                                    <span class="text-slate-500 text-[9px]">Automatiseringslaag</span>
+                                <div class="text-[10px] font-mono border-b border-slate-800/60 pb-1 font-bold text-pink-400">
+                                    Aansturing & Regie (${devActuators.length})
                                 </div>
                                 <div class="space-y-1">
                                     ${actuatorsHtml}
@@ -5418,7 +5415,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             </div>
                         </div>
                         <div class="flex justify-end gap-2 pt-2.5 border-t border-[#1E293B]">
-                            <button onclick='openDeviceModal(${JSON.stringify(dev)})' class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg border border-slate-700 transition">Bewerken</button>
+                            <button onclick="openDeviceModal('${dev.id}')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg border border-slate-700 transition">Bewerken</button>
                             <button onclick="deleteDevice('${dev.id}')" class="px-2.5 py-1 bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800 text-xs rounded-lg transition">Verwijderen</button>
                         </div>
                     `;
@@ -5440,8 +5437,15 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             }
         }
 
-        function openDeviceModal(dev = null) {
+        function openDeviceModal(devOrId = null) {
             populateHaDropdowns();
+            
+            let dev = null;
+            if (typeof devOrId === 'string') {
+                dev = (window.__cachedDevicesMap && window.__cachedDevicesMap[devOrId]) || null;
+            } else {
+                dev = devOrId;
+            }
             
             // Populate broker dropdown
             const bSelect = document.getElementById('modal-dev-mqtt-broker');
@@ -5461,9 +5465,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 document.getElementById('modal-dev-name').value = dev.name;
                 document.getElementById('modal-dev-type').value = dev.type;
                 document.getElementById('modal-dev-source-type').value = dev.source_type || 'homeassistant';
-                document.getElementById('modal-dev-ha-power').value = dev.ha_power_entity || '';
-                if (document.getElementById('modal-dev-ha-temp')) document.getElementById('modal-dev-ha-temp').value = dev.ha_temp_entity || '';
-                document.getElementById('modal-dev-ha-control').value = dev.ha_control_entity || '';
+                // Extract entities from rich sensors/actuators or legacy fields
+                const powerEntity = dev.ha_power_entity || (dev.sensors ? (dev.sensors.find(s => s.role === 'consumer' || s.role === 'producer')?.entity_id || '') : '');
+                const tempEntity = dev.ha_temp_entity || (dev.sensors ? (dev.sensors.find(s => s.role === 'state' && (s.entity_id?.includes('temp') || s.id?.includes('temp')))?.entity_id || '') : '');
+                const controlEntity = dev.ha_control_entity || (dev.actuators ? (dev.actuators[0]?.entity_id || '') : '');
+                const mqttPowerTopic = dev.mqtt_power_topic || (dev.sensors ? (dev.sensors.find(s => s.connector === 'mqtt')?.topic || '') : '');
+
+                document.getElementById('modal-dev-ha-power').value = powerEntity;
+                if (document.getElementById('modal-dev-ha-temp')) document.getElementById('modal-dev-ha-temp').value = tempEntity;
+                document.getElementById('modal-dev-ha-control').value = controlEntity;
+                document.getElementById('modal-dev-mqtt-power-topic').value = mqttPowerTopic;
                 document.getElementById('modal-dev-native-unit').value = dev.native_unit || 'W';
                 document.getElementById('modal-dev-installed').checked = dev.installed !== false;
                 document.getElementById('modal-dev-enabled').checked = dev.enabled !== false;
@@ -5515,6 +5526,68 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     emergency_threshold: parseFloat(document.getElementById('modal-dev-emergency-threshold').value) || 0
                 }
             };
+            // Automatically construct/update canonical sensors and actuators based on entered entities
+            const existingDev = (window.__cachedDevicesMap && window.__cachedDevicesMap[id]) || {};
+            const sensors = existingDev.sensors ? JSON.parse(JSON.stringify(existingDev.sensors)) : [];
+            const actuators = existingDev.actuators ? JSON.parse(JSON.stringify(existingDev.actuators)) : [];
+
+            // Update power sensor
+            if (st === 'homeassistant' && payload.ha_power_entity) {
+                const pSensor = sensors.find(s => s.role === 'consumer' || s.role === 'producer') || {
+                    id: payload.type === 'solar_inverter' ? 'solar_production' : 'device_power',
+                    name: payload.name + ' Vermogen',
+                    role: payload.type === 'solar_inverter' ? 'producer' : 'consumer',
+                    connector: 'homeassistant',
+                    native_unit: payload.native_unit,
+                    storage_unit: 'W'
+                };
+                pSensor.entity_id = payload.ha_power_entity;
+                pSensor.connector = 'homeassistant';
+                pSensor.native_unit = payload.native_unit;
+                if (!sensors.includes(pSensor)) sensors.push(pSensor);
+            } else if (st === 'mqtt' && payload.mqtt_power_topic) {
+                const pSensor = sensors.find(s => s.connector === 'mqtt') || {
+                    id: payload.type === 'solar_inverter' ? 'solar_production' : 'device_power',
+                    name: payload.name + ' Vermogen',
+                    role: payload.type === 'solar_inverter' ? 'producer' : 'consumer',
+                    connector: 'mqtt',
+                    native_unit: payload.native_unit,
+                    storage_unit: 'W'
+                };
+                pSensor.topic = payload.mqtt_power_topic;
+                pSensor.connector = 'mqtt';
+                pSensor.native_unit = payload.native_unit;
+                if (!sensors.includes(pSensor)) sensors.push(pSensor);
+            }
+
+            // Update temp sensor if present
+            if (payload.ha_temp_entity) {
+                const tSensor = sensors.find(s => s.id?.includes('temp') || s.entity_id?.includes('temp')) || {
+                    id: 'device_temperature',
+                    name: payload.name + ' Temperatuur',
+                    role: 'state',
+                    connector: 'homeassistant',
+                    unit: '°C'
+                };
+                tSensor.entity_id = payload.ha_temp_entity;
+                if (!sensors.includes(tSensor)) sensors.push(tSensor);
+            }
+
+            // Update control actuator if present
+            if (payload.ha_control_entity) {
+                const act = actuators[0] || {
+                    id: 'device_control',
+                    name: payload.name + ' Aansturing',
+                    type: payload.ha_control_entity.startsWith('input_select') ? 'select' : (payload.ha_control_entity.startsWith('climate') ? 'range' : 'switch'),
+                    connector: 'homeassistant'
+                };
+                act.entity_id = payload.ha_control_entity;
+                if (!actuators.includes(act)) actuators.push(act);
+            }
+
+            payload.sensors = sensors;
+            payload.actuators = actuators;
+
             if (id) {
                 await fetch('./api/devices/' + id, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
             } else {
