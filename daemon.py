@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.38.0
+Version: 0.38.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1039,7 +1039,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.38.0",
+                "version": "0.38.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2339,7 +2339,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.38.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.38.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3778,6 +3778,44 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
         function refreshCurrentTab() {
             showTab(activeTabId);
+        }
+
+        async function loadProviders() {
+            const container = document.getElementById('providers-container');
+            if (!container) return;
+            try {
+                const res = await fetch('./api/providers');
+                const data = await res.json();
+                container.innerHTML = '';
+                (data.providers || []).forEach(p => {
+                    const card = document.createElement('div');
+                    card.className = 'bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-lg space-y-3';
+                    card.innerHTML = `
+                        <div class="flex justify-between items-start">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-3 h-3 rounded-full bg-purple-400"></span>
+                                <div>
+                                    <h4 class="font-bold text-white text-sm">${p.name}</h4>
+                                    <span class="text-[10px] text-purple-300 font-mono">${p.type}</span>
+                                </div>
+                            </div>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800">Actief</span>
+                        </div>
+                        <div class="text-[11px] text-purple-300 font-mono truncate bg-[#0B0F17] p-2 rounded-lg border border-slate-800/80">
+                            ${p.endpoint}
+                        </div>
+                        <div class="text-[11px] text-slate-300 space-y-1 bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800/80 font-mono">
+                            ${p.ha_entity ? `<div>Gekoppelde HA Entiteit: <span class="text-white">${p.ha_entity}</span></div>` : ''}
+                            ${p.live_price ? `<div>Huidig Tarief: <span class="text-cyan-300 font-bold">€${p.live_price}/kWh</span></div>` : ''}
+                            ${p.live_temp ? `<div>Buitentemperatuur: <span class="text-amber-300 font-bold">${p.live_temp} °C</span></div>` : ''}
+                            <div>Data Status: <span class="text-emerald-400 font-bold">Live polling (15m/1h)</span></div>
+                        </div>
+                    `;
+                    container.appendChild(card);
+                });
+            } catch (e) {
+                console.error('Error loading providers:', e);
+            }
         }
 
         // =========================================================================
