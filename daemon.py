@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.41.0
+Version: 0.41.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1193,7 +1193,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.41.0",
+                "version": "0.41.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1472,18 +1472,24 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             # 2. Fetch Open-Meteo Solar & Weather for Culemborg
             solar_map = {}
             temp_map = {}
+            wind_map = {}
+            rh_map = {}
             try:
-                url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation&timezone=Europe%2FAmsterdam&forecast_days=2"
+                url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
                 req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
                 with urllib.request.urlopen(req_m, timeout=5) as r_m:
                     m_data = json.loads(r_m.read().decode())
                     m_times = m_data.get("hourly", {}).get("time", [])
                     m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
                     m_temps = m_data.get("hourly", {}).get("temperature_2m", [])
-                    for t, rad, tmp in zip(m_times, m_rads, m_temps):
+                    m_winds = m_data.get("hourly", {}).get("wind_speed_10m", [])
+                    m_rhs = m_data.get("hourly", {}).get("relative_humidity_2m", [])
+                    for t, rad, tmp, wnd, rh in zip(m_times, m_rads, m_temps, m_winds, m_rhs):
                         k_t = t.replace('T', ' ')[:13] + ':00'
                         solar_map[k_t] = round((rad / 1000.0) * 5.5 * 0.90, 2)
                         temp_map[k_t] = round(float(tmp), 1)
+                        wind_map[k_t] = round(float(wnd), 1)
+                        rh_map[k_t] = round(float(rh), 1)
             except Exception as e_m:
                 print(f"Warning fetching Open-Meteo forecast: {e_m}")
 
@@ -1546,11 +1552,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                 unalloc_kw = round(float(unalloc_w) / 1000.0, 2)
 
+                w_val = wind_map.get(k_hour, 3.0)
+                rh_val = rh_map.get(k_hour, 75.0)
+
                 labels.append(lbl)
                 prices.append(p_val)
                 solar.append(s_val)
                 unallocated.append(unalloc_kw)
-                timeline_items.append({"idx": i, "dt": dt_slot, "key": k_full, "label": lbl, "price": p_val, "solar": s_val, "temp": t_val})
+                timeline_items.append({"idx": i, "dt": dt_slot, "key": k_full, "label": lbl, "price": p_val, "solar": s_val, "temp": t_val, "wind": w_val, "rh": rh_val})
 
             # 4. Plan Space Heating (CV) with calibrated 2R1C building model & Living Room Sensor Guard
             max_outdoor_temp = max((it["temp"] for it in timeline_items), default=16.0)
@@ -1600,6 +1609,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             it["dt"],
                             t_outdoor_c=it["temp"],
                             solar_radiation_w_m2=it["solar"] * 1000.0 / 5.5,
+                            wind_speed_m_s=it.get("wind", 3.0),
                             is_heating_season=True
                         )
                         heating[i] = round(h_res.get("electrical_w", 0.0) / 1000.0, 2)
@@ -2567,7 +2577,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.41.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.41.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
