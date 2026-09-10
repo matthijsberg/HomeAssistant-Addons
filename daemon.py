@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.35.1
+Version: 0.35.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -555,15 +555,35 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                 now_ams = datetime.now(AMS_TZ)
                 today_str = now_ams.strftime("%d-%m-%Y")
-                today_iso = now_ams.strftime("%Y-%m-%d")
+                tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
 
-                # 1. Fetch EPEX Spot Prices
-                url = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={today_str}&interval={interval_api}"
-                req = urllib.request.Request(url, headers={"User-Agent": "OpenHEMS/1.0"})
-                with urllib.request.urlopen(req, timeout=6) as r:
-                    api_data = json.loads(r.read().decode())
+                is_15m = (res_mode == "15m")
+                total_slots = 96 if is_15m else 24
+                step_mins = 15 if is_15m else 60
+                start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
+                base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
 
-                # 2. Fetch Open-Meteo Solar Forecast for Culemborg
+                # 1. Fetch EPEX Spot Prices for Today & Tomorrow (Rolling 24h matching Verbruiksvoorspelling)
+                prices_map = {}
+                prices_base_map = {}
+                for d_str in [today_str, tomorrow_str]:
+                    try:
+                        url = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval={interval_api}"
+                        req = urllib.request.Request(url, headers={"User-Agent": "OpenHEMS/1.0"})
+                        with urllib.request.urlopen(req, timeout=6) as r:
+                            api_data = json.loads(r.read().decode())
+                            for it in api_data.get("all_in_with_vat", []):
+                                dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
+                                k_fmt = "%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00"
+                                prices_map[dt.strftime(k_fmt)] = round(float(it.get("price", {}).get("value", 0.0)), 4)
+                            for it in api_data.get("base", []):
+                                dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
+                                k_fmt = "%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00"
+                                prices_base_map[dt.strftime(k_fmt)] = round(float(it.get("price", {}).get("value", 0.0)), 4)
+                    except Exception as e_p:
+                        print(f"Warning fetching EPEX prices for {d_str}: {e_p}")
+
+                # 2. Fetch Open-Meteo Solar Forecast for Culemborg (Today & Tomorrow)
                 solar_hourly = {}
                 try:
                     url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=shortwave_radiation&timezone=Europe%2FAmsterdam&forecast_days=2"
@@ -573,33 +593,30 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         m_times = m_data.get("hourly", {}).get("time", [])
                         m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
                         for t, rad in zip(m_times, m_rads):
-                            if t.startswith(today_iso):
-                                solar_hourly[t[11:13]] = round((rad / 1000.0) * 5.5 * 0.90, 2)
+                            k_t = t.replace('T', ' ')[:13] + ':00'
+                            solar_hourly[k_t] = round((rad / 1000.0) * 5.5 * 0.90, 2)
                 except Exception as e_m:
                     print(f"Warning fetching Open-Meteo solar forecast: {e_m}")
 
-                items_all_in = api_data.get("all_in_with_vat", [])
-                items_base = api_data.get("base", [])
-
-                today_date = now_ams.date()
                 labels = []
                 prices_all_in = []
                 prices_base = []
                 solar_forecast_kw = []
 
-                for it in items_all_in:
-                    dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
-                    if dt.date() == today_date:
-                        t_lbl = dt.strftime("%H:%M")
-                        labels.append(t_lbl)
-                        prices_all_in.append(round(float(it.get("price", {}).get("value", 0.0)), 4))
-                        h_str = dt.strftime("%H")
-                        solar_forecast_kw.append(solar_hourly.get(h_str, 0.0))
+                for i in range(total_slots):
+                    dt_slot = base_dt + timedelta(minutes=step_mins * i)
+                    k_full = dt_slot.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
+                    k_hour = dt_slot.strftime("%Y-%m-%d %H:00")
 
-                for it in items_base:
-                    dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
-                    if dt.date() == today_date:
-                        prices_base.append(round(float(it.get("price", {}).get("value", 0.0)), 4))
+                    if i == 0:
+                        lbl = dt_slot.strftime("Nu (%H:%M)" if is_15m else "Nu (%H:00)")
+                    else:
+                        lbl = dt_slot.strftime("%H:%M" if is_15m else "%H:00")
+
+                    labels.append(lbl)
+                    prices_all_in.append(prices_map.get(k_full, 0.25))
+                    prices_base.append(prices_base_map.get(k_full, 0.10))
+                    solar_forecast_kw.append(solar_hourly.get(k_hour, 0.0))
 
                 min_p = min(prices_all_in) if prices_all_in else 0.0
                 max_p = max(prices_all_in) if prices_all_in else 0.0
@@ -1013,7 +1030,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.35.1",
+                "version": "0.35.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2143,7 +2160,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.35.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.35.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
