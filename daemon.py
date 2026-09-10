@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.47.0
+Version: 0.48.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1036,6 +1036,90 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "starting", "samples_in_window": 0})
             return
 
+        if path == "/api/model/heating-forecast":
+            now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
+            start_minute = (now_ams.minute // 15) * 15
+            base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
+
+            # Query Open-Meteo Weather for Culemborg
+            temp_map, solar_map, wind_map = {}, {}, {}
+            try:
+                url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m&timezone=Europe%2FAmsterdam&forecast_days=2"
+                req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
+                with urllib.request.urlopen(req_m, timeout=5) as r_m:
+                    m_data = json.loads(r_m.read().decode())
+                    for t, tmp, rad, wnd in zip(m_data["hourly"]["time"], m_data["hourly"]["temperature_2m"], m_data["hourly"]["shortwave_radiation"], m_data["hourly"]["wind_speed_10m"]):
+                        k_t = t.replace('T', ' ')[:13] + ':00'
+                        temp_map[k_t] = float(tmp)
+                        solar_map[k_t] = float(rad)
+                        wind_map[k_t] = float(wnd)
+            except Exception:
+                pass
+
+            # Fetch EPEX spot prices for next 24h
+            today_str = now_ams.strftime("%d-%m-%Y")
+            tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
+            prices_map = {}
+            for d_str in [today_str, tomorrow_str]:
+                try:
+                    url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval=INTERVAL_QUARTER"
+                    req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
+                    with urllib.request.urlopen(req_p, timeout=5) as r_p:
+                        res_p = json.loads(r_p.read().decode())
+                        for it in res_p.get("all_in_with_vat", []):
+                            dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Amsterdam"))
+                            prices_map[dt.strftime("%Y-%m-%d %H:%M")] = round(float(it.get("price", {}).get("value", 0.28)), 4)
+                except Exception:
+                    pass
+
+            labels, out_temps, cops, th_loss_kw, el_power_kw, costs_eur = [], [], [], [], [], []
+            tot_th_kwh, tot_el_kwh, tot_cost = 0.0, 0.0, 0.0
+
+            for i in range(96):
+                slot_dt = base_dt + timedelta(minutes=15 * i)
+                lbl = slot_dt.strftime("%H:%M")
+                k_full = slot_dt.strftime("%Y-%m-%d %H:%M")
+                k_hour = slot_dt.strftime("%Y-%m-%d %H:00")
+                t_out = temp_map.get(k_hour, 14.0)
+                sol = solar_map.get(k_hour, 0.0)
+                wnd = wind_map.get(k_hour, 3.0)
+                price = prices_map.get(k_full, prices_map.get(k_hour, 0.29))
+
+                if GLOBAL_MODEL:
+                    h_res = GLOBAL_MODEL.predict_space_heating_w(slot_dt, t_outdoor_c=t_out, solar_radiation_w_m2=sol, wind_speed_m_s=wnd, is_heating_season=True)
+                    cop_val = h_res.get("cop", 3.8)
+                    th_kw = round(h_res.get("thermal_w", 0.0) / 1000.0, 2)
+                    el_kw = round(h_res.get("electrical_w", 0.0) / 1000.0, 2)
+                else:
+                    cop_val = 3.8
+                    th_kw = 0.0
+                    el_kw = 0.0
+
+                slot_cost = round(el_kw * 0.25 * price, 3)
+                tot_th_kwh += th_kw * 0.25
+                tot_el_kwh += el_kw * 0.25
+                tot_cost += slot_cost
+
+                labels.append(lbl)
+                out_temps.append(round(t_out, 1))
+                cops.append(round(cop_val, 2))
+                th_loss_kw.append(th_kw)
+                el_power_kw.append(el_kw)
+                costs_eur.append(slot_cost)
+
+            self._send_json({
+                "labels": labels,
+                "outdoor_temps_c": out_temps,
+                "cops": cops,
+                "thermal_loss_kw": th_loss_kw,
+                "electrical_kw": el_power_kw,
+                "costs_eur": costs_eur,
+                "total_thermal_kwh": round(tot_th_kwh, 2),
+                "total_electrical_kwh": round(tot_el_kwh, 2),
+                "total_cost_eur": round(tot_cost, 2)
+            })
+            return
+
         if path == "/api/model/dhw-status":
             t_live = 49.2
             try:
@@ -1231,7 +1315,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.47.0",
+                "version": "0.48.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2652,7 +2736,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.47.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.48.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -2933,6 +3017,56 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             </div>
                         </div>
                     </div>
+
+                    <!-- Chart 1.3: Boilervat Temperatuurtraject & Verwachte Warmwatervraag (24 Uur Vooruit) -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5" id="dhw-temp-chart-container">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white tracking-wide">Boilervat Temperatuurtraject &amp; Verwachte Warmwatervraag (24 Uur Vooruit)</h3>
+                                    <p class="text-[11px] text-slate-400">Verloop in graden Celsius (°C) vanaf de actuele 350L tanksensor en de verwachte getapte liters per kwartier.</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 text-xs font-mono flex-wrap">
+                                <span class="flex items-center gap-1.5 text-amber-300"><span class="w-3 h-1 bg-amber-400 rounded"></span> Temperatuur (°C)</span>
+                                <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-0.5 border-b border-red-500 border-dashed"></span> Comfort 40°C</span>
+                                <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-0.5 border-b border-emerald-500 border-dashed"></span> Doel 50°C</span>
+                                <span class="flex items-center gap-1.5 text-sky-300"><span class="w-2.5 h-2.5 bg-sky-500/50 rounded-sm"></span> Vraag (Liter)</span>
+                            </div>
+                        </div>
+
+                        <!-- Canvas for Boiler Temperature -->
+                        <div class="relative w-full h-60 sm:h-64">
+                            <canvas id="chart-dhw-temperature"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Chart 1.4: CV Ruimteverwarming Warmtevraag, COP & Kosten Voorspelling (24 Uur Vooruit) -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5" id="heating-forecast-chart-container">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></span>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white tracking-wide">CV Ruimteverwarming: Warmteverlies, COP &amp; Kosten Voorspelling (24 Uur Vooruit)</h3>
+                                    <p class="text-[11px] text-slate-400">Fysische warmtevraag woning (2R1C + wind/zon), Daikin Carnot COP, stroomvraag (kW) en EPEX stroomkosten (€).</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 text-xs font-mono flex-wrap">
+                                <span class="flex items-center gap-1.5 text-blue-300"><span class="w-3 h-1 bg-blue-400 rounded"></span> Buitentemp (°C)</span>
+                                <span class="flex items-center gap-1.5 text-emerald-300"><span class="w-3 h-1 bg-emerald-400 rounded"></span> Daikin COP</span>
+                                <span class="flex items-center gap-1.5 text-red-400"><span class="w-2.5 h-2.5 bg-red-500/60 rounded-sm"></span> Warmteverlies (kW)</span>
+                                <span class="flex items-center gap-1.5 text-amber-400"><span class="w-2.5 h-2.5 bg-amber-500 rounded-sm"></span> Stroom (kW)</span>
+                                <span class="flex items-center gap-1.5 text-cyan-300"><span class="w-3 h-0.5 border-b border-cyan-400 border-dashed"></span> Kosten (€/kwartier)</span>
+                            </div>
+                        </div>
+
+                        <!-- Canvas for Heating Forecast -->
+                        <div class="relative w-full h-64 sm:h-72">
+                            <canvas id="chart-heating-forecast"></canvas>
+                        </div>
+                    </div>
+
                 </div>
 
                 <!-- ========================================================================= -->
@@ -3130,9 +3264,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         Laden van analyserapport...
                     </div>
                 </div>
-            </div>
-
-                        <!-- TAB: VERBINDINGEN (CONNECTORS: HA, MQTT & EXTERNE APIS) -->
             </div>
 
             <!-- TAB: APPARAAT POLICIES & AANSTURING -->
@@ -3695,30 +3826,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span>24:00</span>
                             </div>
                         </div>
-                    </div>
-                </div>
-
-                <!-- CARD 2B: DEDICATED BOILER TEMPERATURE TRAJECTORY & TAP DEMAND (24H FORECAST IN °C & LITERS) -->
-                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-xl space-y-4" id="dhw-temp-chart-container">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
-                        <div class="flex items-center gap-2.5">
-                            <span class="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
-                            <div>
-                                <h3 class="text-sm font-bold text-white tracking-wide">Boilervat Temperatuurtraject &amp; Verwachte Warmwatervraag (24 Uur Vooruit)</h3>
-                                <p class="text-[11px] text-slate-400">Simulatie in graden Celsius (°C) vanaf de live tanksensor en de geleerde getapte liters per kwartier.</p>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-3 text-xs font-mono flex-wrap">
-                            <span class="flex items-center gap-1.5 text-amber-300"><span class="w-3 h-1 bg-amber-400 rounded"></span> Temperatuur (°C)</span>
-                            <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-0.5 border-b border-red-500 border-dashed"></span> Comfort 40°C</span>
-                            <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-0.5 border-b border-emerald-500 border-dashed"></span> Doel 50°C</span>
-                            <span class="flex items-center gap-1.5 text-sky-300"><span class="w-2.5 h-2.5 bg-sky-500/50 rounded-sm"></span> Vraag (Liter)</span>
-                        </div>
-                    </div>
-
-                    <!-- Canvas for Boiler Temperature -->
-                    <div class="relative w-full h-64 sm:h-72">
-                        <canvas id="chart-dhw-temperature"></canvas>
                     </div>
                 </div>
 
@@ -4401,6 +4508,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             if (tabId === 'prediction' || tabId === 'analytics') {
                 loadChartData();
                 loadElectricityPricesChart();
+                renderDhwTemperatureChart();
+                renderHeatingForecastChart();
             }
             if (tabId === 'history') {
                 loadAnalytics();
@@ -7197,6 +7306,170 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         }
 
                 let dhwTempChartInstance = null;
+
+                let heatingForecastChartInstance = null;
+
+        async function renderHeatingForecastChart() {
+            const canvas = document.getElementById('chart-heating-forecast');
+            if (!canvas) return;
+            try {
+                const res = await fetch('./api/model/heating-forecast');
+                if (!res.ok) return;
+                const d = await res.json();
+                if (!d.labels || d.labels.length === 0) return;
+
+                const existingChart = Chart.getChart(canvas);
+                if (existingChart) {
+                    existingChart.destroy();
+                }
+
+                const labels = d.labels;
+                const outTemps = d.outdoor_temps_c || [];
+                const cops = d.cops || [];
+                const thLoss = d.thermal_loss_kw || [];
+                const elKw = d.electrical_kw || [];
+                const costs = d.costs_eur || [];
+
+                const ctx = canvas.getContext('2d');
+                heatingForecastChartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Buitentemperatuur (°C)',
+                                data: outTemps,
+                                type: 'line',
+                                yAxisID: 'y_temp',
+                                borderColor: '#60A5FA',
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.75,
+                                tension: 0.25,
+                                pointRadius: 0,
+                                order: 1
+                            },
+                            {
+                                label: 'Daikin COP',
+                                data: cops,
+                                type: 'line',
+                                yAxisID: 'y_temp',
+                                borderColor: '#10B981',
+                                borderDash: [4, 4],
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.5,
+                                tension: 0.2,
+                                pointRadius: 0,
+                                order: 2
+                            },
+                            {
+                                label: 'Stroomkosten (€/kwartier)',
+                                data: costs,
+                                type: 'line',
+                                yAxisID: 'y_cost',
+                                borderColor: '#22D3EE',
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.75,
+                                pointRadius: 0,
+                                order: 3
+                            },
+                            {
+                                label: 'Warmteverlies Woning (kW_th)',
+                                data: thLoss,
+                                yAxisID: 'y_power',
+                                backgroundColor: 'rgba(239, 68, 68, 0.45)',
+                                hoverBackgroundColor: '#EF4444',
+                                borderRadius: 2,
+                                order: 4
+                            },
+                            {
+                                label: 'Stroom Warmtepomp (kW_el)',
+                                data: elKw,
+                                yAxisID: 'y_power',
+                                backgroundColor: 'rgba(245, 158, 11, 0.65)',
+                                hoverBackgroundColor: '#F59E0B',
+                                borderRadius: 2,
+                                order: 5
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                backgroundColor: 'rgba(11, 15, 23, 0.95)',
+                                borderColor: '#1E293B',
+                                borderWidth: 1,
+                                padding: 10,
+                                callbacks: {
+                                    label: function(c) {
+                                        const v = c.raw;
+                                        if (v === 0) return null;
+                                        if (c.dataset.yAxisID === 'y_cost') {
+                                            return ` 💶 Stroomkosten: €${v.toFixed(3)}`;
+                                        }
+                                        if (c.dataset.label.includes('Buitentemp')) {
+                                            return ` 🌡️ Buitentemperatuur: ${v}°C`;
+                                        }
+                                        if (c.dataset.label.includes('COP')) {
+                                            return ` 📈 Daikin COP: ${v}`;
+                                        }
+                                        if (c.dataset.label.includes('Warmteverlies')) {
+                                            return ` 🔥 Warmteverlies Woning: ${v} kW_th (${(v*0.25).toFixed(2)} kWh warmte)`;
+                                        }
+                                        return ` ⚡ Warmtepomp Stroom: ${v} kW_el (${(v*0.25).toFixed(2)} kWh stroom)`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: 'rgba(30, 41, 59, 0.3)' },
+                                ticks: { color: '#64748B', font: { size: 10 }, maxTicksLimit: 16 }
+                            },
+                            y_power: {
+                                position: 'left',
+                                min: 0,
+                                title: {
+                                    display: true,
+                                    text: 'Vermogen (kW)',
+                                    color: '#EF4444',
+                                    font: { size: 10, weight: 'bold' }
+                                },
+                                grid: { color: 'rgba(30, 41, 59, 0.25)' },
+                                ticks: { color: '#EF4444', font: { size: 10 }, callback: v => `${v} kW` }
+                            },
+                            y_temp: {
+                                position: 'right',
+                                min: 0,
+                                max: 25,
+                                grid: { drawOnChartArea: false },
+                                title: {
+                                    display: true,
+                                    text: 'Temperatuur (°C) / COP',
+                                    color: '#60A5FA',
+                                    font: { size: 10, weight: 'bold' }
+                                },
+                                ticks: { color: '#60A5FA', font: { size: 10 }, callback: v => `${v}` }
+                            },
+                            y_cost: {
+                                position: 'right',
+                                min: 0,
+                                grid: { drawOnChartArea: false },
+                                title: {
+                                    display: false
+                                },
+                                ticks: { display: false }
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.warn("Error rendering heating forecast chart:", e);
+            }
+        }
 
         async function renderDhwTemperatureChart() {
             const canvas = document.getElementById('chart-dhw-temperature');
