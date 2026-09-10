@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.43.0
+Version: 0.44.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -37,10 +37,13 @@ try:
     sys.path.insert(0, str(Path(__file__).parent))
     sys.path.insert(0, "/config/projects/energy-scheduler")
     from layer2_calibration.learned_forecaster import HybridForecastingModel
+    from layer2_calibration.dhw_thermal_model import DhwThermalModel
     GLOBAL_MODEL = HybridForecastingModel()
+    GLOBAL_DHW_MODEL = DhwThermalModel()
 except Exception as _e_model:
-    print(f"[WARN] Failed to initialize HybridForecastingModel: {_e_model}")
+    print(f"[WARN] Failed to initialize Forecasting Models: {_e_model}")
     GLOBAL_MODEL = None
+    GLOBAL_DHW_MODEL = None
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timedelta
@@ -1033,6 +1036,41 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "starting", "samples_in_window": 0})
             return
 
+        if path == "/api/model/dhw-status":
+            t_live = 49.2
+            try:
+                ha_sec = load_secrets()
+                ha_tok = ha_sec.get("homeassistant", {}).get("token")
+                ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
+                if ha_tok and ha_url:
+                    req_t = urllib.request.Request(
+                        f"{ha_url}/api/states/sensor.hc_dhw_temperature_r5t_dhw_tank",
+                        headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
+                    )
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    with urllib.request.urlopen(req_t, timeout=3, context=ctx) as r_t:
+                        st_t = json.loads(r_t.read().decode())
+                        val_t = float(st_t.get("state", 49.2))
+                        if 20.0 <= val_t <= 75.0:
+                            t_live = val_t
+            except Exception:
+                pass
+
+            now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
+            if GLOBAL_DHW_MODEL:
+                decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_live, now_ams)
+                traj = GLOBAL_DHW_MODEL.simulate_trajectory(t_live, now_ams, hours_ahead=24)
+                self._send_json({
+                    "status": "online",
+                    "decision": decision,
+                    "trajectory": traj
+                })
+            else:
+                self._send_json({"status": "error", "message": "DHW model niet geladen"}, 500)
+            return
+
         if path == "/api/model/status":
             if not GLOBAL_MODEL:
                 self._send_json({"status": "error", "message": "Model niet geladen"}, 500)
@@ -1193,7 +1231,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.43.0",
+                "version": "0.44.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1621,30 +1659,67 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         else:
                             heating[i] = 0.0
 
-            # 5. Plan Hot Water Generation (SWW Boiler 350L): Real 45-min Run (3 quarters)
-            daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
-            solar_rich_slots = [it for it in daylight_slots if it["solar"] >= 1.2]
-            best_sww_slot = None
+            # 5. Plan Hot Water Generation (SWW Boiler 350L) with Thermal State Decision
+            # Query live tank temperature
+            t_dhw_live = 49.2
+            try:
+                ha_sec = load_secrets()
+                ha_tok = ha_sec.get("homeassistant", {}).get("token")
+                ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
+                if ha_tok and ha_url:
+                    req_t = urllib.request.Request(
+                        f"{ha_url}/api/states/sensor.hc_dhw_temperature_r5t_dhw_tank",
+                        headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
+                    )
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    with urllib.request.urlopen(req_t, timeout=3, context=ctx) as r_t:
+                        st_t = json.loads(r_t.read().decode())
+                        val_t = float(st_t.get("state", 49.2))
+                        if 20.0 <= val_t <= 75.0:
+                            t_dhw_live = val_t
+            except Exception:
+                pass
 
-            if solar_rich_slots:
-                best_sww_slot = max(solar_rich_slots, key=lambda x: x["solar"])
-                sww_start_idx = best_sww_slot["idx"]
-                reason = f"100% Zonne-opwek ({best_sww_slot['solar']:.1f} kW zon)"
-            elif daylight_slots:
-                best_sww_slot = min(daylight_slots, key=lambda x: (x["price"] - (x["solar"] * 0.15)))
-                sww_start_idx = best_sww_slot["idx"]
-                reason = f"Laag tarief (€{best_sww_slot['price']:.3f}) & {best_sww_slot['solar']:.1f} kW zon"
+            dhw_decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_dhw_live, now_ams) if GLOBAL_DHW_MODEL else None
+            needs_night_charge = dhw_decision.get("needs_night_charge", False) if dhw_decision else False
+
+            best_sww_slot = None
+            if needs_night_charge:
+                # Tank would dip < 40C before morning! Plan boost in cheapest night quarter (02:00 - 05:00)
+                night_slots = [it for it in timeline_items if (1 <= it["dt"].hour <= 5)]
+                if night_slots:
+                    best_sww_slot = min(night_slots, key=lambda x: x["price"])
+                    sww_start_idx = best_sww_slot["idx"]
+                    reason = f"Nachtelijke Comfort-Lading (Voorkomt dip <40°C om {dhw_decision.get('morning_dip_time')}) tegen €{best_sww_slot['price']:.3f}/kWh"
+                else:
+                    best_sww_slot = min(timeline_items[:24], key=lambda x: x["price"])
+                    sww_start_idx = best_sww_slot["idx"]
+                    reason = f"Nachtelijke Comfort-Lading tegen €{best_sww_slot['price']:.3f}/kWh"
             else:
-                best_sww_slot = min(timeline_items, key=lambda x: x["price"])
-                sww_start_idx = best_sww_slot["idx"]
-                reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh)"
+                # Night is skipped! Buffer is sufficient; defer to midday free solar or lowest spot price
+                daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
+                solar_rich_slots = [it for it in daylight_slots if it["solar"] >= 1.2]
+                if solar_rich_slots:
+                    best_sww_slot = max(solar_rich_slots, key=lambda x: x["solar"])
+                    sww_start_idx = best_sww_slot["idx"]
+                    reason = f"Zonne-Optimalisatie (Nacht overgeslagen, tank {t_dhw_live:.1f}°C): 100% Zonne-opwek ({best_sww_slot['solar']:.1f} kW zon)"
+                elif daylight_slots:
+                    best_sww_slot = min(daylight_slots, key=lambda x: (x["price"] - (x["solar"] * 0.15)))
+                    sww_start_idx = best_sww_slot["idx"]
+                    reason = f"Dag-Optimalisatie (Nacht overgeslagen): Laag tarief (€{best_sww_slot['price']:.3f}) & {best_sww_slot['solar']:.1f} kW zon"
+                else:
+                    best_sww_slot = min(timeline_items, key=lambda x: x["price"])
+                    sww_start_idx = best_sww_slot["idx"]
+                    reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh)"
 
             slots_to_fill = 3 if is_15m else 1  # 3 x 15m = 45 min run
             for k in range(slots_to_fill):
                 target_slot = sww_start_idx + k
                 if target_slot < total_slots:
                     boiler[target_slot] = 1.6  # 1.6 kW electrical compressor run
-                    advices[target_slot] = f"♨️ SWW Boiler 350L Run: {reason}"
+                    advices[target_slot] = f"♨️ SWW Boiler 350L: {reason}"
 
             
             # 6. Plan Battery Dispatch: ONLY IF BATTERY IS PHYSICALLY INSTALLED OR SIMULATION EXPLICITLY ACTIVATED
@@ -2577,7 +2652,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.43.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.44.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3462,6 +3537,37 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span class="w-2 h-2 rounded-full bg-red-400"></span>
                                 <span>CV Woningverwarming</span>
                             </button>
+                        </div>
+                    </div>
+
+                                        <!-- LIVE BOILERVAT STATUS & NACHTLAAD BESLISSER (Alleen zichtbaar bij SWW) -->
+                    <div id="dhw-decision-banner" class="hidden bg-gradient-to-r from-amber-950/60 via-[#0B0F17] to-amber-900/30 border border-amber-500/30 rounded-xl p-4 space-y-2.5">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-500/20 pb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="text-base">♨️</span>
+                                <span class="text-xs uppercase font-bold text-amber-400 tracking-wider">Live Boilervat Status & Nachtelijk Laadbesluit</span>
+                            </div>
+                            <span id="dhw-live-temp-badge" class="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">Actueel: 49.2°C</span>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-xs">
+                            <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
+                                <div class="text-[10px] text-slate-400 uppercase">Nuttige Warmte (&gt;40°C)</div>
+                                <div class="text-sm font-bold text-amber-300 mt-0.5" id="dhw-usable-heat">3.74 kWh_th (13.5 MJ)</div>
+                                <div class="text-[10px] text-slate-500 font-sans mt-0.5">Capaciteit voor ~90L water van 50°C.</div>
+                            </div>
+                            <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
+                                <div class="text-[10px] text-slate-400 uppercase">Verwachte Ochtenddip</div>
+                                <div class="text-sm font-bold text-white mt-0.5" id="dhw-projected-dip">41.6°C (om 07:45u)</div>
+                                <div class="text-[10px] text-emerald-400 font-sans mt-0.5">Boven 40°C comfortgrens ✓</div>
+                            </div>
+                            <div class="bg-black/40 p-2.5 rounded-lg border border-slate-800">
+                                <div class="text-[10px] text-slate-400 uppercase">Nachtbesluit (bv. Wo/Do nacht)</div>
+                                <div class="text-xs font-bold text-emerald-300 mt-0.5" id="dhw-night-action">✅ Geen nachtlading nodig</div>
+                                <div class="text-[10px] text-slate-500 font-sans mt-0.5">Wacht op zonnepiek morgenmiddag.</div>
+                            </div>
+                        </div>
+                        <div class="text-[11px] text-slate-300 bg-black/50 p-2.5 rounded-lg border border-slate-800/80 font-sans" id="dhw-decision-explanation">
+                            Verantwoording: De tank bevat voldoende thermische buffer voor de ochtenddouches. Door nachtelijke bijverwarming over te slaan bespaar je stroom en laadt de warmtepomp morgen met hogere COP (~3.2) op gratis zonnestroom.
                         </div>
                     </div>
 
@@ -6736,6 +6842,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 const res = await fetch('./api/calibration/unallocated-model');
                 cachedUnallocModel = await res.json();
                 renderUnallocDay(activeUnallocDay);
+            updateDhwLiveCard();
             } catch (e) {
                 console.warn("Error loading unallocated model:", e);
             }
@@ -6771,6 +6878,39 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             activeMonthNum = mNum;
             renderMonthSelector();
             renderUnallocDay(activeUnallocDay);
+        }
+
+                async function updateDhwLiveCard() {
+            const banner = document.getElementById('dhw-decision-banner');
+            if (!banner) return;
+            if (currentProfileType === 'dhw') {
+                banner.classList.remove('hidden');
+                try {
+                    const res = await fetch('./api/model/dhw-status');
+                    if (res.ok) {
+                        const data = await res.json();
+                        const d = data.decision || {};
+                        if (document.getElementById('dhw-live-temp-badge')) document.getElementById('dhw-live-temp-badge').innerText = `Actueel: ${d.current_temp_c}°C`;
+                        if (document.getElementById('dhw-usable-heat')) document.getElementById('dhw-usable-heat').innerText = `${d.usable_heat_kwh_th} kWh_th (${d.usable_heat_mj} MJ)`;
+                        if (document.getElementById('dhw-projected-dip')) {
+                            const isSafe = d.projected_morning_dip_c >= 40.0;
+                            document.getElementById('dhw-projected-dip').innerHTML = `${d.projected_morning_dip_c}°C <span class="${isSafe ? 'text-emerald-400' : 'text-amber-400'} text-xs">(om ${d.morning_dip_time || '07:45'}u)</span>`;
+                        }
+                        if (document.getElementById('dhw-night-action')) {
+                            document.getElementById('dhw-night-action').innerHTML = d.needs_night_charge
+                                ? '<span class="text-amber-400">⚠️ Nachtlading aanbevolen</span>'
+                                : '<span class="text-emerald-400">✅ Geen nachtlading nodig</span>';
+                        }
+                        if (document.getElementById('dhw-decision-explanation')) {
+                            document.getElementById('dhw-decision-explanation').innerText = d.recommendation || '';
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Error fetching DHW live status:", e);
+                }
+            } else {
+                banner.classList.add('hidden');
+            }
         }
 
         function switchProfileType(pType) {
