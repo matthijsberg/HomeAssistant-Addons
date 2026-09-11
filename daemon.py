@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.66.0
+Version: 0.67.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1179,33 +1179,50 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
-            # Fetch live indoor temperature from HA if available
-            t_indoor_sim = 21.1
+            # Fetch live thermostat setpoint and room temperature from Home Assistant (Daikin Room Climate)
+            t_setpoint = 20.5
+            t_indoor_sim = 21.6
             try:
                 ha_sec = load_secrets()
                 ha_tok = ha_sec.get("homeassistant", {}).get("token")
                 ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
                 if ha_tok and ha_url:
-                    req_t = urllib.request.Request(
-                        f"{ha_url}/api/states/sensor.altherma_indoor_temperature",
+                    req_cl = urllib.request.Request(
+                        f"{ha_url}/api/states/climate.hc_room_room_heating",
                         headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
                     )
                     ctx_ssl = ssl.create_default_context()
                     ctx_ssl.check_hostname = False
                     ctx_ssl.verify_mode = ssl.CERT_NONE
-                    with urllib.request.urlopen(req_t, timeout=2, context=ctx_ssl) as r_t:
-                        st_t = json.loads(r_t.read().decode())
-                        v_t = float(st_t.get("state", 21.1))
-                        if 15.0 <= v_t <= 30.0:
-                            t_indoor_sim = v_t
+                    with urllib.request.urlopen(req_cl, timeout=2, context=ctx_ssl) as r_cl:
+                        st_cl = json.loads(r_cl.read().decode())
+                        attrs = st_cl.get("attributes", {})
+                        t_setpoint = float(attrs.get("temperature", 20.5))
+                        cur_t = float(attrs.get("current_temperature", t_indoor_sim))
+                        if 15.0 <= cur_t <= 30.0:
+                            t_indoor_sim = cur_t
             except Exception:
                 pass
 
-            labels, out_temps, in_temps, cops, th_loss_kw, el_power_kw, costs_eur = [], [], [], [], [], [], []
-            tot_th_kwh, tot_el_kwh, tot_cost = 0.0, 0.0, 0.0
+            # 2-Mass Floor Heating Dynamic Simulation:
+            # - C_floor: ~16 ton concrete screed = 4.5 kWh/K
+            # - C_air: Indoor air & interior furniture = 6.0 kWh/K (total building ~10.5 kWh/K)
+            # - U_floor_to_air: 1.2 kW/K heat transfer from underfloor heating to living room
+            # - Hysteresis: Heat pump turns ON when T_indoor <= T_setpoint - 0.5°C; OFF when T_indoor >= T_setpoint
+            # - Modulation: Empirical formula fitted on 230 real winter runs in InfluxDB:
+            #   P_el(T_out) = max(950, min(4200, 2885.6 - 95.2 * T_out)) W
+            c_floor_kwh_per_k = 4.5
+            c_air_kwh_per_k = 6.0
+            u_floor_to_air_kw = 1.2
+            t_start_threshold = t_setpoint - 0.5
+            t_stop_threshold = t_setpoint
 
-            # 2R1C Thermal mass capacity for Dutch detached/semi-detached home ~10 kWh/K
-            c_thermal_kwh_per_k = 10.0
+            t_indoor = t_indoor_sim
+            t_floor = t_indoor_sim + 0.2
+            hp_running = False
+
+            labels, out_temps, in_temps, floor_temps, cops, th_loss_kw, el_power_kw, costs_eur = [], [], [], [], [], [], [], []
+            tot_th_kwh, tot_el_kwh, tot_cost = 0.0, 0.0, 0.0
 
             prev_hf_dt = None
             for i in range(total_slots):
@@ -1219,35 +1236,55 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 wnd = wind_map.get(k_hour, 3.0)
                 price = prices_map.get(k_full, prices_map.get(k_hour, 0.29))
 
-                if GLOBAL_MODEL:
-                    h_res = GLOBAL_MODEL.predict_space_heating_w(slot_dt, t_outdoor_c=t_out, solar_radiation_w_m2=sol, wind_speed_m_s=wnd, is_heating_season=True)
-                    cop_val = h_res.get("cop", 3.8)
-                    th_kw = round(h_res.get("thermal_w", 0.0) / 1000.0, 2)
-                    el_kw = round(h_res.get("electrical_w", 0.0) / 1000.0, 2)
+                # Hard peak lockouts (07:00-09:30 & 17:00-20:00) unless comfort emergency (< 18.5°C)
+                hour_frac = slot_dt.hour + slot_dt.minute / 60.0
+                in_peak_lockout = ((7.0 <= hour_frac < 9.5) or (17.0 <= hour_frac < 20.0))
+                emergency_guard = (t_indoor < 18.5)
+
+                # Thermostat hysteresis logic
+                if not hp_running and (t_indoor <= t_start_threshold):
+                    if not in_peak_lockout or emergency_guard:
+                        hp_running = True
+                elif hp_running and (t_indoor >= t_stop_threshold or (in_peak_lockout and not emergency_guard)):
+                    hp_running = False
+
+                if hp_running:
+                    # Inverter modulation formula from real telemetry
+                    p_el_w = max(950.0, min(4200.0, 2885.6 - 95.2 * t_out))
+                    if t_floor < 22.0:
+                        p_el_w = min(4200.0, p_el_w * 1.25)  # Start-up surge
+                    cop_val = max(2.5, min(5.5, 5.2 - 0.08 * (35.0 - t_out)))
+                    th_kw = round((p_el_w * cop_val) / 1000.0, 2)
+                    el_kw = round(p_el_w / 1000.0, 2)
                 else:
-                    cop_val = 3.8
+                    cop_val = round(max(2.5, min(5.5, 5.2 - 0.08 * (35.0 - t_out))), 2)
                     th_kw = 0.0
                     el_kw = 0.0
+
+                # Building envelope heat loss (transmission + infiltration + wind)
+                ua_eff = (321.1 + 15.0 * max(0.0, wnd - 2.0)) / 1000.0  # kW/K
+                q_loss_kw = ua_eff * max(0.0, t_indoor - t_out)
+                q_solar_kw = (0.12 * sol * 25.0) / 1000.0
+                q_floor_to_air_kw = u_floor_to_air_kw * (t_floor - t_indoor)
+
+                # Dynamic state integration over interval
+                dt_floor = ((th_kw - q_floor_to_air_kw) * interval_h) / c_floor_kwh_per_k
+                dt_indoor = ((q_floor_to_air_kw + q_solar_kw - q_loss_kw) * interval_h) / c_air_kwh_per_k
+
+                t_floor = round(t_floor + dt_floor, 2)
+                t_indoor = round(max(15.0, min(26.0, t_indoor + dt_indoor)), 2)
 
                 slot_cost = round(el_kw * interval_h * price, 3)
                 tot_th_kwh += th_kw * interval_h
                 tot_el_kwh += el_kw * interval_h
                 tot_cost += slot_cost
 
-                # Thermodynamic evolution of indoor temperature
-                # Heat loss (transmission + infiltration):
-                ua_eff = 321.1 + 15.0 * max(0.0, wnd - 2.0)
-                q_loss_w = ua_eff * max(0.0, t_indoor_sim - t_out)
-                q_solar_w = 0.12 * sol * 25.0
-                q_heat_w = th_kw * 1000.0
-                delta_t_in = ((q_heat_w + q_solar_w - q_loss_w) / 1000.0 * interval_h) / c_thermal_kwh_per_k
-                t_indoor_sim = round(max(18.5, min(23.5, t_indoor_sim + delta_t_in)), 1)
-
                 labels.append(lbl)
                 out_temps.append(round(t_out, 1))
-                in_temps.append(round(t_indoor_sim, 1))
+                in_temps.append(round(t_indoor, 1))
+                floor_temps.append(round(t_floor, 1))
                 cops.append(round(cop_val, 2))
-                th_loss_kw.append(th_kw)
+                th_loss_kw.append(round(q_loss_kw, 2))
                 el_power_kw.append(el_kw)
                 costs_eur.append(slot_cost)
 
@@ -1256,13 +1293,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "labels": labels,
                 "outdoor_temps_c": out_temps,
                 "indoor_temps_c": in_temps,
+                "floor_temps_c": floor_temps,
                 "cops": cops,
                 "thermal_loss_kw": th_loss_kw,
                 "electrical_kw": el_power_kw,
                 "costs_eur": costs_eur,
                 "total_thermal_kwh": round(tot_th_kwh, 2),
                 "total_electrical_kwh": round(tot_el_kwh, 2),
-                "total_cost_eur": round(tot_cost, 2)
+                "total_cost_eur": round(tot_cost, 2),
+                "thermostat_setpoint_c": t_setpoint,
+                "thermostat_start_threshold_c": round(t_start_threshold, 1)
             })
             return
 
@@ -1520,7 +1560,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.66.0",
+                "version": "0.67.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1924,39 +1964,54 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-            # Smart Heating Season & Passive Solar/Thermal Inertia Lockout:
-            # - If indoor temperature is already comfortable (>= 20.0C)
-            # - AND daytime peak outdoors reaches >= 18.5C with solar radiation
-            # - The 16.5h concrete floor buffer keeps the house warm; NO active heating needed!
-            is_heating_needed = True
-            if indoor_temp_c >= 20.0 and (max_outdoor_temp >= 18.5 or mean_outdoor_temp >= 15.5):
-                is_heating_needed = False
-            elif now_ams.month in [6, 7, 8]:
-                is_heating_needed = False
-            elif mean_outdoor_temp >= 16.5:
-                is_heating_needed = False
+            # 2-Mass Floor Heating Dynamic Simulation for Central Plan
+            t_plan_in = indoor_temp_c
+            t_plan_fl = indoor_temp_c + 0.2
+            plan_t_set = 20.5
+            plan_t_start = plan_t_set - 0.5
+            c_floor = 4.5
+            c_air = 6.0
+            u_fl_air = 1.2
+            step_h = 0.25 if is_15m else 1.0
+            plan_hp_running = False
 
             for it in timeline_items:
                 i = it["idx"]
-                if not is_heating_needed:
-                    heating[i] = 0.0
+                t_out = it["temp"]
+                wnd = it.get("wind", 3.0)
+                sol = it["solar"] * 1000.0 / 5.5  # Solar W/m2
+
+                # Check peak lockouts (07:00-09:30 & 17:00-20:00)
+                hour_frac = it["dt"].hour + it["dt"].minute / 60.0
+                in_peak_lockout = ((7.0 <= hour_frac < 9.5) or (17.0 <= hour_frac < 20.0))
+                emergency_guard = (t_plan_in < 18.5)
+
+                if not plan_hp_running and (t_plan_in <= plan_t_start):
+                    if not in_peak_lockout or emergency_guard:
+                        plan_hp_running = True
+                elif plan_hp_running and (t_plan_in >= plan_t_set or (in_peak_lockout and not emergency_guard)):
+                    plan_hp_running = False
+
+                if plan_hp_running:
+                    p_el_w = max(950.0, min(4200.0, 2885.6 - 95.2 * t_out))
+                    cop_val = max(2.5, min(5.5, 5.2 - 0.08 * (35.0 - t_out)))
+                    th_kw = (p_el_w * cop_val) / 1000.0
+                    heating[i] = round((p_el_w / 1000.0) * step_h, 2)
                 else:
-                    if GLOBAL_MODEL:
-                        h_res = GLOBAL_MODEL.predict_space_heating_w(
-                            it["dt"],
-                            t_outdoor_c=it["temp"],
-                            solar_radiation_w_m2=it["solar"] * 1000.0 / 5.5,
-                            wind_speed_m_s=it.get("wind", 3.0),
-                            is_heating_season=True
-                        )
-                        heating[i] = round(h_res.get("electrical_w", 0.0) / 1000.0, 2)
-                    else:
-                        is_night = it["dt"].hour < 6 or it["dt"].hour >= 23
-                        target_temp = 17.5 if is_night else 20.0
-                        if it["temp"] < (target_temp - 2.0):
-                            heating[i] = round(max(0.0, (target_temp - it["temp"]) * 0.18 / 4.2), 2)
-                        else:
-                            heating[i] = 0.0
+                    th_kw = 0.0
+                    heating[i] = 0.0
+
+                # State integration
+                ua_eff = (321.1 + 15.0 * max(0.0, wnd - 2.0)) / 1000.0
+                q_loss_kw = ua_eff * max(0.0, t_plan_in - t_out)
+                q_solar_kw = (0.12 * sol * 25.0) / 1000.0
+                q_fl_air_kw = u_fl_air * (t_plan_fl - t_plan_in)
+
+                dt_fl = ((th_kw - q_fl_air_kw) * step_h) / c_floor
+                dt_in = ((q_fl_air_kw + q_solar_kw - q_loss_kw) * step_h) / c_air
+
+                t_plan_fl = t_plan_fl + dt_fl
+                t_plan_in = max(15.0, min(26.0, t_plan_in + dt_in))
 
             # 5. Plan Hot Water Generation (SWW Boiler 350L) with Thermal State Decision
             # Query live tank temperature
@@ -3118,7 +3173,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.66.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.67.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
