@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.53.0
+Version: 0.54.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1466,7 +1466,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.53.0",
+                "version": "0.54.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1925,44 +1925,125 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 pass
 
             dhw_decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_dhw_live, now_ams) if GLOBAL_DHW_MODEL else None
-            needs_night_charge = dhw_decision.get("needs_night_charge", False) if dhw_decision else False
+            needs_night_charge = (dhw_decision.get("status") == "SCHEDULE_NIGHT_CHARGE") if dhw_decision else False
 
-            best_sww_slot = None
+            # Check peak solar surplus over the next 24h
+            daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
+            tot_daylight_solar_kwh = sum(it["solar"] for it in daylight_slots) * (0.25 if is_15m else 1.0)
+            is_solar_boost_eligible = (tot_daylight_solar_kwh >= 2.5)
+
+            planned_mode = "standby_normal"
+            planned_mode_label = "Geen geforceerde run gepland"
+            sww_start_idx = -1
+            slots_to_fill = 0
+            sww_power_kw = 1.8
+            sww_target_temp = 50.0
+
             if needs_night_charge:
-                # Tank would dip < 40C before morning! Plan boost in cheapest night quarter (02:00 - 05:00)
+                # Night run required for morning comfort
                 night_slots = [it for it in timeline_items if (1 <= it["dt"].hour <= 5)]
                 if night_slots:
                     best_sww_slot = min(night_slots, key=lambda x: x["price"])
-                    sww_start_idx = best_sww_slot["idx"]
-                    reason = f"Nachtelijke Comfort-Lading (Voorkomt dip <40°C om {dhw_decision.get('morning_dip_time')}) tegen €{best_sww_slot['price']:.3f}/kWh"
                 else:
                     best_sww_slot = min(timeline_items[:24], key=lambda x: x["price"])
-                    sww_start_idx = best_sww_slot["idx"]
-                    reason = f"Nachtelijke Comfort-Lading tegen €{best_sww_slot['price']:.3f}/kWh"
-            else:
-                # Night is skipped! Buffer is sufficient; place run at optimal midday window (12:00 - 14:30)
-                midday_slots = [it for it in timeline_items if 12 <= it["dt"].hour <= 14]
-                daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
-                if midday_slots:
-                    # Prefer midday slot with best solar or lowest price
-                    best_sww_slot = max(midday_slots, key=lambda x: (x["solar"] - x["price"] * 0.5))
-                    sww_start_idx = best_sww_slot["idx"]
-                    reason = f"Middag Zonne-Optimalisatie (Nacht overgeslagen, tank {t_dhw_live:.1f}°C): Laadt op {best_sww_slot['solar']:.1f} kW zon & laag tarief (€{best_sww_slot['price']:.3f})"
-                elif daylight_slots:
+                sww_start_idx = best_sww_slot["idx"]
+                slots_to_fill = 3 if is_15m else 1
+                sww_power_kw = 1.8
+                sww_target_temp = 50.0
+                planned_mode = "forced_night_50"
+                planned_mode_label = "Geforceerd Aan: Nachtlading (tot 50°C)"
+                reason = f"Nachtlading daltarief (€{best_sww_slot['price']:.3f}/kWh) waarborgt ochtendcomfort"
+            elif is_solar_boost_eligible:
+                # Abundant solar! Activate Mode 3: Solar Buffer Boost to 60°C!
+                # 6 quarters = 90 mins at 2.7 kW (compressor continues above 50C to 60C)
+                if daylight_slots:
                     best_sww_slot = max(daylight_slots, key=lambda x: x["solar"])
-                    sww_start_idx = best_sww_slot["idx"]
-                    reason = f"Dag Zonne-Optimalisatie (Nacht overgeslagen): Laadt om {best_sww_slot['label']} op {best_sww_slot['solar']:.1f} kW zon"
                 else:
                     best_sww_slot = min(timeline_items, key=lambda x: x["price"])
-                    sww_start_idx = best_sww_slot["idx"]
-                    reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh)"
+                sww_start_idx = max(0, best_sww_slot["idx"] - (1 if is_15m else 0))
+                slots_to_fill = 6 if is_15m else 2
+                sww_power_kw = 2.65
+                sww_target_temp = 60.0
+                planned_mode = "forced_solar_boost_60"
+                planned_mode_label = "Geforceerd Aan: Zonnebuffer Boost (tot 60°C)"
+                reason = f"Zonnebuffer Boost (50➔60°C): Buffert +4.07 kWh_th met {best_sww_slot['solar']:.1f} kW zonnestroom"
+            else:
+                # Normal daytime run to 50°C
+                midday_slots = [it for it in timeline_items if 12 <= it["dt"].hour <= 15]
+                if midday_slots:
+                    best_sww_slot = max(midday_slots, key=lambda x: (x["solar"] - x["price"] * 0.5))
+                elif daylight_slots:
+                    best_sww_slot = max(daylight_slots, key=lambda x: x["solar"])
+                else:
+                    best_sww_slot = min(timeline_items, key=lambda x: x["price"])
+                sww_start_idx = best_sww_slot["idx"]
+                slots_to_fill = 3 if is_15m else 1
+                sww_power_kw = 1.8
+                sww_target_temp = 50.0
+                planned_mode = "forced_standard_50"
+                planned_mode_label = "Geforceerd Aan: Standaard Dagrun (tot 50°C)"
+                reason = f"Middagrun (tot 50°C): Laadt op middagzon ({best_sww_slot['solar']:.1f} kW) en daltarief"
 
-            slots_to_fill = 3 if is_15m else 1  # 3 x 15m = 45 min run
+            # Fill boiler dispatch while enforcing STRICT PEAK LOCKOUTS
             for k in range(slots_to_fill):
                 target_slot = sww_start_idx + k
                 if target_slot < total_slots:
-                    boiler[target_slot] = 1.6  # 1.6 kW electrical compressor run
-                    advices[target_slot] = f"♨️ SWW Boiler 350L: {reason}"
+                    slot_hour = timeline_items[target_slot]["dt"].hour
+                    slot_min = timeline_items[target_slot]["dt"].minute
+                    time_dec = slot_hour + slot_min / 60.0
+                    # Check if slot falls in peak lockout (07:00-09:30 or 17:00-20:00)
+                    if not ((7.0 <= time_dec < 9.5) or (17.0 <= time_dec < 20.0)):
+                        boiler[target_slot] = sww_power_kw
+                        advices[target_slot] = f"♨️ SWW Boiler 350L: {reason}"
+
+            # Build 24h Mode Timeline for Horizontal Bar Diagram
+            dhw_mode_timeline = []
+            for it in timeline_items:
+                h_dec = it["dt"].hour + it["dt"].minute / 60.0
+                q_idx = it["idx"]
+                is_peak = (7.0 <= h_dec < 9.5) or (17.0 <= h_dec < 20.0)
+                if is_peak:
+                    m_code = "peak_lockout"
+                    m_lbl = "Hard Uit (Spitsblokkade 🔒)"
+                    m_col = "#EF4444"
+                    m_pwr = 0.0
+                    m_desc = f"Spitsblokkade ({it['label']}): Compressor SG4 vergrendeld tegen piektarieven (€{it['price']:.3f}/kWh) en netbelasting."
+                elif boiler[q_idx] > 0:
+                    m_code = planned_mode
+                    m_lbl = planned_mode_label
+                    m_col = "#A855F7" if planned_mode == "forced_solar_boost_60" else ("#10B981" if planned_mode == "forced_night_50" else "#F59E0B")
+                    m_pwr = boiler[q_idx]
+                    m_desc = f"{planned_mode_label} om {it['label']}: Vermogen {m_pwr} kW elektrisch · Doeltemperatuur {sww_target_temp}°C."
+                else:
+                    m_code = "standby_normal"
+                    m_lbl = "Normale Operatie (Standby / Hysteresis)"
+                    m_col = "#1E293B"
+                    m_pwr = 0.0
+                    m_desc = f"Normale Operatie ({it['label']}): Vrijgavevenster. Warmtepomp waakt autonoom (start alleen bij tank &le; 40°C)."
+
+                dhw_mode_timeline.append({
+                    "slot": q_idx,
+                    "time": it["label"],
+                    "mode": m_code,
+                    "label": m_lbl,
+                    "color": m_col,
+                    "power_kw": m_pwr,
+                    "description": m_desc
+                })
+
+            run_start_time = timeline_items[sww_start_idx]["label"] if 0 <= sww_start_idx < total_slots else "--:--"
+            run_end_time = timeline_items[min(total_slots - 1, sww_start_idx + slots_to_fill)]["label"] if 0 <= sww_start_idx < total_slots else "--:--"
+            dhw_planning_summary = {
+                "planned_mode": planned_mode,
+                "planned_mode_label": planned_mode_label,
+                "target_temp_c": sww_target_temp,
+                "run_start": run_start_time,
+                "run_end": run_end_time,
+                "run_duration_min": slots_to_fill * (15 if is_15m else 60),
+                "power_kw": sww_power_kw,
+                "total_stroom_kwh": round(sww_power_kw * slots_to_fill * (0.25 if is_15m else 1.0), 2),
+                "spits_lockout_hours": 5.5
+            }
 
             
             # 6. Plan Battery Dispatch: ONLY IF BATTERY IS PHYSICALLY INSTALLED OR SIMULATION EXPLICITLY ACTIVATED
@@ -2910,7 +2991,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.53.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.54.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
