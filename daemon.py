@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.67.0
+Version: 0.68.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1180,15 +1180,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     pass
 
             # Fetch live thermostat setpoint and room temperature from Home Assistant (Daikin Room Climate)
-            t_setpoint = 20.5
-            t_indoor_sim = 21.6
+            t_setpoint = 20.0
+            t_indoor_sim = 22.0
+            thermostat_active = True
             try:
                 ha_sec = load_secrets()
                 ha_tok = ha_sec.get("homeassistant", {}).get("token")
                 ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
                 if ha_tok and ha_url:
                     req_cl = urllib.request.Request(
-                        f"{ha_url}/api/states/climate.hc_room_room_heating",
+                        f"{ha_url}/api/states/climate.woonkamer_climate_daikin",
                         headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
                     )
                     ctx_ssl = ssl.create_default_context()
@@ -1197,10 +1198,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     with urllib.request.urlopen(req_cl, timeout=2, context=ctx_ssl) as r_cl:
                         st_cl = json.loads(r_cl.read().decode())
                         attrs = st_cl.get("attributes", {})
-                        t_setpoint = float(attrs.get("temperature", 20.5))
+                        t_setpoint = float(attrs.get("target_temp_low", attrs.get("temperature", 20.0)))
                         cur_t = float(attrs.get("current_temperature", t_indoor_sim))
                         if 15.0 <= cur_t <= 30.0:
                             t_indoor_sim = cur_t
+                        if st_cl.get("state") == "off" or attrs.get("hvac_action") == "off":
+                            thermostat_active = False
             except Exception:
                 pass
 
@@ -1242,10 +1245,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 emergency_guard = (t_indoor < 18.5)
 
                 # Thermostat hysteresis logic
-                if not hp_running and (t_indoor <= t_start_threshold):
+                if thermostat_active and not hp_running and (t_indoor <= t_start_threshold):
                     if not in_peak_lockout or emergency_guard:
                         hp_running = True
-                elif hp_running and (t_indoor >= t_stop_threshold or (in_peak_lockout and not emergency_guard)):
+                elif hp_running and (not thermostat_active or t_indoor >= t_stop_threshold or (in_peak_lockout and not emergency_guard)):
                     hp_running = False
 
                 if hp_running:
@@ -1560,7 +1563,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.67.0",
+                "version": "0.68.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1944,30 +1947,36 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             # Query live indoor temperature from Home Assistant (or default 21.0C from current season)
             indoor_temp_c = 21.0
+            plan_t_set = 20.0
+            indoor_temp_c = 22.0
+            plan_thermostat_active = True
             try:
                 ha_sec = load_secrets()
                 ha_tok = ha_sec.get("homeassistant", {}).get("token")
                 ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
                 if ha_tok and ha_url:
                     req_in = urllib.request.Request(
-                        f"{ha_url}/api/states/sensor.sco2_staging_01_woonkamer_co2_temperature",
+                        f"{ha_url}/api/states/climate.woonkamer_climate_daikin",
                         headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
                     )
                     ctx = ssl.create_default_context()
                     ctx.check_hostname = False
                     ctx.verify_mode = ssl.CERT_NONE
-                    with urllib.request.urlopen(req_in, timeout=3, context=ctx) as r_in:
+                    with urllib.request.urlopen(req_in, timeout=2, context=ctx) as r_in:
                         st_in = json.loads(r_in.read().decode())
-                        val_in = float(st_in.get("state", 21.0))
-                        if 15.0 <= val_in <= 28.0:
-                            indoor_temp_c = val_in
+                        attrs_in = st_in.get("attributes", {})
+                        plan_t_set = float(attrs_in.get("target_temp_low", attrs_in.get("temperature", 20.0)))
+                        cur_in = float(attrs_in.get("current_temperature", indoor_temp_c))
+                        if 15.0 <= cur_in <= 30.0:
+                            indoor_temp_c = cur_in
+                        if st_in.get("state") == "off" or attrs_in.get("hvac_action") == "off":
+                            plan_thermostat_active = False
             except Exception:
                 pass
 
             # 2-Mass Floor Heating Dynamic Simulation for Central Plan
             t_plan_in = indoor_temp_c
             t_plan_fl = indoor_temp_c + 0.2
-            plan_t_set = 20.5
             plan_t_start = plan_t_set - 0.5
             c_floor = 4.5
             c_air = 6.0
@@ -1986,10 +1995,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 in_peak_lockout = ((7.0 <= hour_frac < 9.5) or (17.0 <= hour_frac < 20.0))
                 emergency_guard = (t_plan_in < 18.5)
 
-                if not plan_hp_running and (t_plan_in <= plan_t_start):
+                if plan_thermostat_active and not plan_hp_running and (t_plan_in <= plan_t_start):
                     if not in_peak_lockout or emergency_guard:
                         plan_hp_running = True
-                elif plan_hp_running and (t_plan_in >= plan_t_set or (in_peak_lockout and not emergency_guard)):
+                elif plan_hp_running and (not plan_thermostat_active or t_plan_in >= plan_t_set or (in_peak_lockout and not emergency_guard)):
                     plan_hp_running = False
 
                 if plan_hp_running:
@@ -3173,7 +3182,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.67.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.68.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
