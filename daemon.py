@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.79.0
+Version: 0.79.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -46,7 +46,7 @@ except Exception as _e_model:
     GLOBAL_DHW_MODEL = None
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 AMS_TZ = ZoneInfo('Europe/Amsterdam')
 
@@ -1229,8 +1229,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     dt_ams = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
                     h_str = dt_ams.strftime("%Y-%m-%dT%H:00")
 
-                    is_midnight = (dt_ams.hour == 0 and dt_ams.minute == 0)
-                    time_lbl = format_slot_label(dt_ams, prev_dt, is_midnight, time_fmt)
+                    if prev_dt is not None and dt_ams.day != prev_dt.day:
+                        day_str = DUTCH_DAYS_SHORT[dt_ams.weekday()]
+                        time_lbl = f"{day_str} {dt_ams.strftime(time_fmt)}"
+                    else:
+                        time_lbl = dt_ams.strftime(time_fmt)
                     labels.append(time_lbl)
                     prev_dt = dt_ams
 
@@ -1884,7 +1887,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.79.0",
+                "version": "0.79.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2832,186 +2835,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip("/")
         body = self._read_json_body()
 
-
-        # =========================================================================
-        # API: VALIDATION OVERLAY (HISTORICAL PREDICTION VS ACTUAL TELEMETRY)
-        # =========================================================================
-        if path.startswith("/api/analytics/validation_overlay"):
-            try:
-                sec = load_secrets()
-                cfg = load_json(CONFIG_FILE)
-                active_conn = cfg.get("influxdb_connections", [{}])[0]
-                pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
-
-                parsed_url = urllib.parse.urlparse(self.path)
-                qp = urllib.parse.parse_qs(parsed_url.query)
-                tf = qp.get("range", ["24h"])[0]
-                user_res = qp.get("resolution", ["15m"])[0]
-
-                days = 1 if tf == "24h" else (2 if tf == "48h" else 7)
-                bucket_sz = "1h" if user_res == "1h" else "15m"
-                interval_h = 1.0 if bucket_sz == "1h" else 0.25
-                time_fmt = "%H:%M" if bucket_sz == "15m" else "%H:00"
-
-                now = datetime.now(timezone.utc)
-                t_start = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:00:00Z")
-                t_end = now.strftime("%Y-%m-%dT%H:00:00Z")
-
-                # 1. Query InfluxDB for actuals
-                q_telemetry = f"""
-                SELECT mean("solar_w") as solar, mean("total_house_w") as house, mean("unallocated_w") as unalloc, mean("heatpump_w") as hp
-                FROM "energy_telemetry" 
-                WHERE time >= '{t_start}' AND time <= '{t_end}'
-                GROUP BY time({bucket_sz}) fill(linear);
-                SELECT mean("power_w") as dhw_w FROM "energy_telemetry" WHERE "device_id" = 'daikin_heat_pump' AND "mode" = 'dhw' AND time >= '{t_start}' AND time <= '{t_end}' GROUP BY time({bucket_sz}) fill(0);
-                SELECT mean("power_w") as cv_w FROM "energy_telemetry" WHERE "device_id" = 'daikin_heat_pump' AND "mode" = 'heating' AND time >= '{t_start}' AND time <= '{t_end}' GROUP BY time({bucket_sz}) fill(0);
-                """
-                url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q_telemetry)}"
-                with urllib.request.urlopen(url, timeout=5) as r:
-                    influx_res = json.loads(r.read().decode())
-
-                gen_pts = influx_res['results'][0].get('series', [{}])[0].get('values', [])
-                dhw_pts = influx_res['results'][1].get('series', [{}])[0].get('values', [])
-                cv_series_list = influx_res['results'][2].get('series', [])
-                cv_pts = cv_series_list[0].get('values', []) if cv_series_list else []
-
-                dhw_map = {p[0]: (p[1] or 0.0) for p in dhw_pts}
-                cv_map = {p[0]: (p[1] or 0.0) for p in cv_pts}
-
-                # 2. Get Weather Data (with in-memory 1h caching)
-                global _weather_history_cache
-                if '_weather_history_cache' not in globals() or (time.time() - _weather_history_cache.get('ts', 0) > 3600):
-                    try:
-                        om_url = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.232&hourly=temperature_2m,shortwave_radiation_instant&past_days=7&timezone=Europe%2FAmsterdam"
-                        with urllib.request.urlopen(om_url, timeout=6) as r_om:
-                            om_data = json.loads(r_om.read().decode())
-                            h_data = om_data.get("hourly", {})
-                            rad_m = {t: r for t, r in zip(h_data.get("time", []), h_data.get("shortwave_radiation_instant", []))}
-                            temp_m = {t: tm for t, tm in zip(h_data.get("time", []), h_data.get("temperature_2m", []))}
-                            _weather_history_cache = {'ts': time.time(), 'rad': rad_m, 'temp': temp_m}
-                    except Exception as e_om:
-                        if '_weather_history_cache' not in globals():
-                            _weather_history_cache = {'ts': 0, 'rad': {}, 'temp': {}}
-
-                rad_map = _weather_history_cache.get('rad', {})
-                temp_map = _weather_history_cache.get('temp', {})
-
-                # 3. Model Parameters & Calibration Profile
-                sol_cfg = cfg.get("solar", {})
-                kwp = float(sol_cfg.get("kwp", 5.76))
-                inv_max_w = int(sol_cfg.get("inverter_max_w", 5500))
-                tilt = float(sol_cfg.get("tilt_degrees", 34.0))
-                azimuth = float(sol_cfg.get("azimuth_degrees", 225.0))
-                eff = float(sol_cfg.get("efficiency_factor", 0.88))
-
-                try:
-                    from layer2_calibration.learned_forecaster import HybridForecastingModel
-                    forecaster = HybridForecastingModel()
-                    grid_96 = forecaster.profile.get("profile_96_quarters", [])
-                except Exception:
-                    grid_96 = []
-
-                labels = []
-                act_solar, pred_solar = [], []
-                act_dhw, pred_dhw = [], []
-                act_cv, pred_cv = [], []
-                act_total, pred_total = [], []
-
-                prev_dt = None
-                for p in gen_pts:
-                    ts_str = p[0]
-                    dt_ams = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
-                    h_str = dt_ams.strftime("%Y-%m-%dT%H:00")
-
-                    is_midnight = (dt_ams.hour == 0 and dt_ams.minute == 0)
-                    time_lbl = format_slot_label(dt_ams, prev_dt, is_midnight, time_fmt)
-                    labels.append(time_lbl)
-                    prev_dt = dt_ams
-
-                    # Actuals
-                    s_w = p[1] or 0.0
-                    tot_w = p[2] or 0.0
-                    d_w = dhw_map.get(ts_str, 0.0)
-                    c_w = cv_map.get(ts_str, 0.0)
-
-                    act_solar.append(round(max(0.0, s_w / 1000.0), 3))
-                    act_dhw.append(round(max(0.0, d_w / 1000.0), 3))
-                    act_cv.append(round(max(0.0, c_w / 1000.0), 3))
-                    act_total.append(round(max(0.0, tot_w / 1000.0), 3))
-
-                    # Predictions:
-                    # Solar POA Prediction
-                    ghi = rad_map.get(h_str, 0.0)
-                    p_sol_kw = calculate_poa_solar_kw(dt_ams, ghi, kwp=kwp, tilt_deg=tilt, azimuth_deg=azimuth, inverter_limit_kw=inv_max_w/1000.0, eff=eff)
-                    pred_solar.append(p_sol_kw)
-
-                    # Unallocated Load Prediction
-                    dow = dt_ams.weekday()
-                    q_idx = dt_ams.hour * 4 + dt_ams.minute // 15
-                    p_unalloc_kw = (grid_96[dow][q_idx] if (grid_96 and len(grid_96) > dow and len(grid_96[dow]) > q_idx) else 300.0) / 1000.0
-
-                    # DHW Run Model:
-                    # Model expects scheduled reheat runs around optimal solar window (e.g. 10:00-11:00 or 14:00-15:00 ~1.8 to 2.4 kW)
-                    # When active run occurred in real telemetry, compare directly; otherwise planned window
-                    p_dhw_kw = round(d_w / 1000.0, 3) if d_w > 500 else 0.0
-                    pred_dhw.append(p_dhw_kw)
-
-                    # CV Heating Model: Space heating was turned off in current conditions
-                    pred_cv.append(0.0)
-
-                    # Total House Prediction
-                    pred_total.append(round(p_unalloc_kw + p_dhw_kw, 3))
-
-                def compute_kpis(actual_list, pred_list):
-                    if not actual_list or not pred_list:
-                        return {"mae_w": 0, "accuracy_pct": 100.0, "total_actual_kwh": 0.0, "total_pred_kwh": 0.0, "delta_kwh": 0.0}
-                    n = len(actual_list)
-                    diffs = [abs(a - p) for a, p in zip(actual_list, pred_list)]
-                    mae_w = sum(diffs) / n * 1000.0
-                    denom = max(sum(actual_list), sum(pred_list), 1.0)
-                    acc = max(0.0, min(100.0, (1.0 - (sum(diffs) / (2.0 * denom))) * 100.0))
-                    tot_act = sum(actual_list) * interval_h
-                    tot_pred = sum(pred_list) * interval_h
-                    return {
-                        "mae_w": int(round(mae_w)),
-                        "accuracy_pct": round(acc, 1),
-                        "total_actual_kwh": round(tot_act, 2),
-                        "total_pred_kwh": round(tot_pred, 2),
-                        "delta_kwh": round(tot_act - tot_pred, 2)
-                    }
-
-                metrics = {
-                    "all": compute_kpis(act_total, pred_total),
-                    "solar": compute_kpis(act_solar, pred_solar),
-                    "dhw": compute_kpis(act_dhw, pred_dhw),
-                    "cv": compute_kpis(act_cv, pred_cv)
-                }
-
-                self._send_json({
-                    "status": "success",
-                    "range": tf,
-                    "resolution": bucket_sz,
-                    "interval_h": interval_h,
-                    "labels": labels,
-                    "actual": {
-                        "all": act_total,
-                        "solar": act_solar,
-                        "dhw": act_dhw,
-                        "cv": act_cv
-                    },
-                    "predicted": {
-                        "all": pred_total,
-                        "solar": pred_solar,
-                        "dhw": pred_dhw,
-                        "cv": pred_cv
-                    },
-                    "metrics": metrics
-                })
-                return
-            except Exception as e:
-                self._send_json({"status": "error", "message": f"Fout bij berekenen validatie overlay: {str(e)}"}, 500)
-                return
-
         if path == "/api/config/solar":
             data = body or {}
             cfg = load_json(CONFIG_FILE)
@@ -3778,7 +3601,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.79.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.79.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
