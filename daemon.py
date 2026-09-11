@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.59.0
+Version: 0.60.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1487,7 +1487,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.59.0",
+                "version": "0.60.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2019,26 +2019,34 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 planned_mode_label = "Geforceerd Aan: Zonnebuffer Boost (tot 60°C)"
                 reason = f"Zonnebuffer Boost (50➔60°C): Buffert +4.07 kWh_th met {best_sww_slot['solar']:.1f} kW zonnestroom om {best_sww_slot['label']}"
             elif today_daylight_slots:
-                # Normal daytime run to 50°C on best daytime slot
+                # Normal daytime run to 50°C on best daytime slot (centered around 14:30 - 15:30 solar window)
                 best_sww_slot = max(today_daylight_slots, key=lambda x: (x["solar"] - x["price"] * 0.5))
                 sww_start_idx = best_sww_slot["idx"]
-                slots_to_fill = 3 if is_15m else 1
                 sww_power_kw = 1.8
                 sww_target_temp = 50.0
                 planned_mode = "forced_standard_50"
                 planned_mode_label = "Geforceerd Aan: Standaard Dagrun (tot 50°C)"
-                reason = f"Middagrun (tot 50°C): Laadt op middagzon ({best_sww_slot['solar']:.1f} kW) en daltarief om {best_sww_slot['label']}"
+                reason = f"Standaard Dagrun (50°C): Laadt vanaf {best_sww_slot['label']} op zonnestroom naar 50°C"
             else:
                 # Fallback to cheapest price slot outside peaks
                 valid_slots = [it for it in timeline_items if not ((7.0 <= (it['dt'].hour + it['dt'].minute/60.0) < 9.5) or (17.0 <= (it['dt'].hour + it['dt'].minute/60.0) < 20.0))]
                 best_sww_slot = min(valid_slots, key=lambda x: x["price"]) if valid_slots else timeline_items[0]
                 sww_start_idx = best_sww_slot["idx"]
-                slots_to_fill = 3 if is_15m else 1
                 sww_power_kw = 1.8
                 sww_target_temp = 50.0
                 planned_mode = "forced_standard_50"
                 planned_mode_label = "Geforceerd Aan: Standaard Dagrun (tot 50°C)"
                 reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh) om {best_sww_slot['label']}"
+
+            # Calculate required slots dynamically based on thermal mass so the tank ACTUALLY reaches sww_target_temp (50°C of 60°C)
+            c_tank_kwh_per_c = 350.0 * 4.186 / 3600.0  # 0.407 kWh/K
+            step_h = 0.25 if is_15m else 1.0
+            t_run_start_est = max(34.0, t_dhw_live - (sww_start_idx * step_h * 0.28))
+            delta_t_run = max(2.0, sww_target_temp - t_run_start_est)
+            cop_run_est = 2.85 if sww_target_temp <= 52.0 else 2.15
+            p_th_run_est = sww_power_kw * cop_run_est
+            hours_run_needed = (delta_t_run * c_tank_kwh_per_c) / p_th_run_est
+            slots_to_fill = max(2, math.ceil(hours_run_needed / step_h))
 
             # Fill boiler dispatch while enforcing STRICT PEAK LOCKOUTS
             for k in range(slots_to_fill):
@@ -3065,7 +3073,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.59.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.60.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
