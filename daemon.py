@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.63.0
+Version: 0.64.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1487,7 +1487,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.63.0",
+                "version": "0.64.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1984,25 +1984,34 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             cost_avoided_later = (3.27 / 2.85) * p_future_avoided
             boost_net_saving_eur = round(cost_avoided_later - cost_boost_now, 3)
 
-            # DYNAMIC CRITERION: Boost to 60°C is profitable if net savings > 0 AND at least 0.8 kWh solar surplus anchors the run!
-            is_solar_boost_eligible = (boost_net_saving_eur > 0.02 and tot_net_surplus_kwh >= 0.8)
+            # DYNAMIC CRITERION: Boost to 60°C is ONLY activated if there is abundant free solar surplus (>= 3.0 kWh net)
+            # preventing costly grid imports at low COP (2.15) when the tank is already adequately heated to 50°C.
+            is_solar_boost_eligible = (tot_net_surplus_kwh >= 3.0 and boost_net_saving_eur > 0.05)
 
             planned_mode = "standby_normal"
             planned_mode_label = "Geen geforceerde run gepland"
             sww_start_idx = -1
             slots_to_fill = 0
             sww_power_kw = 1.8
-            sww_target_temp = 50.0
+            sww_target_temp = 60.0 if (is_solar_boost_eligible and today_daylight_slots) else 50.0
 
-            if needs_night_charge:
+            # LIVE THERMAL FEEDBACK: Is the tank ALREADY at or above target temperature?
+            # (e.g. the heat pump has already run autonomously or completed its heating cycle!)
+            tank_already_warm = (t_dhw_live >= (sww_target_temp - 0.8))
+
+            if tank_already_warm and not needs_night_charge:
+                # Target already achieved! Standby in effect: cancel any redundant daytime runs!
+                planned_mode = "standby_normal"
+                planned_mode_label = f"Doeltemperatuur bereikt ({t_dhw_live:.1f}°C) — Standby"
+                reason = f"Boilervat is met {t_dhw_live:.1f}°C reeds op gewenste temperatuur (≥ {sww_target_temp:.0f}°C). Warmtepomp staat in rust."
+                sww_start_idx = -1
+                slots_to_fill = 0
+                sww_power_kw = 0.0
+            elif needs_night_charge:
                 # Night run required (only active between 20:00 and 06:00)
                 night_slots = [it for it in timeline_items if (1 <= it["dt"].hour <= 5)]
-                if night_slots:
-                    best_sww_slot = min(night_slots, key=lambda x: x["price"])
-                else:
-                    best_sww_slot = min(timeline_items[:24], key=lambda x: x["price"])
+                best_sww_slot = min(night_slots, key=lambda x: x["price"]) if night_slots else min(timeline_items[:24], key=lambda x: x["price"])
                 sww_start_idx = best_sww_slot["idx"]
-                slots_to_fill = 3 if is_15m else 1
                 sww_power_kw = 1.8
                 sww_target_temp = 50.0
                 planned_mode = "forced_night_50"
@@ -2012,12 +2021,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 # Abundant solar today! Mode 3: Solar Buffer Boost to 60°C!
                 best_sww_slot = max(today_daylight_slots, key=lambda x: x["solar"])
                 sww_start_idx = max(0, best_sww_slot["idx"] - (1 if is_15m else 0))
-                slots_to_fill = 6 if is_15m else 2
                 sww_power_kw = 2.65
                 sww_target_temp = 60.0
                 planned_mode = "forced_solar_boost_60"
                 planned_mode_label = "Geforceerd Aan: Zonnebuffer Boost (tot 60°C)"
-                reason = f"Zonnebuffer Boost (50➔60°C): Buffert +4.07 kWh_th met {best_sww_slot['solar']:.1f} kW zonnestroom om {best_sww_slot['label']}"
+                reason = f"Zonnebuffer Boost (60°C): {tot_net_surplus_kwh:.1f} kWh netto zonne-overschot buffert voordelig door naar 60°C"
             elif today_daylight_slots:
                 # Normal daytime run to 50°C on best daytime slot (centered around 14:30 - 15:30 solar window)
                 best_sww_slot = max(today_daylight_slots, key=lambda x: (x["solar"] - x["price"] * 0.5))
@@ -2038,17 +2046,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 planned_mode_label = "Geforceerd Aan: Standaard Dagrun (tot 50°C)"
                 reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh) om {best_sww_slot['label']}"
 
-            # Check if tank is ALREADY at or above target temperature (warmtepomp has already run!)
-            tank_already_warm = (t_dhw_live >= (sww_target_temp - 0.8))
-            if tank_already_warm and not needs_night_charge:
-                # Target already achieved! Cancel any redundant daytime run!
-                planned_mode = "standby_normal"
-                planned_mode_label = f"Doeltemperatuur bereikt ({t_dhw_live:.1f}°C) — Standby"
-                reason = f"Boilervat is met {t_dhw_live:.1f}°C reeds op gewenste temperatuur (≥ {sww_target_temp:.0f}°C). Geen extra dagrun nodig."
-                sww_start_idx = -1
-                slots_to_fill = 0
-                sww_power_kw = 0.0
-            else:
+            if not tank_already_warm and sww_start_idx >= 0:
                 # Calculate required slots dynamically based on thermal mass so the tank ACTUALLY reaches sww_target_temp (50°C of 60°C)
                 c_tank_kwh_per_c = 350.0 * 4.186 / 3600.0  # 0.407 kWh/K
                 step_h = 0.25 if is_15m else 1.0
@@ -3084,7 +3082,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.63.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.64.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>

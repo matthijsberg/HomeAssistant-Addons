@@ -1,6 +1,6 @@
 name: "Open HEMS"
 description: "Open-source Home Energy Management System: predictive heat pump, solar, dynamic tariffs, and battery dispatch."
-version: "0.63.0"
+version: "0.64.0"
 slug: "open_hems"
 init: false
 arch:
