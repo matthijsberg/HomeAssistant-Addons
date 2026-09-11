@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.55.0
+Version: 0.56.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1494,7 +1494,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.55.0",
+                "version": "0.56.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1952,13 +1952,24 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-            dhw_decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_dhw_live, now_ams) if GLOBAL_DHW_MODEL else None
-            needs_night_charge = (dhw_decision.get("status") == "SCHEDULE_NIGHT_CHARGE") if dhw_decision else False
+            # Daytime vs Evening/Night Planning Window:
+            # - Between 06:00 and 20:00 (daytime): focus 100% on the optimal DAY RUN (solar surplus / midday tariff).
+            #   No premature night evaluation when night spot prices are not yet known.
+            #   If tank drops < 40C earlier, Daikin autonomous hysteresis handles it.
+            # - After 20:00 or before 06:00 (evening/night): day run has passed, EPEX prices for tonight are known,
+            #   so evaluate night charging to ensure morning comfort (>40C).
+            is_daytime_focus = (6 <= now_ams.hour < 20)
 
-            # Check peak solar surplus over the next 24h
+            dhw_decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_dhw_live, now_ams) if GLOBAL_DHW_MODEL else None
+            needs_night_charge = False
+            if not is_daytime_focus and dhw_decision:
+                needs_night_charge = (dhw_decision.get("status") == "SCHEDULE_NIGHT_CHARGE")
+
+            # Find daylight slots
             daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
-            tot_daylight_solar_kwh = sum(it["solar"] for it in daylight_slots) * (0.25 if is_15m else 1.0)
-            is_solar_boost_eligible = (tot_daylight_solar_kwh >= 2.5)
+            today_daylight_slots = [it for it in daylight_slots if it["dt"].day == now_ams.day]
+            tot_daylight_solar_kwh = sum(it["solar"] for it in today_daylight_slots) * (0.25 if is_15m else 1.0)
+            is_solar_boost_eligible = (tot_daylight_solar_kwh >= 2.0)
 
             planned_mode = "standby_normal"
             planned_mode_label = "Geen geforceerde run gepland"
@@ -1968,7 +1979,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             sww_target_temp = 50.0
 
             if needs_night_charge:
-                # Night run required for morning comfort
+                # Night run required (only active between 20:00 and 06:00)
                 night_slots = [it for it in timeline_items if (1 <= it["dt"].hour <= 5)]
                 if night_slots:
                     best_sww_slot = min(night_slots, key=lambda x: x["price"])
@@ -1981,36 +1992,37 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 planned_mode = "forced_night_50"
                 planned_mode_label = "Geforceerd Aan: Nachtlading (tot 50°C)"
                 reason = f"Nachtlading daltarief (€{best_sww_slot['price']:.3f}/kWh) waarborgt ochtendcomfort"
-            elif is_solar_boost_eligible:
-                # Abundant solar! Activate Mode 3: Solar Buffer Boost to 60°C!
-                # 6 quarters = 90 mins at 2.7 kW (compressor continues above 50C to 60C)
-                if daylight_slots:
-                    best_sww_slot = max(daylight_slots, key=lambda x: x["solar"])
-                else:
-                    best_sww_slot = min(timeline_items, key=lambda x: x["price"])
+            elif is_solar_boost_eligible and today_daylight_slots:
+                # Abundant solar today! Mode 3: Solar Buffer Boost to 60°C!
+                best_sww_slot = max(today_daylight_slots, key=lambda x: x["solar"])
                 sww_start_idx = max(0, best_sww_slot["idx"] - (1 if is_15m else 0))
                 slots_to_fill = 6 if is_15m else 2
                 sww_power_kw = 2.65
                 sww_target_temp = 60.0
                 planned_mode = "forced_solar_boost_60"
                 planned_mode_label = "Geforceerd Aan: Zonnebuffer Boost (tot 60°C)"
-                reason = f"Zonnebuffer Boost (50➔60°C): Buffert +4.07 kWh_th met {best_sww_slot['solar']:.1f} kW zonnestroom"
-            else:
-                # Normal daytime run to 50°C
-                midday_slots = [it for it in timeline_items if 12 <= it["dt"].hour <= 15]
-                if midday_slots:
-                    best_sww_slot = max(midday_slots, key=lambda x: (x["solar"] - x["price"] * 0.5))
-                elif daylight_slots:
-                    best_sww_slot = max(daylight_slots, key=lambda x: x["solar"])
-                else:
-                    best_sww_slot = min(timeline_items, key=lambda x: x["price"])
+                reason = f"Zonnebuffer Boost (50➔60°C): Buffert +4.07 kWh_th met {best_sww_slot['solar']:.1f} kW zonnestroom om {best_sww_slot['label']}"
+            elif today_daylight_slots:
+                # Normal daytime run to 50°C on best daytime slot
+                best_sww_slot = max(today_daylight_slots, key=lambda x: (x["solar"] - x["price"] * 0.5))
                 sww_start_idx = best_sww_slot["idx"]
                 slots_to_fill = 3 if is_15m else 1
                 sww_power_kw = 1.8
                 sww_target_temp = 50.0
                 planned_mode = "forced_standard_50"
                 planned_mode_label = "Geforceerd Aan: Standaard Dagrun (tot 50°C)"
-                reason = f"Middagrun (tot 50°C): Laadt op middagzon ({best_sww_slot['solar']:.1f} kW) en daltarief"
+                reason = f"Middagrun (tot 50°C): Laadt op middagzon ({best_sww_slot['solar']:.1f} kW) en daltarief om {best_sww_slot['label']}"
+            else:
+                # Fallback to cheapest price slot outside peaks
+                valid_slots = [it for it in timeline_items if not ((7.0 <= (it['dt'].hour + it['dt'].minute/60.0) < 9.5) or (17.0 <= (it['dt'].hour + it['dt'].minute/60.0) < 20.0))]
+                best_sww_slot = min(valid_slots, key=lambda x: x["price"]) if valid_slots else timeline_items[0]
+                sww_start_idx = best_sww_slot["idx"]
+                slots_to_fill = 3 if is_15m else 1
+                sww_power_kw = 1.8
+                sww_target_temp = 50.0
+                planned_mode = "forced_standard_50"
+                planned_mode_label = "Geforceerd Aan: Standaard Dagrun (tot 50°C)"
+                reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh) om {best_sww_slot['label']}"
 
             # Fill boiler dispatch while enforcing STRICT PEAK LOCKOUTS
             for k in range(slots_to_fill):
@@ -3027,7 +3039,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.55.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.56.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
