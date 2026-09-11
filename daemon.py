@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.65.0
+Version: 0.66.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -49,6 +49,17 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 AMS_TZ = ZoneInfo('Europe/Amsterdam')
+
+DUTCH_DAYS_SHORT = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"]
+
+def format_slot_label(dt_slot, prev_dt, is_first, is_15m):
+    time_str = dt_slot.strftime("%H:%M" if is_15m else "%H:00")
+    if is_first:
+        return f"Nu ({time_str})"
+    if prev_dt is not None and dt_slot.day != prev_dt.day:
+        day_str = DUTCH_DAYS_SHORT[dt_slot.weekday()]
+        return f"{day_str} {time_str}"
+    return time_str
 from pathlib import Path
 
 # Site-specific adapters (decoupled from core engine)
@@ -694,14 +705,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 prices_base = []
                 solar_forecast_kw = []
 
-                prev_dt_slot = None
+                prev_ep_dt = None
                 for i in range(total_slots):
                     dt_slot = base_dt + timedelta(minutes=step_mins * i)
                     k_full = dt_slot.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
                     k_hour = dt_slot.strftime("%Y-%m-%d %H:00")
 
-                    lbl = format_slot_label(dt_slot, prev_dt_slot, i == 0, is_15m)
-                    prev_dt_slot = dt_slot
+                    lbl = format_slot_label(dt_slot, prev_ep_dt, i == 0, is_15m)
+                    prev_ep_dt = dt_slot
 
                     labels.append(lbl)
                     prices_all_in.append(prices_map.get(k_full, 0.25))
@@ -1299,30 +1310,43 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     heat_pump_power_kw=c_power
                 )
 
-                if not is_15m and traj and "labels" in traj:
-                    # Aggregate 96 quarters to 24 hours
-                    h_labels, h_temps, h_p05, h_p95, h_demand = [], [], [], [], []
+                if traj and "labels" in traj:
                     raw_lbls = traj.get("labels", [])
                     raw_temps = traj.get("temperatures_c", [])
                     raw_p05 = traj.get("temperatures_p05_c", raw_temps)
                     raw_p95 = traj.get("temperatures_p95_c", raw_temps)
                     raw_dem = traj.get("demand_kwh_th", [])
-                    for h_i in range(min(24, len(raw_lbls) // 4)):
-                        idx = h_i * 4
-                        h_labels.append(raw_lbls[idx][:2] + ":00")
-                        h_temps.append(round(sum(raw_temps[idx:idx+4]) / 4.0, 1))
-                        h_p05.append(round(sum(raw_p05[idx:idx+4]) / 4.0, 1))
-                        h_p95.append(round(sum(raw_p95[idx:idx+4]) / 4.0, 1))
-                        h_demand.append(round(sum(raw_dem[idx:idx+4]), 3))
-                    traj = {
-                        "labels": h_labels,
-                        "temperatures_c": h_temps,
-                        "temperatures_p05_c": h_p05,
-                        "temperatures_p95_c": h_p95,
-                        "demand_kwh_th": h_demand,
-                        "morning_dip_temp_c": traj.get("morning_dip_temp_c"),
-                        "morning_dip_time": traj.get("morning_dip_time")
-                    }
+                    if not is_15m:
+                        # Aggregate 96 quarters to 24 hours
+                        h_labels, h_temps, h_p05, h_p95, h_demand = [], [], [], [], []
+                        prev_h_dt = None
+                        for h_i in range(min(24, len(raw_lbls) // 4)):
+                            idx = h_i * 4
+                            h_dt = base_sim_dt + timedelta(hours=h_i)
+                            h_labels.append(format_slot_label(h_dt, prev_h_dt, h_i == 0, False))
+                            prev_h_dt = h_dt
+                            h_temps.append(round(sum(raw_temps[idx:idx+4]) / 4.0, 1))
+                            h_p05.append(round(sum(raw_p05[idx:idx+4]) / 4.0, 1))
+                            h_p95.append(round(sum(raw_p95[idx:idx+4]) / 4.0, 1))
+                            h_demand.append(round(sum(raw_dem[idx:idx+4]), 3))
+                        traj = {
+                            "labels": h_labels,
+                            "temperatures_c": h_temps,
+                            "temperatures_p05_c": h_p05,
+                            "temperatures_p95_c": h_p95,
+                            "demand_kwh_th": h_demand,
+                            "morning_dip_temp_c": traj.get("morning_dip_temp_c"),
+                            "morning_dip_time": traj.get("morning_dip_time")
+                        }
+                    else:
+                        # Ensure 15m labels have clean format_slot_label applied
+                        q_labels = []
+                        prev_q_dt = None
+                        for q_i in range(len(raw_lbls)):
+                            q_dt = base_sim_dt + timedelta(minutes=15 * q_i)
+                            q_labels.append(format_slot_label(q_dt, prev_q_dt, q_i == 0, True))
+                            prev_q_dt = q_dt
+                        traj["labels"] = q_labels
 
                 self._send_json({
                     "status": "online",
@@ -1496,7 +1520,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.65.0",
+                "version": "0.66.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1834,10 +1858,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                 if i == 0:
                     lbl = dt_slot.strftime("Nu (%H:%M)" if is_15m else "Nu (%H:00)")
-                elif dt_slot.day != now_ams.day and dt_slot.hour == 0 and dt_slot.minute == 0:
-                    lbl = dt_slot.strftime("Morgen %H:%M" if is_15m else "Morgen %H:00")
+                elif prev_dt_item is not None and dt_slot.day != prev_dt_item.day:
+                    day_str = DUTCH_DAYS_SHORT[dt_slot.weekday()]
+                    lbl = f"{day_str} {dt_slot.strftime('%H:%M' if is_15m else '%H:00')}"
                 else:
                     lbl = dt_slot.strftime("%H:%M" if is_15m else "%H:00")
+                prev_dt_item = dt_slot
 
                 p_val = prices_map.get(k_full, prices_map.get(k_hour, 0.28))
                 
@@ -3092,7 +3118,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.65.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.66.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>

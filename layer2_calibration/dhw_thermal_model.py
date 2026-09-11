@@ -119,9 +119,18 @@ class DhwThermalModel:
         morning_dip_temp = 99.0
         morning_dip_time = ""
 
+        DUTCH_DAYS_SHORT = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"]
+        prev_dt = None
         for i in range(total_quarters):
             slot_dt = dt_ams + timedelta(minutes=15 * i)
-            lbl = slot_dt.strftime("%H:%M")
+            if i == 0:
+                lbl = slot_dt.strftime("Nu (%H:%M)")
+            elif prev_dt is not None and slot_dt.day != prev_dt.day:
+                day_str = DUTCH_DAYS_SHORT[slot_dt.weekday()]
+                lbl = f"{day_str} {slot_dt.strftime('%H:%M')}"
+            else:
+                lbl = slot_dt.strftime("%H:%M")
+            prev_dt = slot_dt
             dow = slot_dt.weekday()
             q_idx = slot_dt.hour * 4 + slot_dt.minute // 15
 
