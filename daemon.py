@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.52.1
+Version: 0.53.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1466,7 +1466,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.52.1",
+                "version": "0.53.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2170,6 +2170,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "battery_enabled": is_battery_active,
                 "battery_simulated": bool(sim_battery_param and not battery_installed),
                 "export_prices_eur": export_prices,
+                "dhw_mode_timeline": dhw_mode_timeline,
+                "dhw_planning_summary": dhw_planning_summary,
                 "datasets": {
                     "unallocated_kw": unallocated,
                     "baseload_kw": unallocated,
@@ -2908,7 +2910,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.52.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.53.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3189,6 +3191,66 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             </div>
                         </div>
                     </div>
+
+                    
+                    <!-- Card 1.25: Warmtepomp & Boiler 24-Uurs Modusplanning (Horizontale Tijdlijn) -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4" id="dhw-mode-timeline-container">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                            <div class="flex items-center gap-2.5">
+                                <span class="text-xl">♨️</span>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white tracking-wide">Warmtepomp &amp; Boiler 24-Uurs Modusplanning (Tijdlijn)</h3>
+                                    <p class="text-[11px] text-slate-400">Verdeling over de dag: spitsblokkades (hard uit 🔒), normale standby vrijgave en geplande geforceerde runs.</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2.5 text-[11px] font-mono flex-wrap">
+                                <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-2 bg-red-600 rounded-sm"></span> Hard Uit (Spits)</span>
+                                <span class="flex items-center gap-1.5 text-slate-400"><span class="w-3 h-2 bg-slate-700 rounded-sm"></span> Normale Standby</span>
+                                <span class="flex items-center gap-1.5 text-amber-300"><span class="w-3 h-2 bg-amber-500 rounded-sm"></span> Geforceerd (50°C)</span>
+                                <span class="flex items-center gap-1.5 text-purple-300"><span class="w-3 h-2 bg-purple-600 rounded-sm"></span> Zonnebuffer (60°C)</span>
+                                <span class="flex items-center gap-1.5 text-emerald-300"><span class="w-3 h-2 bg-emerald-500 rounded-sm"></span> Nachtlading (50°C)</span>
+                            </div>
+                        </div>
+
+                        <!-- 1. The Segmented Horizontal Timeline Bar -->
+                        <div class="space-y-1.5">
+                            <div id="dhw-timeline-bar" class="flex w-full h-8 sm:h-9 rounded-xl overflow-hidden border border-slate-700/80 p-0.5 bg-[#0B0F17] gap-[1px]">
+                                <!-- Populated dynamically via JS -->
+                            </div>
+                            <!-- Time Scale Ticks -->
+                            <div class="flex justify-between text-[10px] text-slate-500 font-mono px-1">
+                                <span>00:00</span>
+                                <span>03:00</span>
+                                <span>06:00</span>
+                                <span>09:00</span>
+                                <span>12:00</span>
+                                <span>15:00</span>
+                                <span>18:00</span>
+                                <span>21:00</span>
+                                <span>24:00</span>
+                            </div>
+                        </div>
+
+                        <!-- 2. Planning Summary Metric Cards -->
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs pt-1">
+                            <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
+                                <div class="text-[10px] text-slate-400 uppercase font-bold">🚫 Spitsblokkades (5.5 Uur)</div>
+                                <div class="text-xs font-bold text-red-400">07:00–09:30 &amp; 17:00–20:00</div>
+                                <div class="text-[10px] text-slate-400 font-sans">Compressor SG4 vergrendeld tegen piektarieven.</div>
+                            </div>
+                            <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
+                                <div class="text-[10px] text-slate-400 uppercase font-bold">⚡ Geplande Run &amp; Modus</div>
+                                <div class="text-xs font-bold text-amber-300" id="dhw-summary-mode">Zonnebuffer Boost (60°C)</div>
+                                <div class="text-[10px] text-slate-400 font-sans" id="dhw-summary-times">Venster: 13:30 – 15:00u (90 min)</div>
+                            </div>
+                            <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
+                                <div class="text-[10px] text-slate-400 uppercase font-bold">🔋 Gebufferde Warmte &amp; Stroom</div>
+                                <div class="text-xs font-bold text-purple-300" id="dhw-summary-energy">~3.8 kWh stroom (8.1 kWh_th)</div>
+                                <div class="text-[10px] text-slate-400 font-sans" id="dhw-summary-shower">Mengcapaciteit ~715L douchewater (38°C).</div>
+                            </div>
+                        </div>
+                    </div>
+
 
                     <!-- Chart 1.3: Boilervat Temperatuurtraject & Verwachte Warmwatervraag (24 Uur Vooruit) -->
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5" id="dhw-temp-chart-container">
@@ -5973,6 +6035,42 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 if (document.getElementById('solar-recommendation-text')) {
                     document.getElementById('solar-recommendation-text').innerText = data.solar_recommendation || "☀️ Geen overschot";
                 }
+
+                // Render Horizontal Mode Timeline Bar
+                const tlContainer = document.getElementById('dhw-timeline-bar');
+                if (tlContainer && data.dhw_mode_timeline) {
+                    tlContainer.innerHTML = '';
+                    data.dhw_mode_timeline.forEach(seg => {
+                        const block = document.createElement('div');
+                        block.className = 'flex-1 h-full rounded-sm transition-all duration-150 cursor-pointer relative group';
+                        block.style.backgroundColor = seg.color;
+                        if (seg.mode === 'peak_lockout') {
+                            block.style.backgroundImage = 'repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(0,0,0,0.3) 3px, rgba(0,0,0,0.3) 6px)';
+                        }
+                        // Tooltip on hover
+                        block.title = `${seg.time} | ${seg.label}\n${seg.description}`;
+                        tlContainer.appendChild(block);
+                    });
+                }
+
+                // Populate Planning Summary Cards
+                const dSum = data.dhw_planning_summary || {};
+                if (document.getElementById('dhw-summary-mode') && dSum.planned_mode_label) {
+                    document.getElementById('dhw-summary-mode').innerText = `${dSum.planned_mode_label}`;
+                }
+                if (document.getElementById('dhw-summary-times') && dSum.run_start) {
+                    document.getElementById('dhw-summary-times').innerText = `Venster: ${dSum.run_start} – ${dSum.run_end} (${dSum.run_duration_min} min)`;
+                }
+                if (document.getElementById('dhw-summary-energy') && dSum.total_stroom_kwh) {
+                    const thKwh = (dSum.target_temp_c >= 55 ? '8.1 kWh_th' : '4.1 kWh_th');
+                    document.getElementById('dhw-summary-energy').innerText = `~${dSum.total_stroom_kwh} kWh stroom (${thKwh})`;
+                }
+                if (document.getElementById('dhw-summary-shower') && dSum.target_temp_c) {
+                    const liters = dSum.target_temp_c >= 55 ? '~715L' : '~496L';
+                    document.getElementById('dhw-summary-shower').innerText = `Mengcapaciteit ${liters} douchewater van 38°C.`;
+                }
+
+
 
                 // Populate 6-Box Prediction Metrics Aligned with Historical
                 const ps = data.prediction_stats || {};
