@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.56.0
+Version: 0.57.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1494,7 +1494,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.56.0",
+                "version": "0.57.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1965,11 +1965,15 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             if not is_daytime_focus and dhw_decision:
                 needs_night_charge = (dhw_decision.get("status") == "SCHEDULE_NIGHT_CHARGE")
 
-            # Find daylight slots
+            # Check free net solar surplus TODAY (after deducting unallocated baseline load)
             daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
             today_daylight_slots = [it for it in daylight_slots if it["dt"].day == now_ams.day]
-            tot_daylight_solar_kwh = sum(it["solar"] for it in today_daylight_slots) * (0.25 if is_15m else 1.0)
-            is_solar_boost_eligible = (tot_daylight_solar_kwh >= 2.0)
+            tot_net_surplus_kwh = sum(max(0.0, it["solar"] - unallocated[it["idx"]]) for it in today_daylight_slots) * (0.25 if is_15m else 1.0)
+            peak_net_surplus_kw = max((max(0.0, it["solar"] - unallocated[it["idx"]]) for it in today_daylight_slots), default=0.0)
+
+            # Solar Buffer Boost (60°C) is ONLY eligible if there is genuinely substantial FREE solar surplus (>= 3.0 kWh and >= 1.8 kW peak surplus).
+            # Otherwise, heat efficiently to 50°C to avoid pulling expensive grid power at poor COP!
+            is_solar_boost_eligible = (tot_net_surplus_kwh >= 3.0 and peak_net_surplus_kw >= 1.8)
 
             planned_mode = "standby_normal"
             planned_mode_label = "Geen geforceerde run gepland"
@@ -3039,7 +3043,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.56.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.57.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
