@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.68.0
+Version: 0.69.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -157,6 +157,103 @@ def save_secret(domain: str, conn_id: str, secret: str):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(sec, f, indent=2)
     os.replace(tmp, SECRETS_FILE)
+
+def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
+    """
+    Fetches Open-Meteo weather forecast for Culemborg (51.9537, 5.2320),
+    reads live local Wittboy weather station from Home Assistant,
+    and performs smooth observation nudging (analysis assimilation) from local measurements
+    into the regional forecast over a 3-hour decay window.
+    Returns (temp_map, solar_map, wind_map, rh_map) keyed by "%Y-%m-%d %H:00".
+    """
+    temp_map, solar_map, wind_map, rh_map = {}, {}, {}, {}
+
+    wb_temp = None
+    wb_wind = None
+    wb_solar = None
+    wb_rh = None
+    try:
+        ha_sec = load_secrets()
+        ha_tok = ha_sec.get("homeassistant", {}).get("token")
+        ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
+        if ha_tok and ha_url:
+            ctx_ssl = ssl.create_default_context()
+            ctx_ssl.check_hostname = False
+            ctx_ssl.verify_mode = ssl.CERT_NONE
+
+            entities_to_query = [
+                ("sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature", "temp"),
+                ("sensor.temperatuur_buiten", "temp_fallback"),
+                ("sensor.wittboy_gw2000a_weather_station_gw2000a_wind_speed", "wind"),
+                ("sensor.wittboy_gw2000a_weather_station_gw2000a_solar_radiation", "solar"),
+                ("sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_humidity", "rh")
+            ]
+            for ent, var in entities_to_query:
+                try:
+                    req = urllib.request.Request(f"{ha_url}/api/states/{ent}", headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"})
+                    with urllib.request.urlopen(req, timeout=1.5, context=ctx_ssl) as r:
+                        st = json.loads(r.read().decode())
+                        val = float(st.get("state", 0.0))
+                        if var == "temp" and wb_temp is None:
+                            wb_temp = val
+                        elif var == "temp_fallback" and wb_temp is None:
+                            wb_temp = val
+                        elif var == "wind" and wb_wind is None:
+                            wb_wind = val / 3.6  # km/h to m/s
+                        elif var == "solar" and wb_solar is None:
+                            wb_solar = val  # W/m2
+                        elif var == "rh" and wb_rh is None:
+                            wb_rh = val
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    try:
+        url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
+        req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
+        with urllib.request.urlopen(req_m, timeout=5) as r_m:
+            m_data = json.loads(r_m.read().decode())
+            h_times = m_data["hourly"]["time"]
+            h_temps = m_data["hourly"]["temperature_2m"]
+            h_rads = m_data["hourly"]["shortwave_radiation"]
+            h_winds = m_data["hourly"]["wind_speed_10m"]
+            h_rhs = m_data["hourly"]["relative_humidity_2m"]
+
+            start_hour_iso = base_dt.strftime("%Y-%m-%dT%H:00")
+            idx_start = h_times.index(start_hour_iso) if start_hour_iso in h_times else 0
+
+            raw_cur_temp = float(h_temps[idx_start]) if idx_start < len(h_temps) else 15.0
+            delta_temp = (wb_temp - raw_cur_temp) if wb_temp is not None else 0.0
+
+            raw_cur_wind = float(h_winds[idx_start]) if idx_start < len(h_winds) else 3.0
+            delta_wind = (wb_wind - raw_cur_wind) if wb_wind is not None else 0.0
+
+            raw_cur_solar = float(h_rads[idx_start]) if idx_start < len(h_rads) else 0.0
+            delta_solar = (wb_solar - raw_cur_solar) if wb_solar is not None else 0.0
+
+            tau_hours = 3.0  # Smooth assimilation window of 3 hours
+            for offset_h in range(len(h_times) - idx_start):
+                idx = idx_start + offset_h
+                t_str = h_times[idx]
+                k_t = t_str.replace('T', ' ')[:13] + ':00'
+
+                weight = math.exp(-offset_h / tau_hours)
+
+                nudged_temp = round(float(h_temps[idx]) + delta_temp * weight, 1)
+                nudged_wind = round(max(0.0, float(h_winds[idx]) + delta_wind * weight), 1)
+                nudged_solar = round(max(0.0, float(h_rads[idx]) + delta_solar * weight), 1)
+                nudged_rh = float(h_rhs[idx])
+
+                temp_map[k_t] = nudged_temp
+                solar_map[k_t] = nudged_solar
+                wind_map[k_t] = nudged_wind
+                rh_map[k_t] = nudged_rh
+    except Exception as e:
+        print(f"Warning fetching anchored weather forecast: {e}")
+
+    return temp_map, solar_map, wind_map, rh_map
+
     try:
         os.chmod(SECRETS_FILE, 0o600)
     except Exception:
@@ -1147,20 +1244,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
             base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
 
-            # Query Open-Meteo Weather for Culemborg
-            temp_map, solar_map, wind_map = {}, {}, {}
-            try:
-                url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m&timezone=Europe%2FAmsterdam&forecast_days=2"
-                req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
-                with urllib.request.urlopen(req_m, timeout=5) as r_m:
-                    m_data = json.loads(r_m.read().decode())
-                    for t, tmp, rad, wnd in zip(m_data["hourly"]["time"], m_data["hourly"]["temperature_2m"], m_data["hourly"]["shortwave_radiation"], m_data["hourly"]["wind_speed_10m"]):
-                        k_t = t.replace('T', ' ')[:13] + ':00'
-                        temp_map[k_t] = float(tmp)
-                        solar_map[k_t] = float(rad)
-                        wind_map[k_t] = float(wnd)
-            except Exception:
-                pass
+            # Anchored weather forecast: Wittboy live weather station blended with Open-Meteo
+            temp_map, solar_map, wind_map, rh_map = get_anchored_weather_forecast(base_dt)
 
             # Fetch EPEX spot prices for next 24h
             today_str = now_ams.strftime("%d-%m-%Y")
@@ -1563,7 +1648,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.68.0",
+                "version": "0.69.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3182,7 +3267,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.68.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.69.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
