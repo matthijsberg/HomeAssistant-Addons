@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.64.0
+Version: 0.65.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -694,15 +694,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 prices_base = []
                 solar_forecast_kw = []
 
+                prev_dt_slot = None
                 for i in range(total_slots):
                     dt_slot = base_dt + timedelta(minutes=step_mins * i)
                     k_full = dt_slot.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
                     k_hour = dt_slot.strftime("%Y-%m-%d %H:00")
 
-                    if i == 0:
-                        lbl = dt_slot.strftime("Nu (%H:%M)" if is_15m else "Nu (%H:00)")
-                    else:
-                        lbl = dt_slot.strftime("%H:%M" if is_15m else "%H:00")
+                    lbl = format_slot_label(dt_slot, prev_dt_slot, i == 0, is_15m)
+                    prev_dt_slot = dt_slot
 
                     labels.append(lbl)
                     prices_all_in.append(prices_map.get(k_full, 0.25))
@@ -892,12 +891,18 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 tot_afname_eur = 0.0
                 tot_verbruik_eur = 0.0
                 tot_selfcons_eur = 0.0
+                prev_pp_dt = None
 
                 for ts_str in sorted_ts:
                     m = ts_map[ts_str]
                     try:
                         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
-                        time_label = dt.strftime(time_fmt)
+                        if prev_pp_dt is not None and dt.day != prev_pp_dt.day:
+                            day_str = DUTCH_DAYS_SHORT[dt.weekday()]
+                            time_label = f"{day_str} {dt.strftime(time_fmt)}"
+                        else:
+                            time_label = dt.strftime(time_fmt)
+                        prev_pp_dt = dt
                     except Exception:
                         time_label = ts_str[11:16]
                     
@@ -1191,9 +1196,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             # 2R1C Thermal mass capacity for Dutch detached/semi-detached home ~10 kWh/K
             c_thermal_kwh_per_k = 10.0
 
+            prev_hf_dt = None
             for i in range(total_slots):
                 slot_dt = base_dt + timedelta(minutes=step_mins * i)
-                lbl = slot_dt.strftime("%H:%M" if is_15m else "%H:00")
+                lbl = format_slot_label(slot_dt, prev_hf_dt, i == 0, is_15m)
+                prev_hf_dt = slot_dt
                 k_full = slot_dt.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
                 k_hour = slot_dt.strftime("%Y-%m-%d %H:00")
                 t_out = temp_map.get(k_hour, 14.0)
@@ -1387,9 +1394,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             labels, unalloc_w, heating_w, boiler_w, solar_w, total_w = [], [], [], [], [], []
             timeline_slots = []
+            prev_dhw_dt = None
             for i in range(total_slots):
                 slot_dt = base_dt + timedelta(minutes=step_mins * i)
-                lbl = slot_dt.strftime("%H:%M")
+                lbl = format_slot_label(slot_dt, prev_dhw_dt, i == 0, is_15m)
+                prev_dhw_dt = slot_dt
                 k_hour = slot_dt.strftime("%Y-%m-%d %H:00")
                 t_out = temp_map.get(k_hour, 14.0)
                 sol_rad = solar_map.get(k_hour, 0.0)
@@ -1487,7 +1496,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.64.0",
+                "version": "0.65.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1816,6 +1825,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             advices = [""] * total_slots
             timeline_items = []
 
+            prev_dt_item = None
             for i in range(total_slots):
                 dt_slot = base_dt + timedelta(minutes=step_mins * i)
                 k_full = dt_slot.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
@@ -3082,7 +3092,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.64.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.65.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3142,24 +3152,26 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 <!-- CATEGORIE 1: VOORSPELLING (FORECAST)                                      -->
                 <!-- ========================================================================= -->
                 <div class="space-y-4 pt-2">
-                    <!-- Category Header & Controls Bar -->
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-purple-500/30">
+                    <!-- Sticky Category Header & Controls Bar -->
+                    <div class="sticky top-0 z-30 bg-[#0B0F17]/95 backdrop-blur-md py-2.5 -mx-4 px-4 sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 border-b border-purple-500/30 shadow-lg shadow-black/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all">
                         <div class="flex items-center gap-2.5">
                             <span class="w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse"></span>
                             <h2 class="text-sm sm:text-base font-bold text-white tracking-wide uppercase">Voorspelling</h2>
                             <span class="text-[10px] text-purple-300 font-mono bg-purple-950/80 px-2 py-0.5 rounded border border-purple-800">24H FORECAST</span>
                         </div>
                         <div class="flex items-center gap-2 text-xs flex-wrap">
-                            <!-- Battery Simulation Toggle (Default: UIT / Geen Mock) -->
-                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono items-center">
-                                <span class="px-2 text-slate-400 font-medium">🔋 Accu:</span>
-                                <button id="bat-btn-off" onclick="setBatterySimulation(false)" class="bat-btn-off px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow">Uit</button>
-                                <button id="bat-btn-on" onclick="setBatterySimulation(true)" class="bat-btn-on px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">Simuleer</button>
+                            <!-- Diagram Type Toggle: Staven vs Lijn -->
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
+                                <button id="pred-btn-type-bar" onclick="setPredictionChartType('bar')" class="px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">📊 Staven</button>
+                                <button id="pred-btn-type-line" onclick="setPredictionChartType('line')" class="px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">📈 Lijn</button>
                             </div>
+
+                            <!-- Interval / Resolutie Toggle -->
                             <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
                                 <button onclick="setPredictionResolution('1h')" class="res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
                                 <button onclick="setPredictionResolution('15m')" class="res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
                             </div>
+
                             <button onclick="loadChartData(); loadElectricityPricesChart(); renderDhwTemperatureChart(); renderHeatingForecastChart();" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                 <span>Verversen</span>
@@ -3501,8 +3513,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 <!-- CATEGORIE 2: HISTORIE (HISTORICAL DATA)                                   -->
                 <!-- ========================================================================= -->
                 <div class="space-y-4 pt-4">
-                    <!-- Category Header & Controls Bar -->
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-emerald-500/30">
+                    <!-- Sticky Category Header & Controls Bar -->
+                    <div class="sticky top-0 z-30 bg-[#0B0F17]/95 backdrop-blur-md py-2.5 -mx-4 px-4 sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 border-b border-emerald-500/30 shadow-lg shadow-black/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all">
                         <div class="flex items-center gap-2.5">
                             <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
                             <h2 class="text-sm sm:text-base font-bold text-white tracking-wide uppercase">Historie</h2>
@@ -4924,6 +4936,29 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
         window.__simulateBattery = false;
 
+                window.predictionChartType = 'bar'; // Default to Staven
+
+        function setPredictionChartType(type) {
+            window.predictionChartType = type;
+            const btnBar = document.getElementById('pred-btn-type-bar');
+            const btnLine = document.getElementById('pred-btn-type-line');
+            if (btnBar && btnLine) {
+                if (type === 'bar') {
+                    btnBar.className = 'px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow';
+                    btnLine.className = 'px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                } else {
+                    btnBar.className = 'px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                    btnLine.className = 'px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow';
+                }
+            }
+            loadChartData();
+        }
+
+                function toggleBatterySimFromSettings() {
+            setBatterySimulation(!window.__simulateBattery);
+            renderDevicesGrid();
+        }
+
         function setBatterySimulation(enable) {
             window.__simulateBattery = enable;
             document.querySelectorAll('.bat-btn-off').forEach(b => {
@@ -6326,8 +6361,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 maxAbsPrice = Math.ceil(maxAbsPrice * 10) / 10;
                 if (maxAbsPrice < 0.30) maxAbsPrice = 0.30;
 
+                const isLineMode = (window.predictionChartType === 'line');
                 const chartConfig = {
-                    type: 'bar',
+                    type: isLineMode ? 'line' : 'bar',
                     data: {
                         labels: labels,
                         datasets: (() => {
@@ -6356,60 +6392,133 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     tension: 0.25,
                                     yAxisID: 'y',
                                     order: 1
-                                },
-                                {
+                                }
+                            ];
+
+                            if (isLineMode) {
+                                ds.push({
+                                    label: 'Ongedefinieerd (kWh)',
+                                    data: unallocKwh,
+                                    type: 'line',
+                                    borderColor: '#3B82F6',
+                                    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                    borderWidth: 2,
+                                    pointRadius: 0,
+                                    tension: 0.25,
+                                    order: 2
+                                });
+                                ds.push({
+                                    label: 'SWW Tapwater (kWh)',
+                                    data: boilerKwh,
+                                    type: 'line',
+                                    borderColor: '#EC4899',
+                                    backgroundColor: 'rgba(236, 72, 153, 0.2)',
+                                    borderWidth: 2,
+                                    pointRadius: 0,
+                                    tension: 0.25,
+                                    order: 3
+                                });
+                                ds.push({
+                                    label: 'CV Verwarming (kWh)',
+                                    data: heatingKwh,
+                                    type: 'line',
+                                    borderColor: '#6366F1',
+                                    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                                    borderWidth: 2,
+                                    pointRadius: 0,
+                                    tension: 0.25,
+                                    order: 3
+                                });
+                                if (data.battery_enabled) {
+                                    ds.push({
+                                        label: 'Accu Laden (kWh)',
+                                        data: batteryChargeKwh,
+                                        type: 'line',
+                                        borderColor: '#10B981',
+                                        backgroundColor: 'transparent',
+                                        borderWidth: 2,
+                                        pointRadius: 0,
+                                        tension: 0.25,
+                                        order: 4
+                                    });
+                                }
+                                ds.push({
+                                    label: 'Zon Productie (kWh)',
+                                    data: solarNegKwh,
+                                    type: 'line',
+                                    borderColor: '#F59E0B',
+                                    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                                    borderWidth: 2,
+                                    pointRadius: 0,
+                                    tension: 0.25,
+                                    order: 4
+                                });
+                                if (data.battery_enabled) {
+                                    ds.push({
+                                        label: 'Accu Ontladen (kWh)',
+                                        data: batteryDischargeNegKwh,
+                                        type: 'line',
+                                        borderColor: '#14B8A6',
+                                        backgroundColor: 'transparent',
+                                        borderWidth: 2,
+                                        pointRadius: 0,
+                                        tension: 0.25,
+                                        order: 5
+                                    });
+                                }
+                            } else {
+                                ds.push({
                                     label: 'Ongedefinieerd (kWh)',
                                     data: unallocKwh,
                                     backgroundColor: '#3B82F6',
                                     stack: 'energy',
                                     borderRadius: 2,
                                     order: 3
-                                },
-                                {
+                                });
+                                ds.push({
                                     label: 'SWW Tapwater (kWh)',
                                     data: boilerKwh,
                                     backgroundColor: '#EC4899',
                                     stack: 'energy',
                                     borderRadius: 2,
                                     order: 3
-                                },
-                                {
+                                });
+                                ds.push({
                                     label: 'CV Verwarming (kWh)',
                                     data: heatingKwh,
                                     backgroundColor: '#6366F1',
                                     stack: 'energy',
                                     borderRadius: 2,
                                     order: 3
-                                }
-                            ];
-                            // Only include battery datasets if physically installed or simulation active
-                            if (data.battery_enabled) {
-                                ds.push({
-                                    label: 'Accu Laden (kWh)',
-                                    data: batteryChargeKwh,
-                                    backgroundColor: '#10B981',
-                                    stack: 'energy',
-                                    borderRadius: 2,
-                                    order: 3
                                 });
-                            }
-                            ds.push({
-                                label: 'Zon Productie (kWh)',
-                                data: solarNegKwh,
-                                backgroundColor: '#F59E0B',
-                                stack: 'energy',
-                                borderRadius: 2,
-                                order: 4
-                            });
-                            if (data.battery_enabled) {
+                                if (data.battery_enabled) {
+                                    ds.push({
+                                        label: 'Accu Laden (kWh)',
+                                        data: batteryChargeKwh,
+                                        backgroundColor: '#10B981',
+                                        stack: 'energy',
+                                        borderRadius: 2,
+                                        order: 3
+                                    });
+                                }
                                 ds.push({
-                                    label: 'Accu Ontladen (kWh)',
-                                    data: batteryDischargeNegKwh,
-                                    backgroundColor: '#14B8A6',
+                                    label: 'Zon Productie (kWh)',
+                                    data: solarNegKwh,
+                                    backgroundColor: '#F59E0B',
                                     stack: 'energy',
                                     borderRadius: 2,
                                     order: 4
                                 });
+                                if (data.battery_enabled) {
+                                    ds.push({
+                                        label: 'Accu Ontladen (kWh)',
+                                        data: batteryDischargeNegKwh,
+                                        backgroundColor: '#14B8A6',
+                                        stack: 'energy',
+                                        borderRadius: 2,
+                                        order: 4
+                                    });
+                                }
                             }
                             return ds;
                         })()
@@ -6429,12 +6538,12 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         },
                         scales: {
                             x: {
-                                stacked: true,
+                                stacked: !isLineMode,
                                 grid: { color: 'rgba(30, 41, 59, 0.4)' },
                                 ticks: { color: '#94A3B8', font: { family: 'monospace', size: 10 } }
                             },
                             y: {
-                                stacked: true,
+                                stacked: !isLineMode,
                                 min: -maxAbsKwh,
                                 max: maxAbsKwh,
                                 title: { display: true, text: 'Opbrengst (-kWh) < 0 < Verbruik (+kWh)', color: '#94A3B8', font: { family: 'monospace', size: 10 } },
@@ -7016,6 +7125,17 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     ${actuatorsHtml}
                                 </div>
                             </div>
+
+                            ${dev.type === 'home_battery' ? `
+                            <div class="bg-purple-950/30 border border-purple-800/40 rounded-xl p-2.5 mb-2 flex items-center justify-between text-xs">
+                                <div>
+                                    <div class="font-bold text-purple-300">🔋 Voorspelling Simulatie</div>
+                                    <div class="text-[10px] text-slate-400">Accu meenemen in 24h prognose</div>
+                                </div>
+                                <button onclick="toggleBatterySimFromSettings()" class="px-2.5 py-1 rounded font-medium text-xs transition ${window.__simulateBattery ? 'bg-purple-600 text-white shadow' : 'bg-slate-800 text-slate-400 hover:text-white'}">
+                                    ${window.__simulateBattery ? 'Actief' : 'Uit'}
+                                </button>
+                            </div>` : ''}
                         </div>
                         <div class="flex justify-end gap-2 pt-2.5 border-t border-[#1E293B]">
                             <button onclick="openDeviceModal('${dev.id}')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg border border-slate-700 transition">Bewerken</button>
