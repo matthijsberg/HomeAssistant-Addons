@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.73.0
+Version: 0.74.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1704,7 +1704,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.73.0",
+                "version": "0.74.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3418,7 +3418,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.73.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.74.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -9563,92 +9563,6 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     loadModelRecommendations();
                 } else {
                     showToast('Fout bij opslaan algoritme instellingen', 'error');
-                }
-            } catch (e) {
-                showToast('Verbindingsfout: ' + e, 'error');
-            } finally {
-                if (btn) btn.disabled = false;
-            }
-        }
-
-        async function loadModelRecommendations() {
-            const tBody = document.getElementById('recs-table-body');
-            const badge = document.getElementById('recs-status-badge');
-            if (!tBody) return;
-            try {
-                const res = await fetch('./api/model/recommendations');
-                if (!res.ok) return;
-                const d = await res.json();
-                const recs = d.recommendations || [];
-                if (recs.length === 0) {
-                    tBody.innerHTML = '<tr><td colspan="6" class="py-4 text-center text-slate-500">Nog geen kalibratie-aanbevelingen beschikbaar.</td></tr>';
-                    return;
-                }
-
-                const isPending = (d.status === 'pending_review');
-                if (badge) {
-                    if (isPending) {
-                        badge.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse';
-                        badge.textContent = 'Actie Vereist (Voorstellen Klaar)';
-                    } else {
-                        badge.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
-                        badge.textContent = 'Up-to-date (Geaccepteerd)';
-                    }
-                }
-
-                tBody.innerHTML = recs.map(r => {
-                    const drift = Number(r.drift_pct || 0);
-                    const driftColor = drift === 0 ? 'text-slate-400' : (Math.abs(drift) <= 3.0 ? 'text-emerald-400' : (drift < 0 ? 'text-blue-400' : 'text-amber-400'));
-                    const driftSign = drift > 0 ? '+' : '';
-                    const statusHtml = r.auto_applied 
-                        ? '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950/60 text-emerald-400 border border-emerald-800">Automatisch</span>'
-                        : '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-950/60 text-amber-400 border border-amber-800">Ter Beoordeling</span>';
-
-                    return `
-                        <tr class="hover:bg-slate-800/30 transition">
-                            <td class="py-2.5 font-bold text-white">${r.name}</td>
-                            <td class="py-2.5 text-center text-slate-400 font-mono">${r.current_value} <span class="text-[10px] text-slate-500">${r.unit}</span></td>
-                            <td class="py-2.5 text-center font-bold text-white font-mono">${r.proposed_value} <span class="text-[10px] text-slate-500">${r.unit}</span></td>
-                            <td class="py-2.5 text-center font-bold ${driftColor} font-mono">${driftSign}${drift}%</td>
-                            <td class="py-2.5 text-[11px] text-slate-400 font-sans">${r.evidence || '--'}</td>
-                            <td class="py-2.5 text-right font-mono">${statusHtml}</td>
-                        </tr>
-                    `;
-                }).join('');
-            } catch (e) {
-                console.warn('Error loading recommendations:', e);
-            }
-        }
-
-        async function acceptRecommendations() {
-            const btn = document.getElementById('btn-recs-accept');
-            if (btn) btn.disabled = true;
-            try {
-                const res = await fetch('./api/model/recommendations/accept', { method: 'POST' });
-                if (res.ok) {
-                    showToast('Aanbevelingen geaccepteerd en geactiveerd!', 'success');
-                    loadModelRecommendations();
-                    loadAnalytics();
-                } else {
-                    showToast('Fout bij accepteren van aanbevelingen', 'error');
-                }
-            } catch (e) {
-                showToast('Verbindingsfout: ' + e, 'error');
-            } finally {
-                if (btn) btn.disabled = false;
-            }
-        }
-
-        async function rejectRecommendations() {
-            const btn = document.getElementById('btn-recs-reject');
-            if (btn) btn.disabled = true;
-            try {
-                const res = await fetch('./api/model/recommendations/reject', { method: 'POST' });
-                if (res.ok) {
-                    showToast('Aanbevelingen afgewezen; actieve parameters behouden.', 'info');
-                    loadModelRecommendations();
-                } else {
-                    showToast('Fout bij afwijzen van aanbevelingen', 'error');
                 }
             } catch (e) {
                 showToast('Verbindingsfout: ' + e, 'error');

@@ -19,6 +19,7 @@ import sys
 import json
 import math
 import time
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Dict, List, Any, Tuple, Optional
@@ -353,6 +354,8 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
         save_json(PROFILE_FILE, self.profile)
 
         # 2. Recalibrate Building UA using OLS on Heating Days
+        old_ua = float(self.params.get("building", {}).get("ua_base_w_per_k", 321.1))
+        calibrated_ua = old_ua
         r_squared = 0.81
         rmse_w = 185.4
         mae_w = 132.0
@@ -377,7 +380,6 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
                     calibrated_ua = 318.5
 
         # 3. Model Governance: Evaluate Parameter Drift & Proposed Recommendations
-        old_ua = float(self.params.get("building", {}).get("ua_base_w_per_k", 321.1))
         ua_drift_pct = round(((calibrated_ua - old_ua) / old_ua) * 100.0, 1) if old_ua > 0 else 0.0
 
         # Night baseload drift
@@ -462,7 +464,7 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
             "auto_accept_max_drift_pct": auto_accept_threshold,
             "recommendations": recs
         }
-        recs_file = Path("/config/model_recommendations.json")
+        recs_file = "/config/model_recommendations.json"
         save_json(recs_file, recs_payload)
 
         return {
