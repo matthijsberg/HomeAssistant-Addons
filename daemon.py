@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.54.0
+Version: 0.55.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -63,6 +63,13 @@ PARAMS_FILE = Path("/config/heatpump_model_parameters.json")
 CACHE_FILE = Path("/config/data/energy_feed_cache.json")
 HA_API_CONFIG = Path("/config/.ha_api_config.json")
 SECRETS_FILE = Path("/config/open_hems_secrets.json")
+
+
+GLOBAL_CENTRAL_CACHE = {
+    "timestamp": 0,
+    "15m": None,
+    "1h": None
+}
 
 def calculate_poa_solar_kw(
     dt_ams: datetime,
@@ -1269,7 +1276,28 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
             if GLOBAL_DHW_MODEL:
                 decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_live, now_ams)
-                traj = GLOBAL_DHW_MODEL.simulate_trajectory(t_live, now_ams, hours_ahead=24)
+                
+                # Retrieve planned slots from central dispatch cache
+                cached_slots = []
+                c_start = GLOBAL_CENTRAL_CACHE.get("sww_start_idx", -1)
+                c_power = GLOBAL_CENTRAL_CACHE.get("sww_power_kw", 1.8)
+                c_target = GLOBAL_CENTRAL_CACHE.get("target_temp_c", 50.0)
+                c_is_15m = GLOBAL_CENTRAL_CACHE.get("is_15m", True)
+                if c_start >= 0:
+                    # Convert to 15-minute slot indices if needed
+                    mult = 1 if c_is_15m else 4
+                    fill_count = 6 if c_target >= 55.0 else 3
+                    cached_slots = [c_start * mult + k for k in range(fill_count)]
+
+                base_sim_dt = GLOBAL_CENTRAL_CACHE.get("base_dt", now_ams)
+                traj = GLOBAL_DHW_MODEL.simulate_trajectory(
+                    t_live,
+                    base_sim_dt,
+                    hours_ahead=24,
+                    heat_pump_schedule_slots=cached_slots,
+                    target_temp_c=c_target,
+                    heat_pump_power_kw=c_power
+                )
 
                 if not is_15m and traj and "labels" in traj:
                     # Aggregate 96 quarters to 24 hours
@@ -1466,7 +1494,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.54.0",
+                "version": "0.55.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2030,6 +2058,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     "power_kw": m_pwr,
                     "description": m_desc
                 })
+
+                        # Cache central dispatch for DHW trajectory synchronization
+            GLOBAL_CENTRAL_CACHE["planned_dhw_slots"] = [k for k in range(slots_to_fill)]
+            GLOBAL_CENTRAL_CACHE["sww_start_idx"] = sww_start_idx
+            GLOBAL_CENTRAL_CACHE["target_temp_c"] = sww_target_temp
+            GLOBAL_CENTRAL_CACHE["sww_power_kw"] = sww_power_kw
+            GLOBAL_CENTRAL_CACHE["is_15m"] = is_15m
+            GLOBAL_CENTRAL_CACHE["base_dt"] = base_dt
 
             run_start_time = timeline_items[sww_start_idx]["label"] if 0 <= sww_start_idx < total_slots else "--:--"
             run_end_time = timeline_items[min(total_slots - 1, sww_start_idx + slots_to_fill)]["label"] if 0 <= sww_start_idx < total_slots else "--:--"
@@ -2991,7 +3027,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.54.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.55.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3298,17 +3334,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <div id="dhw-timeline-bar" class="flex w-full h-8 sm:h-9 rounded-xl overflow-hidden border border-slate-700/80 p-0.5 bg-[#0B0F17] gap-[1px]">
                                 <!-- Populated dynamically via JS -->
                             </div>
-                            <!-- Time Scale Ticks -->
-                            <div class="flex justify-between text-[10px] text-slate-500 font-mono px-1">
-                                <span>00:00</span>
-                                <span>03:00</span>
-                                <span>06:00</span>
-                                <span>09:00</span>
-                                <span>12:00</span>
-                                <span>15:00</span>
-                                <span>18:00</span>
-                                <span>21:00</span>
-                                <span>24:00</span>
+                            <!-- Dynamic Rolling Time Scale Ticks (Starts at Nu) -->
+                            <div id="dhw-timeline-ticks" class="flex justify-between text-[10px] text-slate-400 font-mono px-1">
+                                <!-- Populated dynamically via JS matching labels -->
                             </div>
                         </div>
 
@@ -6117,8 +6145,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     document.getElementById('solar-recommendation-text').innerText = data.solar_recommendation || "☀️ Geen overschot";
                 }
 
-                // Render Horizontal Mode Timeline Bar
+                // Render Horizontal Mode Timeline Bar & Dynamic Rolling Ticks
                 const tlContainer = document.getElementById('dhw-timeline-bar');
+                const ticksContainer = document.getElementById('dhw-timeline-ticks');
                 if (tlContainer && data.dhw_mode_timeline) {
                     tlContainer.innerHTML = '';
                     data.dhw_mode_timeline.forEach(seg => {
@@ -6132,6 +6161,21 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         block.title = `${seg.time} | ${seg.label}\n${seg.description}`;
                         tlContainer.appendChild(block);
                     });
+                }
+                if (ticksContainer && labels && labels.length > 0) {
+                    ticksContainer.innerHTML = '';
+                    const totalL = labels.length;
+                    const step = Math.max(1, Math.floor(totalL / 8));
+                    for (let t_i = 0; t_i < totalL; t_i += step) {
+                        const s = document.createElement('span');
+                        s.innerText = labels[t_i];
+                        ticksContainer.appendChild(s);
+                    }
+                    if (ticksContainer.children.length < 9 && totalL > 0) {
+                        const sEnd = document.createElement('span');
+                        sEnd.innerText = labels[totalL - 1];
+                        ticksContainer.appendChild(sEnd);
+                    }
                 }
 
                 // Populate Planning Summary Cards

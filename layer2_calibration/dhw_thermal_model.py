@@ -81,7 +81,9 @@ class DhwThermalModel:
         t_start_c: float,
         start_dt: datetime,
         hours_ahead: int = 24,
-        heat_pump_schedule_slots: Optional[List[int]] = None
+        heat_pump_schedule_slots: Optional[List[int]] = None,
+        target_temp_c: float = 50.0,
+        heat_pump_power_kw: float = 1.8
     ) -> Dict[str, Any]:
         """
         Simulates 15-minute tank temperature and thermal energy trajectory.
@@ -127,7 +129,8 @@ class DhwThermalModel:
             q_hp_th = 0.0
             dt_hp = 0.0
             if i in heat_pump_schedule_slots:
-                q_hp_th = 1.6 * 2.8 * 0.25
+                cop_run = 2.85 if target_temp_c <= 52.0 else 2.15
+                q_hp_th = heat_pump_power_kw * cop_run * 0.25
                 dt_hp = q_hp_th / C_TANK_KWH_PER_C
 
             # Tap draw-off demand: Normal (P50), Minimal (P05), Heavy (P95)
@@ -140,10 +143,11 @@ class DhwThermalModel:
             dt_standby_p05 = ((UA_TANK_W_PER_K * max(0.0, current_p05 - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
             dt_standby_p95 = ((UA_TANK_W_PER_K * max(0.0, current_p95 - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
 
-            # Advance temperatures
-            current_temp = max(15.0, min(T_TARGET_C + 2.0, current_temp - dt_standby - (q_tap_th / C_TANK_KWH_PER_C) + dt_hp))
-            current_p05 = max(15.0, min(T_TARGET_C + 2.0, current_p05 - dt_standby_p05 - (q_tap_p05 / C_TANK_KWH_PER_C) + dt_hp))
-            current_p95 = max(15.0, min(T_TARGET_C + 2.0, current_p95 - dt_standby_p95 - (q_tap_p95 / C_TANK_KWH_PER_C) + dt_hp))
+            # Advance temperatures capped at target_temp_c
+            cap_temp = max(50.0, target_temp_c) + 0.5
+            current_temp = max(15.0, min(cap_temp, current_temp - dt_standby - (q_tap_th / C_TANK_KWH_PER_C) + dt_hp))
+            current_p05 = max(15.0, min(cap_temp, current_p05 - dt_standby_p05 - (q_tap_p05 / C_TANK_KWH_PER_C) + dt_hp))
+            current_p95 = max(15.0, min(cap_temp, current_p95 - dt_standby_p95 - (q_tap_p95 / C_TANK_KWH_PER_C) + dt_hp))
 
             # Usable heat above comfort minimum (40°C)
             q_usable = max(0.0, (current_temp - T_MIN_COMFORT_C) * C_TANK_KWH_PER_C)
