@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.58.0
+Version: 0.59.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1278,16 +1278,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_live, now_ams)
                 
                 # Retrieve planned slots from central dispatch cache
-                cached_slots = []
-                c_start = GLOBAL_CENTRAL_CACHE.get("sww_start_idx", -1)
+                cached_slots = GLOBAL_CENTRAL_CACHE.get("planned_dhw_slots", [])
                 c_power = GLOBAL_CENTRAL_CACHE.get("sww_power_kw", 1.8)
                 c_target = GLOBAL_CENTRAL_CACHE.get("target_temp_c", 50.0)
-                c_is_15m = GLOBAL_CENTRAL_CACHE.get("is_15m", True)
-                if c_start >= 0:
-                    # Convert to 15-minute slot indices if needed
-                    mult = 1 if c_is_15m else 4
-                    fill_count = 6 if c_target >= 55.0 else 3
-                    cached_slots = [c_start * mult + k for k in range(fill_count)]
 
                 base_sim_dt = GLOBAL_CENTRAL_CACHE.get("base_dt", now_ams)
                 traj = GLOBAL_DHW_MODEL.simulate_trajectory(
@@ -1494,7 +1487,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.58.0",
+                "version": "0.59.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2094,9 +2087,15 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     "description": m_desc
                 })
 
-                        # Cache central dispatch for DHW trajectory synchronization
-            GLOBAL_CENTRAL_CACHE["planned_dhw_slots"] = [k for k in range(slots_to_fill)]
+                        # Cache central dispatch with exact 15-minute slot indices
+            if is_15m:
+                actual_15m_slots = [sww_start_idx + k for k in range(slots_to_fill)]
+            else:
+                actual_15m_slots = [sww_start_idx * 4 + k for k in range(slots_to_fill * 4)]
+
+            GLOBAL_CENTRAL_CACHE["planned_dhw_slots"] = actual_15m_slots
             GLOBAL_CENTRAL_CACHE["sww_start_idx"] = sww_start_idx
+            GLOBAL_CENTRAL_CACHE["slots_to_fill"] = slots_to_fill
             GLOBAL_CENTRAL_CACHE["target_temp_c"] = sww_target_temp
             GLOBAL_CENTRAL_CACHE["sww_power_kw"] = sww_power_kw
             GLOBAL_CENTRAL_CACHE["is_15m"] = is_15m
@@ -3066,7 +3065,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.58.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.59.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
