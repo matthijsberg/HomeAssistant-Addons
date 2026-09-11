@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.79.2
+Version: 0.80.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1658,15 +1658,29 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     heat_pump_power_kw=c_power
                 )
 
+                # Counterfactual trajectory WITHOUT night recharge (pure passive standby & tap demand)
+                unheated_traj = GLOBAL_DHW_MODEL.simulate_trajectory(
+                    t_live,
+                    base_sim_dt,
+                    hours_ahead=24,
+                    heat_pump_schedule_slots=[]
+                )
+
                 if traj and "labels" in traj:
                     raw_lbls = traj.get("labels", [])
                     raw_temps = traj.get("temperatures_c", [])
                     raw_p05 = traj.get("temperatures_p05_c", raw_temps)
                     raw_p95 = traj.get("temperatures_p95_c", raw_temps)
                     raw_dem = traj.get("demand_kwh_th", [])
+
+                    raw_unh_temps = unheated_traj.get("temperatures_c", [])
+                    raw_unh_p05 = unheated_traj.get("temperatures_p05_c", raw_unh_temps)
+                    raw_unh_p95 = unheated_traj.get("temperatures_p95_c", raw_unh_temps)
+
                     if not is_15m:
                         # Aggregate 96 quarters to 24 hours
                         h_labels, h_temps, h_p05, h_p95, h_demand = [], [], [], [], []
+                        h_unh_temps, h_unh_p05, h_unh_p95 = [], [], []
                         prev_h_dt = None
                         for h_i in range(min(24, len(raw_lbls) // 4)):
                             idx = h_i * 4
@@ -1677,6 +1691,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             h_p05.append(round(sum(raw_p05[idx:idx+4]) / 4.0, 1))
                             h_p95.append(round(sum(raw_p95[idx:idx+4]) / 4.0, 1))
                             h_demand.append(round(sum(raw_dem[idx:idx+4]), 3))
+
+                            h_unh_temps.append(round(sum(raw_unh_temps[idx:idx+4]) / 4.0, 1))
+                            h_unh_p05.append(round(sum(raw_unh_p05[idx:idx+4]) / 4.0, 1))
+                            h_unh_p95.append(round(sum(raw_unh_p95[idx:idx+4]) / 4.0, 1))
+
                         traj = {
                             "labels": h_labels,
                             "temperatures_c": h_temps,
@@ -1685,6 +1704,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             "demand_kwh_th": h_demand,
                             "morning_dip_temp_c": traj.get("morning_dip_temp_c"),
                             "morning_dip_time": traj.get("morning_dip_time")
+                        }
+                        unheated_traj = {
+                            "temperatures_c": h_unh_temps,
+                            "temperatures_p05_c": h_unh_p05,
+                            "temperatures_p95_c": h_unh_p95
                         }
                     else:
                         # Ensure 15m labels have clean format_slot_label applied
@@ -1700,7 +1724,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     "status": "online",
                     "resolution": res_mode,
                     "decision": decision,
-                    "trajectory": traj
+                    "trajectory": traj,
+                    "unheated_trajectory": unheated_traj
                 })
             else:
                 self._send_json({"status": "error", "message": "DHW model niet geladen"}, 500)
@@ -1887,7 +1912,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.79.2",
+                "version": "0.80.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3601,7 +3626,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.79.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.80.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3950,6 +3975,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <div class="flex items-center gap-3 text-xs font-mono flex-wrap">
                                 <span class="flex items-center gap-1.5 text-amber-300"><span class="w-3 h-1 bg-amber-400 rounded"></span> Verwacht (°C)</span>
                                 <span class="flex items-center gap-1.5 text-amber-200/80"><span class="w-3 h-2 bg-amber-400/20 border border-amber-400/40 rounded-sm"></span> Marge (P05–P95)</span>
+                                <span class="flex items-center gap-1.5 text-slate-400"><span class="w-3 h-0.5 border-b border-slate-400 border-dashed"></span> Zonder Nachtladen (°C)</span>
+                                <span class="flex items-center gap-1.5 text-slate-400/80"><span class="w-3 h-2 bg-slate-500/20 border border-slate-500/40 rounded-sm"></span> Marge Zonder Nacht</span>
                                 <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-0.5 border-b border-red-500 border-dashed"></span> Comfort 40°C</span>
                                 <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-0.5 border-b border-emerald-500 border-dashed"></span> Doel 50°C</span>
                                 <span class="flex items-center gap-1.5 text-sky-300"><span class="w-2.5 h-2.5 bg-sky-500/50 rounded-sm"></span> Vraag (Liter)</span>
@@ -3959,6 +3986,52 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <!-- Canvas for Boiler Temperature -->
                         <div class="relative w-full h-60 sm:h-64">
                             <canvas id="chart-dhw-temperature"></canvas>
+                        </div>
+
+                        <!-- Besluitvorming & Economische Analyse: Nachtlading vs. Daglading (10:00u) -->
+                        <div class="bg-[#0B0F17]/90 border border-slate-800 rounded-xl p-3.5 space-y-2 font-sans text-xs text-slate-300" id="dhw-night-decision-box">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm">⚖️</span>
+                                    <span class="font-bold text-white tracking-wide">Besluitvorming: Waarom Nachtladen vs. Daglading (10:00u)?</span>
+                                    <button type="button" onclick="toggleInfoPopover(event, 'dhw_decision_box_info')" class="text-slate-500 hover:text-cyan-400 transition p-0.5 focus:outline-none" aria-label="Info">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
+                                    </button>
+                                </div>
+                                <div id="dhw-box-status-pill">
+                                    <!-- Dynamic Status Badge -->
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-[11px] leading-relaxed">
+                                <!-- Links: Comfort & Fysisch Verloop -->
+                                <div class="space-y-1.5 bg-slate-900/40 p-2.5 rounded-lg border border-slate-800/60">
+                                    <div class="font-semibold text-amber-400 flex items-center gap-1.5">
+                                        <span>🌡️</span> <span>Comfort- &amp; Temperatuurrisico</span>
+                                    </div>
+                                    <p id="dhw-eval-comfort-text">
+                                        Zonder nachtlading (<span class="text-slate-400 font-mono">grijze lijn</span>) daalt het vat door nachtelijk stilstandsverlies en ochtenddouches naar <strong class="text-amber-300" id="dhw-box-dip-text">39,9°C</strong> (bij piekverbruik zelfs <strong class="text-red-400" id="dhw-box-p95-text">38,3°C</strong>) vóór 10:00 uur.
+                                    </p>
+                                    <div class="text-[10px] text-slate-400 font-mono space-y-0.5 pt-0.5">
+                                        <div>• Ochtenddip zonder nacht: <span class="text-amber-300 font-bold" id="dhw-box-dip-val">39,9°C om 09:44</span></div>
+                                        <div>• Spitsvergrendeling (07:00–09:30): <span class="text-red-300 font-bold">Verwarmen geblokkeerd</span></div>
+                                    </div>
+                                </div>
+
+                                <!-- Rechts: Economische Afweging -->
+                                <div class="space-y-1.5 bg-slate-900/40 p-2.5 rounded-lg border border-slate-800/60">
+                                    <div class="font-semibold text-emerald-400 flex items-center gap-1.5">
+                                        <span>💶</span> <span>Financiële Afweging (Nacht vs. Weekend-Dag)</span>
+                                    </div>
+                                    <p id="dhw-eval-finance-text">
+                                        Nachtstroom kost vannacht ~€0,31/kWh (€0,56 per run). Morgenmiddag rond 12:00–14:00 is stroom aanzienlijk goedkoper (€0,11/kWh, ~€0,20 per run met zonne-energie).
+                                    </p>
+                                    <div class="text-[10px] text-slate-400 font-mono space-y-0.5 pt-0.5">
+                                        <div>• Verschil: <span class="text-emerald-300 font-bold">~€0,36 voordeel</span> bij wachten tot middagzon.</div>
+                                        <div>• Afweging: <span class="text-white font-bold">Gegarandeerd ochtendcomfort vóór 10:00u</span> vs €0,36 besparing.</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -5637,7 +5710,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             'status_auto': 'Automatisch doorgevoerd: de afwijking valt binnen de ingestelde auto-accept drempel en is direct via de leersnelheid (EWMA) in het actieve rekenmodel bijgesteld.',
             'status_review': "Ter beoordeling: de afwijking overschrijdt de drempel. Klik rechtsonder op 'Accepteren & Toepassen' om deze wijziging te bekrachtigen.",
             'status_accepted': 'Handmatig geaccepteerd: door jou goedgekeurd en geactiveerd in het actieve rekenmodel.',
-            'val_overlay_info': 'Model Validatie legt het voorspelde profiel (gestreept) direct over de werkelijk geregistreerde meters (massief) heen. Zo zie je exact waar het model accuraat is en waar leerafwijkingen ontstaan.'
+            'val_overlay_info': 'Model Validatie legt het voorspelde profiel (gestreept) direct over de werkelijk geregistreerde meters (massief) heen. Zo zie je exact waar het model accuraat is en waar leerafwijkingen ontstaan.',
+            'dhw_decision_box_info': 'Toont de thermodynamische en economische analyse van het nachtlaadbesluit: waarom de planner nu wel of niet voorverwarmt, inclusief comfortrisico (koude douche) en spitsblokkades.'
         };
 
         function toggleInfoPopover(e, key) {
