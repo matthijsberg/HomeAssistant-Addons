@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.62.0
+Version: 0.63.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1487,7 +1487,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.62.0",
+                "version": "0.63.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3084,7 +3084,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.62.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.63.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -8339,89 +8339,110 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 const litersArr = demandsKwh.map(k => Math.round(k * 3600 / (4.186 * 38)));
                 const comfortLine = Array(labels.length).fill(40.0);
                 const targetLine = Array(labels.length).fill(50.0);
+                
+                // Detect if 60C boost is present
+                const maxTempInTraj = Math.max(...temps, ...tempsP05, 50.0);
+                const isBoostMode = (maxTempInTraj >= 53.0);
+                const ySuggestedMax = isBoostMode ? 64.0 : 55.0;
+
+                const chartDatasets = [
+                    // 1. Upper boundary: Minimaal Verbruik P05
+                    {
+                        label: 'Minimaal Verbruik P05 (°C)',
+                        data: tempsP05,
+                        yAxisID: 'y',
+                        borderColor: 'rgba(245, 158, 11, 0.35)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.2,
+                        borderDash: [3, 3],
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.25,
+                        order: 1
+                    },
+                    // 2. Lower boundary: Piekverbruik P95 with filled yellow margin to P05
+                    {
+                        label: 'Piekverbruik P95 (°C)',
+                        data: tempsP95,
+                        yAxisID: 'y',
+                        borderColor: 'rgba(245, 158, 11, 0.45)',
+                        backgroundColor: 'rgba(251, 191, 36, 0.15)',
+                        borderWidth: 1.2,
+                        borderDash: [4, 4],
+                        fill: '-1',
+                        pointRadius: 0,
+                        tension: 0.25,
+                        order: 2
+                    },
+                    // 3. Expected Boiler Temperature P50 (Solid bright amber)
+                    {
+                        label: 'Verwachte Temperatuur P50 (°C)',
+                        data: temps,
+                        yAxisID: 'y',
+                        borderColor: '#F59E0B',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2.5,
+                        tension: 0.25,
+                        pointRadius: 0,
+                        order: 3
+                    },
+                    // 4. Comfortgrens (40°C)
+                    {
+                        label: 'Comfortgrens (40°C)',
+                        data: comfortLine,
+                        yAxisID: 'y',
+                        borderColor: 'rgba(239, 68, 68, 0.75)',
+                        borderDash: [5, 5],
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        order: 4
+                    },
+                    // 5. Doeltemperatuur (50°C)
+                    {
+                        label: 'Doeltemperatuur (50°C)',
+                        data: targetLine,
+                        yAxisID: 'y',
+                        borderColor: 'rgba(16, 185, 129, 0.75)',
+                        borderDash: [5, 5],
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        order: 5
+                    }
+                ];
+
+                if (isBoostMode) {
+                    chartDatasets.push({
+                        label: 'Zonnebuffer Doel (60°C)',
+                        data: Array(labels.length).fill(60.0),
+                        yAxisID: 'y',
+                        borderColor: 'rgba(168, 85, 247, 0.75)',
+                        borderDash: [4, 4],
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        order: 6
+                    });
+                }
+
+                chartDatasets.push({
+                    label: 'Verwachte Tapvraag (Liters)',
+                    data: litersArr,
+                    type: 'bar',
+                    yAxisID: 'y1',
+                    backgroundColor: 'rgba(56, 189, 248, 0.5)',
+                    hoverBackgroundColor: '#38BDF8',
+                    borderRadius: 2,
+                    order: 7
+                });
 
                 const ctx = canvas.getContext('2d');
                 dhwTempChartInstance = new Chart(ctx, {
                     type: 'line',
                     data: {
                         labels: labels,
-                        datasets: [
-                            // 1. Upper boundary: Minimaal Verbruik P05
-                            {
-                                label: 'Minimaal Verbruik P05 (°C)',
-                                data: tempsP05,
-                                yAxisID: 'y',
-                                borderColor: 'rgba(245, 158, 11, 0.35)',
-                                backgroundColor: 'transparent',
-                                borderWidth: 1.2,
-                                borderDash: [3, 3],
-                                fill: false,
-                                pointRadius: 0,
-                                tension: 0.25,
-                                order: 1
-                            },
-                            // 2. Lower boundary: Piekverbruik P95 with filled yellow margin to P05
-                            {
-                                label: 'Piekverbruik P95 (°C)',
-                                data: tempsP95,
-                                yAxisID: 'y',
-                                borderColor: 'rgba(245, 158, 11, 0.45)',
-                                backgroundColor: 'rgba(251, 191, 36, 0.15)',
-                                borderWidth: 1.2,
-                                borderDash: [4, 4],
-                                fill: '-1',  // Fills area between P05 and P95!
-                                pointRadius: 0,
-                                tension: 0.25,
-                                order: 2
-                            },
-                            // 3. Expected Boiler Temperature P50 (Solid bright amber)
-                            {
-                                label: 'Verwachte Temperatuur P50 (°C)',
-                                data: temps,
-                                yAxisID: 'y',
-                                borderColor: '#F59E0B',
-                                backgroundColor: 'transparent',
-                                borderWidth: 2.5,
-                                tension: 0.25,
-                                pointRadius: 0,
-                                order: 3
-                            },
-                            // 4. Comfortgrens (40°C)
-                            {
-                                label: 'Comfortgrens (40°C)',
-                                data: comfortLine,
-                                yAxisID: 'y',
-                                borderColor: 'rgba(239, 68, 68, 0.75)',
-                                borderDash: [5, 5],
-                                backgroundColor: 'transparent',
-                                borderWidth: 1.5,
-                                pointRadius: 0,
-                                order: 4
-                            },
-                            // 5. Doeltemperatuur (50°C)
-                            {
-                                label: 'Doeltemperatuur (50°C)',
-                                data: targetLine,
-                                yAxisID: 'y',
-                                borderColor: 'rgba(16, 185, 129, 0.75)',
-                                borderDash: [5, 5],
-                                backgroundColor: 'transparent',
-                                borderWidth: 1.5,
-                                pointRadius: 0,
-                                order: 5
-                            },
-                            // 6. Expected Liter Tap Demand
-                            {
-                                label: 'Verwachte Tapvraag (Liters)',
-                                data: litersArr,
-                                type: 'bar',
-                                yAxisID: 'y1',
-                                backgroundColor: 'rgba(56, 189, 248, 0.5)',
-                                hoverBackgroundColor: '#38BDF8',
-                                borderRadius: 2,
-                                order: 6
-                            }
-                        ]
+                        datasets: chartDatasets
                     },
                     options: {
                         responsive: true,
@@ -8444,7 +8465,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             y: {
                                 position: 'left',
                                 suggestedMin: 35.0,
-                                suggestedMax: 55.0,
+                                suggestedMax: ySuggestedMax,
                                 grace: '5%',
                                 title: {
                                     display: true,
