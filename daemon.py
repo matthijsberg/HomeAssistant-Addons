@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.69.0
+Version: 0.70.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1264,31 +1264,66 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
-            # Fetch live thermostat setpoint and room temperature from Home Assistant (Daikin Room Climate)
+            # Fetch live thermostat setpoint and active state from Home Assistant
             t_setpoint = 20.0
             t_indoor_sim = 22.0
             thermostat_active = True
+            thermostat_status_msg = "Actief (CV Verwarming Standby)"
             try:
                 ha_sec = load_secrets()
                 ha_tok = ha_sec.get("homeassistant", {}).get("token")
                 ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
                 if ha_tok and ha_url:
-                    req_cl = urllib.request.Request(
-                        f"{ha_url}/api/states/climate.woonkamer_climate_daikin",
-                        headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
-                    )
                     ctx_ssl = ssl.create_default_context()
                     ctx_ssl.check_hostname = False
                     ctx_ssl.verify_mode = ssl.CERT_NONE
-                    with urllib.request.urlopen(req_cl, timeout=2, context=ctx_ssl) as r_cl:
-                        st_cl = json.loads(r_cl.read().decode())
-                        attrs = st_cl.get("attributes", {})
-                        t_setpoint = float(attrs.get("target_temp_low", attrs.get("temperature", 20.0)))
-                        cur_t = float(attrs.get("current_temperature", t_indoor_sim))
-                        if 15.0 <= cur_t <= 30.0:
-                            t_indoor_sim = cur_t
-                        if st_cl.get("state") == "off" or attrs.get("hvac_action") == "off":
-                            thermostat_active = False
+
+                    # 1. Query climate.woonkamer_climate_daikin for setpoint & indoor temp
+                    try:
+                        req_cl = urllib.request.Request(
+                            f"{ha_url}/api/states/climate.woonkamer_climate_daikin",
+                            headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
+                        )
+                        with urllib.request.urlopen(req_cl, timeout=2, context=ctx_ssl) as r_cl:
+                            st_cl = json.loads(r_cl.read().decode())
+                            attrs = st_cl.get("attributes", {})
+                            t_setpoint = float(attrs.get("target_temp_low", attrs.get("temperature", 20.0)))
+                            cur_t = float(attrs.get("current_temperature", t_indoor_sim))
+                            if 15.0 <= cur_t <= 30.0:
+                                t_indoor_sim = cur_t
+                            if st_cl.get("state") == "off" or attrs.get("hvac_action") == "off":
+                                thermostat_active = False
+                                thermostat_status_msg = "Woonkamerthermostaat staat Uit"
+                    except Exception:
+                        pass
+
+                    # 2. Query Daikin room heating circuit: climate.hc_room_room_heating
+                    try:
+                        req_hc = urllib.request.Request(
+                            f"{ha_url}/api/states/climate.hc_room_room_heating",
+                            headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
+                        )
+                        with urllib.request.urlopen(req_hc, timeout=2, context=ctx_ssl) as r_hc:
+                            st_hc = json.loads(r_hc.read().decode())
+                            if st_hc.get("state") == "off":
+                                thermostat_active = False
+                                thermostat_status_msg = "Ruimteverwarming staat Uit (climate.hc_room_room_heating is Uit)"
+                    except Exception:
+                        pass
+
+                    # 3. Query Daikin master climate switch: switch.hc_mode_altherma_on
+                    try:
+                        req_sw = urllib.request.Request(
+                            f"{ha_url}/api/states/switch.hc_mode_altherma_on",
+                            headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
+                        )
+                        with urllib.request.urlopen(req_sw, timeout=2, context=ctx_ssl) as r_sw:
+                            st_sw = json.loads(r_sw.read().decode())
+                            if st_sw.get("state") == "off":
+                                thermostat_active = False
+                                thermostat_status_msg = "Warmtepomp CV staat Uit (switch.hc_mode_altherma_on is Uit)"
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
@@ -1390,7 +1425,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "total_electrical_kwh": round(tot_el_kwh, 2),
                 "total_cost_eur": round(tot_cost, 2),
                 "thermostat_setpoint_c": t_setpoint,
-                "thermostat_start_threshold_c": round(t_start_threshold, 1)
+                "thermostat_start_threshold_c": round(t_start_threshold, 1),
+                "thermostat_active": thermostat_active,
+                "thermostat_status_label": thermostat_status_msg
             })
             return
 
@@ -1648,7 +1685,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.69.0",
+                "version": "0.70.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2040,22 +2077,48 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 ha_tok = ha_sec.get("homeassistant", {}).get("token")
                 ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
                 if ha_tok and ha_url:
-                    req_in = urllib.request.Request(
-                        f"{ha_url}/api/states/climate.woonkamer_climate_daikin",
-                        headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
-                    )
                     ctx = ssl.create_default_context()
                     ctx.check_hostname = False
                     ctx.verify_mode = ssl.CERT_NONE
-                    with urllib.request.urlopen(req_in, timeout=2, context=ctx) as r_in:
-                        st_in = json.loads(r_in.read().decode())
-                        attrs_in = st_in.get("attributes", {})
-                        plan_t_set = float(attrs_in.get("target_temp_low", attrs_in.get("temperature", 20.0)))
-                        cur_in = float(attrs_in.get("current_temperature", indoor_temp_c))
-                        if 15.0 <= cur_in <= 30.0:
-                            indoor_temp_c = cur_in
-                        if st_in.get("state") == "off" or attrs_in.get("hvac_action") == "off":
-                            plan_thermostat_active = False
+
+                    try:
+                        req_in = urllib.request.Request(
+                            f"{ha_url}/api/states/climate.woonkamer_climate_daikin",
+                            headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
+                        )
+                        with urllib.request.urlopen(req_in, timeout=2, context=ctx) as r_in:
+                            st_in = json.loads(r_in.read().decode())
+                            attrs_in = st_in.get("attributes", {})
+                            plan_t_set = float(attrs_in.get("target_temp_low", attrs_in.get("temperature", 20.0)))
+                            cur_in = float(attrs_in.get("current_temperature", indoor_temp_c))
+                            if 15.0 <= cur_in <= 30.0:
+                                indoor_temp_c = cur_in
+                            if st_in.get("state") == "off" or attrs_in.get("hvac_action") == "off":
+                                plan_thermostat_active = False
+                    except Exception:
+                        pass
+
+                    try:
+                        req_hc = urllib.request.Request(
+                            f"{ha_url}/api/states/climate.hc_room_room_heating",
+                            headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
+                        )
+                        with urllib.request.urlopen(req_hc, timeout=2, context=ctx) as r_hc:
+                            if json.loads(r_hc.read().decode()).get("state") == "off":
+                                plan_thermostat_active = False
+                    except Exception:
+                        pass
+
+                    try:
+                        req_sw = urllib.request.Request(
+                            f"{ha_url}/api/states/switch.hc_mode_altherma_on",
+                            headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
+                        )
+                        with urllib.request.urlopen(req_sw, timeout=2, context=ctx) as r_sw:
+                            if json.loads(r_sw.read().decode()).get("state") == "off":
+                                plan_thermostat_active = False
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
@@ -3267,7 +3330,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.69.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.70.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3630,19 +3693,26 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                     <!-- Chart 1.4: CV Ruimteverwarming Warmtevraag, COP & Kosten Voorspelling (24 Uur Vooruit) -->
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5" id="heating-forecast-chart-container">
-                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                            <div class="flex items-center gap-2.5">
-                                <span class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></span>
-                                <div>
-                                    <h3 class="text-sm font-bold text-white tracking-wide">CV Ruimteverwarming: Warmteverlies, COP &amp; Kosten Voorspelling (24 Uur Vooruit)</h3>
-                                    <p class="text-[11px] text-slate-400">Fysische warmtevraag woning (2R1C + wind/zon), Daikin Carnot COP, stroomvraag (kW) en EPEX stroomkosten (€).</p>
+                        <div class="flex flex-col gap-2.5 border-b border-slate-800/80 pb-3">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></span>
+                                    <div>
+                                        <h3 class="text-sm font-bold text-white tracking-wide">CV Ruimteverwarming: Warmteverlies, COP &amp; Kosten Voorspelling (24 Uur Vooruit)</h3>
+                                        <p class="text-[11px] text-slate-400">Fysische warmtevraag woning (2R1C + wind/zon), Daikin Carnot COP, stroomvraag (kW) en EPEX stroomkosten (€).</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 text-xs flex-wrap font-mono">
+                                    <span id="heating-kpi-status" class="px-2.5 py-0.5 rounded-md text-[10px] font-bold border bg-slate-900 border-slate-700 text-slate-400">Thermostaat: --</span>
+                                    <span id="heating-kpi-kwh" class="px-2.5 py-0.5 rounded-md text-[10px] font-bold border bg-amber-950/60 border-amber-500/40 text-amber-300">⚡ Stroom: -- kWh</span>
+                                    <span id="heating-kpi-cost" class="px-2.5 py-0.5 rounded-md text-[10px] font-bold border bg-emerald-950/60 border-emerald-500/40 text-emerald-300">💶 Kosten: €--</span>
                                 </div>
                             </div>
-                            <div class="flex items-center gap-3 text-xs font-mono flex-wrap">
+                            <div class="flex items-center gap-3 text-xs font-mono flex-wrap pt-1 border-t border-slate-800/40">
                                 <span class="flex items-center gap-1.5 text-blue-300"><span class="w-3 h-1 bg-blue-400 rounded"></span> Buitentemp (°C)</span>
                                 <span class="flex items-center gap-1.5 text-rose-400"><span class="w-3 h-1 bg-rose-500 rounded"></span> Binnentemp (°C)</span>
                                 <span class="flex items-center gap-1.5 text-emerald-300"><span class="w-3 h-1 bg-emerald-400 rounded"></span> Daikin COP</span>
-                                <span class="flex items-center gap-1.5 text-red-400"><span class="w-2.5 h-2.5 bg-red-500/60 rounded-sm"></span> Warmteverlies (kW)</span>
+                                <span class="flex items-center gap-1.5 text-slate-400"><span class="w-3 h-0.5 border-b border-slate-400 border-dashed"></span> Warmteverlies (kW)</span>
                                 <span class="flex items-center gap-1.5 text-amber-400"><span class="w-2.5 h-2.5 bg-amber-500 rounded-sm"></span> Stroom (kW)</span>
                                 <span class="flex items-center gap-1.5 text-cyan-300"><span class="w-3 h-0.5 border-b border-cyan-400 border-dashed"></span> Kosten (€)</span>
                             </div>
