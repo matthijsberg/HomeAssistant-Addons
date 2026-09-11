@@ -203,7 +203,9 @@ class DhwThermalModel:
         t_current_c: float,
         now_dt: datetime,
         tomorrow_solar_peak_kw: float = 2.5,
-        planned_heat_hour: float = 12.5
+        planned_heat_hour: float = 12.5,
+        prices_map: Optional[Dict[str, float]] = None,
+        lockout_min_delta: float = 0.04
     ) -> Dict[str, Any]:
         dt_ams = now_dt.astimezone(AMS_TZ)
         today_name = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"][dt_ams.weekday()]
@@ -246,20 +248,33 @@ class DhwThermalModel:
                 first_sub40_idx = idx
                 break
 
-        # 4. Spits-Lockout Detection:
-        # Morning peak lockout: 07:00 - 09:30 (extreme EPEX spot spikes + gezin thuis)
-        # Evening peak lockout: 17:00 - 20:00 (peak tariffs + cooking/heating)
-        # If the tank drops < 40C before 10:00, forced daytime reheat would hit peak hours!
-        drops_in_morning_peak = ("06:30" <= (first_sub40_time or "12:00") <= "09:45")
+        # 4. Dynamic Spits-Lockout Detection based on Real Spot Prices
+        min_night_p = 0.309
+        max_morn_p = 0.380
+        min_day_p = 0.291
+        if prices_map:
+            night_vals = [v for k, v in prices_map.items() if any(k.endswith(f"{h:02d}:{m:02d}") or f" {h:02d}:{m:02d}" in k for h in range(0, 6) for m in (0, 15, 30, 45))]
+            morn_vals = [v for k, v in prices_map.items() if any(k.endswith(f"{h:02d}:{m:02d}") or f" {h:02d}:{m:02d}" in k for h in range(7, 10) for m in (0, 15, 30, 45))]
+            day_vals = [v for k, v in prices_map.items() if any(k.endswith(f"{h:02d}:{m:02d}") or f" {h:02d}:{m:02d}" in k for h in range(11, 16) for m in (0, 15, 30, 45))]
+            if night_vals: min_night_p = min(night_vals)
+            if morn_vals: max_morn_p = max(morn_vals)
+            if day_vals: min_day_p = min(day_vals)
+
+        morn_delta_p = round(max_morn_p - min_night_p, 4)
+        has_morn_lockout = (morn_delta_p >= lockout_min_delta)
+
+        # Tank only "drops in morning peak" if that morning peak is an ACTUAL economic lockout
+        # And if the dip occurs strictly before 09:30
+        drops_in_morning_peak = has_morn_lockout and ("06:30" <= (first_sub40_time or "12:00") <= "09:30")
 
         # 5. Financial Cost Comparison: Night Charge vs Daytime Charge
-        night_price = 0.309   # EUR/kWh (typical EPEX spot night price)
+        night_price = min_night_p
         cop_night = 2.65      # Lower COP at 11C night air
         th_need_night = (T_TARGET_C - t_current_c) * C_TANK_KWH_PER_C + (STANDBY_LOSS_KW_PER_HOUR * 8.0)
         el_kwh_night = max(1.2, th_need_night / cop_night)
         cost_night = round(el_kwh_night * night_price, 2)
 
-        day_price = 0.291     # EUR/kWh (cheaper midday spot tariff + solar self-consumption)
+        day_price = min_day_p     # Cheaper midday spot tariff + solar self-consumption
         cop_day = 3.25        # Higher COP at 16C daytime air
         th_need_day = (T_TARGET_C - min(40.0, morning_dip_c)) * C_TANK_KWH_PER_C
         el_kwh_day = max(1.0, th_need_day / cop_day)
@@ -283,14 +298,36 @@ class DhwThermalModel:
         v_mixed_shower_liters = round(350.0 * max(0.0, t_current_c - 12.0) / (38.0 - 12.0))
 
         # 7. Final Policy Decision Logic
-        if drops_in_morning_peak or not morning_is_safe:
+        can_safely_defer = (not has_morn_lockout or morning_dip_time >= "09:30") and morning_dip_c >= 38.5 and (cost_day <= cost_night)
+
+        if drops_in_morning_peak:
             status = "SCHEDULE_NIGHT_CHARGE"
             decision_title = "⚠️ Nachtlading vereist (Ochtendcomfort)"
-            decision_sub = f"Tank zakt om {morning_dip_time}u onder 40°C in ochtendspits"
+            decision_sub = f"Tank zakt om {morning_dip_time}u onder 40°C in economische ochtendspits (+€{morn_delta_p:.2f}/kWh)"
             recommendation = (
                 f"⚠️ NACHTLADING VEREIST ({night_label}): "
                 f"Zonder nachtlading daalt de tank tijdens de ochtendspits naar {morning_dip_c}°C om {morning_dip_time}u (<40°C). "
-                f"Nachtlading in het goedkoopste dalkwartier (03:15u, €{cost_night:.2f}) voorkomt een koude douche en dure spitsopwarming."
+                f"Omdat de ochtendspits een echte prijspiek heeft (+€{morn_delta_p:.3f}/kWh), voorkomt nachtlading in het dalkwartier (€{cost_night:.2f}) een koude douche en dure piekinkoop."
+            )
+            optimal_slot_type = "cheapest_night_quarter"
+        elif can_safely_defer:
+            status = "SKIP_NIGHT_CHARGE"
+            decision_title = "✅ Geen nachtlading nodig (Dynamische Vrijgave)"
+            decision_sub = f"Ochtendverschil slechts €{morn_delta_p:.3f}/kWh (< €{lockout_min_delta:.2f} drempel) · Verwarmen om 10:00/12:00u bespaart €{savings_by_waiting:.2f}"
+            recommendation = (
+                f"✅ GEEN nachtlading nodig ({night_label}). "
+                f"Ochtendtarief heeft geen significante prijspiek (ΔP = €{morn_delta_p:.3f}/kWh, onder de €{lockout_min_delta:.2f} drempel). "
+                f"De tank blijft met {morning_dip_c}°C comfortabel tot {morning_dip_time}u. "
+                f"Door pas rond 10:00–12:00u met dagzon (€{day_price:.3f}/kWh, COP {cop_day}) te laden, bespaar je €{savings_by_waiting:.2f} en voorkom je onnodig nachtverlies!"
+            )
+            optimal_slot_type = "midday_solar"
+        elif not morning_is_safe and morning_dip_c < 38.0:
+            status = "SCHEDULE_NIGHT_CHARGE"
+            decision_title = "⚠️ Nachtlading vereist (Diepe Ochtenddip)"
+            decision_sub = f"Tank zakt naar {morning_dip_c}°C (<38°C noodgrens) om {morning_dip_time}u"
+            recommendation = (
+                f"⚠️ NACHTLADING VEREIST ({night_label}): "
+                f"Zonder nachtlading zakt de tank naar {morning_dip_c}°C om {morning_dip_time}u. Om koud water te voorkomen wordt nachtlading bekrachtigd."
             )
             optimal_slot_type = "cheapest_night_quarter"
         elif comfort_hedge_triggered:

@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.80.1
+Version: 0.81.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1641,7 +1641,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
             if GLOBAL_DHW_MODEL:
-                decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_live, now_ams)
+                decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_live, now_ams, prices_map=GLOBAL_CENTRAL_CACHE.get("prices_map", {}))
                 
                 # Retrieve planned slots from central dispatch cache
                 cached_slots = GLOBAL_CENTRAL_CACHE.get("planned_dhw_slots", [])
@@ -1912,7 +1912,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.80.1",
+                "version": "0.81.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2365,9 +2365,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 wnd = it.get("wind", 3.0)
                 sol = it["solar"] * 1000.0 / 5.5  # Solar W/m2
 
-                # Check peak lockouts (07:00-09:30 & 17:00-20:00)
+                # Check dynamic peak lockouts (07:00-09:30 & 17:00-20:00 with price premium >= €0.04)
                 hour_frac = it["dt"].hour + it["dt"].minute / 60.0
-                in_peak_lockout = ((7.0 <= hour_frac < 9.5) or (17.0 <= hour_frac < 20.0))
+                is_trad_window = ((7.0 <= hour_frac < 9.5) or (17.0 <= hour_frac < 20.0))
+                price_delta_night = it.get("price", 0.30) - min_night_p
+                has_price_peak = (price_delta_night >= 0.04) and (it.get("price", 0.30) >= p80_price_threshold or it.get("price", 0.30) >= 1.12 * min_night_p)
+                in_peak_lockout = is_trad_window and has_price_peak
                 emergency_guard = (t_plan_in < 18.5)
 
                 if plan_thermostat_active and not plan_hp_running and (t_plan_in <= plan_t_start):
@@ -3626,7 +3629,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.80.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.81.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
