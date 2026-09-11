@@ -288,8 +288,10 @@ class HybridForecastingModel:
     # -------------------------------------------------------------------------
     # 4. Periodic Retraining & Calibration Loop (from InfluxDB)
     # -------------------------------------------------------------------------
-    def retrain_from_openhems(self, days_history: int = 90) -> Dict[str, Any]:
-        """Queries the dedicated 'openhems' InfluxDB database and recalibrates the 7x96 profile and building UA."""
+    def retrain_from_openhems(self, days_history: Optional[int] = None) -> Dict[str, Any]:
+        """Queries the dedicated 'openhems' InfluxDB database and recalibrates the 7x96 profile and building UA with recommendations governance."""
+        if days_history is None:
+            days_history = int(self.params.get("rolling_window_days", 90))
         pwd = self.secrets.get("influxdb", {}).get("local_ha_influxdb", "")
         if not pwd:
             return {"status": "error", "message": "Geen InfluxDB wachtwoord in secrets kluis"}

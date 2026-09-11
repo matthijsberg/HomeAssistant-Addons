@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.71.0
+Version: 0.72.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1523,6 +1523,25 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "error", "message": "DHW model niet geladen"}, 500)
             return
 
+        if path == "/api/model/algorithm-config":
+            params = load_json(PARAMS_FILE) if PARAMS_FILE.exists() else {}
+            self._send_json({
+                "learning_rate_ewma": float(params.get("learning_rate_ewma", 0.05)),
+                "rolling_window_days": int(params.get("rolling_window_days", 90)),
+                "auto_accept_max_drift_pct": float(params.get("auto_accept_max_drift_pct", 3.0)),
+                "wind_exclusion_limit_ms": float(params.get("wind_exclusion_limit_ms", 8.0)),
+                "solar_exclusion_limit_w_m2": float(params.get("solar_exclusion_limit_w_m2", 500.0))
+            })
+            return
+
+        if path == "/api/model/recommendations":
+            recs_file = Path("/config/model_recommendations.json")
+            if recs_file.exists():
+                self._send_json(load_json(recs_file))
+            else:
+                self._send_json({"status": "empty", "recommendations": []})
+            return
+
         if path == "/api/model/status":
             if not GLOBAL_MODEL:
                 self._send_json({"status": "error", "message": "Model niet geladen"}, 500)
@@ -1685,7 +1704,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.71.0",
+                "version": "0.72.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2646,6 +2665,75 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             save_json(CONFIG_FILE, cfg)
             self._send_json({"status": "success", "message": "Zonnepanelen configuratie opgeslagen", "solar": cfg["solar"]})
             return
+
+        if path == "/api/model/algorithm-config":
+            try:
+                params = load_json(PARAMS_FILE) if PARAMS_FILE.exists() else {}
+                if "learning_rate_ewma" in body:
+                    params["learning_rate_ewma"] = round(float(body["learning_rate_ewma"]), 3)
+                if "rolling_window_days" in body:
+                    params["rolling_window_days"] = int(body["rolling_window_days"])
+                if "auto_accept_max_drift_pct" in body:
+                    params["auto_accept_max_drift_pct"] = round(float(body["auto_accept_max_drift_pct"]), 1)
+                save_json(PARAMS_FILE, params)
+                if GLOBAL_MODEL:
+                    GLOBAL_MODEL.params = params
+                self._send_json({"status": "success", "message": "Algoritme instellingen opgeslagen", "params": params})
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)}, 500)
+            return
+
+        if path == "/api/model/recommendations/accept":
+            try:
+                recs_file = Path("/config/model_recommendations.json")
+                if not recs_file.exists():
+                    self._send_json({"status": "error", "message": "Geen aanbevelingen gevonden"}, 404)
+                    return
+                recs_data = load_json(recs_file)
+                params = load_json(PARAMS_FILE) if PARAMS_FILE.exists() else {}
+                ewma = float(params.get("learning_rate_ewma", 0.05))
+
+                for r in recs_data.get("recommendations", []):
+                    r["auto_applied"] = True
+                    p_id = r.get("id")
+                    if p_id == "building_ua":
+                        old_v = float(params.get("building", {}).get("ua_base_w_per_k", 321.1))
+                        prop_v = float(r.get("proposed_value", old_v))
+                        params.setdefault("building", {})["ua_base_w_per_k"] = round((1.0 - ewma) * old_v + ewma * prop_v, 1)
+                    elif p_id == "night_baseload":
+                        old_v = float(params.get("unallocated", {}).get("night_baseload_floor_w", 265.0))
+                        prop_v = float(r.get("proposed_value", old_v))
+                        params.setdefault("unallocated", {})["night_baseload_floor_w"] = round((1.0 - ewma) * old_v + ewma * prop_v, 1)
+                    elif p_id == "dhw_standby":
+                        old_v = float(params.get("dhw_tank", {}).get("standby_loss_w_per_k", 2.50))
+                        prop_v = float(r.get("proposed_value", old_v))
+                        params.setdefault("dhw_tank", {})["standby_loss_w_per_k"] = round((1.0 - ewma) * old_v + ewma * prop_v, 2)
+
+                recs_data["status"] = "accepted"
+                recs_data["accepted_at"] = datetime.now(AMS_TZ).isoformat()
+                save_json(recs_file, recs_data)
+                save_json(PARAMS_FILE, params)
+                if GLOBAL_MODEL:
+                    GLOBAL_MODEL.params = params
+
+                self._send_json({"status": "success", "message": "Aanbevelingen geaccepteerd en modelparameters geactiveerd!"})
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)}, 500)
+            return
+
+        if path == "/api/model/recommendations/reject":
+            try:
+                recs_file = Path("/config/model_recommendations.json")
+                if recs_file.exists():
+                    recs_data = load_json(recs_file)
+                    recs_data["status"] = "rejected"
+                    recs_data["rejected_at"] = datetime.now(AMS_TZ).isoformat()
+                    save_json(recs_file, recs_data)
+                self._send_json({"status": "success", "message": "Aanbevelingen afgewezen; actieve parameters blijven ongewijzigd."})
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)}, 500)
+            return
+
         if path == "/api/model/retrain":
             if not GLOBAL_MODEL:
                 self._send_json({"status": "error", "message": "Model niet geladen"}, 500)
@@ -3330,7 +3418,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.71.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.72.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4448,6 +4536,123 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         </div>
                         <div class="text-sm font-bold text-emerald-300 tracking-tight" id="model-kpi-schedule">Elke nacht 02:00</div>
                         <div class="text-[11px] text-slate-400 font-sans">EWMA drift tracking (leersnelheid 5%).</div>
+                    </div>
+                </div>
+
+                                <!-- ========================================================================= -->
+                <!-- HYPERPARAMETER STEERING & MODEL GOVERNANCE CARDS                          -->
+                <!-- ========================================================================= -->
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                    <!-- LEFT COLUMN: ALGORITHM HYPERPARAMETERS (4 COLS) -->
+                    <div class="lg:col-span-4 bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-xl space-y-4 flex flex-col justify-between">
+                        <div class="space-y-3">
+                            <div class="flex items-center gap-2.5 border-b border-slate-800/80 pb-3">
+                                <span class="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white tracking-wide">Algoritme Knoppen</h3>
+                                    <p class="text-[11px] text-slate-400">Beïnvloed de leersnelheid en geheugenduur.</p>
+                                </div>
+                            </div>
+
+                            <!-- 1. Learning Rate Slider -->
+                            <div class="space-y-1.5 pt-1">
+                                <div class="flex justify-between items-center text-xs">
+                                    <label class="text-slate-300 font-medium">Leersnelheid (EWMA &alpha;)</label>
+                                    <span id="label-learning-rate" class="font-mono text-amber-400 font-bold bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/50">5%</span>
+                                </div>
+                                <input type="range" id="slider-learning-rate" min="1" max="20" value="5" step="1" oninput="updateLearningRateLabel(this.value)" class="w-full accent-amber-500 bg-slate-800 rounded-lg cursor-pointer h-2">
+                                <div class="flex justify-between text-[10px] text-slate-500 font-mono">
+                                    <span>1% (Zeer stabiel)</span>
+                                    <span>10%</span>
+                                    <span>20% (Agressief)</span>
+                                </div>
+                            </div>
+
+                            <!-- 2. Rolling Window Selector -->
+                            <div class="space-y-1.5 pt-2">
+                                <div class="flex justify-between items-center text-xs">
+                                    <label class="text-slate-300 font-medium">Geheugenhorizon (Data Historie)</label>
+                                    <span id="label-rolling-window" class="font-mono text-blue-400 font-bold bg-blue-950/60 px-2 py-0.5 rounded border border-blue-800/50">90 Dagen</span>
+                                </div>
+                                <select id="select-rolling-window" class="w-full bg-[#0B0F17] border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 font-mono focus:border-blue-500 focus:outline-none">
+                                    <option value="30">30 Dagen (Recent seizoen)</option>
+                                    <option value="90" selected>90 Dagen (Kwartaal / Standaard)</option>
+                                    <option value="365">365 Dagen (Volledig jaar / Max. robuust)</option>
+                                </select>
+                            </div>
+
+                            <!-- 3. Auto-Accept Threshold Slider -->
+                            <div class="space-y-1.5 pt-2">
+                                <div class="flex justify-between items-center text-xs">
+                                    <label class="text-slate-300 font-medium">Auto-Accept Drempel</label>
+                                    <span id="label-auto-accept" class="font-mono text-emerald-400 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50">&plusmn;3.0%</span>
+                                </div>
+                                <input type="range" id="slider-auto-accept" min="0" max="10" value="3" step="0.5" oninput="updateAutoAcceptLabel(this.value)" class="w-full accent-emerald-500 bg-slate-800 rounded-lg cursor-pointer h-2">
+                                <div class="flex justify-between text-[10px] text-slate-500 font-mono">
+                                    <span>0% (Altijd handmatig)</span>
+                                    <span>&plusmn;5%</span>
+                                    <span>&plusmn;10%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="pt-3 border-t border-slate-800/80">
+                            <button onclick="saveAlgorithmConfig()" id="btn-save-algo" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition flex items-center justify-center gap-2">
+                                <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+                                <span>Instellingen Opslaan</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT COLUMN: MODEL RECOMMENDATIONS & PARAMETER DRIFT (8 COLS) -->
+                    <div class="lg:col-span-8 bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-xl space-y-4 flex flex-col justify-between">
+                        <div class="space-y-3">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="w-3 h-3 rounded-full bg-purple-500 animate-pulse"></span>
+                                    <div>
+                                        <h3 class="text-sm font-bold text-white tracking-wide">Model Parameter Aanbevelingen</h3>
+                                        <p class="text-[11px] text-slate-400">Vergelijk actieve parameters met de nieuw berekende voorstellen.</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2" id="recs-status-badge-container">
+                                    <span id="recs-status-badge" class="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">Laden...</span>
+                                </div>
+                            </div>
+
+                            <!-- Recommendations Table -->
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-xs font-mono">
+                                    <thead>
+                                        <tr class="text-[10px] uppercase text-slate-400 border-b border-slate-800/60 pb-2">
+                                            <th class="py-2">Fysische Parameter</th>
+                                            <th class="py-2 text-center">Huidig Actief</th>
+                                            <th class="py-2 text-center">Nieuw Voorstel</th>
+                                            <th class="py-2 text-center">Drift (%)</th>
+                                            <th class="py-2">Onderbouwing</th>
+                                            <th class="py-2 text-right">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="recs-table-body" class="divide-y divide-slate-800/50 text-slate-300">
+                                        <tr><td colspan="6" class="py-4 text-center text-slate-500">Aanbevelingen ophalen...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Action Buttons Bar -->
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-800/80">
+                            <span class="text-[11px] text-slate-400 font-sans" id="recs-info-footer">Klik op Accepteren om de voorgestelde waarden per direct te activeren.</span>
+                            <div class="flex items-center gap-2">
+                                <button onclick="rejectRecommendations()" id="btn-recs-reject" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-xl font-medium border border-slate-700 transition">
+                                    Afwijzen
+                                </button>
+                                <button onclick="acceptRecommendations()" id="btn-recs-accept" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-lg transition flex items-center gap-1.5">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                                    <span>Accepteren &amp; Toepassen</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -9100,6 +9305,157 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             }
         }
 
+        async 
+        // =========================================================================
+        // MODEL GOVERNANCE & ALGORITHM HYPERPARAMETER STEERING JS
+        // =========================================================================
+        function updateLearningRateLabel(val) {
+            const el = document.getElementById('label-learning-rate');
+            if (el) el.textContent = `${val}%`;
+        }
+
+        function updateAutoAcceptLabel(val) {
+            const el = document.getElementById('label-auto-accept');
+            if (el) el.textContent = `&plusmn;${Number(val).toFixed(1)}%`;
+        }
+
+        async function loadAlgorithmConfig() {
+            try {
+                const res = await fetch('./api/model/algorithm-config');
+                if (!res.ok) return;
+                const d = await res.json();
+                const lr = Math.round((d.learning_rate_ewma || 0.05) * 100);
+                const sLr = document.getElementById('slider-learning-rate');
+                if (sLr) { sLr.value = lr; updateLearningRateLabel(lr); }
+
+                const rw = d.rolling_window_days || 90;
+                const sRw = document.getElementById('select-rolling-window');
+                if (sRw) sRw.value = String(rw);
+
+                const aa = d.auto_accept_max_drift_pct !== undefined ? d.auto_accept_max_drift_pct : 3.0;
+                const sAa = document.getElementById('slider-auto-accept');
+                if (sAa) { sAa.value = aa; updateAutoAcceptLabel(aa); }
+            } catch (e) {
+                console.warn('Error loading algorithm config:', e);
+            }
+        }
+
+        async function saveAlgorithmConfig() {
+            const btn = document.getElementById('btn-save-algo');
+            if (btn) btn.disabled = true;
+            try {
+                const lr = Number(document.getElementById('slider-learning-rate').value) / 100.0;
+                const rw = parseInt(document.getElementById('select-rolling-window').value, 10);
+                const aa = Number(document.getElementById('slider-auto-accept').value);
+
+                const res = await fetch('./api/model/algorithm-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        learning_rate_ewma: lr,
+                        rolling_window_days: rw,
+                        auto_accept_max_drift_pct: aa
+                    })
+                });
+                if (res.ok) {
+                    showToast('Algoritme instellingen opgeslagen!', 'success');
+                    loadModelRecommendations();
+                } else {
+                    showToast('Fout bij opslaan algoritme instellingen', 'error');
+                }
+            } catch (e) {
+                showToast('Verbindingsfout: ' + e, 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function loadModelRecommendations() {
+            const tBody = document.getElementById('recs-table-body');
+            const badge = document.getElementById('recs-status-badge');
+            if (!tBody) return;
+            try {
+                const res = await fetch('./api/model/recommendations');
+                if (!res.ok) return;
+                const d = await res.json();
+                const recs = d.recommendations || [];
+                if (recs.length === 0) {
+                    tBody.innerHTML = '<tr><td colspan="6" class="py-4 text-center text-slate-500">Nog geen kalibratie-aanbevelingen beschikbaar.</td></tr>';
+                    return;
+                }
+
+                const isPending = (d.status === 'pending_review');
+                if (badge) {
+                    if (isPending) {
+                        badge.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse';
+                        badge.textContent = 'Actie Vereist (Voorstellen Klaar)';
+                    } else {
+                        badge.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+                        badge.textContent = 'Up-to-date (Geaccepteerd)';
+                    }
+                }
+
+                tBody.innerHTML = recs.map(r => {
+                    const drift = Number(r.drift_pct || 0);
+                    const driftColor = drift === 0 ? 'text-slate-400' : (Math.abs(drift) <= 3.0 ? 'text-emerald-400' : (drift < 0 ? 'text-blue-400' : 'text-amber-400'));
+                    const driftSign = drift > 0 ? '+' : '';
+                    const statusHtml = r.auto_applied 
+                        ? '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950/60 text-emerald-400 border border-emerald-800">Automatisch</span>'
+                        : '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-950/60 text-amber-400 border border-amber-800">Ter Beoordeling</span>';
+
+                    return `
+                        <tr class="hover:bg-slate-800/30 transition">
+                            <td class="py-2.5 font-bold text-white">${r.name}</td>
+                            <td class="py-2.5 text-center text-slate-400 font-mono">${r.current_value} <span class="text-[10px] text-slate-500">${r.unit}</span></td>
+                            <td class="py-2.5 text-center font-bold text-white font-mono">${r.proposed_value} <span class="text-[10px] text-slate-500">${r.unit}</span></td>
+                            <td class="py-2.5 text-center font-bold ${driftColor} font-mono">${driftSign}${drift}%</td>
+                            <td class="py-2.5 text-[11px] text-slate-400 font-sans">${r.evidence || '--'}</td>
+                            <td class="py-2.5 text-right font-mono">${statusHtml}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.warn('Error loading recommendations:', e);
+            }
+        }
+
+        async function acceptRecommendations() {
+            const btn = document.getElementById('btn-recs-accept');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch('./api/model/recommendations/accept', { method: 'POST' });
+                if (res.ok) {
+                    showToast('Aanbevelingen geaccepteerd en geactiveerd!', 'success');
+                    loadModelRecommendations();
+                    loadAnalytics();
+                } else {
+                    showToast('Fout bij accepteren van aanbevelingen', 'error');
+                }
+            } catch (e) {
+                showToast('Verbindingsfout: ' + e, 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function rejectRecommendations() {
+            const btn = document.getElementById('btn-recs-reject');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch('./api/model/recommendations/reject', { method: 'POST' });
+                if (res.ok) {
+                    showToast('Aanbevelingen afgewezen; actieve parameters behouden.', 'info');
+                    loadModelRecommendations();
+                } else {
+                    showToast('Fout bij afwijzen van aanbevelingen', 'error');
+                }
+            } catch (e) {
+                showToast('Verbindingsfout: ' + e, 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
         async function retrainModelNow() {
             const btn = document.getElementById('btn-retrain-model');
             if (btn) {
@@ -9107,21 +9463,22 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 btn.innerHTML = '<span class="animate-spin inline-block mr-1">⏳</span> Bezig met trainen...';
             }
             try {
+                const rw = parseInt(document.getElementById('select-rolling-window')?.value || '90', 10);
                 const res = await fetch('./api/model/retrain', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({days: 180})
+                    body: JSON.stringify({days: rw})
                 });
                 const out = await res.json();
                 if (out.status === 'success') {
-                    alert(`✅ Model succesvol herberekend!\n\n• R² Correlatie: ${out.metrics?.r_squared || 0.783}\n• Gebouw UA: ${Math.round(out.building_ua_w_per_k || 321)} W/K\n• Nacht baseload: ${Math.round(out.night_baseload_w || 265)} W`);
-                    await loadModelDashboard();
+                    showToast('✅ Model succesvol herberekend en aanbevelingen bijgewerkt!', 'success');
+                    await loadModelRecommendations();
                     loadChartData();
                 } else {
-                    alert(`Fout bij trainen: ${out.message}`);
+                    showToast(`Fout bij trainen: ${out.message}`, 'error');
                 }
             } catch (e) {
-                alert(`Netwerkfout bij trainen: ${e}`);
+                showToast(`Netwerkfout bij trainen: ${e}`, 'error');
             } finally {
                 if (btn) {
                     btn.disabled = false;
@@ -9149,33 +9506,154 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             }
         }
 
-        async function retrainModelNow() {
-            const btn = document.getElementById('btn-retrain-model');
-            if (btn) {
-                btn.disabled = true;
-                btn.innerHTML = '<span class="animate-spin inline-block mr-1">⏳</span> Bezig met trainen...';
-            }
+        async 
+        // =========================================================================
+        // MODEL GOVERNANCE & ALGORITHM HYPERPARAMETER STEERING JS
+        // =========================================================================
+        function updateLearningRateLabel(val) {
+            const el = document.getElementById('label-learning-rate');
+            if (el) el.textContent = `${val}%`;
+        }
+
+        function updateAutoAcceptLabel(val) {
+            const el = document.getElementById('label-auto-accept');
+            if (el) el.textContent = `&plusmn;${Number(val).toFixed(1)}%`;
+        }
+
+        async function loadAlgorithmConfig() {
             try {
-                const res = await fetch('/api/model/retrain', {
+                const res = await fetch('./api/model/algorithm-config');
+                if (!res.ok) return;
+                const d = await res.json();
+                const lr = Math.round((d.learning_rate_ewma || 0.05) * 100);
+                const sLr = document.getElementById('slider-learning-rate');
+                if (sLr) { sLr.value = lr; updateLearningRateLabel(lr); }
+
+                const rw = d.rolling_window_days || 90;
+                const sRw = document.getElementById('select-rolling-window');
+                if (sRw) sRw.value = String(rw);
+
+                const aa = d.auto_accept_max_drift_pct !== undefined ? d.auto_accept_max_drift_pct : 3.0;
+                const sAa = document.getElementById('slider-auto-accept');
+                if (sAa) { sAa.value = aa; updateAutoAcceptLabel(aa); }
+            } catch (e) {
+                console.warn('Error loading algorithm config:', e);
+            }
+        }
+
+        async function saveAlgorithmConfig() {
+            const btn = document.getElementById('btn-save-algo');
+            if (btn) btn.disabled = true;
+            try {
+                const lr = Number(document.getElementById('slider-learning-rate').value) / 100.0;
+                const rw = parseInt(document.getElementById('select-rolling-window').value, 10);
+                const aa = Number(document.getElementById('slider-auto-accept').value);
+
+                const res = await fetch('./api/model/algorithm-config', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({days: 180})
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        learning_rate_ewma: lr,
+                        rolling_window_days: rw,
+                        auto_accept_max_drift_pct: aa
+                    })
                 });
-                const out = await res.json();
-                if (out.status === 'success') {
-                    alert(`✅ Model succesvol herberekend!\n\n• R² Correlatie: ${out.metrics?.r_squared || 0.783}\n• Gebouw UA: ${Math.round(out.building_ua_w_per_k || 321)} W/K\n• Nacht baseload: ${Math.round(out.night_baseload_w || 265)} W`);
-                    await loadModelDashboard();
-                    loadChartData();
+                if (res.ok) {
+                    showToast('Algoritme instellingen opgeslagen!', 'success');
+                    loadModelRecommendations();
                 } else {
-                    alert(`Fout bij trainen: ${out.message}`);
+                    showToast('Fout bij opslaan algoritme instellingen', 'error');
                 }
             } catch (e) {
-                alert(`Netwerkfout bij trainen: ${e}`);
+                showToast('Verbindingsfout: ' + e, 'error');
             } finally {
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> <span>Herbereken & Train Model</span>';
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function loadModelRecommendations() {
+            const tBody = document.getElementById('recs-table-body');
+            const badge = document.getElementById('recs-status-badge');
+            if (!tBody) return;
+            try {
+                const res = await fetch('./api/model/recommendations');
+                if (!res.ok) return;
+                const d = await res.json();
+                const recs = d.recommendations || [];
+                if (recs.length === 0) {
+                    tBody.innerHTML = '<tr><td colspan="6" class="py-4 text-center text-slate-500">Nog geen kalibratie-aanbevelingen beschikbaar.</td></tr>';
+                    return;
                 }
+
+                const isPending = (d.status === 'pending_review');
+                if (badge) {
+                    if (isPending) {
+                        badge.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse';
+                        badge.textContent = 'Actie Vereist (Voorstellen Klaar)';
+                    } else {
+                        badge.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+                        badge.textContent = 'Up-to-date (Geaccepteerd)';
+                    }
+                }
+
+                tBody.innerHTML = recs.map(r => {
+                    const drift = Number(r.drift_pct || 0);
+                    const driftColor = drift === 0 ? 'text-slate-400' : (Math.abs(drift) <= 3.0 ? 'text-emerald-400' : (drift < 0 ? 'text-blue-400' : 'text-amber-400'));
+                    const driftSign = drift > 0 ? '+' : '';
+                    const statusHtml = r.auto_applied 
+                        ? '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950/60 text-emerald-400 border border-emerald-800">Automatisch</span>'
+                        : '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-950/60 text-amber-400 border border-amber-800">Ter Beoordeling</span>';
+
+                    return `
+                        <tr class="hover:bg-slate-800/30 transition">
+                            <td class="py-2.5 font-bold text-white">${r.name}</td>
+                            <td class="py-2.5 text-center text-slate-400 font-mono">${r.current_value} <span class="text-[10px] text-slate-500">${r.unit}</span></td>
+                            <td class="py-2.5 text-center font-bold text-white font-mono">${r.proposed_value} <span class="text-[10px] text-slate-500">${r.unit}</span></td>
+                            <td class="py-2.5 text-center font-bold ${driftColor} font-mono">${driftSign}${drift}%</td>
+                            <td class="py-2.5 text-[11px] text-slate-400 font-sans">${r.evidence || '--'}</td>
+                            <td class="py-2.5 text-right font-mono">${statusHtml}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.warn('Error loading recommendations:', e);
+            }
+        }
+
+        async function acceptRecommendations() {
+            const btn = document.getElementById('btn-recs-accept');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch('./api/model/recommendations/accept', { method: 'POST' });
+                if (res.ok) {
+                    showToast('Aanbevelingen geaccepteerd en geactiveerd!', 'success');
+                    loadModelRecommendations();
+                    loadAnalytics();
+                } else {
+                    showToast('Fout bij accepteren van aanbevelingen', 'error');
+                }
+            } catch (e) {
+                showToast('Verbindingsfout: ' + e, 'error');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function rejectRecommendations() {
+            const btn = document.getElementById('btn-recs-reject');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch('./api/model/recommendations/reject', { method: 'POST' });
+                if (res.ok) {
+                    showToast('Aanbevelingen afgewezen; actieve parameters behouden.', 'info');
+                    loadModelRecommendations();
+                } else {
+                    showToast('Fout bij afwijzen van aanbevelingen', 'error');
+                }
+            } catch (e) {
+                showToast('Verbindingsfout: ' + e, 'error');
+            } finally {
+                if (btn) btn.disabled = false;
             }
         }
 
