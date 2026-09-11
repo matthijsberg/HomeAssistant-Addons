@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.79.1
+Version: 0.79.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1887,7 +1887,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.79.1",
+                "version": "0.79.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3601,7 +3601,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.79.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.79.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5619,6 +5619,71 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         let currentPolicyParams = {};
         let activeTabId = 'analytics';
         let predictionResolution = '1h';
+
+// =========================================================================
+        // SUBTLE INTERACTIVE INFO POPOVERS (TOUCH & CLICK FRIENDLY)
+        // =========================================================================
+        const infoPopovers = {
+            'col_param': 'Fysische en gedragsmatige eigenschappen van de woning, warmtepomp en installatie die door het zelflerende model worden gekalibreerd.',
+            'col_active': 'De actieve parameterwaarde waarmee Open HEMS op dit moment live de 24-uurs dispatch en energiegrafieken doorrekent.',
+            'col_proposed': 'De nieuw berekende waarde uit de OLS-regressie over InfluxDB telemetrie over de gekozen geheugenhorizon (30, 90 of 365 dagen).',
+            'col_drift': 'Het procentuele verschil tussen de actieve parameter en het nieuwe voorstel. Groen = binnen drempel (< 3%), Blauw = daling, Oranje = stijging.',
+            'col_evidence': 'De statistische bron, steekproefgrootte en wiskundige methode (bijv. OLS regressie over stookdagen, 230 winterruns, nachtmediaan).',
+            'col_status': "'Automatisch' = afwijking valt binnen de drempel (±3%) en is direct via EWMA toegepast. 'Ter Beoordeling' = vereist handmatige goedkeuring via 'Accepteren'.",
+            'param_building_ua': 'Totale transmissie- en infiltratieverlies van het huis per graad temperatuurverschil (W/K). Hoe lager de UA, hoe beter de isolatie en hoe trager de woning afkoelt.',
+            'param_heating_modulation': 'Daikin Altherma inverter vermogensformule (Watt elektrisch o.b.v. buitentemperatuur) gebaseerd op 230 werkelijke winterruns in InfluxDB.',
+            'param_night_baseload': 'De continue nachtelijke basislast van het huis (01:00-05:00u) voor standby, netwerk, ventilatie en domotica.',
+            'param_dhw_standby': 'Thermisch stilstandsverlies van de 350L boiler door de isolatiemantel (~0,18°C/uur afkoeling) naar de omgeving.',
+            'status_auto': 'Automatisch doorgevoerd: de afwijking valt binnen de ingestelde auto-accept drempel en is direct via de leersnelheid (EWMA) in het actieve rekenmodel bijgesteld.',
+            'status_review': "Ter beoordeling: de afwijking overschrijdt de drempel. Klik rechtsonder op 'Accepteren & Toepassen' om deze wijziging te bekrachtigen.",
+            'status_accepted': 'Handmatig geaccepteerd: door jou goedgekeurd en geactiveerd in het actieve rekenmodel.',
+            'val_overlay_info': 'Model Validatie legt het voorspelde profiel (gestreept) direct over de werkelijk geregistreerde meters (massief) heen. Zo zie je exact waar het model accuraat is en waar leerafwijkingen ontstaan.'
+        };
+
+        function toggleInfoPopover(e, key) {
+            if (e) {
+                e.stopPropagation();
+                e.preventDefault();
+            }
+            const text = infoPopovers[key] || '';
+            if (!text) return;
+
+            let pop = document.getElementById('open-hems-popover');
+            if (pop && pop.__currentKey === key && !pop.classList.contains('hidden')) {
+                pop.classList.add('hidden');
+                return;
+            }
+            if (!pop) {
+                pop = document.createElement('div');
+                pop.id = 'open-hems-popover';
+                pop.className = 'fixed z-50 max-w-xs bg-[#0B0F17] border border-slate-700 text-slate-200 text-xs p-3 rounded-xl shadow-2xl backdrop-blur-md leading-relaxed transition-all duration-200';
+                document.body.appendChild(pop);
+                document.addEventListener('click', (evt) => {
+                    if (pop && !pop.contains(evt.target)) {
+                        pop.classList.add('hidden');
+                    }
+                });
+            }
+            pop.__currentKey = key;
+            pop.innerHTML = `<div class="flex items-start gap-2.5">
+                <span class="w-4 h-4 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-700/60 flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">i</span>
+                <div class="text-[11px] text-slate-300 font-sans leading-relaxed">${text}</div>
+            </div>`;
+            pop.classList.remove('hidden');
+
+            const targetEl = e ? e.currentTarget : null;
+            if (targetEl) {
+                const rect = targetEl.getBoundingClientRect();
+                let top = rect.bottom + 6;
+                let left = rect.left - 15;
+                if (left + 290 > window.innerWidth) {
+                    left = window.innerWidth - 300;
+                }
+                if (left < 12) left = 12;
+                pop.style.top = `${top}px`;
+                pop.style.left = `${left}px`;
+            }
+        }
 
         function setPowerProducersType(type) {
             powerProducersChartType = type;
@@ -8375,7 +8440,6 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         var validationResolution = '15m'; // '15m', '1h'
         var validationDataCache = null;
 
-        infoPopovers['val_overlay_info'] = 'Model Validatie legt het voorspelde profiel (gestreept) direct over de werkelijk geregistreerde meters (massief) heen. Zo zie je exact waar het model accuraat is en waar leerafwijkingen ontstaan.';
 
         function setValidationComponent(comp) {
             validationComponent = comp;
@@ -9846,71 +9910,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         // TOAST NOTIFICATIONS & MODEL GOVERNANCE STEERING JS
         // =========================================================================
         
-        // =========================================================================
-        // SUBTLE INTERACTIVE INFO POPOVERS (TOUCH & CLICK FRIENDLY)
-        // =========================================================================
-        const infoPopovers = {
-            'col_param': 'Fysische en gedragsmatige eigenschappen van de woning, warmtepomp en installatie die door het zelflerende model worden gekalibreerd.',
-            'col_active': 'De actieve parameterwaarde waarmee Open HEMS op dit moment live de 24-uurs dispatch en energiegrafieken doorrekent.',
-            'col_proposed': 'De nieuw berekende waarde uit de OLS-regressie over InfluxDB telemetrie over de gekozen geheugenhorizon (30, 90 of 365 dagen).',
-            'col_drift': 'Het procentuele verschil tussen de actieve parameter en het nieuwe voorstel. Groen = binnen drempel (< 3%), Blauw = daling, Oranje = stijging.',
-            'col_evidence': 'De statistische bron, steekproefgrootte en wiskundige methode (bijv. OLS regressie over stookdagen, 230 winterruns, nachtmediaan).',
-            'col_status': "'Automatisch' = afwijking valt binnen de drempel (±3%) en is direct via EWMA toegepast. 'Ter Beoordeling' = vereist handmatige goedkeuring via 'Accepteren'.",
-            'param_building_ua': 'Totale transmissie- en infiltratieverlies van het huis per graad temperatuurverschil (W/K). Hoe lager de UA, hoe beter de isolatie en hoe trager de woning afkoelt.',
-            'param_heating_modulation': 'Daikin Altherma inverter vermogensformule (Watt elektrisch o.b.v. buitentemperatuur) gebaseerd op 230 werkelijke winterruns in InfluxDB.',
-            'param_night_baseload': 'De continue nachtelijke basislast van het huis (01:00-05:00u) voor standby, netwerk, ventilatie en domotica.',
-            'param_dhw_standby': 'Thermisch stilstandsverlies van de 350L boiler door de isolatiemantel (~0,18°C/uur afkoeling) naar de omgeving.',
-            'status_auto': 'Automatisch doorgevoerd: de afwijking valt binnen de ingestelde auto-accept drempel en is direct via de leersnelheid (EWMA) in het actieve rekenmodel bijgesteld.',
-            'status_review': "Ter beoordeling: de afwijking overschrijdt de drempel. Klik rechtsonder op 'Accepteren & Toepassen' om deze wijziging te bekrachtigen.",
-            'status_accepted': 'Handmatig geaccepteerd: door jou goedgekeurd en geactiveerd in het actieve rekenmodel.'
-        };
 
-        function toggleInfoPopover(e, key) {
-            if (e) {
-                e.stopPropagation();
-                e.preventDefault();
-            }
-            const text = infoPopovers[key] || '';
-            if (!text) return;
-
-            let pop = document.getElementById('open-hems-popover');
-            if (pop && pop.__currentKey === key && !pop.classList.contains('hidden')) {
-                pop.classList.add('hidden');
-                return;
-            }
-            if (!pop) {
-                pop = document.createElement('div');
-                pop.id = 'open-hems-popover';
-                pop.className = 'fixed z-50 max-w-xs bg-[#0B0F17] border border-slate-700 text-slate-200 text-xs p-3 rounded-xl shadow-2xl backdrop-blur-md leading-relaxed transition-all duration-200';
-                document.body.appendChild(pop);
-                document.addEventListener('click', (evt) => {
-                    if (pop && !pop.contains(evt.target)) {
-                        pop.classList.add('hidden');
-                    }
-                });
-            }
-            pop.__currentKey = key;
-            pop.innerHTML = `<div class="flex items-start gap-2.5">
-                <span class="w-4 h-4 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-700/60 flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">i</span>
-                <div class="text-[11px] text-slate-300 font-sans leading-relaxed">${text}</div>
-            </div>`;
-            pop.classList.remove('hidden');
-
-            const targetEl = e ? e.currentTarget : null;
-            if (targetEl) {
-                const rect = targetEl.getBoundingClientRect();
-                let top = rect.bottom + 6;
-                let left = rect.left - 15;
-                if (left + 290 > window.innerWidth) {
-                    left = window.innerWidth - 300;
-                }
-                if (left < 12) left = 12;
-                pop.style.top = `${top}px`;
-                pop.style.left = `${left}px`;
-            }
-        }
-
-        function showToast(msg, type = 'info') {
+                function showToast(msg, type = 'info') {
             let toast = document.getElementById('open-hems-toast');
             if (!toast) {
                 toast = document.createElement('div');
