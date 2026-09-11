@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.52.0
+Version: 0.52.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -63,6 +63,59 @@ PARAMS_FILE = Path("/config/heatpump_model_parameters.json")
 CACHE_FILE = Path("/config/data/energy_feed_cache.json")
 HA_API_CONFIG = Path("/config/.ha_api_config.json")
 SECRETS_FILE = Path("/config/open_hems_secrets.json")
+
+def calculate_poa_solar_kw(
+    dt_ams: datetime,
+    ghi_w_m2: float,
+    kwp: float = 5.76,
+    tilt_deg: float = 34.0,
+    azimuth_deg: float = 225.0,
+    inverter_limit_kw: float = 5.5,
+    eff: float = 0.88,
+    lat: float = 51.9537,
+    lon: float = 5.232
+) -> float:
+    """Calculates Plane-of-Array (POA) solar generation in AC kW based on NOAA solar geometry."""
+    if ghi_w_m2 <= 1.0:
+        return 0.0
+    doy = dt_ams.timetuple().tm_yday
+    decl = math.radians(23.45 * math.sin(math.radians(360.0 * (284.0 + doy) / 365.0)))
+    b = math.radians(360.0 * (doy - 81) / 364.0)
+    eot = 9.87 * math.sin(2 * b) - 7.53 * math.cos(b) - 1.5 * math.sin(b)
+    tz_offset = dt_ams.utcoffset().total_seconds() / 3600.0 if dt_ams.utcoffset() else 2.0
+    solar_time_h = dt_ams.hour + dt_ams.minute / 60.0 + dt_ams.second / 3600.0 + (4.0 * lon + eot) / 60.0 - tz_offset
+    omega = math.radians((solar_time_h - 12.0) * 15.0)
+    lat_r = math.radians(lat)
+    sin_alpha = math.sin(lat_r) * math.sin(decl) + math.cos(lat_r) * math.cos(decl) * math.cos(omega)
+    alpha = math.asin(max(-1.0, min(1.0, sin_alpha)))
+    cos_alpha = math.cos(alpha)
+    if math.degrees(alpha) <= 1.0:
+        return 0.0
+    cos_az = (math.sin(decl) * math.cos(lat_r) - math.cos(decl) * math.sin(lat_r) * math.cos(omega)) / max(0.001, cos_alpha)
+    cos_az = max(-1.0, min(1.0, cos_az))
+    az_deg = math.degrees(math.acos(cos_az))
+    if omega > 0:
+        az_deg = 360.0 - az_deg
+    beta_r = math.radians(tilt_deg)
+    gamma_diff_r = math.radians(az_deg - azimuth_deg)
+    cos_aoi = math.cos(alpha) * math.sin(beta_r) * math.cos(gamma_diff_r) + math.sin(alpha) * math.cos(beta_r)
+    kt = min(1.0, ghi_w_m2 / (1367.0 * max(0.05, math.sin(alpha))))
+    if kt <= 0.22:
+        df_frac = 1.0 - 0.09 * kt
+    elif kt <= 0.80:
+        df_frac = 0.9511 - 0.1604 * kt + 4.388 * (kt**2) - 16.638 * (kt**3) + 12.336 * (kt**4)
+    else:
+        df_frac = 0.165
+    diffuse_horiz = ghi_w_m2 * max(0.15, min(1.0, df_frac))
+    direct_horiz = max(0.0, ghi_w_m2 - diffuse_horiz)
+    direct_normal = direct_horiz / max(0.05, math.sin(alpha))
+    poa_beam = direct_normal * max(0.0, cos_aoi)
+    poa_diffuse = diffuse_horiz * (1.0 + math.cos(beta_r)) / 2.0
+    poa_ground = ghi_w_m2 * 0.20 * (1.0 - math.cos(beta_r)) / 2.0
+    poa_total = max(0.0, poa_beam + poa_diffuse + poa_ground)
+    p_dc = (poa_total / 1000.0) * kwp * eff
+    return round(min(inverter_limit_kw, p_dc), 3)
+
 
 
 def load_secrets() -> dict:
@@ -616,16 +669,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         m_data = json.loads(r_m.read().decode())
                         m_times = m_data.get("hourly", {}).get("time", [])
                         m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
-                        for t, rad in zip(m_times, m_rads):
-                            k_t = t.replace('T', ' ')[:13] + ':00'
-                            s_cfg = load_json(CONFIG_FILE).get("solar", {})
+                        s_cfg = load_json(CONFIG_FILE).get("solar", {})
                         s_kwp = float(s_cfg.get("kwp", 5.76))
                         s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
                         s_tilt = float(s_cfg.get("tilt_degrees", 34))
                         s_az = float(s_cfg.get("azimuth_degrees", 225))
                         s_eff = float(s_cfg.get("efficiency_factor", 0.88))
-                        dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
-                        solar_hourly[k_t] = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
+                        for t, rad in zip(m_times, m_rads):
+                            k_t = t.replace('T', ' ')[:13] + ':00'
+                            dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
+                            solar_hourly[k_t] = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
                 except Exception as e_m:
                     print(f"Warning fetching Open-Meteo solar forecast: {e_m}")
 
@@ -1413,7 +1466,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.52.0",
+                "version": "0.52.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1704,14 +1757,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     m_temps = m_data.get("hourly", {}).get("temperature_2m", [])
                     m_winds = m_data.get("hourly", {}).get("wind_speed_10m", [])
                     m_rhs = m_data.get("hourly", {}).get("relative_humidity_2m", [])
+                    s_cfg = load_json(CONFIG_FILE).get("solar", {})
+                    s_kwp = float(s_cfg.get("kwp", 5.76))
+                    s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
+                    s_tilt = float(s_cfg.get("tilt_degrees", 34))
+                    s_az = float(s_cfg.get("azimuth_degrees", 225))
+                    s_eff = float(s_cfg.get("efficiency_factor", 0.88))
                     for t, rad, tmp, wnd, rh in zip(m_times, m_rads, m_temps, m_winds, m_rhs):
                         k_t = t.replace('T', ' ')[:13] + ':00'
-                        s_cfg = load_json(CONFIG_FILE).get("solar", {})
-                        s_kwp = float(s_cfg.get("kwp", 5.76))
-                        s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
-                        s_tilt = float(s_cfg.get("tilt_degrees", 34))
-                        s_az = float(s_cfg.get("azimuth_degrees", 225))
-                        s_eff = float(s_cfg.get("efficiency_factor", 0.88))
                         dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
                         solar_map[k_t] = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
                         temp_map[k_t] = round(float(tmp), 1)
@@ -2855,7 +2908,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.52.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.52.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
