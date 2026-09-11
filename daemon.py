@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.76.0
+Version: 0.77.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1704,7 +1704,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.76.0",
+                "version": "0.77.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3418,7 +3418,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.76.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.77.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4624,13 +4624,43 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <div class="overflow-x-auto">
                                 <table class="w-full text-left text-xs font-mono">
                                     <thead>
-                                        <tr class="text-[10px] uppercase text-slate-400 border-b border-slate-800/60 pb-2">
-                                            <th class="py-2">Fysische Parameter</th>
-                                            <th class="py-2 text-center">Huidig Actief</th>
-                                            <th class="py-2 text-center">Nieuw Voorstel</th>
-                                            <th class="py-2 text-center">Drift (%)</th>
-                                            <th class="py-2">Onderbouwing</th>
-                                            <th class="py-2 text-right">Status</th>
+                                        <tr class="text-[10px] uppercase text-slate-400 border-b border-slate-800/60 pb-2 font-mono select-none">
+                                            <th class="py-2">
+                                                <span class="inline-flex items-center gap-1">
+                                                    <span>Fysische Parameter</span>
+                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="Fysische en gedragsmatige eigenschappen van de woning, warmtepomp en installatie die door het zelflerende model worden gekalibreerd.">ℹ️</span>
+                                                </span>
+                                            </th>
+                                            <th class="py-2 text-center">
+                                                <span class="inline-flex items-center justify-center gap-1">
+                                                    <span>Huidig Actief</span>
+                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="De actieve parameterwaarde waarmee Open HEMS op dit moment live de 24-uurs dispatch en energiegrafieken doorrekent.">ℹ️</span>
+                                                </span>
+                                            </th>
+                                            <th class="py-2 text-center">
+                                                <span class="inline-flex items-center justify-center gap-1">
+                                                    <span>Nieuw Voorstel</span>
+                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="De nieuw berekende waarde uit de OLS-regressie over InfluxDB telemetrie over de gekozen geheugenhorizon (30, 90 of 365 dagen).">ℹ️</span>
+                                                </span>
+                                            </th>
+                                            <th class="py-2 text-center">
+                                                <span class="inline-flex items-center justify-center gap-1">
+                                                    <span>Drift (%)</span>
+                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="Het procentuele verschil tussen de actieve parameter en het nieuwe voorstel. Groen = binnen drempel (< 3%), Blauw = lichte daling, Oranje = stijging.">ℹ️</span>
+                                                </span>
+                                            </th>
+                                            <th class="py-2">
+                                                <span class="inline-flex items-center gap-1">
+                                                    <span>Onderbouwing</span>
+                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="De statistische bron, steekproefgrootte en wiskundige methode (bijv. OLS regressie over stookdagen, 230 winterruns, nachtmediaan).">ℹ️</span>
+                                                </span>
+                                            </th>
+                                            <th class="py-2 text-right">
+                                                <span class="inline-flex items-center justify-end gap-1">
+                                                    <span>Status</span>
+                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="'Automatisch' = afwijking valt binnen de auto-accept drempel (±3%) en is direct via EWMA toegepast. 'Ter Beoordeling' = afwijking is groter dan de drempel en vereist handmatige goedkeuring via 'Accepteren'.">ℹ️</span>
+                                                </span>
+                                            </th>
                                         </tr>
                                     </thead>
                                     <tbody id="recs-table-body" class="divide-y divide-slate-800/50 text-slate-300">
@@ -4642,7 +4672,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                         <!-- Action Buttons Bar -->
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-800/80">
-                            <span class="text-[11px] text-slate-400 font-sans" id="recs-info-footer">Klik op Accepteren om de voorgestelde waarden per direct te activeren.</span>
+                            <div class="flex flex-col gap-0.5" id="recs-info-footer">
+                                <span class="text-[11px] text-slate-300 font-sans font-medium">💡 <strong>Wat betekent Automatisch?</strong> Wijzigingen binnen de drempel (&plusmn;3%) worden geruisloos via de leersnelheid (EWMA) toegepast.</span>
+                                <span class="text-[10px] text-slate-400 font-sans">Grotere afwijkingen (zoals een sprong in nachtverbruik) komen op 'Ter Beoordeling' te staan totdat je op 'Accepteren &amp; Toepassen' klikt.</span>
+                            </div>
                             <div class="flex items-center gap-2">
                                 <button onclick="rejectRecommendations()" id="btn-recs-reject" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-xl font-medium border border-slate-700 transition">
                                     Afwijzen
@@ -9421,22 +9454,43 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     }
                 }
 
+                const paramDescriptions = {
+                    'building_ua': 'Totale transmissie- en infiltratieverlies van het huis per graad temperatuurverschil (W/K). Hoe lager de UA, hoe beter de isolatie en hoe trager de woning afkoelt.',
+                    'heating_modulation': 'Daikin Altherma inverter vermogensformule (Watt elektrisch o.b.v. buitentemperatuur) gebaseerd op 230 werkelijke winterruns in InfluxDB.',
+                    'night_baseload': 'De continue nachtelijke basislast van het huis (01:00-05:00u) voor standby, netwerk, ventilatie en domotica.',
+                    'dhw_standby': 'Thermisch stilstandsverlies van de 350L boiler door de isolatiemantel (~0,18°C/uur) naar de omgeving.'
+                };
+
+                const thresholdVal = d.auto_accept_max_drift_pct !== undefined ? d.auto_accept_max_drift_pct : 3.0;
+
                 tBody.innerHTML = recs.map(r => {
                     const drift = Number(r.drift_pct || 0);
-                    const driftColor = drift === 0 ? 'text-slate-400' : (Math.abs(drift) <= 3.0 ? 'text-emerald-400' : (drift < 0 ? 'text-blue-400' : 'text-amber-400'));
+                    const driftColor = drift === 0 ? 'text-slate-400' : (Math.abs(drift) <= thresholdVal ? 'text-emerald-400' : (drift < 0 ? 'text-blue-400' : 'text-amber-400'));
                     const driftSign = drift > 0 ? '+' : '';
-                    const statusHtml = r.auto_applied 
-                        ? '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950/60 text-emerald-400 border border-emerald-800">Automatisch</span>'
-                        : '<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-950/60 text-amber-400 border border-amber-800">Ter Beoordeling</span>';
+                    const desc = paramDescriptions[r.id] || 'Fysische modelparameter gekalibreerd via telemetrie.';
+
+                    let statusBadge = '';
+                    if (d.status === 'accepted') {
+                        statusBadge = `<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-blue-950/70 text-blue-300 border border-blue-800 cursor-help" title="Handmatig geaccepteerd: door jou goedgekeurd en bekrachtigd in het actieve rekenmodel.">Geaccepteerd ℹ️</span>`;
+                    } else if (r.auto_applied) {
+                        statusBadge = `<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950/70 text-emerald-400 border border-emerald-800 cursor-help" title="Automatisch doorgevoerd: de afwijking (${driftSign}${drift}%) valt binnen jouw auto-accept drempel (±${thresholdVal}%) en is via de leersnelheid (EWMA) direct in het model bijgesteld.">Automatisch ℹ️</span>`;
+                    } else {
+                        statusBadge = `<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-950/70 text-amber-300 border border-amber-800 cursor-help" title="Ter beoordeling: de afwijking (${driftSign}${drift}%) overschrijdt de drempel (±${thresholdVal}%). Klik op 'Accepteren & Toepassen' om deze wijziging te bekrachtigen.">Ter Beoordeling ℹ️</span>`;
+                    }
 
                     return `
                         <tr class="hover:bg-slate-800/30 transition">
-                            <td class="py-2.5 font-bold text-white">${r.name}</td>
+                            <td class="py-2.5 font-bold text-white">
+                                <span class="inline-flex items-center gap-1.5">
+                                    <span>${r.name}</span>
+                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="${desc}">ℹ️</span>
+                                </span>
+                            </td>
                             <td class="py-2.5 text-center text-slate-400 font-mono">${r.current_value} <span class="text-[10px] text-slate-500">${r.unit}</span></td>
                             <td class="py-2.5 text-center font-bold text-white font-mono">${r.proposed_value} <span class="text-[10px] text-slate-500">${r.unit}</span></td>
                             <td class="py-2.5 text-center font-bold ${driftColor} font-mono">${driftSign}${drift}%</td>
                             <td class="py-2.5 text-[11px] text-slate-400 font-sans">${r.evidence || '--'}</td>
-                            <td class="py-2.5 text-right font-mono">${statusHtml}</td>
+                            <td class="py-2.5 text-right font-mono">${statusBadge}</td>
                         </tr>
                     `;
                 }).join('');
