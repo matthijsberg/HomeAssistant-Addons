@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.57.0
+Version: 0.58.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1494,7 +1494,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.57.0",
+                "version": "0.58.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -1965,15 +1965,34 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             if not is_daytime_focus and dhw_decision:
                 needs_night_charge = (dhw_decision.get("status") == "SCHEDULE_NIGHT_CHARGE")
 
-            # Check free net solar surplus TODAY (after deducting unallocated baseline load)
+            # Dynamic Economic Arbitrage for DHW 60°C Solar Buffer Boost:
             daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
             today_daylight_slots = [it for it in daylight_slots if it["dt"].day == now_ams.day]
             tot_net_surplus_kwh = sum(max(0.0, it["solar"] - unallocated[it["idx"]]) for it in today_daylight_slots) * (0.25 if is_15m else 1.0)
             peak_net_surplus_kw = max((max(0.0, it["solar"] - unallocated[it["idx"]]) for it in today_daylight_slots), default=0.0)
 
-            # Solar Buffer Boost (60°C) is ONLY eligible if there is genuinely substantial FREE solar surplus (>= 3.0 kWh and >= 1.8 kW peak surplus).
-            # Otherwise, heat efficiently to 50°C to avoid pulling expensive grid power at poor COP!
-            is_solar_boost_eligible = (tot_net_surplus_kwh >= 3.0 and peak_net_surplus_kw >= 1.8)
+            # Electricity required to boost 350L from 50°C to 60°C (+4.07 kWh_th at COP 2.15)
+            el_boost_needed_kwh = 1.89
+            solar_used_kwh = min(el_boost_needed_kwh, tot_net_surplus_kwh)
+            grid_import_kwh = max(0.0, el_boost_needed_kwh - solar_used_kwh)
+
+            # Midday dynamic import & export pricing
+            midday_prices = [it["price"] for it in today_daylight_slots]
+            p_midday = (sum(midday_prices) / len(midday_prices)) if midday_prices else 0.28
+            p_export = max(0.0, (p_midday / 1.21) - 0.11085 - 0.0121)
+
+            # Future avoided electricity price (e.g. evening peak 18:00 - 22:00 or tomorrow)
+            evening_slots = [it for it in timeline_items if (18 <= it["dt"].hour <= 22)]
+            p_future_avoided = (sum(it["price"] for it in evening_slots) / len(evening_slots)) if evening_slots else 0.35
+
+            # Cost now: lost feed-in revenue of solar + actual grid import cost
+            cost_boost_now = (solar_used_kwh * p_export) + (grid_import_kwh * p_midday)
+            # Avoided future cost: 3.27 kWh_th carried over (after standby loss) heated at COP 2.85
+            cost_avoided_later = (3.27 / 2.85) * p_future_avoided
+            boost_net_saving_eur = round(cost_avoided_later - cost_boost_now, 3)
+
+            # DYNAMIC CRITERION: Boost to 60°C is profitable if net savings > 0 AND at least 0.8 kWh solar surplus anchors the run!
+            is_solar_boost_eligible = (boost_net_saving_eur > 0.02 and tot_net_surplus_kwh >= 0.8)
 
             planned_mode = "standby_normal"
             planned_mode_label = "Geen geforceerde run gepland"
@@ -2094,7 +2113,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "run_duration_min": slots_to_fill * (15 if is_15m else 60),
                 "power_kw": sww_power_kw,
                 "total_stroom_kwh": round(sww_power_kw * slots_to_fill * (0.25 if is_15m else 1.0), 2),
-                "spits_lockout_hours": 5.5
+                "spits_lockout_hours": 5.5,
+                "arbitrage_saving_eur": boost_net_saving_eur,
+                "arbitrage_p_midday": round(p_midday, 4),
+                "arbitrage_p_future": round(p_future_avoided, 4),
+                "arbitrage_surplus_kwh": round(tot_net_surplus_kwh, 2)
             }
 
             
@@ -3043,7 +3066,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.57.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.58.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
