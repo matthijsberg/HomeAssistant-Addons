@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.80.0
+Version: 0.80.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1912,7 +1912,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.80.0",
+                "version": "0.80.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3626,7 +3626,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.80.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.80.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -9633,7 +9633,78 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 const isBoostMode = (maxTempInTraj >= 53.0);
                 const ySuggestedMax = isBoostMode ? 64.0 : 55.0;
 
+                const unh = data.unheated_trajectory || {};
+                const unhTemps = unh.temperatures_c || [];
+                const unhP05 = unh.temperatures_p05_c || unhTemps;
+                const unhP95 = unh.temperatures_p95_c || unhTemps;
+
+                // Update Decision Box below chart
+                const dec = data.decision || {};
+                const boxPill = document.getElementById('dhw-box-status-pill');
+                if (boxPill) {
+                    if (dec.status === 'SCHEDULE_NIGHT_CHARGE') {
+                        boxPill.innerHTML = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Nachtlading Gepland (Comfortzekerheid)</span>';
+                    } else {
+                        boxPill.innerHTML = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Wachten op Daglading (Besparing)</span>';
+                    }
+                }
+                const dipValEl = document.getElementById('dhw-box-dip-val');
+                if (dipValEl && dec.morning_dip_c !== undefined) {
+                    dipValEl.innerText = `${dec.morning_dip_c}°C om ${dec.morning_dip_time || '09:44'}`;
+                }
+                const dipTextEl = document.getElementById('dhw-box-dip-text');
+                if (dipTextEl && dec.morning_dip_c !== undefined) {
+                    dipTextEl.innerText = `${dec.morning_dip_c}°C`;
+                }
+                const p95TextEl = document.getElementById('dhw-box-p95-text');
+                if (p95TextEl && dec.morning_dip_p95_c !== undefined) {
+                    p95TextEl.innerText = `${dec.morning_dip_p95_c}°C`;
+                }
+
                 const chartDatasets = [
+                    // Counterfactual Upper boundary: Zonder Nachtladen P05
+                    {
+                        label: 'Marge Zonder Nacht P05 (°C)',
+                        data: unhP05,
+                        yAxisID: 'y',
+                        borderColor: 'rgba(148, 163, 184, 0.25)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.0,
+                        borderDash: [2, 2],
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.25,
+                        order: 6
+                    },
+                    // Counterfactual Lower boundary: Zonder Nachtladen P95 with grey fill to P05
+                    {
+                        label: 'Marge Zonder Nachtladen',
+                        data: unhP95,
+                        yAxisID: 'y',
+                        borderColor: 'rgba(148, 163, 184, 0.35)',
+                        backgroundColor: 'rgba(148, 163, 184, 0.12)',
+                        borderWidth: 1.0,
+                        borderDash: [3, 3],
+                        fill: '-1',
+                        pointRadius: 0,
+                        tension: 0.25,
+                        order: 7
+                    },
+                    // Counterfactual Line: Zonder Nachtladen P50 (Light Slate Grey Dashed Line)
+                    {
+                        label: 'Zonder Nachtladen (°C)',
+                        data: unhTemps,
+                        yAxisID: 'y',
+                        borderColor: '#94A3B8',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2.2,
+                        borderDash: [5, 4],
+                        fill: false,
+                        tension: 0.25,
+                        order: 5,
+                        pointRadius: 0,
+                        pointHoverRadius: 5
+                    },
                     // 1. Upper boundary: Minimaal Verbruik P05
                     {
                         label: 'Minimaal Verbruik P05 (°C)',
