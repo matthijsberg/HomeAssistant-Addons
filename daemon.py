@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.61.0
+Version: 0.62.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1487,7 +1487,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.61.0",
+                "version": "0.62.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2038,15 +2038,26 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 planned_mode_label = "Geforceerd Aan: Standaard Dagrun (tot 50°C)"
                 reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh) om {best_sww_slot['label']}"
 
-            # Calculate required slots dynamically based on thermal mass so the tank ACTUALLY reaches sww_target_temp (50°C of 60°C)
-            c_tank_kwh_per_c = 350.0 * 4.186 / 3600.0  # 0.407 kWh/K
-            step_h = 0.25 if is_15m else 1.0
-            t_run_start_est = max(34.0, t_dhw_live - (sww_start_idx * step_h * 0.28))
-            delta_t_run = max(2.0, sww_target_temp - t_run_start_est)
-            cop_run_est = 2.85 if sww_target_temp <= 52.0 else 2.15
-            p_th_run_est = sww_power_kw * cop_run_est
-            hours_run_needed = (delta_t_run * c_tank_kwh_per_c) / p_th_run_est
-            slots_to_fill = max(2, math.ceil(hours_run_needed / step_h) + (1 if is_15m else 0))
+            # Check if tank is ALREADY at or above target temperature (warmtepomp has already run!)
+            tank_already_warm = (t_dhw_live >= (sww_target_temp - 0.8))
+            if tank_already_warm and not needs_night_charge:
+                # Target already achieved! Cancel any redundant daytime run!
+                planned_mode = "standby_normal"
+                planned_mode_label = f"Doeltemperatuur bereikt ({t_dhw_live:.1f}°C) — Standby"
+                reason = f"Boilervat is met {t_dhw_live:.1f}°C reeds op gewenste temperatuur (≥ {sww_target_temp:.0f}°C). Geen extra dagrun nodig."
+                sww_start_idx = -1
+                slots_to_fill = 0
+                sww_power_kw = 0.0
+            else:
+                # Calculate required slots dynamically based on thermal mass so the tank ACTUALLY reaches sww_target_temp (50°C of 60°C)
+                c_tank_kwh_per_c = 350.0 * 4.186 / 3600.0  # 0.407 kWh/K
+                step_h = 0.25 if is_15m else 1.0
+                t_run_start_est = max(34.0, t_dhw_live - (sww_start_idx * step_h * 0.28))
+                delta_t_run = max(2.0, sww_target_temp - t_run_start_est)
+                cop_run_est = 2.85 if sww_target_temp <= 52.0 else 2.15
+                p_th_run_est = sww_power_kw * cop_run_est
+                hours_run_needed = (delta_t_run * c_tank_kwh_per_c) / p_th_run_est
+                slots_to_fill = max(2, math.ceil(hours_run_needed / step_h) + (1 if is_15m else 0))
 
             # Fill boiler dispatch while enforcing STRICT PEAK LOCKOUTS
             for k in range(slots_to_fill):
@@ -3073,7 +3084,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.61.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.62.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -8432,8 +8443,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             },
                             y: {
                                 position: 'left',
-                                min: 35.0,
-                                max: 55.0,
+                                suggestedMin: 35.0,
+                                suggestedMax: 55.0,
+                                grace: '5%',
                                 title: {
                                     display: true,
                                     text: 'Boilertemperatuur (°C)',
