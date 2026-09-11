@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.70.0
+Version: 0.71.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1685,7 +1685,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.70.0",
+                "version": "0.71.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3330,7 +3330,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.70.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.71.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -8531,6 +8531,25 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 const d = await res.json();
                 if (!d.labels || d.labels.length === 0) return;
 
+                const isActive = (d.thermostat_active !== false);
+                const tSet = d.thermostat_setpoint_c || 20.0;
+                const tStart = d.thermostat_start_threshold_c || (tSet - 0.5);
+
+                const statusEl = document.getElementById('heating-kpi-status');
+                if (statusEl) {
+                    if (isActive) {
+                        statusEl.className = 'px-2.5 py-0.5 rounded-md text-[10px] font-bold border bg-emerald-950/60 border-emerald-500/40 text-emerald-300';
+                        statusEl.textContent = `Thermostaat: Aan (${tSet}°C)`;
+                    } else {
+                        statusEl.className = 'px-2.5 py-0.5 rounded-md text-[10px] font-bold border bg-slate-900 border-slate-700 text-slate-400';
+                        statusEl.textContent = `Thermostaat: Uit (0 W)`;
+                    }
+                }
+                const kwhEl = document.getElementById('heating-kpi-kwh');
+                if (kwhEl) kwhEl.textContent = `⚡ Stroom: ${d.total_electrical_kwh || 0} kWh`;
+                const costEl = document.getElementById('heating-kpi-cost');
+                if (costEl) costEl.textContent = `💶 Kosten: €${Number(d.total_cost_eur || 0).toFixed(2)}`;
+
                 const existingChart = Chart.getChart(canvas);
                 if (existingChart) {
                     existingChart.destroy();
@@ -8543,6 +8562,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 const thLoss = d.thermal_loss_kw || [];
                 const elKw = d.electrical_kw || [];
                 const costs = d.costs_eur || [];
+                const setpointLine = Array(labels.length).fill(tSet);
+                const startLine = Array(labels.length).fill(tStart);
 
                 const ctx = canvas.getContext('2d');
                 heatingForecastChartInstance = new Chart(ctx, {
@@ -8573,6 +8594,30 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 tension: 0.25,
                                 pointRadius: 0,
                                 order: 2
+                            },
+                            {
+                                label: `Thermostaat Setpoint (${tSet}°C)`,
+                                data: setpointLine,
+                                type: 'line',
+                                yAxisID: 'y_temp',
+                                borderColor: 'rgba(244, 63, 94, 0.6)',
+                                borderDash: [5, 5],
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.5,
+                                pointRadius: 0,
+                                order: 3
+                            },
+                            {
+                                label: `Inschakeldrempel (${tStart}°C)`,
+                                data: startLine,
+                                type: 'line',
+                                yAxisID: 'y_temp',
+                                borderColor: 'rgba(239, 68, 68, 0.45)',
+                                borderDash: [2, 4],
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.2,
+                                pointRadius: 0,
+                                order: 4
                             },
                             {
                                 label: 'Daikin COP',
