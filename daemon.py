@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.77.0
+Version: 0.78.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1704,7 +1704,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.77.0",
+                "version": "0.78.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3418,7 +3418,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.77.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.78.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4628,37 +4628,49 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                             <th class="py-2">
                                                 <span class="inline-flex items-center gap-1">
                                                     <span>Fysische Parameter</span>
-                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="Fysische en gedragsmatige eigenschappen van de woning, warmtepomp en installatie die door het zelflerende model worden gekalibreerd.">ℹ️</span>
+                                                    <button type="button" onclick="toggleInfoPopover(event, 'col_param')" class="text-slate-500 hover:text-cyan-400 transition-colors p-0.5 focus:outline-none" aria-label="Info">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
+                                                    </button>
                                                 </span>
                                             </th>
                                             <th class="py-2 text-center">
                                                 <span class="inline-flex items-center justify-center gap-1">
                                                     <span>Huidig Actief</span>
-                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="De actieve parameterwaarde waarmee Open HEMS op dit moment live de 24-uurs dispatch en energiegrafieken doorrekent.">ℹ️</span>
+                                                    <button type="button" onclick="toggleInfoPopover(event, 'col_active')" class="text-slate-500 hover:text-cyan-400 transition-colors p-0.5 focus:outline-none" aria-label="Info">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
+                                                    </button>
                                                 </span>
                                             </th>
                                             <th class="py-2 text-center">
                                                 <span class="inline-flex items-center justify-center gap-1">
                                                     <span>Nieuw Voorstel</span>
-                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="De nieuw berekende waarde uit de OLS-regressie over InfluxDB telemetrie over de gekozen geheugenhorizon (30, 90 of 365 dagen).">ℹ️</span>
+                                                    <button type="button" onclick="toggleInfoPopover(event, 'col_proposed')" class="text-slate-500 hover:text-cyan-400 transition-colors p-0.5 focus:outline-none" aria-label="Info">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
+                                                    </button>
                                                 </span>
                                             </th>
                                             <th class="py-2 text-center">
                                                 <span class="inline-flex items-center justify-center gap-1">
                                                     <span>Drift (%)</span>
-                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="Het procentuele verschil tussen de actieve parameter en het nieuwe voorstel. Groen = binnen drempel (< 3%), Blauw = lichte daling, Oranje = stijging.">ℹ️</span>
+                                                    <button type="button" onclick="toggleInfoPopover(event, 'col_drift')" class="text-slate-500 hover:text-cyan-400 transition-colors p-0.5 focus:outline-none" aria-label="Info">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
+                                                    </button>
                                                 </span>
                                             </th>
                                             <th class="py-2">
                                                 <span class="inline-flex items-center gap-1">
                                                     <span>Onderbouwing</span>
-                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="De statistische bron, steekproefgrootte en wiskundige methode (bijv. OLS regressie over stookdagen, 230 winterruns, nachtmediaan).">ℹ️</span>
+                                                    <button type="button" onclick="toggleInfoPopover(event, 'col_evidence')" class="text-slate-500 hover:text-cyan-400 transition-colors p-0.5 focus:outline-none" aria-label="Info">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
+                                                    </button>
                                                 </span>
                                             </th>
                                             <th class="py-2 text-right">
                                                 <span class="inline-flex items-center justify-end gap-1">
                                                     <span>Status</span>
-                                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="'Automatisch' = afwijking valt binnen de auto-accept drempel (±3%) en is direct via EWMA toegepast. 'Ter Beoordeling' = afwijking is groter dan de drempel en vereist handmatige goedkeuring via 'Accepteren'.">ℹ️</span>
+                                                    <button type="button" onclick="toggleInfoPopover(event, 'col_status')" class="text-slate-500 hover:text-cyan-400 transition-colors p-0.5 focus:outline-none" aria-label="Info">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
+                                                    </button>
                                                 </span>
                                             </th>
                                         </tr>
@@ -9343,6 +9355,71 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         // =========================================================================
         // TOAST NOTIFICATIONS & MODEL GOVERNANCE STEERING JS
         // =========================================================================
+        
+        // =========================================================================
+        // SUBTLE INTERACTIVE INFO POPOVERS (TOUCH & CLICK FRIENDLY)
+        // =========================================================================
+        const infoPopovers = {
+            'col_param': 'Fysische en gedragsmatige eigenschappen van de woning, warmtepomp en installatie die door het zelflerende model worden gekalibreerd.',
+            'col_active': 'De actieve parameterwaarde waarmee Open HEMS op dit moment live de 24-uurs dispatch en energiegrafieken doorrekent.',
+            'col_proposed': 'De nieuw berekende waarde uit de OLS-regressie over InfluxDB telemetrie over de gekozen geheugenhorizon (30, 90 of 365 dagen).',
+            'col_drift': 'Het procentuele verschil tussen de actieve parameter en het nieuwe voorstel. Groen = binnen drempel (< 3%), Blauw = daling, Oranje = stijging.',
+            'col_evidence': 'De statistische bron, steekproefgrootte en wiskundige methode (bijv. OLS regressie over stookdagen, 230 winterruns, nachtmediaan).',
+            'col_status': "'Automatisch' = afwijking valt binnen de drempel (±3%) en is direct via EWMA toegepast. 'Ter Beoordeling' = vereist handmatige goedkeuring via 'Accepteren'.",
+            'param_building_ua': 'Totale transmissie- en infiltratieverlies van het huis per graad temperatuurverschil (W/K). Hoe lager de UA, hoe beter de isolatie en hoe trager de woning afkoelt.',
+            'param_heating_modulation': 'Daikin Altherma inverter vermogensformule (Watt elektrisch o.b.v. buitentemperatuur) gebaseerd op 230 werkelijke winterruns in InfluxDB.',
+            'param_night_baseload': 'De continue nachtelijke basislast van het huis (01:00-05:00u) voor standby, netwerk, ventilatie en domotica.',
+            'param_dhw_standby': 'Thermisch stilstandsverlies van de 350L boiler door de isolatiemantel (~0,18°C/uur afkoeling) naar de omgeving.',
+            'status_auto': 'Automatisch doorgevoerd: de afwijking valt binnen de ingestelde auto-accept drempel en is direct via de leersnelheid (EWMA) in het actieve rekenmodel bijgesteld.',
+            'status_review': "Ter beoordeling: de afwijking overschrijdt de drempel. Klik rechtsonder op 'Accepteren & Toepassen' om deze wijziging te bekrachtigen.",
+            'status_accepted': 'Handmatig geaccepteerd: door jou goedgekeurd en geactiveerd in het actieve rekenmodel.'
+        };
+
+        function toggleInfoPopover(e, key) {
+            if (e) {
+                e.stopPropagation();
+                e.preventDefault();
+            }
+            const text = infoPopovers[key] || '';
+            if (!text) return;
+
+            let pop = document.getElementById('open-hems-popover');
+            if (pop && pop.__currentKey === key && !pop.classList.contains('hidden')) {
+                pop.classList.add('hidden');
+                return;
+            }
+            if (!pop) {
+                pop = document.createElement('div');
+                pop.id = 'open-hems-popover';
+                pop.className = 'fixed z-50 max-w-xs bg-[#0B0F17] border border-slate-700 text-slate-200 text-xs p-3 rounded-xl shadow-2xl backdrop-blur-md leading-relaxed transition-all duration-200';
+                document.body.appendChild(pop);
+                document.addEventListener('click', (evt) => {
+                    if (pop && !pop.contains(evt.target)) {
+                        pop.classList.add('hidden');
+                    }
+                });
+            }
+            pop.__currentKey = key;
+            pop.innerHTML = `<div class="flex items-start gap-2.5">
+                <span class="w-4 h-4 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-700/60 flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">i</span>
+                <div class="text-[11px] text-slate-300 font-sans leading-relaxed">${text}</div>
+            </div>`;
+            pop.classList.remove('hidden');
+
+            const targetEl = e ? e.currentTarget : null;
+            if (targetEl) {
+                const rect = targetEl.getBoundingClientRect();
+                let top = rect.bottom + 6;
+                let left = rect.left - 15;
+                if (left + 290 > window.innerWidth) {
+                    left = window.innerWidth - 300;
+                }
+                if (left < 12) left = 12;
+                pop.style.top = `${top}px`;
+                pop.style.left = `${left}px`;
+            }
+        }
+
         function showToast(msg, type = 'info') {
             let toast = document.getElementById('open-hems-toast');
             if (!toast) {
@@ -9454,28 +9531,20 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     }
                 }
 
-                const paramDescriptions = {
-                    'building_ua': 'Totale transmissie- en infiltratieverlies van het huis per graad temperatuurverschil (W/K). Hoe lager de UA, hoe beter de isolatie en hoe trager de woning afkoelt.',
-                    'heating_modulation': 'Daikin Altherma inverter vermogensformule (Watt elektrisch o.b.v. buitentemperatuur) gebaseerd op 230 werkelijke winterruns in InfluxDB.',
-                    'night_baseload': 'De continue nachtelijke basislast van het huis (01:00-05:00u) voor standby, netwerk, ventilatie en domotica.',
-                    'dhw_standby': 'Thermisch stilstandsverlies van de 350L boiler door de isolatiemantel (~0,18°C/uur) naar de omgeving.'
-                };
-
                 const thresholdVal = d.auto_accept_max_drift_pct !== undefined ? d.auto_accept_max_drift_pct : 3.0;
 
                 tBody.innerHTML = recs.map(r => {
                     const drift = Number(r.drift_pct || 0);
                     const driftColor = drift === 0 ? 'text-slate-400' : (Math.abs(drift) <= thresholdVal ? 'text-emerald-400' : (drift < 0 ? 'text-blue-400' : 'text-amber-400'));
                     const driftSign = drift > 0 ? '+' : '';
-                    const desc = paramDescriptions[r.id] || 'Fysische modelparameter gekalibreerd via telemetrie.';
 
                     let statusBadge = '';
                     if (d.status === 'accepted') {
-                        statusBadge = `<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-blue-950/70 text-blue-300 border border-blue-800 cursor-help" title="Handmatig geaccepteerd: door jou goedgekeurd en bekrachtigd in het actieve rekenmodel.">Geaccepteerd ℹ️</span>`;
+                        statusBadge = `<button type="button" onclick="toggleInfoPopover(event, 'status_accepted')" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-blue-950/70 text-blue-300 border border-blue-800 hover:bg-blue-900/60 transition focus:outline-none"><span class="w-1.5 h-1.5 rounded-full bg-blue-400"></span> <span>Geaccepteerd</span></button>`;
                     } else if (r.auto_applied) {
-                        statusBadge = `<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950/70 text-emerald-400 border border-emerald-800 cursor-help" title="Automatisch doorgevoerd: de afwijking (${driftSign}${drift}%) valt binnen jouw auto-accept drempel (±${thresholdVal}%) en is via de leersnelheid (EWMA) direct in het model bijgesteld.">Automatisch ℹ️</span>`;
+                        statusBadge = `<button type="button" onclick="toggleInfoPopover(event, 'status_auto')" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-950/70 text-emerald-400 border border-emerald-800 hover:bg-emerald-900/60 transition focus:outline-none"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> <span>Automatisch</span></button>`;
                     } else {
-                        statusBadge = `<span class="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-950/70 text-amber-300 border border-amber-800 cursor-help" title="Ter beoordeling: de afwijking (${driftSign}${drift}%) overschrijdt de drempel (±${thresholdVal}%). Klik op 'Accepteren & Toepassen' om deze wijziging te bekrachtigen.">Ter Beoordeling ℹ️</span>`;
+                        statusBadge = `<button type="button" onclick="toggleInfoPopover(event, 'status_review')" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-950/70 text-amber-300 border border-amber-800 hover:bg-amber-900/60 transition focus:outline-none"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> <span>Ter Beoordeling</span></button>`;
                     }
 
                     return `
@@ -9483,7 +9552,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             <td class="py-2.5 font-bold text-white">
                                 <span class="inline-flex items-center gap-1.5">
                                     <span>${r.name}</span>
-                                    <span class="cursor-help text-slate-500 hover:text-slate-200 transition text-[11px]" title="${desc}">ℹ️</span>
+                                    <button type="button" onclick="toggleInfoPopover(event, 'param_${r.id}')" class="text-slate-500 hover:text-cyan-400 transition-colors p-0.5 focus:outline-none" aria-label="Toelichting">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
+                                    </button>
                                 </span>
                             </td>
                             <td class="py-2.5 text-center text-slate-400 font-mono">${r.current_value} <span class="text-[10px] text-slate-500">${r.unit}</span></td>
