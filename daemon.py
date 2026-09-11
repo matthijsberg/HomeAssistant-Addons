@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.75.0
+Version: 0.76.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1704,7 +1704,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.75.0",
+                "version": "0.76.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3418,7 +3418,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.75.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.76.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -9307,10 +9307,34 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             }
         }
 
-        async 
         // =========================================================================
-        // MODEL GOVERNANCE & ALGORITHM HYPERPARAMETER STEERING JS
+        // TOAST NOTIFICATIONS & MODEL GOVERNANCE STEERING JS
         // =========================================================================
+        function showToast(msg, type = 'info') {
+            let toast = document.getElementById('open-hems-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'open-hems-toast';
+                document.body.appendChild(toast);
+            }
+            const colors = {
+                'success': 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50',
+                'error': 'bg-red-950/90 text-red-300 border-red-500/50',
+                'info': 'bg-blue-950/90 text-blue-300 border-blue-500/50'
+            };
+            const icons = {
+                'success': '✅',
+                'error': '❌',
+                'info': 'ℹ️'
+            };
+            toast.className = `fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-xl shadow-2xl border text-xs font-bold transition-all duration-300 transform translate-y-0 opacity-100 flex items-center gap-2 ${colors[type] || colors.info}`;
+            toast.innerHTML = `<span>${icons[type] || ''}</span> <span>${msg}</span>`;
+            clearTimeout(window.__toastTimer);
+            window.__toastTimer = setTimeout(() => {
+                toast.className = `fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-xl shadow-2xl border text-xs font-bold transition-all duration-300 transform translate-y-10 opacity-0 pointer-events-none flex items-center gap-2 ${colors[type] || colors.info}`;
+            }, 3500);
+        }
+
         function updateLearningRateLabel(val) {
             const el = document.getElementById('label-learning-rate');
             if (el) el.textContent = `${val}%`;
@@ -9505,71 +9529,6 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 btnFormulas.className = 'px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition';
                 pnlCode.classList.remove('hidden');
                 pnlFormulas.classList.add('hidden');
-            }
-        }
-
-        async 
-        // =========================================================================
-        // MODEL GOVERNANCE & ALGORITHM HYPERPARAMETER STEERING JS
-        // =========================================================================
-        function updateLearningRateLabel(val) {
-            const el = document.getElementById('label-learning-rate');
-            if (el) el.textContent = `${val}%`;
-        }
-
-        function updateAutoAcceptLabel(val) {
-            const el = document.getElementById('label-auto-accept');
-            if (el) el.textContent = `&plusmn;${Number(val).toFixed(1)}%`;
-        }
-
-        async function loadAlgorithmConfig() {
-            try {
-                const res = await fetch('./api/model/algorithm-config');
-                if (!res.ok) return;
-                const d = await res.json();
-                const lr = Math.round((d.learning_rate_ewma || 0.05) * 100);
-                const sLr = document.getElementById('slider-learning-rate');
-                if (sLr) { sLr.value = lr; updateLearningRateLabel(lr); }
-
-                const rw = d.rolling_window_days || 90;
-                const sRw = document.getElementById('select-rolling-window');
-                if (sRw) sRw.value = String(rw);
-
-                const aa = d.auto_accept_max_drift_pct !== undefined ? d.auto_accept_max_drift_pct : 3.0;
-                const sAa = document.getElementById('slider-auto-accept');
-                if (sAa) { sAa.value = aa; updateAutoAcceptLabel(aa); }
-            } catch (e) {
-                console.warn('Error loading algorithm config:', e);
-            }
-        }
-
-        async function saveAlgorithmConfig() {
-            const btn = document.getElementById('btn-save-algo');
-            if (btn) btn.disabled = true;
-            try {
-                const lr = Number(document.getElementById('slider-learning-rate').value) / 100.0;
-                const rw = parseInt(document.getElementById('select-rolling-window').value, 10);
-                const aa = Number(document.getElementById('slider-auto-accept').value);
-
-                const res = await fetch('./api/model/algorithm-config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        learning_rate_ewma: lr,
-                        rolling_window_days: rw,
-                        auto_accept_max_drift_pct: aa
-                    })
-                });
-                if (res.ok) {
-                    showToast('Algoritme instellingen opgeslagen!', 'success');
-                    loadModelRecommendations();
-                } else {
-                    showToast('Fout bij opslaan algoritme instellingen', 'error');
-                }
-            } catch (e) {
-                showToast('Verbindingsfout: ' + e, 'error');
-            } finally {
-                if (btn) btn.disabled = false;
             }
         }
 
