@@ -73,7 +73,7 @@ class TelemetrySanitizer:
         raw_prices: List[Dict[str, Any]],
         raw_solar: List[Dict[str, Any]],
         raw_weather: List[Dict[str, Any]],
-        raw_unallocated_matrix: List[float],
+        raw_unallocated_matrix: Any,
         current_dhw_temp: Optional[float] = None,
         current_room_temp: Optional[float] = None,
         current_floor_temp: Optional[float] = None,
@@ -212,15 +212,32 @@ class TelemetrySanitizer:
                 t_val = last_known_t
             last_known_t = t_val
 
-            # Unallocated demand matching
-            # Map slot to weekday and quarter (0-95)
+            # Unallocated demand matching (7x96 matrix support)
+            # Map slot to weekday (0=Ma..6=Zo) and quarter (0-95)
             weekday_idx = slot_dt.weekday()
             quarter_idx = slot_dt.hour * 4 + (slot_dt.minute // 15)
-            matrix_idx = weekday_idx * 96 + quarter_idx
-            if raw_unallocated_matrix and matrix_idx < len(raw_unallocated_matrix):
-                u_val = max(0.05, float(raw_unallocated_matrix[matrix_idx]))
+            u_w = None
+
+            if raw_unallocated_matrix:
+                # Shape A: 2D list of 7 days x 96 quarters (Watts)
+                if len(raw_unallocated_matrix) == 7 and isinstance(raw_unallocated_matrix[0], (list, tuple)):
+                    day_q = raw_unallocated_matrix[weekday_idx]
+                    if quarter_idx < len(day_q):
+                        u_w = float(day_q[quarter_idx])
+                # Shape B: 1D flat list of 672 quarters
+                elif len(raw_unallocated_matrix) == 672:
+                    matrix_idx = weekday_idx * 96 + quarter_idx
+                    u_w = float(raw_unallocated_matrix[matrix_idx])
+                # Shape C: 1D list of 96 quarters (single day)
+                elif len(raw_unallocated_matrix) == 96:
+                    u_w = float(raw_unallocated_matrix[quarter_idx])
+
+            if u_w is not None:
+                # Convert Watts to kW if > 10.0
+                u_kw = (u_w / 1000.0) if u_w > 10.0 else u_w
+                u_val = max(0.05, round(u_kw, 3))
             else:
-                u_val = 0.35  # baseline standby household power ~300-400W
+                u_val = 0.35  # baseline standby household power ~350W
 
             lbl = "Nu (" + slot_dt.strftime("%H:%M") + ")" if i == 0 else slot_dt.strftime("%H:%M")
 
