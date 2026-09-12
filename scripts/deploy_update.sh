@@ -38,6 +38,16 @@ echo "Pre-flight: Verifying Python bytecode and syntax..."
 python3 -m py_compile "${ADDON_DIR}/daemon.py"
 echo "✓ Python bytecode compilation passed!"
 
+# Pre-flight: Mandatory Data & API Integrity Verification Gate
+echo "Pre-flight: Running Automated Data & API Integrity Verification Gate..."
+python3 "${ADDON_DIR}/scripts/verify_data_integrity.py"
+echo "✓ All data integrity invariants passed!"
+
+# Pre-flight: Mandatory Full Regression Test Suite
+echo "Pre-flight: Running regression tests..."
+PYTHONPATH="${ADDON_DIR}" pytest "${ADDON_DIR}/tests/"
+echo "✓ All pytest regression tests passed!"
+
 NEW_VER=$(python3 "${ADDON_DIR}/scripts/version_manager.py" bump "${BUMP_TYPE}")
 
 # 2. Run Pre-Commit Security & Secret Scanner
@@ -66,6 +76,16 @@ if ! ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "${SSH_K
     bash "${ADDON_DIR}/scripts/rollback.sh" "${SNAPSHOT_DIR}"
     exit 1
 fi
+
+# 6. Post-Deploy Live Data & API Smoke Test
+echo "Step 6: Running Post-Deploy Live Data & API Smoke Test..."
+sleep 4
+if ! python3 "${ADDON_DIR}/scripts/verify_data_integrity.py" --live --url "http://172.30.33.10:8099"; then
+    echo "❌ Post-deploy data integrity smoke test failed! Initiating automatic rollback..."
+    bash "${ADDON_DIR}/scripts/rollback.sh" "${SNAPSHOT_DIR}"
+    exit 1
+fi
+echo "✓ Post-deploy live data integrity verified!"
 
 echo "=== ✅ Deployment Complete: Open HEMS ${NEW_VER} is live and healthy! ==="
 echo "Retained snapshots in ${ARCHIVE_DIR}:"
