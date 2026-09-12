@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.91.0
+Version: 0.91.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -700,8 +700,30 @@ def ensure_active_canonical_plan(force_refresh=False):
         except Exception:
             pass
 
-    # 2. Fetch Open-Meteo Weather for Culemborg
+    # 2. Fetch Solar & Weather Forecast for Culemborg
+    cfg = load_json(CONFIG_FILE)
+    s_cfg = cfg.get("solar", {})
+    s_kwp = float(s_cfg.get("kwp", 5.76))
+    s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
+    s_tilt = float(s_cfg.get("tilt_degrees", 34))
+    s_az = float(s_cfg.get("azimuth_degrees", 225))
+    s_cal = float(s_cfg.get("calibration_factor", 1.18))
+    use_fs = s_cfg.get("forecast_provider", "forecast_solar") == "forecast_solar"
+
     raw_solar = []
+    if use_fs:
+        try:
+            from layer1_data_collection.forecast_solar import ForecastSolarProvider
+            fs_prov = ForecastSolarProvider(
+                lat=51.9537, lon=5.2320, tilt=s_tilt,
+                azimuth_deg_south=45.0,
+                kwp=s_kwp, inverter_max_kw=s_inv,
+                calibration_factor=s_cal
+            )
+            raw_solar = fs_prov.get_calibrated_quarter_slots(now_ams, horizon_slots=96, step_mins=15)
+        except Exception as e_fs:
+            print(f"Warning fetching Forecast.Solar: {e_fs}")
+
     raw_weather = []
     try:
         url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m&timezone=Europe%2FAmsterdam&forecast_days=2"
@@ -711,19 +733,15 @@ def ensure_active_canonical_plan(force_refresh=False):
             m_times = m_data.get("hourly", {}).get("time", [])
             m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
             m_temps = m_data.get("hourly", {}).get("temperature_2m", [])
-            cfg = load_json(CONFIG_FILE)
-            s_cfg = cfg.get("solar", {})
-            s_kwp = float(s_cfg.get("kwp", 5.76))
-            s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
-            s_tilt = float(s_cfg.get("tilt_degrees", 34))
-            s_az = float(s_cfg.get("azimuth_degrees", 225))
             s_eff = float(s_cfg.get("efficiency_factor", 0.88))
 
             for t, rad, tmp in zip(m_times, m_rads, m_temps):
                 k_t = t.replace('T', ' ')[:13] + ':00'
                 dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
-                poa_kw = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
-                raw_solar.append({"dt": dt_h, "solar_kw": poa_kw})
+                # Fallback solar if Forecast.Solar failed
+                if not raw_solar:
+                    poa_kw = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
+                    raw_solar.append({"dt": dt_h, "solar_kw": poa_kw})
                 raw_weather.append({"dt": dt_h, "temperature": float(tmp)})
     except Exception as e_w:
         print(f"Warning fetching Open-Meteo in ensure_active_canonical_plan: {e_w}")
@@ -2008,7 +2026,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.91.0",
+                "version": "0.91.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3755,7 +3773,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.91.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.91.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
