@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.88.0
+Version: 0.88.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1931,7 +1931,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.88.0",
+                "version": "0.88.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3658,7 +3658,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.88.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.88.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3954,7 +3954,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 </div>
                             </div>
                             <div class="flex items-center gap-2.5 text-[11px] font-mono flex-wrap">
-                                <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-2 bg-red-600 rounded-sm"></span> Geforceerd uit (blok)</span>
+                                <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-2 bg-red-600 rounded-sm" style="background: repeating-linear-gradient(45deg, #EF4444, #EF4444 2px, #B91C1C 2px, #B91C1C 4px)"></span> Geforceerd uit (blok)</span>
                                 <span class="flex items-center gap-1.5 text-amber-400"><span class="w-3 h-2 bg-amber-500 rounded-sm"></span> Geadviseerd uit</span>
                                 <span class="flex items-center gap-1.5 text-slate-400"><span class="w-3 h-2 bg-slate-700 rounded-sm"></span> Normaal</span>
                                 <span class="flex items-center gap-1.5 text-emerald-300"><span class="w-3 h-2 border border-emerald-400/80 rounded-sm" style="background: repeating-linear-gradient(45deg, #10B981, #10B981 2px, #86EFAC 2px, #86EFAC 4px)"></span> Geadviseerd aan</span>
@@ -7239,8 +7239,18 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
                 // Populate Planning Summary Cards
                 const dSum = data.dhw_planning_summary || {};
-                if (document.getElementById('dhw-summary-mode') && dSum.planned_mode_label) {
-                    document.getElementById('dhw-summary-mode').innerText = `${dSum.planned_mode_label}`;
+                const modeEl = document.getElementById('dhw-summary-mode');
+                if (modeEl && dSum.planned_mode_label) {
+                    modeEl.innerText = `${dSum.planned_mode_label}`;
+                    if (dSum.planned_mode === 'forced_solar_boost_60' || dSum.planned_mode === 'max_on') {
+                        modeEl.className = 'text-xs font-bold text-purple-300';
+                    } else if (dSum.planned_mode === 'forced_night_50' || dSum.planned_mode === 'forced_standard_50' || dSum.planned_mode === 'forced_on') {
+                        modeEl.className = 'text-xs font-bold text-emerald-400';
+                    } else if (dSum.planned_mode === 'advised_on') {
+                        modeEl.className = 'text-xs font-bold text-emerald-300';
+                    } else {
+                        modeEl.className = 'text-xs font-bold text-slate-300';
+                    }
                 }
                 if (document.getElementById('dhw-summary-times') && dSum.run_start) {
                     document.getElementById('dhw-summary-times').innerText = `Venster: ${dSum.run_start} – ${dSum.run_end} (${dSum.run_duration_min} min)`;
