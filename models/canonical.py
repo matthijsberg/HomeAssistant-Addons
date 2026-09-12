@@ -13,7 +13,7 @@ Principles:
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 
 class Vector(str, Enum):
@@ -307,3 +307,120 @@ def normalize_power_reading(
             return v
 
     return v
+
+import math
+
+def calc_percentile(data: List[float], p: float) -> float:
+    """Calculates percentile from list of floats (pure python, deterministic)."""
+    if not data:
+        return 0.0
+    s = sorted(data)
+    k = (len(s) - 1) * (p / 100.0)
+    f = math.floor(k)
+    c = math.ceil(k)
+    if f == c:
+        return float(s[int(k)])
+    return float(s[int(f)] * (c - k) + s[int(c)] * (k - f))
+
+
+def detect_dynamic_price_peaks(timeline_items: List[Dict[str, Any]], step_mins: int = 15) -> Tuple[List[Dict[str, Any]], Dict[int, Dict[str, Any]]]:
+    """
+    Dynamische Spitsdetector op kwartier- of uurbasis.
+    Geheel onafhankelijk van starre kloktijden (zoals 07:00-09:30).
+    Bepaalt pieken dynamisch op basis van:
+      1. Hoogte: P_slot >= P75 en delta met mediaan >= €0,030/kWh.
+      2. Lengte & Duur: Aaneengesloten kwartieren met overbrugging van 15m rimpels.
+      3. Gradatie: HARD_LOCKOUT (max >= P85 en delta >= €0,050) vs SOFT_ADVICE.
+    """
+    if not timeline_items:
+        return [], {}
+
+    prices = [float(it.get("price", 0.0)) for it in timeline_items]
+    p_med = calc_percentile(prices, 50)
+    p75 = calc_percentile(prices, 75)
+    p85 = calc_percentile(prices, 85)
+
+    # 1. Kandidaat slots
+    is_cand = []
+    for it in timeline_items:
+        p = float(it.get("price", 0.0))
+        cand = (p >= p75) and ((p - p_med) >= 0.030)
+        is_cand.append(cand)
+
+    # 2. Overbrug 1-slot dipjes binnen een bredere piek (smoothing)
+    n = len(is_cand)
+    bridged = list(is_cand)
+    p70 = calc_percentile(prices, 70)
+    for i in range(1, n - 1):
+        if not bridged[i] and bridged[i-1] and bridged[i+1]:
+            if float(timeline_items[i].get("price", 0.0)) >= p70:
+                bridged[i] = True
+
+    # 3. Cluster aaneengesloten pieken
+    events = []
+    in_event = False
+    start_idx = 0
+    for i in range(n):
+        if bridged[i] and not in_event:
+            in_event = True
+            start_idx = i
+        elif not bridged[i] and in_event:
+            in_event = False
+            events.append((start_idx, i - 1))
+    if in_event:
+        events.append((start_idx, n - 1))
+
+    # 4. Formuleer Peak Events en Slot Lookup Map
+    peak_objects = []
+    slot_lockout_map = {}
+
+    for s_idx, e_idx in events:
+        cluster_len = e_idx - s_idx + 1
+        dur_mins = cluster_len * step_mins
+        cluster_prices = [float(timeline_items[k].get("price", 0.0)) for k in range(s_idx, e_idx + 1)]
+        max_p = max(cluster_prices)
+        avg_p = sum(cluster_prices) / cluster_len
+        dt_start = timeline_items[s_idx]["dt"]
+        dt_end = timeline_items[e_idx]["dt"] + timedelta(minutes=step_mins)
+
+        # Gradatie van blokkade
+        if max_p >= p85 and (max_p - p_med) >= 0.050:
+            sev = "HARD_LOCKOUT"
+            sev_lbl = "Harde Spitsblokkade 🔒"
+            is_hard = True
+        else:
+            sev = "SOFT_ADVICE"
+            sev_lbl = "Economisch Blokadvies ⚠️"
+            is_hard = False
+
+        h = dt_start.hour
+        if 5 <= h < 11:
+            name = "Ochtendspits"
+        elif 11 <= h < 16:
+            name = "Middagpiek"
+        elif 16 <= h < 22:
+            name = "Avondspits"
+        else:
+            name = "Nachtpiek"
+
+        peak_obj = {
+            "start_idx": s_idx,
+            "end_idx": e_idx,
+            "start_time": dt_start.strftime("%H:%M"),
+            "end_time": dt_end.strftime("%H:%M"),
+            "duration_mins": dur_mins,
+            "slots_count": cluster_len,
+            "name": name,
+            "severity": sev,
+            "severity_label": sev_lbl,
+            "is_hard_lockout": is_hard,
+            "max_price": round(max_p, 4),
+            "avg_price": round(avg_p, 4),
+            "delta_median": round(max_p - p_med, 4)
+        }
+        peak_objects.append(peak_obj)
+
+        for k in range(s_idx, e_idx + 1):
+            slot_lockout_map[k] = peak_obj
+
+    return peak_objects, slot_lockout_map

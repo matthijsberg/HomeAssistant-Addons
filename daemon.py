@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.81.1
+Version: 0.82.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -67,7 +67,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, "/addons/open-hems")
 sys.path.insert(0, "/opt/open-hems")
 from site_adapters.daikin_p1p2 import DaikinP1P2StateClassifier, HeatPumpDisaggregation
-from models.canonical import normalize_power_reading
+from models.canonical import normalize_power_reading, detect_dynamic_price_peaks, calc_percentile
 
 CONFIG_FILE = Path("/config/heatpump_config.json")
 PARAMS_FILE = Path("/config/heatpump_model_parameters.json")
@@ -1912,7 +1912,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.81.1",
+                "version": "0.82.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2349,11 +2349,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-            # Dynamic Price Lockout Thresholds (calculated over 24h timeline)
-            all_timeline_prices = [it.get("price", 0.30) for it in timeline_items]
-            min_night_p = min([it.get("price", 0.30) for it in timeline_items if it["dt"].hour < 6] or [0.30])
-            sorted_tl_prices = sorted(all_timeline_prices)
-            p80_price_threshold = sorted_tl_prices[int(len(sorted_tl_prices) * 0.80)] if sorted_tl_prices else 0.35
+            # Fully Dynamic Price Peak Detection across Timeline (no static clock times)
+            dynamic_peaks, slot_lockout_map = detect_dynamic_price_peaks(timeline_items, step_mins=step_mins)
 
             # 2-Mass Floor Heating Dynamic Simulation for Central Plan
             t_plan_in = indoor_temp_c
@@ -2371,12 +2368,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 wnd = it.get("wind", 3.0)
                 sol = it["solar"] * 1000.0 / 5.5  # Solar W/m2
 
-                # Check dynamic peak lockouts (07:00-09:30 & 17:00-20:00 with price premium >= €0.04)
-                hour_frac = it["dt"].hour + it["dt"].minute / 60.0
-                is_trad_window = ((7.0 <= hour_frac < 9.5) or (17.0 <= hour_frac < 20.0))
-                price_delta_night = it.get("price", 0.30) - min_night_p
-                has_price_peak = (price_delta_night >= 0.04) and (it.get("price", 0.30) >= p80_price_threshold or it.get("price", 0.30) >= 1.12 * min_night_p)
-                in_peak_lockout = is_trad_window and has_price_peak
+                # Dynamic Lockout Check: locked only if slot falls in a detected HARD_LOCKOUT peak
+                peak_info = slot_lockout_map.get(i)
+                in_peak_lockout = bool(peak_info and peak_info.get("is_hard_lockout"))
                 emergency_guard = (t_plan_in < 18.5)
 
                 if plan_thermostat_active and not plan_hp_running and (t_plan_in <= plan_t_start):
@@ -2598,6 +2592,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             GLOBAL_CENTRAL_CACHE["sww_start_idx"] = sww_start_idx
             GLOBAL_CENTRAL_CACHE["slots_to_fill"] = slots_to_fill
             GLOBAL_CENTRAL_CACHE["target_temp_c"] = sww_target_temp
+            GLOBAL_CENTRAL_CACHE["dynamic_peaks"] = dynamic_peaks
             GLOBAL_CENTRAL_CACHE["sww_power_kw"] = sww_power_kw
             GLOBAL_CENTRAL_CACHE["is_15m"] = is_15m
             GLOBAL_CENTRAL_CACHE["base_dt"] = base_dt
@@ -2827,6 +2822,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "battery_simulated": bool(sim_battery_param and not battery_installed),
                 "export_prices_eur": export_prices,
                 "dhw_mode_timeline": dhw_mode_timeline,
+                "dynamic_peaks": dynamic_peaks,
                 "dhw_planning_summary": dhw_planning_summary,
                 "datasets": {
                     "unallocated_kw": unallocated,
@@ -3635,7 +3631,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.81.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.82.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
