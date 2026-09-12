@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.10
+Version: 0.92.11
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1873,6 +1873,15 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 unh_morning_p95 = round(max(25.0, float(unh_morning_dip) - 1.6), 1)
                 comfort_guaranteed = (unh_morning_dip >= 40.0)
 
+                # Unheated temperature during evening peak (18:00 - 22:30)
+                raw_unh = raw_unh_temps if raw_unh_temps else []
+                spits_temps = []
+                for s_i, u_t in enumerate(raw_unh):
+                    s_dt = base_sim_dt + timedelta(minutes=15 * s_i)
+                    if 18 <= s_dt.hour <= 22 and s_dt.date() == now_ams.date():
+                        spits_temps.append(u_t)
+                unh_spits_temp = min(spits_temps) if spits_temps else max(38.0, round(t_live - 4.5, 1))
+
                 # Physics & Tariffs (350L vat = 0.407 kWh_th / K)
                 c_tank = 0.407
                 cop_50 = 2.85
@@ -1904,57 +1913,72 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                 if is_daytime:
                     box_title = "Buffer Efficiëntie: Wel of Niet Bufferen (50°C vs. 60°C)?"
-                    comfort_card_title = "Comfort- & Temperatuurverloop"
-                    finance_card_title = "Financiële Afweging (Daglading vs. Avond/Nacht)"
+                    comfort_card_title = "1️⃣ Basislading 50°C Nodig voor Avondspits?"
+                    finance_card_title = "2️⃣ Afweging: Doorbuffereen naar 60°C (24h Dekking)?"
+
+                    # Stap 1: Moeten we nu überhaupt verwarmen naar 50°C voor de avondspits?
+                    is_50_needed = (t_live < 48.0 or unh_spits_temp < 43.0)
+                    if not is_50_needed:
+                        comfort_text = (
+                            f"Het vat is nu <strong>{t_live:.1f}°C</strong> en al op basistemperatuur (doel: 50°C). "
+                            f"Zonder enige verwarming (<span class='text-slate-400 font-mono'>grijze lijn</span>) blijft het vat tijdens de avondspits (18:45–22:15) ruim op comforttemperatuur "
+                            f"(~{unh_spits_temp:.1f}°C). Een basislading naar 50°C is vóór de spits dus <strong>niet nodig</strong>."
+                        )
+                        bullet_1 = f"Basislading 50°C: Niet nodig (vat op peil, daalt naar ~{unh_spits_temp:.1f}°C in spits)"
+                    else:
+                        comfort_text = (
+                            f"Het vat is nu <strong>{t_live:.1f}°C</strong>. Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat tijdens de avondspits "
+                            f"naar <strong>{unh_spits_temp:.1f}°C</strong> (richting de 40°C comfortdrempel). "
+                            f"Een basislading naar 50°C is vóór de avondspits <strong>noodzakelijk</strong> om koude douches te voorkomen."
+                        )
+                        bullet_1 = f"Basislading 50°C: Noodzakelijk vóór 18:45 (spitsdip {unh_spits_temp:.1f}°C dreigt)"
+
+                    # Stap 2: Wel of niet doorwarmen naar 60°C?
+                    finance_text = (
+                        f"Doorwarmen naar 60°C vraagt ~{kwh_e_60} kWh stroom. "
+                        f"Met 60°C dekken we niet alleen de avondspits, maar overbruggen we ook de complete nacht én ochtendspits (een <strong>volledige dag vooruit</strong> zonder tussentijdse runs!). "
+                        f"Ondanks het lichte extra stilstandsverlies (~0,5 kWh over 20u) is nu laden met zon/dalstroom "
+                        + (f"(~€{cost_now_60:.2f} met zonne-overschot) " if is_solar_surplus else f"(~€{cost_now_60:.2f} tegen actueel tarief) ")
+                        + f"veel voordeliger dan later bijwarmen tijdens de avondspits of ochtend (~€{cost_later_run:.2f})."
+                    )
+                    bullet_2 = f"Bufferen naar 60°C: ~€{savings_60:.2f} voordeel + 24h rust voor warmtepomp"
 
                     if planned_mode in ["forced_solar_boost_60", "max_on"]:
                         badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-950/80 text-purple-300 border border-purple-800/80"><span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span> Zonnebuffer Geadviseerd (tot 60°C)</span>'
-                        target_rec = "Bufferen naar 60°C (Zonnebuffer)"
                     elif planned_mode in ["forced_standard_50", "forced_on", "advised_on"]:
                         badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Comfortlading Geadviseerd (tot 50°C)</span>'
-                        target_rec = "Laden naar 50°C (Comfort)"
                     else:
                         badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-700"><span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Afwachten (Vat op temperatuur)</span>'
-                        target_rec = "Afwachten (Geen actie)"
-
-                    comfort_text = (
-                        f"Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het 350L vat door stilstandsverlies en douchebeurten naar "
-                        f"<strong class='text-amber-300'>{unh_morning_dip}°C</strong> (bij piekverbruik zelfs <strong class='text-red-400'>{unh_morning_p95}°C</strong>) vóór 10:00 uur morgenochtend. "
-                        + ("Ochtendcomfort blijft boven 40°C gewaarborgd." if comfort_guaranteed else "Comfortrisico: vat zakt onder 40°C douchegrens!")
-                    )
-
-                    finance_text = (
-                        f"Nu doorwarmen naar 60°C vraagt ~{kwh_e_60} kWh stroom. "
-                        + (f"Met actueel zonne-overschot ({solar_kw_now:.1f} kW) kost dit slechts ~€{cost_now_60:.2f}. " if is_solar_surplus else f"Tegen actueel tarief kost dit ~€{cost_now_60:.2f}. ")
-                        + f"Later bijwarmen in de avondspits (€{evening_peak_price:.2f}/kWh) zou ~€{cost_later_run:.2f} kosten. "
-                        f"Bufferen levert <strong>~€{savings_60:.2f} besparing</strong> op én biedt ~715L mengwater van 38°C."
-                    )
-                    bullet_1 = f"~€{savings_60:.2f} voordeel bij nu bufferen met zon t.o.v. avond/nacht"
-                    bullet_2 = f"Advies: {target_rec} levert ~715L mengwater en overbrugt de avondspits"
                 else:
                     box_title = "Buffer Efficiëntie: Nachtlading vs. Afwachten tot Middagzon?"
-                    comfort_card_title = "Ochtendcomfort & Temperatuurrisico"
-                    finance_card_title = "Financiële Afweging (Nacht vs. Morgenmiddag)"
+                    comfort_card_title = "1️⃣ Basislading 50°C Nodig voor Ochtendspits?"
+                    finance_card_title = "2️⃣ Afweging: Nu Laden vs. Wachten op Morgenmiddag?"
 
-                    if planned_mode in ["forced_night_50", "forced_on"]:
-                        badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Nachtlading Gepland (Comfortzekerheid)</span>'
-                        target_rec = "Nachtladen naar 50°C"
+                    # Stap 1 Nacht: Is 50C nodig voor ochtendcomfort?
+                    if not comfort_guaranteed:
+                        comfort_text = (
+                            f"Zonder nachtlading (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat door nachtelijk stilstand en ochtenddouches naar "
+                            f"<strong class='text-amber-300'>{unh_morning_dip}°C</strong> (bij piekverbruik zelfs <strong class='text-red-400'>{unh_morning_p95}°C</strong>) vóór 10:00 uur. "
+                            f"Comfortrisico: een lading naar 50°C vannacht is <strong>noodzakelijk voor ochtendcomfort</strong>."
+                        )
+                        bullet_1 = f"Basislading 50°C: Noodzakelijk (ochtenddip zakt naar {unh_morning_dip}°C)"
                     else:
-                        badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Wachten op Middagzon (Besparing)</span>'
-                        target_rec = "Afwachten tot middagzon"
-
-                    comfort_text = (
-                        f"Zonder nachtlading (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat door nachtelijk verlies en ochtenddouches naar "
-                        f"<strong class='text-amber-300'>{unh_morning_dip}°C</strong> (bij piekverbruik zelfs <strong class='text-red-400'>{unh_morning_p95}°C</strong>) vóór 10:00 uur. "
-                        + ("Ochtendcomfort blijft boven 40°C gewaarborgd." if comfort_guaranteed else "Comfortrisico: lauwe douche dreigt zonder nachtelijke bijverwarming!")
-                    )
+                        comfort_text = (
+                            f"Het vat daalt vannacht zonder lading (<span class='text-slate-400 font-mono'>grijze lijn</span>) naar {unh_morning_dip}°C. "
+                            f"Ochtendcomfort blijft ruim boven 40°C gewaarborgd. Een nachtlading is voor comfort <strong>niet strikt verplicht</strong>."
+                        )
+                        bullet_1 = f"Basislading 50°C: Niet verplicht (ochtenddip blijft {unh_morning_dip}°C)"
 
                     finance_text = (
                         f"Nachtstroom kost vannacht ~€0,26/kWh (~€0,38 per run). Morgenmiddag rond 12:00–14:00 is stroom goedkoper met zonne-energie (~€0,15 per run). "
-                        + ("Comfortzekerheid weegt zwaarder dan wachten op zon." if not comfort_guaranteed else "Wachten tot middagzon bespaart ~€0,23.")
+                        + ("Comfortzekerheid vóór 10:00u weegt zwaarder dan wachten op zon." if not comfort_guaranteed else "Wachten tot middagzon bespaart ~€0,23.")
                     )
-                    bullet_1 = "~€0,23 besparing bij wachten tot middagzon" if comfort_guaranteed else "Comfortzekerheid vereist nachtrun (€0,38)"
-                    bullet_2 = f"Advies: {target_rec} (ochtenddip zakt naar {unh_morning_dip}°C)"
+                    bullet_2 = "Nachtlading gepland voor gegarandeerd ochtendcomfort" if not comfort_guaranteed else "Afwachten tot middagzon bespaart ~€0,23"
+
+                    if planned_mode in ["forced_night_50", "forced_on"]:
+                        badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Nachtlading Gepland (Comfortzekerheid)</span>'
+                    else:
+                        badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Wachten op Middagzon (Besparing)</span>'
 
                 decision = {
                     "status": "SCHEDULE_NIGHT_CHARGE" if planned_mode == "forced_night_50" else "SKIP_NIGHT_CHARGE",
@@ -2129,7 +2153,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.10",
+                "version": "0.92.11",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3900,7 +3924,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.10</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.11</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4247,8 +4271,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <div class="flex items-center gap-3 text-xs font-mono flex-wrap">
                                 <span class="flex items-center gap-1.5 text-amber-300"><span class="w-3 h-1 bg-amber-400 rounded"></span> Verwacht (°C)</span>
                                 <span class="flex items-center gap-1.5 text-amber-200/80"><span class="w-3 h-2 bg-amber-400/20 border border-amber-400/40 rounded-sm"></span> Marge (P05–P95)</span>
-                                <span class="flex items-center gap-1.5 text-slate-400"><span class="w-3 h-0.5 border-b border-slate-400 border-dashed"></span> Zonder Nachtladen (°C)</span>
-                                <span class="flex items-center gap-1.5 text-slate-400/80"><span class="w-3 h-2 bg-slate-500/20 border border-slate-500/40 rounded-sm"></span> Marge Zonder Nacht</span>
+                                <span class="flex items-center gap-1.5 text-slate-400"><span class="w-3 h-0.5 border-b border-slate-400 border-dashed"></span> Zonder Verwarming (°C)</span>
+                                <span class="flex items-center gap-1.5 text-slate-400/80"><span class="w-3 h-2 bg-slate-500/20 border border-slate-500/40 rounded-sm"></span> Marge Onverwarmd</span>
                                 <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-0.5 border-b border-red-500 border-dashed"></span> Comfort 40°C</span>
                                 <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-0.5 border-b border-emerald-500 border-dashed"></span> Doel 50°C</span>
                                 <span class="flex items-center gap-1.5 text-sky-300"><span class="w-2.5 h-2.5 bg-sky-500/50 rounded-sm"></span> Vraag (Liter)</span>
