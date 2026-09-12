@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.3
+Version: 0.92.4
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2025,7 +2025,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.3",
+                "version": "0.92.4",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2385,15 +2385,33 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     lbl = dt_slot.strftime("%H:%M" if is_15m else "%H:00")
                 prev_dt_item = dt_slot
 
-                plan_slot = plan.slots[i] if plan and i < len(plan.slots) else None
-                if plan_slot:
-                    s_val = plan_slot.solar_kw
-                    unalloc_kw = plan_slot.unallocated_kw
-                    p_val = plan_slot.price_eur
+                if is_15m:
+                    plan_slot = plan.slots[i] if plan and i < len(plan.slots) else None
+                    if plan_slot:
+                        s_val = plan_slot.solar_kw
+                        unalloc_kw = plan_slot.unallocated_kw
+                        p_val = plan_slot.price_eur
+                    else:
+                        s_val = solar_map.get(k_full, solar_map.get(k_hour, 0.0))
+                        unalloc_kw = 0.35
+                        p_val = prices_map.get(k_full, prices_map.get(k_hour, 0.28))
                 else:
-                    s_val = solar_map.get(k_full, solar_map.get(k_hour, 0.0))
-                    unalloc_kw = 0.35
-                    p_val = prices_map.get(k_full, prices_map.get(k_hour, 0.28))
+                    # 1-hour resolution: aggregate the 4 quarters of this hour
+                    q_start = i * 4
+                    q_end = min(len(plan.slots), (i + 1) * 4) if plan else 0
+                    q_slots = plan.slots[q_start:q_end] if plan else []
+                    if q_slots:
+                        s_val = round(sum(s.solar_kw for s in q_slots) / len(q_slots), 2)
+                        unalloc_kw = round(sum(s.unallocated_kw for s in q_slots) / len(q_slots), 2)
+                        p_val = round(sum(s.price_eur for s in q_slots) / len(q_slots), 4)
+                    else:
+                        s_val = solar_map.get(k_full, solar_map.get(k_hour, 0.0))
+                        unalloc_kw = 0.35
+                        p_val = prices_map.get(k_full, prices_map.get(k_hour, 0.28))
+
+                # Physical nighttime guard (Netherlands is dark between 21:00 and 07:00 in September)
+                if dt_slot.hour >= 21 or dt_slot.hour < 7:
+                    s_val = 0.0
 
                 t_h0 = temp_map.get(k_hour, 16.0)
                 t_h1 = temp_map.get(k_next_hour, t_h0)
@@ -3778,7 +3796,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.3</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.4</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
