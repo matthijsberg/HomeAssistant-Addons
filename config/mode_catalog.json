@@ -1,0 +1,136 @@
+{
+  "$schema": "https://open-hems.org/schemas/v1/mode_catalog.json",
+  "version": "1.0.0",
+  "archetypes": {
+    "thermal_buffer": {
+      "forced_off": {
+        "code": "forced_off",
+        "label": "Geforceerd uit (blok)",
+        "color_hex": "#EF4444",
+        "tailwind_text": "text-red-400",
+        "css_pattern": "repeating-linear-gradient(45deg, #EF4444, #EF4444 2px, #B91C1C 2px, #B91C1C 4px)",
+        "badge_label": "Harde Spitsblokkade 🔒",
+        "description": "Harde spitsvergrendeling: compressor vergrendeld tegen piektarieven."
+      },
+      "advised_off": {
+        "code": "advised_off",
+        "label": "Geadviseerd uit",
+        "color_hex": "#F59E0B",
+        "tailwind_text": "text-amber-400",
+        "css_pattern": "none",
+        "badge_label": "Verhoogd Tarief ⚠️",
+        "description": "Schouderpiek / verhoogd tarief: uitstel van grote verbruikers aanbevolen; CV op minimale modulatie."
+      },
+      "normal": {
+        "code": "normal",
+        "label": "Normaal",
+        "color_hex": "#1E293B",
+        "tailwind_text": "text-slate-400",
+        "css_pattern": "none",
+        "badge_label": "Vrijloop 🔓",
+        "description": "Vrijloopvenster: warmtepomp en boiler in normale werking."
+      },
+      "advised_on": {
+        "code": "advised_on",
+        "label": "Geadviseerd aan",
+        "color_hex": "#4ADE80",
+        "tailwind_text": "text-emerald-300",
+        "css_pattern": "repeating-linear-gradient(45deg, #10B981, #10B981 2px, #86EFAC 2px, #86EFAC 4px)",
+        "badge_label": "Doorverwarmen ♨️",
+        "description": "Voordelig venster: warmtepomp mag hoger doorverwarmen voor CV vloerbuffer."
+      },
+      "forced_on": {
+        "code": "forced_on",
+        "label": "Geforceerd aan",
+        "color_hex": "#10B981",
+        "tailwind_text": "text-emerald-400",
+        "css_pattern": "none",
+        "badge_label": "Actieve Run ⚡",
+        "description": "Verwarmen naar setpoint (50°C): actieve stookrun voor boiler of CV."
+      },
+      "max_on": {
+        "code": "max_on",
+        "label": "Maximaal aan (60°C)",
+        "color_hex": "#A855F7",
+        "tailwind_text": "text-purple-300",
+        "css_pattern": "none",
+        "badge_label": "Zonnebuffer ☀️",
+        "description": "Zonnebuffer doorverwarming naar 60°C bij hoge zonne-overschotten."
+      }
+    },
+    "battery_storage": {
+      "idle": {
+        "code": "idle",
+        "label": "Standby",
+        "color_hex": "#1E293B",
+        "tailwind_text": "text-slate-400",
+        "description": "Batterij in ruststand."
+      },
+      "charge_solar": {
+        "code": "charge_solar",
+        "label": "Zonneladen",
+        "color_hex": "#10B981",
+        "tailwind_text": "text-emerald-400",
+        "description": "Batterij laadt uitsluitend op lokaal zonne-overschot."
+      },
+      "charge_grid": {
+        "code": "charge_grid",
+        "label": "Netladen (Daltarief)",
+        "color_hex": "#3B82F6",
+        "tailwind_text": "text-blue-400",
+        "description": "Batterij laadt geforceerd uit het net tijdens goedkope nachturen."
+      },
+      "discharge_self_consumption": {
+        "code": "discharge_self_consumption",
+        "label": "Ontladen (Eigen verbruik)",
+        "color_hex": "#06B6D4",
+        "tailwind_text": "text-cyan-400",
+        "description": "Batterij levert stroom aan het huis om netafname te voorkomen."
+      },
+      "discharge_arbitrage": {
+        "code": "discharge_arbitrage",
+        "label": "Ontladen (Prijsarbitrage)",
+        "color_hex": "#F59E0B",
+        "tailwind_text": "text-amber-400",
+        "description": "Batterij levert maximaal terug aan het net tijdens extreme prijspiek."
+      },
+      "lockout_hold": {
+        "code": "lockout_hold",
+        "label": "Vasthouden (Reservering)",
+        "color_hex": "#64748B",
+        "tailwind_text": "text-slate-400",
+        "description": "Ontladen geblokkeerd ter voorbereiding op komende duurdere prijspiek."
+      }
+    },
+    "ev_charger": {
+      "disconnected": {
+        "code": "disconnected",
+        "label": "Niet aangesloten",
+        "color_hex": "#1E293B",
+        "tailwind_text": "text-slate-400",
+        "description": "Geen voertuig gekoppeld."
+      },
+      "paused": {
+        "code": "paused",
+        "label": "Gepauzeerd",
+        "color_hex": "#64748B",
+        "tailwind_text": "text-slate-400",
+        "description": "Aangesloten; wacht op zonne-overschot of daltarief."
+      },
+      "solar_only": {
+        "code": "solar_only",
+        "label": "Alleen Zon (6–16A)",
+        "color_hex": "#10B981",
+        "tailwind_text": "text-emerald-400",
+        "description": "Dynamisch laden afgestemd op netto PV-overschot."
+      },
+      "scheduled_charge": {
+        "code": "scheduled_charge",
+        "label": "Gepland Laden",
+        "color_hex": "#3B82F6",
+        "tailwind_text": "text-blue-400",
+        "description": "Snelladen om vertrek-deadline te halen."
+      }
+    }
+  }
+}
