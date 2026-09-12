@@ -95,9 +95,13 @@ class ForecastSolarProvider:
 
         parsed_points.sort(key=lambda x: x[0])
 
+        # Automatically align start_dt to quarter-hour boundary
+        aligned_min = (start_dt.minute // step_mins) * step_mins
+        aligned_start = start_dt.replace(minute=aligned_min, second=0, microsecond=0)
+
         slots = []
         for i in range(horizon_slots):
-            slot_dt = start_dt + timedelta(minutes=i * step_mins)
+            slot_dt = aligned_start + timedelta(minutes=i * step_mins)
             
             # Find nearest or linear interpolation between points
             w_val = 0.0
