@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.87.0
+Version: 0.87.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1931,7 +1931,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.87.0",
+                "version": "0.87.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2497,49 +2497,49 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             if tank_already_warm and not needs_night_charge:
                 # Target already achieved! Standby in effect: cancel any redundant daytime runs!
-                planned_mode = "standby_normal"
-                planned_mode_label = f"Doeltemperatuur bereikt ({t_dhw_live:.1f}°C) — Standby"
+                planned_mode = "normal"
+                planned_mode_label = f"Normaal: Doeltemperatuur bereikt ({t_dhw_live:.1f}°C) — Standby"
                 reason = f"Boilervat is met {t_dhw_live:.1f}°C reeds op gewenste temperatuur (≥ {sww_target_temp:.0f}°C). Warmtepomp staat in rust."
                 sww_start_idx = -1
                 slots_to_fill = 0
                 sww_power_kw = 0.0
-            elif needs_night_charge:
-                # Night run required (only active between 20:00 and 06:00)
-                night_slots = [it for it in timeline_items if (1 <= it["dt"].hour <= 5)]
-                best_sww_slot = min(night_slots, key=lambda x: x["price"]) if night_slots else min(timeline_items[:24], key=lambda x: x["price"])
-                sww_start_idx = best_sww_slot["idx"]
-                sww_power_kw = 1.8
-                sww_target_temp = 50.0
-                planned_mode = "forced_night_50"
-                planned_mode_label = "Geforceerd Aan: Nachtlading (tot 50°C)"
-                reason = f"Nachtlading daltarief (€{best_sww_slot['price']:.3f}/kWh) waarborgt ochtendcomfort"
             elif is_solar_boost_eligible and today_daylight_slots:
-                # Abundant solar today! Mode 3: Solar Buffer Boost to 60°C!
+                # 1. Mode: Maximaal aan (60°C Zonnebuffer Boost) during today's solar peak!
                 best_sww_slot = max(today_daylight_slots, key=lambda x: x["solar"])
                 sww_start_idx = max(0, best_sww_slot["idx"] - (1 if is_15m else 0))
                 sww_power_kw = 2.65
                 sww_target_temp = 60.0
                 planned_mode = "forced_solar_boost_60"
-                planned_mode_label = "Geforceerd Aan: Zonnebuffer Boost (tot 60°C)"
-                reason = f"Zonnebuffer Boost (60°C): {tot_net_surplus_kwh:.1f} kWh netto zonne-overschot buffert voordelig door naar 60°C"
+                planned_mode_label = "Maximaal aan (doorverwarming tot 60°C)"
+                reason = f"Maximaal aan (60°C): {tot_net_surplus_kwh:.1f} kWh netto zonne-overschot buffert voordelig door naar 60°C"
             elif today_daylight_slots:
-                # Normal daytime run to 50°C on best daytime slot (centered around 14:30 - 15:30 solar window)
+                # 2. Mode: Geforceerd aan (50°C Dagrun) during today's best solar/tariff slot!
                 best_sww_slot = max(today_daylight_slots, key=lambda x: (x["solar"] - x["price"] * 0.5))
                 sww_start_idx = best_sww_slot["idx"]
                 sww_power_kw = 1.8
                 sww_target_temp = 50.0
                 planned_mode = "forced_standard_50"
-                planned_mode_label = "Geforceerd Aan: Standaard Dagrun (tot 50°C)"
-                reason = f"Standaard Dagrun (50°C): Laadt vanaf {best_sww_slot['label']} op zonnestroom naar 50°C"
+                planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
+                reason = f"Geforceerd aan (50°C): Laadt vanaf {best_sww_slot['label']} op zonnestroom naar 50°C"
+            elif needs_night_charge:
+                # 3. Mode: Geforceerd aan (Nachtlading tot 50°C) only when daylight has passed!
+                night_slots = [it for it in timeline_items if (1 <= it["dt"].hour <= 5)]
+                best_sww_slot = min(night_slots, key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5))) if night_slots else min(timeline_items[:24], key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5)))
+                sww_start_idx = best_sww_slot["idx"]
+                sww_power_kw = 1.8
+                sww_target_temp = 50.0
+                planned_mode = "forced_night_50"
+                planned_mode_label = "Geforceerd aan (Nachtlading tot 50°C)"
+                reason = f"Geforceerd aan (€{best_sww_slot['price']:.3f}/kWh) waarborgt ochtendcomfort vóór prijspiek"
             else:
                 # Fallback to cheapest price slot outside peaks
-                valid_slots = [it for it in timeline_items if not ((7.0 <= (it['dt'].hour + it['dt'].minute/60.0) < 9.5) or (17.0 <= (it['dt'].hour + it['dt'].minute/60.0) < 20.0))]
-                best_sww_slot = min(valid_slots, key=lambda x: x["price"]) if valid_slots else timeline_items[0]
+                valid_slots = [it for it in timeline_items if not ((it["idx"] in slot_lockout_map) and slot_lockout_map[it["idx"]].get("is_hard_lockout"))]
+                best_sww_slot = min(valid_slots, key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5))) if valid_slots else timeline_items[0]
                 sww_start_idx = best_sww_slot["idx"]
                 sww_power_kw = 1.8
                 sww_target_temp = 50.0
                 planned_mode = "forced_standard_50"
-                planned_mode_label = "Geforceerd Aan: Standaard Dagrun (tot 50°C)"
+                planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
                 reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh) om {best_sww_slot['label']}"
 
             if not tank_already_warm and sww_start_idx >= 0:
@@ -3658,7 +3658,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.87.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.87.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
