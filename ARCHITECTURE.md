@@ -1,66 +1,76 @@
-# Open HEMS — Master Architecture & Agent Scoping Blueprint
-**Version:** `0.8.0` (Streamlined 4-Layer Modular Monorepo)
-
-Open HEMS is structured as a **Contract-First Modular Monorepo**. Hardware actuation and safety guardrails are absorbed directly into **Device Hardware Adapters** (device-specific parameters such as dwell-time, SG contacts, and emergency thresholds) and **Policy Orchestration** (multi-device constraints such as 3x25A main grid peak-shaving and hydraulic heater interlocks).
+# Open HEMS — Master Architecture & Layer Specification
+**Document Version:** `2.0.0`  
+**Reference Document:** See `PRD.md` for full functional and non-functional requirements.
 
 ---
 
-## 🏛️ The 4-Layer Architecture
+## 1. Architectural Philosophy: The 5-Layer Unidirectional Pipeline
+
+Open HEMS enforces a contract-first, unidirectional architecture:
 
 ```
-                                  models/canonical.py
+                                      models/canonical.py
                        (Universal Contract: Single Source of Truth)
-                       Vector, Flow, Measurement, Policies, Commands
-                                           │
-         ┌─────────────────────────────────┼─────────────────────────────────┐
-         ▼                                 ▼                                 ▼
-┌─────────────────────────┐   ┌─────────────────────────┐   ┌─────────────────────────┐
-│ LAAG 1: DATA & DEVICES  │   │ LAAG 2: CALIBRATION     │   │ LAAG 3: POLICIES & PLAN │
-│ layer1_data_collection/ │   │ layer2_calibration/     │   │ layer3_scheduling/      │
-├─────────────────────────┤   ├─────────────────────────┤   ├─────────────────────────┤
-│ • InfluxDB & Secrets    │   │ • Solar K(h) OLS Matrix │   │ • 3 Policy Archetypes:  │
-│ • MQTT Bus & Streaming  │   │ • Building UA_base      │   │   - Shiftable Consumer  │
-│ • Device Source Adapters│   │ • Standby Loss (350L)   │   │   - Thermal Buffer      │
-│ • Per-Device Safety:    │   │ • 80/20 EMA Smoothing   │   │   - Battery Arbitrage   │
-│   - Compressor Dwell    │   │ • Sensor Downtime Masks │   │ • Multi-Device Limits:  │
-│   - Max Device Wattage  │   │                         │   │   - 3x25A Peak Shaving  │
-│   - Noodgrens (<38°C)   │   │                         │   │   - Hydraulic Cutoffs   │
-│   - SG Relais Contacts  │   │                         │   │   - Surplus Waterfall   │
-└───────────┬─────────────┘   └────────────┬────────────┘   └───────────┬─────────────┘
-            │                              │                            │
-            └──────────────────────────────┼────────────────────────────┘
-                                           ▼
-                              ┌─────────────────────────┐
-                              │ LAAG 4: ANALYTICS       │
-                              │ layer5_analytics/       │
-                              ├─────────────────────────┤
-                              │ • Realized Net Savings  │
-                              │ • Solar Self-Consump %  │
-                              │ • Seasonal COP & SCOP   │
-                              │ • MAE Forecast Accuracy │
-                              └─────────────────────────┘
+            Vector, Flow, CleanTelemetryFrame, CanonicalDispatchPlan, DeviceCommand
+                                               │
+         ┌─────────────────────────────────────┼─────────────────────────────────────┐
+         ▼                                     ▼                                     ▼
+┌─────────────────────────┐         ┌─────────────────────────┐           ┌─────────────────────────┐
+│ LAAG 1: INGESTIE        │         │ LAAG 2: KALIBRATIE      │           │ LAAG 3: PLANNING        │
+│ layer1_data_collection/ │         │ layer2_calibration/     │           │ layer3_scheduling/      │
+├─────────────────────────┤         ├─────────────────────────┤           ├─────────────────────────┤
+│ • Hardware Collectors   │         │ • 7×96 Quarters Matrix  │           │ • Multi-Device Policy   │
+│ • Protocol Adapters     │ ──────> │ • EWMA Residual Learning│  ───────> │   Waterfall             │
+│ • TelemetrySanitizer    │         │ • Wittboy Assimilation  │           │ • Dynamic Peak Detector │
+│ • Freshness & Bounds    │         │ • Physical Thermal Loss │           │ • PlanStore Singleton   │
+└─────────────────────────┘         └─────────────────────────┘           └────────────┬────────────┘
+                                                                                       │
+                                    ┌──────────────────────────────────────────────────┴──────────────────────┐
+                                    ▼                                                                         ▼
+                         ┌─────────────────────────┐                                               ┌─────────────────────────┐
+                         │ LAAG 4: ACTUATIE        │                                               │ LAAG 5: PRESENTATIE     │
+                         │ layer4_control/         │                                               │ (daemon.py & Lovelace)  │
+                         ├─────────────────────────┤                                               ├─────────────────────────┤
+                         │ • Standalone Modbus     │                                               │ • Web Cockpit (Port     │
+                         │ • Standalone GPIO       │                                               │   8099)                 │
+                         │ • Home Assistant Plugin │                                               │ • Ingress Integration   │
+                         │ • Fail-safe Fallback    │                                               │ • Pure Rendering (Dumb) │
+                         └─────────────────────────┘                                               └─────────────────────────┘
 ```
 
 ---
 
-## 🤖 AI Agent Scoping Guidelines
+## 2. Core Separation of Responsibilities
 
-When prompting or spawning an AI Agent to work on this repository, **set the scope explicitly to the relevant layer**:
+1. **Layer 1: Telemetry Collection & Sanitization (`layer1_data_collection/`)**
+   * Emits raw telemetric streams from Modbus, P1, MQTT, and weather APIs.
+   * `TelemetrySanitizer` enforces physical boundaries, checks freshness (< 15 min), and synchronizes all streams to 15-minute grid slots starting from `Now`.
+   * Produces a contract-bound `CleanTelemetryFrame`.
 
-| Target Work | Target Directory | Dedicated Agent Spec | Permitted Actions | Forbidden Actions |
-| :--- | :--- | :--- | :--- | :--- |
-| **Data, Devices & Ingest** | `layer1_data_collection/` | `AGENT_SPEC.md` | I/O, API clients, InfluxDB, MQTT, device adapters, hardware limits | Macro-scheduling, tariff economics, analytics reporting |
-| **Physical Calibration** | `layer2_calibration/` | `AGENT_SPEC.md` | OLS regression, thermal equations, sensor mask filtering | External network calls, relay switching, UI styling |
-| **Policies & Peak Shaving** | `layer3_scheduling/` | `AGENT_SPEC.md` | Dynamic dispatch, tariff arbitration, multi-device peak shaving | Direct database writing, hardware I/O |
-| **Analytics & Reporting** | `layer5_analytics/` | `AGENT_SPEC.md` | Financial KPIs, self-consumption %, COP calculations, export | Modifying optimization plans, writing device commands |
-| **Universal Contracts** | `models/canonical.py` | `ARCHITECTURE.md` | Dataclass definitions, unit conversions, type annotations | Business logic, stateful code |
+2. **Layer 2: Calibration & Learning (`layer2_calibration/`)**
+   * Learns baseline non-dispatchable household patterns (7×96 quarters matrix).
+   * Applies Exponentially Weighted Moving Average (EWMA) tracking for residual drift correction.
+   * Assimilates local on-site weather sensors (Wittboy) against satellite irradiance forecasts.
+
+3. **Layer 3: Central Planning & Plan Store (`layer3_scheduling/`)**
+   * Solves multi-device energy dispatch over a 24–48 hour horizon based on dynamic wholesale tariffs.
+   * Identifies economic price spikes and enforces anti-hunting and comfort caps (max 2.5h winter lockout).
+   * Emits an immutable, versioned `CanonicalDispatchPlan`.
+   * Publishes to `PlanStore` (thread-safe in-memory singleton + persistent disk snapshot + InfluxDB audit log).
+
+4. **Layer 4: Actuation & Control (`layer4_control/`)**
+   * Translates dispatch commands into physical device actions.
+   * Connects via standalone Modbus/GPIO or via the optional Home Assistant Service Actuator.
+   * Guarantees fail-safe fallback to normal mode upon connection loss.
+
+5. **Layer 5: Presentation & Analytics (`daemon.py` / Lovelace)**
+   * Pure presentation layer.
+   * Consumes `PlanStore.get_plan()` directly via REST `/api/schedule/chart-data`, `/api/model/decomposition`, and `/api/health/consistency`.
+   * Contains **zero** mathematical modeling, zero private aggregation, and zero state color logic.
 
 ---
 
-## 🔒 Architectural Guardrails
-1. **Strict No-Mock-Data Integrity:** All calculations and reports must run against real verified data.
-2. **Device vs. Policy Separation:**
-   - Apparaat-specifieke parameters (minimale looptijd, fysiek SG contact, noodcomfort $<38^\circ\text{C}$) horen bij het **Device**.
-   - Systeembrede totalen (3x25A netafname peak shaving, overschotprioritering, hydraulische uitsluiting) horen bij **Policies**.
-3. **RAM Relais (0 EEPROM Wear):** Daikin Smart Grid relais uitsluitend aansturen via vluchtige binaire contacten S10S/S11S.
-4. **Isolated Secrets Vault:** Wachtwoorden en API-sleutels leven in `/config/open_hems_secrets.json` (`0600`) en worden nooit in git of HTML gedeeld.
+## 3. Architecture Decision Records (ADRs)
+* `docs/adr/ADR-001-5-layer-pipeline.md`: 5-Layer Unidirectional Architecture Pipeline.
+* `docs/adr/ADR-002-device-agnostic-dispatch-contract.md`: Generic Device-Agnostic Dispatch Plan.
+* `docs/adr/ADR-003-ha-as-adapter-plugin.md`: Home Assistant as an Optional Adapter Plugin.
