@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.84.1
+Version: 0.85.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1641,10 +1641,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
             if GLOBAL_DHW_MODEL:
-                decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_live, now_ams, prices_map=GLOBAL_CENTRAL_CACHE.get("prices_map", {}))
-                
-                # Retrieve planned slots from central dispatch cache
+                # Retrieve planned slots & dispatch parameters from central dispatch cache (Single Source of Truth)
                 cached_slots = GLOBAL_CENTRAL_CACHE.get("planned_dhw_slots", [])
+                planned_mode = GLOBAL_CENTRAL_CACHE.get("planned_mode", "forced_standard_50")
+                planned_reason = GLOBAL_CENTRAL_CACHE.get("reason", "Centrale dispatch planning")
+                cached_dyn_peaks = GLOBAL_CENTRAL_CACHE.get("dynamic_peaks", [])
                 c_power = GLOBAL_CENTRAL_CACHE.get("sww_power_kw", 1.8)
                 c_target = GLOBAL_CENTRAL_CACHE.get("target_temp_c", 50.0)
 
@@ -1719,6 +1720,24 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             q_labels.append(format_slot_label(q_dt, prev_q_dt, q_i == 0, True))
                             prev_q_dt = q_dt
                         traj["labels"] = q_labels
+
+                # Unified Decision derived directly from Central Dispatch Engine
+                decision = {
+                    "status": "SCHEDULE_NIGHT_CHARGE" if planned_mode == "forced_night_50" else "SKIP_NIGHT_CHARGE",
+                    "planned_mode": planned_mode,
+                    "decision_title": (
+                        "🟣 Zonnebuffer Boost (tot 60°C)" if planned_mode == "forced_solar_boost_60"
+                        else ("🌙 Nachtlading Gepland (Comfortzekerheid vóór Prijspiek)" if planned_mode == "forced_night_50"
+                        else ("☀️ Daglading Gepland (tot 50°C)" if planned_mode in ["forced_standard_50", "forced_midday_50"]
+                        else "✅ Geen opwarming nodig (Vat op temperatuur)"))
+                    ),
+                    "decision_sub": planned_reason,
+                    "recommendation": f"{GLOBAL_CENTRAL_CACHE.get('planned_mode_label', 'Centrale planning')}: {planned_reason}",
+                    "morning_dip_c": traj.get("morning_dip_temp_c", 40.0) if traj else 40.0,
+                    "morning_dip_time": traj.get("morning_dip_time", "09:30") if traj else "09:30",
+                    "morning_dip_p95_c": round(max(30.0, float(traj.get("morning_dip_temp_c", 40.0) if traj else 40.0) - 1.6), 1),
+                    "dynamic_peaks": cached_dyn_peaks
+                }
 
                 self._send_json({
                     "status": "online",
@@ -1912,7 +1931,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.84.1",
+                "version": "0.85.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2423,18 +2442,17 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-            # Daytime vs Evening/Night Planning Window:
-            # - Between 06:00 and 20:00 (daytime): focus 100% on the optimal DAY RUN (solar surplus / midday tariff).
-            #   No premature night evaluation when night spot prices are not yet known.
-            #   If tank drops < 40C earlier, Daikin autonomous hysteresis handles it.
-            # - After 20:00 or before 06:00 (evening/night): day run has passed, EPEX prices for tonight are known,
-            #   so evaluate night charging to ensure morning comfort (>40C).
-            is_daytime_focus = (6 <= now_ams.hour < 20)
+            # Unified Central Thermal Evaluation (Single Source of Truth):
+            # Check if the unheated tank drops below comfort (< 40°C) during a dynamic hard lockout peak before midday
+            unheated_sim = GLOBAL_DHW_MODEL.simulate_trajectory(t_dhw_live, now_ams, hours_ahead=24, heat_pump_schedule_slots=[]) if GLOBAL_DHW_MODEL else {}
+            unheated_temps = unheated_sim.get("temperatures_c", [])
 
-            dhw_decision = GLOBAL_DHW_MODEL.evaluate_night_heating_decision(t_dhw_live, now_ams) if GLOBAL_DHW_MODEL else None
-            needs_night_charge = False
-            if not is_daytime_focus and dhw_decision:
-                needs_night_charge = (dhw_decision.get("status") == "SCHEDULE_NIGHT_CHARGE")
+            morning_check_limit = 44 if is_15m else 11
+            dips_in_morning_hard_lockout = any(
+                unheated_temps[k] < 40.0 and slot_lockout_map.get(k, {}).get("is_hard_lockout")
+                for k in range(min(len(unheated_temps), morning_check_limit))
+            )
+            needs_night_charge = dips_in_morning_hard_lockout
 
             # Dynamic Economic Arbitrage for DHW 60°C Solar Buffer Boost:
             daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
@@ -2601,6 +2619,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             GLOBAL_CENTRAL_CACHE["sww_power_kw"] = sww_power_kw
             GLOBAL_CENTRAL_CACHE["is_15m"] = is_15m
             GLOBAL_CENTRAL_CACHE["base_dt"] = base_dt
+            GLOBAL_CENTRAL_CACHE["planned_mode"] = planned_mode
+            GLOBAL_CENTRAL_CACHE["planned_mode_label"] = planned_mode_label
+            GLOBAL_CENTRAL_CACHE["reason"] = reason
 
             run_start_time = timeline_items[sww_start_idx]["label"] if 0 <= sww_start_idx < total_slots else "--:--"
             run_end_time = timeline_items[min(total_slots - 1, sww_start_idx + slots_to_fill)]["label"] if 0 <= sww_start_idx < total_slots else "--:--"
@@ -3637,7 +3658,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.84.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.85.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
