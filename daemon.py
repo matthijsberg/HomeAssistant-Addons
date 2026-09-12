@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.9
+Version: 0.92.10
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1831,6 +1831,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             h_unh_p05.append(round(sum(raw_unh_p05[idx:idx+4]) / 4.0, 1))
                             h_unh_p95.append(round(sum(raw_unh_p95[idx:idx+4]) / 4.0, 1))
 
+                        # Anchor slot 0 ('Nu') strictly to live tank temperature
+                        if h_temps:
+                            h_temps[0] = round(t_live, 1)
+                            h_p05[0] = round(t_live, 1)
+                            h_p95[0] = round(t_live, 1)
+                        if h_unh_temps:
+                            h_unh_temps[0] = round(t_live, 1)
+                            h_unh_p05[0] = round(t_live, 1)
+                            h_unh_p95[0] = round(t_live, 1)
+
                         traj = {
                             "labels": h_labels,
                             "temperatures_c": h_temps,
@@ -1855,21 +1865,111 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             prev_q_dt = q_dt
                         traj["labels"] = q_labels
 
-                # Unified Decision derived directly from Central Dispatch Engine
+                # === Unified Buffer Efficiëntie & Laadbesluit Analysis ===
+                is_daytime = (7 <= now_ams.hour < 19)
+
+                unh_morning_dip = traj.get("morning_dip_temp_c", 39.5) if traj else 39.5
+                unh_morning_dip_time = traj.get("morning_dip_time", "09:30") if traj else "09:30"
+                unh_morning_p95 = round(max(25.0, float(unh_morning_dip) - 1.6), 1)
+                comfort_guaranteed = (unh_morning_dip >= 40.0)
+
+                # Physics & Tariffs (350L vat = 0.407 kWh_th / K)
+                c_tank = 0.407
+                cop_50 = 2.85
+                cop_60 = 2.15
+
+                cur_price = GLOBAL_CENTRAL_CACHE.get("current_price_eur", 0.24)
+                solar_kw_now = GLOBAL_CENTRAL_CACHE.get("current_solar_kw", 0.0)
+                is_solar_surplus = (solar_kw_now >= 1.2)
+
+                solar_cost_kwh = float(load_json(CONFIG_FILE).get("solar_cost_eur_kwh", 0.06))
+                effective_price_now = solar_cost_kwh if is_solar_surplus else cur_price
+
+                evening_peak_price = 0.35
+                for p_entry in cached_dyn_peaks:
+                    if p_entry.get("max_price"):
+                        evening_peak_price = max(evening_peak_price, p_entry["max_price"])
+
+                # Electricity needed to buffer to 50C and 60C
+                delta_t_50 = max(0.0, 50.0 - t_live)
+                kwh_e_50 = round((delta_t_50 * c_tank) / cop_50, 2)
+
+                delta_t_60 = max(0.0, 60.0 - t_live)
+                kwh_e_60 = round((delta_t_60 * c_tank) / cop_60, 2)
+
+                cost_now_50 = round(kwh_e_50 * effective_price_now, 2)
+                cost_now_60 = round(kwh_e_60 * effective_price_now, 2)
+                cost_later_run = round(max(1.3, kwh_e_60 if kwh_e_60 > 0 else 1.5) * evening_peak_price, 2)
+                savings_60 = round(max(0.0, cost_later_run - cost_now_60), 2)
+
+                if is_daytime:
+                    box_title = "Buffer Efficiëntie: Wel of Niet Bufferen (50°C vs. 60°C)?"
+                    comfort_card_title = "Comfort- & Temperatuurverloop"
+                    finance_card_title = "Financiële Afweging (Daglading vs. Avond/Nacht)"
+
+                    if planned_mode in ["forced_solar_boost_60", "max_on"]:
+                        badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-950/80 text-purple-300 border border-purple-800/80"><span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span> Zonnebuffer Geadviseerd (tot 60°C)</span>'
+                        target_rec = "Bufferen naar 60°C (Zonnebuffer)"
+                    elif planned_mode in ["forced_standard_50", "forced_on", "advised_on"]:
+                        badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Comfortlading Geadviseerd (tot 50°C)</span>'
+                        target_rec = "Laden naar 50°C (Comfort)"
+                    else:
+                        badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-700"><span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Afwachten (Vat op temperatuur)</span>'
+                        target_rec = "Afwachten (Geen actie)"
+
+                    comfort_text = (
+                        f"Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het 350L vat door stilstandsverlies en douchebeurten naar "
+                        f"<strong class='text-amber-300'>{unh_morning_dip}°C</strong> (bij piekverbruik zelfs <strong class='text-red-400'>{unh_morning_p95}°C</strong>) vóór 10:00 uur morgenochtend. "
+                        + ("Ochtendcomfort blijft boven 40°C gewaarborgd." if comfort_guaranteed else "Comfortrisico: vat zakt onder 40°C douchegrens!")
+                    )
+
+                    finance_text = (
+                        f"Nu doorwarmen naar 60°C vraagt ~{kwh_e_60} kWh stroom. "
+                        + (f"Met actueel zonne-overschot ({solar_kw_now:.1f} kW) kost dit slechts ~€{cost_now_60:.2f}. " if is_solar_surplus else f"Tegen actueel tarief kost dit ~€{cost_now_60:.2f}. ")
+                        + f"Later bijwarmen in de avondspits (€{evening_peak_price:.2f}/kWh) zou ~€{cost_later_run:.2f} kosten. "
+                        f"Bufferen levert <strong>~€{savings_60:.2f} besparing</strong> op én biedt ~715L mengwater van 38°C."
+                    )
+                    bullet_1 = f"~€{savings_60:.2f} voordeel bij nu bufferen met zon t.o.v. avond/nacht"
+                    bullet_2 = f"Advies: {target_rec} levert ~715L mengwater en overbrugt de avondspits"
+                else:
+                    box_title = "Buffer Efficiëntie: Nachtlading vs. Afwachten tot Middagzon?"
+                    comfort_card_title = "Ochtendcomfort & Temperatuurrisico"
+                    finance_card_title = "Financiële Afweging (Nacht vs. Morgenmiddag)"
+
+                    if planned_mode in ["forced_night_50", "forced_on"]:
+                        badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Nachtlading Gepland (Comfortzekerheid)</span>'
+                        target_rec = "Nachtladen naar 50°C"
+                    else:
+                        badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Wachten op Middagzon (Besparing)</span>'
+                        target_rec = "Afwachten tot middagzon"
+
+                    comfort_text = (
+                        f"Zonder nachtlading (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat door nachtelijk verlies en ochtenddouches naar "
+                        f"<strong class='text-amber-300'>{unh_morning_dip}°C</strong> (bij piekverbruik zelfs <strong class='text-red-400'>{unh_morning_p95}°C</strong>) vóór 10:00 uur. "
+                        + ("Ochtendcomfort blijft boven 40°C gewaarborgd." if comfort_guaranteed else "Comfortrisico: lauwe douche dreigt zonder nachtelijke bijverwarming!")
+                    )
+
+                    finance_text = (
+                        f"Nachtstroom kost vannacht ~€0,26/kWh (~€0,38 per run). Morgenmiddag rond 12:00–14:00 is stroom goedkoper met zonne-energie (~€0,15 per run). "
+                        + ("Comfortzekerheid weegt zwaarder dan wachten op zon." if not comfort_guaranteed else "Wachten tot middagzon bespaart ~€0,23.")
+                    )
+                    bullet_1 = "~€0,23 besparing bij wachten tot middagzon" if comfort_guaranteed else "Comfortzekerheid vereist nachtrun (€0,38)"
+                    bullet_2 = f"Advies: {target_rec} (ochtenddip zakt naar {unh_morning_dip}°C)"
+
                 decision = {
                     "status": "SCHEDULE_NIGHT_CHARGE" if planned_mode == "forced_night_50" else "SKIP_NIGHT_CHARGE",
                     "planned_mode": planned_mode,
-                    "decision_title": (
-                        "🟣 Zonnebuffer Boost (tot 60°C)" if planned_mode == "forced_solar_boost_60"
-                        else ("🌙 Nachtlading Gepland (Comfortzekerheid vóór Prijspiek)" if planned_mode == "forced_night_50"
-                        else ("☀️ Daglading Gepland (tot 50°C)" if planned_mode in ["forced_standard_50", "forced_midday_50"]
-                        else "✅ Geen opwarming nodig (Vat op temperatuur)"))
-                    ),
-                    "decision_sub": planned_reason,
-                    "recommendation": f"{GLOBAL_CENTRAL_CACHE.get('planned_mode_label', 'Centrale planning')}: {planned_reason}",
-                    "morning_dip_c": traj.get("morning_dip_temp_c", 40.0) if traj else 40.0,
-                    "morning_dip_time": traj.get("morning_dip_time", "09:30") if traj else "09:30",
-                    "morning_dip_p95_c": round(max(30.0, float(traj.get("morning_dip_temp_c", 40.0) if traj else 40.0) - 1.6), 1),
+                    "box_title": box_title,
+                    "badge_html": badge_html,
+                    "comfort_card_title": comfort_card_title,
+                    "comfort_text": comfort_text,
+                    "finance_card_title": finance_card_title,
+                    "finance_text": finance_text,
+                    "bullet_1": bullet_1,
+                    "bullet_2": bullet_2,
+                    "morning_dip_c": unh_morning_dip,
+                    "morning_dip_time": unh_morning_dip_time,
+                    "morning_dip_p95_c": unh_morning_p95,
                     "dynamic_peaks": cached_dyn_peaks
                 }
 
@@ -2029,7 +2129,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.9",
+                "version": "0.92.10",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3800,7 +3900,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.9</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.10</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4160,12 +4260,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <canvas id="chart-dhw-temperature"></canvas>
                         </div>
 
-                        <!-- Besluitvorming & Economische Analyse: Nachtlading vs. Daglading (10:00u) -->
+                        <!-- Buffer Efficiëntie & Laadbesluit (50°C vs. 60°C) -->
                         <div class="bg-[#0B0F17]/90 border border-slate-800 rounded-xl p-3.5 space-y-2 font-sans text-xs text-slate-300" id="dhw-night-decision-box">
                             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
                                 <div class="flex items-center gap-2">
                                     <span class="text-sm">⚖️</span>
-                                    <span class="font-bold text-white tracking-wide">Besluitvorming: Waarom Nachtladen vs. Daglading (10:00u)?</span>
+                                    <span class="font-bold text-white tracking-wide" id="dhw-decision-box-title">Buffer Efficiëntie: Wel of Niet Bufferen (50°C vs. 60°C)?</span>
                                     <button type="button" onclick="toggleInfoPopover(event, 'dhw_decision_box_info')" class="text-slate-500 hover:text-cyan-400 transition p-0.5 focus:outline-none" aria-label="Info">
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
                                     </button>
@@ -4179,13 +4279,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <!-- Links: Comfort & Fysisch Verloop -->
                                 <div class="space-y-1.5 bg-slate-900/40 p-2.5 rounded-lg border border-slate-800/60">
                                     <div class="font-semibold text-amber-400 flex items-center gap-1.5">
-                                        <span>🌡️</span> <span>Comfort- &amp; Temperatuurrisico</span>
+                                        <span>🌡️</span> <span id="dhw-comfort-card-title">Comfort- &amp; Temperatuurverloop</span>
                                     </div>
                                     <p id="dhw-eval-comfort-text">
-                                        Zonder nachtlading (<span class="text-slate-400 font-mono">grijze lijn</span>) daalt het vat door nachtelijk stilstandsverlies en ochtenddouches naar <strong class="text-amber-300" id="dhw-box-dip-text">39,9°C</strong> (bij piekverbruik zelfs <strong class="text-red-400" id="dhw-box-p95-text">38,3°C</strong>) vóór 10:00 uur.
+                                        Zonder bijwarmen (<span class="text-slate-400 font-mono">grijze lijn</span>) daalt het vat door stilstandsverlies en douchebeurten naar <strong class="text-amber-300" id="dhw-box-dip-text">39,9°C</strong> (bij piekverbruik zelfs <strong class="text-red-400" id="dhw-box-p95-text">38,3°C</strong>) vóór 10:00 uur morgenochtend.
                                     </p>
                                     <div class="text-[10px] text-slate-400 font-mono space-y-0.5 pt-0.5">
-                                        <div>• Ochtenddip zonder nacht: <span class="text-amber-300 font-bold" id="dhw-box-dip-val">39,9°C om 09:44</span></div>
+                                        <div>• Ochtenddip zonder bijwarmen: <span class="text-amber-300 font-bold" id="dhw-box-dip-val">39,9°C om 09:44</span></div>
                                         <div>• Piekblokkades: <span class="text-slate-300 font-bold" id="dhw-box-spits-detail">Real-time berekening...</span></div>
                                     </div>
                                 </div>
@@ -4193,14 +4293,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <!-- Rechts: Economische Afweging -->
                                 <div class="space-y-1.5 bg-slate-900/40 p-2.5 rounded-lg border border-slate-800/60">
                                     <div class="font-semibold text-emerald-400 flex items-center gap-1.5">
-                                        <span>💶</span> <span>Financiële Afweging (Nacht vs. Weekend-Dag)</span>
+                                        <span>💶</span> <span id="dhw-finance-card-title">Financiële Afweging (Daglading vs. Avond/Nacht)</span>
                                     </div>
                                     <p id="dhw-eval-finance-text">
-                                        Nachtstroom kost vannacht ~€0,31/kWh (€0,56 per run). Morgenmiddag rond 12:00–14:00 is stroom aanzienlijk goedkoper (€0,11/kWh, ~€0,20 per run met zonne-energie).
+                                        Nu doorwarmen naar 60°C vraagt ~1.4 kWh stroom. Met actueel zonne-overschot kost dit slechts ~€0,08. Later bijwarmen in de avondspits (€0,35/kWh) zou ~€0,48 kosten.
                                     </p>
                                     <div class="text-[10px] text-slate-400 font-mono space-y-0.5 pt-0.5">
-                                        <div>• Verschil: <span class="text-emerald-300 font-bold">~€0,36 voordeel</span> bij wachten tot middagzon.</div>
-                                        <div>• Afweging: <span class="text-white font-bold">Gegarandeerd ochtendcomfort vóór 10:00u</span> vs €0,36 besparing.</div>
+                                        <div id="dhw-box-bullet-1">• Verschil: <span class="text-emerald-300 font-bold" id="dhw-box-diff-val">~€0,39 voordeel</span> bij nu bufferen.</div>
+                                        <div id="dhw-box-bullet-2">• Advies: <span class="text-white font-bold" id="dhw-box-advies-val">Zonnebuffer naar 60°C overbrugt de avondspits</span>.</div>
                                     </div>
                                 </div>
                             </div>
@@ -9963,20 +10063,45 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 const unhP05 = unh.temperatures_p05_c || unhTemps;
                 const unhP95 = unh.temperatures_p95_c || unhTemps;
 
-                // Update Decision Box below chart
+                // Update Decision Box below chart (Buffer Efficiëntie)
                 const dec = data.decision || {};
+                const titleEl = document.getElementById('dhw-decision-box-title');
+                if (titleEl && dec.box_title) titleEl.innerText = dec.box_title;
+
                 const boxPill = document.getElementById('dhw-box-status-pill');
                 if (boxPill) {
-                    if (dec.status === 'SCHEDULE_NIGHT_CHARGE') {
+                    if (dec.badge_html) {
+                        boxPill.innerHTML = dec.badge_html;
+                    } else if (dec.status === 'SCHEDULE_NIGHT_CHARGE') {
                         boxPill.innerHTML = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Nachtlading Gepland (Comfortzekerheid)</span>';
                     } else {
-                        boxPill.innerHTML = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Wachten op Daglading (Besparing)</span>';
+                        boxPill.innerHTML = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Wachten op Middagzon (Besparing)</span>';
                     }
                 }
+
+                const cTitleEl = document.getElementById('dhw-comfort-card-title');
+                if (cTitleEl && dec.comfort_card_title) cTitleEl.innerText = dec.comfort_card_title;
+
+                const cTextEl = document.getElementById('dhw-eval-comfort-text');
+                if (cTextEl && dec.comfort_text) cTextEl.innerHTML = dec.comfort_text;
+
+                const fTitleEl = document.getElementById('dhw-finance-card-title');
+                if (fTitleEl && dec.finance_card_title) fTitleEl.innerText = dec.finance_card_title;
+
+                const fTextEl = document.getElementById('dhw-eval-finance-text');
+                if (fTextEl && dec.finance_text) fTextEl.innerHTML = dec.finance_text;
+
+                const diffEl = document.getElementById('dhw-box-diff-val');
+                if (diffEl && dec.bullet_1) diffEl.innerText = dec.bullet_1.replace('~', '');
+
+                const advEl = document.getElementById('dhw-box-advies-val');
+                if (advEl && dec.bullet_2) advEl.innerText = dec.bullet_2.replace('Advies: ', '');
+
                 const dipValEl = document.getElementById('dhw-box-dip-val');
                 if (dipValEl && dec.morning_dip_c !== undefined) {
-                    dipValEl.innerText = `${dec.morning_dip_c}°C om ${dec.morning_dip_time || '09:44'}`;
+                    dipValEl.innerText = `${dec.morning_dip_c}°C om ${dec.morning_dip_time || '09:30'}`;
                 }
+
                 const dBoxSpits = document.getElementById('dhw-box-spits-detail');
                 const cachedPeaks = window.__lastDynamicPeaks || [];
                 if (dBoxSpits) {
@@ -9989,19 +10114,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         }).join(' · ');
                     }
                 }
-                const dipTextEl = document.getElementById('dhw-box-dip-text');
-                if (dipTextEl && dec.morning_dip_c !== undefined) {
-                    dipTextEl.innerText = `${dec.morning_dip_c}°C`;
-                }
-                const p95TextEl = document.getElementById('dhw-box-p95-text');
-                if (p95TextEl && dec.morning_dip_p95_c !== undefined) {
-                    p95TextEl.innerText = `${dec.morning_dip_p95_c}°C`;
-                }
 
                 const chartDatasets = [
-                    // Counterfactual Upper boundary: Zonder Nachtladen P05
+                    // Counterfactual Upper boundary: Zonder Verwarming P05
                     {
-                        label: 'Marge Zonder Nacht P05 (°C)',
+                        label: 'Marge Onverwarmd P05 (°C)',
                         data: unhP05,
                         yAxisID: 'y',
                         borderColor: 'rgba(148, 163, 184, 0.25)',
@@ -10013,9 +10130,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         tension: 0.25,
                         order: 6
                     },
-                    // Counterfactual Lower boundary: Zonder Nachtladen P95 with grey fill to P05
+                    // Counterfactual Lower boundary: Zonder Verwarming P95 with grey fill to P05
                     {
-                        label: 'Marge Zonder Nachtladen',
+                        label: 'Marge Onverwarmd (P05–P95)',
                         data: unhP95,
                         yAxisID: 'y',
                         borderColor: 'rgba(148, 163, 184, 0.35)',
@@ -10027,9 +10144,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         tension: 0.25,
                         order: 7
                     },
-                    // Counterfactual Line: Zonder Nachtladen P50 (Light Slate Grey Dashed Line)
+                    // Counterfactual Line: Zonder Verwarming P50 (Light Slate Grey Dashed Line)
                     {
-                        label: 'Zonder Nachtladen (°C)',
+                        label: 'Zonder Verwarming (°C)',
                         data: unhTemps,
                         yAxisID: 'y',
                         borderColor: '#94A3B8',
