@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.2
+Version: 0.92.3
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2025,7 +2025,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.2",
+                "version": "0.92.3",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2282,6 +2282,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             baseload_kw = round(baseload_w / 1000.0, 3)
 
             now_ams = datetime.now(AMS_TZ)
+            plan = ensure_active_canonical_plan()
             today_str = now_ams.strftime("%d-%m-%Y")
             tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
 
@@ -2312,6 +2313,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             s_tilt = float(s_cfg.get("tilt_degrees", 34))
             s_az = float(s_cfg.get("azimuth_degrees", 225))
             s_cal = float(s_cfg.get("calibration_factor", 1.18))
+            s_eff = float(s_cfg.get("efficiency_factor", 0.88))
 
             try:
                 from layer1_data_collection.forecast_solar import ForecastSolarProvider
@@ -3776,7 +3778,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.3</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
