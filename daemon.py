@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.87.1
+Version: 0.88.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1931,7 +1931,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.87.1",
+                "version": "0.88.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3658,7 +3658,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.87.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.88.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5058,8 +5058,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <div class="flex items-center gap-2.5">
                             <span class="w-3 h-3 rounded-full bg-cyan-500 animate-pulse"></span>
                             <div>
-                                <h3 class="text-sm font-bold text-white tracking-wide">24-Uurs Kwartier-Voorspelling Decompositie (96 Slots)</h3>
-                                <p class="text-[11px] text-slate-400">Integraal verwacht vermogen opgebouwd uit de drie geleerde fysische en gedragsmatige deelmodellen.</p>
+                                <div class="flex items-center gap-2">
+                                    <h3 class="text-sm font-bold text-white tracking-wide">24-Uurs Kwartier-Voorspelling Decompositie (Vanaf Nu)</h3>
+                                    <span class="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800">SINGLE SOURCE OF TRUTH</span>
+                                </div>
+                                <p class="text-[11px] text-slate-400">Identiek aan Voorspelling &amp; Optimalisatie: toont de 96 kwartieren vanaf Nu inclusief de actieve dispatch (boiler opwarming om 13:00u, piekuitsluiting en zon).</p>
                             </div>
                         </div>
                         <div class="flex items-center gap-2 flex-wrap text-xs">
@@ -5081,8 +5084,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <div class="flex items-center gap-2.5">
                             <span class="w-3 h-3 rounded-full bg-blue-500 animate-pulse" id="profile-status-indicator"></span>
                             <div>
-                                <h3 class="text-sm font-bold text-white tracking-wide" id="profile-section-title">Zelflerende Verbruiksbehoefte & Historische Profielen (7×96 Kwartieren)</h3>
-                                <p class="text-[11px] text-slate-400" id="profile-section-sub">Geleerd uit 374 dagen continue InfluxDB data. Schakel tussen categorie, seizoen/maand en weekdag.</p>
+                                <div class="flex items-center gap-2">
+                                    <h3 class="text-sm font-bold text-white tracking-wide" id="profile-section-title">Zelflerende Basisprofielen per Weekdag (7×96 Matrix: 00:00–24:00)</h3>
+                                    <span class="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-blue-950 text-blue-300 border border-blue-800">STATISTISCHE MATRIX</span>
+                                </div>
+                                <p class="text-[11px] text-slate-400" id="profile-section-sub">De onderliggende statistische referentiebehoefte per kalenderdag van 00:00 tot 24:00 (vóór dynamische sturing en actuele weersinvloeden), gefit op 374 dagen InfluxDB telemetrie.</p>
                             </div>
                         </div>
                         
@@ -5722,7 +5728,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         var powerProducersResolution = '1h';  // Default to 1 Uur for 24h range
         var electricityPricesChartInstance = null;
         var pipelinePollInterval = null;
-        var activeUnallocDay = 1;
+        var activeUnallocDay = (new Date().getDay() + 6) % 7; // Auto-defaults to today (0=Ma ... 5=Za, 6=Zo)
         var cachedUnallocModel = null;
         let haEntitiesCache = [];
         let currentPolicyParams = {};
@@ -5969,10 +5975,12 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             if (tabId === 'calibration') {
                 loadModelDashboard();
                 loadCalibration();
+                activeUnallocDay = (new Date().getDay() + 6) % 7;
                 loadUnallocatedModel();
                 loadAlgorithmConfig();
                 loadModelRecommendations();
                 renderDhwTemperatureChart();
+                renderModelDecompositionChart();
             }
             if (tabId === 'devices') loadDevices();
             if (tabId === 'tariffs') loadTariffs();
@@ -9384,9 +9392,13 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             // Apply seasonal multiplier
             const quarters = baseQuarters.map(v => Math.round(v * multiplier * 10) / 10);
 
-            // Update weekday tab styles
+            // Update weekday tab styles and mark today
+            const todayIdx = (new Date().getDay() + 6) % 7;
             const btns = document.querySelectorAll('.unalloc-day-btn');
             btns.forEach((btn, idx) => {
+                const isToday = (idx === todayIdx);
+                const dayBaseName = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'][idx];
+                btn.innerText = isToday ? `${dayBaseName} • Vandaag` : dayBaseName;
                 if (idx === dayIdx) {
                     const bgActive = currentProfileType === 'unallocated' ? 'bg-blue-600 border-blue-500' : (currentProfileType === 'dhw' ? 'bg-amber-600 border-amber-500' : 'bg-red-600 border-red-500');
                     btn.className = `unalloc-day-btn px-3 py-1 rounded-lg border ${bgActive} text-white font-bold shadow`;
