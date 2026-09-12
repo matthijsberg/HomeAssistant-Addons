@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.1
+Version: 0.92.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2025,7 +2025,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.1",
+                "version": "0.92.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2383,29 +2383,20 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     lbl = dt_slot.strftime("%H:%M" if is_15m else "%H:00")
                 prev_dt_item = dt_slot
 
-                p_val = prices_map.get(k_full, prices_map.get(k_hour, 0.28))
-                
-                # Solar interpolation across quarters
-                s_h0 = solar_map.get(k_hour, 0.0)
-                s_h1 = solar_map.get(k_next_hour, s_h0)
-                frac = (dt_slot.minute / 60.0) if is_15m else 0.0
-                s_val = round(max(0.0, s_h0 + (s_h1 - s_h0) * frac), 2)
+                plan_slot = plan.slots[i] if plan and i < len(plan.slots) else None
+                if plan_slot:
+                    s_val = plan_slot.solar_kw
+                    unalloc_kw = plan_slot.unallocated_kw
+                    p_val = plan_slot.price_eur
+                else:
+                    s_val = solar_map.get(k_full, solar_map.get(k_hour, 0.0))
+                    unalloc_kw = 0.35
+                    p_val = prices_map.get(k_full, prices_map.get(k_hour, 0.28))
 
                 t_h0 = temp_map.get(k_hour, 16.0)
                 t_h1 = temp_map.get(k_next_hour, t_h0)
+                frac = (dt_slot.minute / 60.0) if is_15m else 0.0
                 t_val = round(t_h0 + (t_h1 - t_h0) * frac, 1)
-
-                # Unallocated load from exact 7x96 matrix
-                dow = dt_slot.weekday()
-                q_idx = dt_slot.hour * 4 + dt_slot.minute // 15
-                if grid_96 and len(grid_96) > dow and len(grid_96[dow]) > q_idx:
-                    unalloc_w = grid_96[dow][q_idx]
-                elif GLOBAL_MODEL:
-                    unalloc_w = GLOBAL_MODEL.predict_unallocated_w(dt_slot)
-                else:
-                    unalloc_w = 300.0
-
-                unalloc_kw = round(float(unalloc_w) / 1000.0, 2)
 
                 w_val = wind_map.get(k_hour, 3.0)
                 rh_val = rh_map.get(k_hour, 75.0)
@@ -3785,7 +3776,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
