@@ -436,21 +436,12 @@ def detect_dynamic_price_peaks(timeline_items: List[Dict[str, Any]], step_mins: 
         peak_objects.append(peak_obj)
 
         for k in range(s_idx, e_idx + 1):
-            if hard_start_idx <= k <= hard_end_idx and hard_start_idx >= 0:
-                slot_lockout_map[k] = {
-                    "is_hard_lockout": True,
-                    "severity": "HARD_LOCKOUT",
-                    "severity_label": "Harde Spitsblokkade 🔒",
-                    "name": name,
-                    "peak_obj": peak_obj
-                }
-            else:
-                slot_lockout_map[k] = {
-                    "is_hard_lockout": False,
-                    "severity": "SOFT_ADVICE",
-                    "severity_label": "Economisch Blokadvies ⚠️",
-                    "name": name,
-                    "peak_obj": peak_obj
-                }
+            is_hard = (hard_start_idx <= k <= hard_end_idx and hard_start_idx >= 0)
+            slot_entry = dict(peak_obj)
+            slot_entry["is_hard_lockout"] = is_hard
+            slot_entry["severity"] = "HARD_LOCKOUT" if is_hard else "SOFT_ADVICE"
+            slot_entry["severity_label"] = "Harde Spitsblokkade 🔒" if is_hard else "Economisch Blokadvies ⚠️"
+            slot_entry["peak_obj"] = peak_obj
+            slot_lockout_map[k] = slot_entry
 
     return peak_objects, slot_lockout_map
