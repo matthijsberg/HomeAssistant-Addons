@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.82.1
+Version: 0.83.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1912,7 +1912,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.82.1",
+                "version": "0.83.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2535,30 +2535,35 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 hours_run_needed = (delta_t_run * c_tank_kwh_per_c) / p_th_run_est
                 slots_to_fill = max(2, math.ceil(hours_run_needed / step_h) + (1 if is_15m else 0))
 
-            # Fill boiler dispatch while enforcing STRICT PEAK LOCKOUTS
+            # Fill boiler dispatch while enforcing DYNAMIC PEAK LOCKOUTS
             for k in range(slots_to_fill):
                 target_slot = sww_start_idx + k
                 if target_slot < total_slots:
-                    slot_hour = timeline_items[target_slot]["dt"].hour
-                    slot_min = timeline_items[target_slot]["dt"].minute
-                    time_dec = slot_hour + slot_min / 60.0
-                    # Check if slot falls in peak lockout (07:00-09:30 or 17:00-20:00)
-                    if not ((7.0 <= time_dec < 9.5) or (17.0 <= time_dec < 20.0)):
+                    slot_peak = slot_lockout_map.get(target_slot)
+                    is_locked_slot = bool(slot_peak and slot_peak.get("is_hard_lockout"))
+                    if not is_locked_slot:
                         boiler[target_slot] = sww_power_kw
                         advices[target_slot] = f"♨️ SWW Boiler 350L: {reason}"
 
             # Build 24h Mode Timeline for Horizontal Bar Diagram
             dhw_mode_timeline = []
             for it in timeline_items:
-                h_dec = it["dt"].hour + it["dt"].minute / 60.0
                 q_idx = it["idx"]
-                is_peak = (7.0 <= h_dec < 9.5) or (17.0 <= h_dec < 20.0)
-                if is_peak:
+                p_val = it.get("price", 0.30)
+                peak_info = slot_lockout_map.get(q_idx)
+
+                if peak_info and peak_info.get("is_hard_lockout"):
                     m_code = "peak_lockout"
-                    m_lbl = "Hard Uit (Spitsblokkade 🔒)"
+                    m_lbl = f"{peak_info['name']} ({peak_info['duration_mins']}m 🔒)"
                     m_col = "#EF4444"
                     m_pwr = 0.0
-                    m_desc = f"Spitsblokkade ({it['label']}): Compressor SG4 vergrendeld tegen piektarieven (€{it['price']:.3f}/kWh) en netbelasting."
+                    m_desc = f"{peak_info['name']} ({peak_info['start_time']}–{peak_info['end_time']}, {peak_info['duration_mins']}m): Prijspiek max €{peak_info['max_price']:.3f}/kWh (+€{peak_info['delta_median']:.3f} t.o.v. mediaan). Compressor SG4 vergrendeld."
+                elif peak_info and not peak_info.get("is_hard_lockout") and boiler[q_idx] == 0:
+                    m_code = "peak_advice"
+                    m_lbl = f"{peak_info['name']} ({peak_info['duration_mins']}m ⚠️)"
+                    m_col = "#F59E0B"
+                    m_pwr = 0.0
+                    m_desc = f"{peak_info['name']} ({peak_info['start_time']}–{peak_info['end_time']}, {peak_info['duration_mins']}m): Matige prijspiek (gem. €{peak_info['avg_price']:.3f}/kWh). Uitstel opwarming aanbevolen."
                 elif boiler[q_idx] > 0:
                     m_code = planned_mode
                     m_lbl = planned_mode_label
@@ -2567,10 +2572,10 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     m_desc = f"{planned_mode_label} om {it['label']}: Vermogen {m_pwr} kW elektrisch · Doeltemperatuur {sww_target_temp}°C."
                 else:
                     m_code = "standby_normal"
-                    m_lbl = "Normale Operatie (Standby / Hysteresis)"
+                    m_lbl = "Normale Operatie (Vrijloop 🔓)"
                     m_col = "#1E293B"
                     m_pwr = 0.0
-                    m_desc = f"Normale Operatie ({it['label']}): Vrijgavevenster. Warmtepomp waakt autonoom (start alleen bij tank &le; 40°C)."
+                    m_desc = f"Vrijloopvenster ({it['label']}): Geen prijspiek gedetecteerd (€{p_val:.3f}/kWh). Vrij voor warmtepomp / boiler."
 
                 dhw_mode_timeline.append({
                     "slot": q_idx,
@@ -3631,7 +3636,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.82.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.83.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3949,9 +3954,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <!-- 2. Planning Summary Metric Cards -->
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs pt-1">
                             <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
-                                <div class="text-[10px] text-slate-400 uppercase font-bold">🚫 Spitsblokkades (5.5 Uur)</div>
-                                <div class="text-xs font-bold text-red-400">07:00–09:30 &amp; 17:00–20:00</div>
-                                <div class="text-[10px] text-slate-400 font-sans">Compressor SG4 vergrendeld tegen piektarieven.</div>
+                                <div class="text-[10px] text-slate-400 uppercase font-bold flex items-center justify-between">
+                                    <span id="dhw-dyn-lockout-title">🚫 Spitsblokkades</span>
+                                    <span class="text-[9px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono font-bold">DYNAMISCH</span>
+                                </div>
+                                <div class="text-xs font-bold text-red-400" id="dhw-dyn-lockout-hours">Berekenen...</div>
+                                <div class="text-[10px] text-slate-400 font-sans" id="dhw-dyn-lockout-sub">Real-time piekdetectie o.b.v. EPEX all-up tarieven.</div>
                             </div>
                             <div class="bg-black/50 p-3 rounded-xl border border-slate-800 space-y-1">
                                 <div class="text-[10px] text-slate-400 uppercase font-bold">⚡ Geplande Run &amp; Modus</div>
@@ -4019,7 +4027,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                     </p>
                                     <div class="text-[10px] text-slate-400 font-mono space-y-0.5 pt-0.5">
                                         <div>• Ochtenddip zonder nacht: <span class="text-amber-300 font-bold" id="dhw-box-dip-val">39,9°C om 09:44</span></div>
-                                        <div>• Spitsvergrendeling (07:00–09:30): <span class="text-red-300 font-bold">Verwarmen geblokkeerd</span></div>
+                                        <div>• Piekblokkades: <span class="text-slate-300 font-bold" id="dhw-box-spits-detail">Real-time berekening...</span></div>
                                     </div>
                                 </div>
 
@@ -7135,6 +7143,40 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         block.title = `${seg.time} | ${seg.label}\n${seg.description}`;
                         tlContainer.appendChild(block);
                     });
+                }
+
+                // Update Dynamic Spitsblokkades Summary Card & Decision Box
+                const dynPeaks = data.dynamic_peaks || [];
+                const hTitle = document.getElementById('dhw-dyn-lockout-title');
+                const hHours = document.getElementById('dhw-dyn-lockout-hours');
+                const hSub = document.getElementById('dhw-dyn-lockout-sub');
+                const spitsDetailEl = document.getElementById('dhw-box-spits-detail');
+
+                if (dynPeaks.length === 0) {
+                    if (hTitle) hTitle.innerText = '✨ Spitsblokkades: Geen';
+                    if (hHours) {
+                        hHours.innerText = 'Geen prijspieken (Vlak tarief 🔓)';
+                        hHours.className = 'text-xs font-bold text-emerald-400';
+                    }
+                    if (hSub) hSub.innerText = 'Tarief schommelt minimaal: warmtepomp mag overdag vrij opereren.';
+                    if (spitsDetailEl) spitsDetailEl.innerHTML = '<span class="text-emerald-400 font-bold">Geen prijspieken gedetecteerd 🔓 (volledige vrijloop)</span>';
+                } else {
+                    const totMins = dynPeaks.reduce((acc, p) => acc + (p.duration_mins || 0), 0);
+                    const totHours = (totMins / 60).toFixed(1);
+                    if (hTitle) hTitle.innerText = `🚫 Spitsblokkades (${totHours} Uur)`;
+                    if (hHours) {
+                        hHours.innerText = dynPeaks.map(p => `${p.name} ${p.start_time}–${p.end_time} (${p.duration_mins}m)`).join(' · ');
+                        hHours.className = 'text-xs font-bold text-red-400';
+                    }
+                    const maxPeakP = Math.max(...dynPeaks.map(p => p.max_price));
+                    if (hSub) hSub.innerText = `Piekhoogte tot €${maxPeakP.toFixed(3)}/kWh. Compressor vergrendeld.`;
+                    if (spitsDetailEl) {
+                        spitsDetailEl.innerHTML = dynPeaks.map(p => {
+                            const badgeColor = p.is_hard_lockout ? 'text-red-300' : 'text-amber-300';
+                            const icon = p.is_hard_lockout ? '🔒' : '⚠️';
+                            return `<span class="${badgeColor} font-bold">${p.name} ${p.start_time}–${p.end_time} (${p.duration_mins}m ${icon})</span>`;
+                        }).join(' · ');
+                    }
                 }
                 if (ticksContainer && labels && labels.length > 0) {
                     ticksContainer.innerHTML = '';
