@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.88.1
+Version: 0.88.2
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1931,7 +1931,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.88.1",
+                "version": "0.88.2",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2571,29 +2571,47 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 peak_info = slot_lockout_map.get(q_idx)
 
                 if peak_info and peak_info.get("is_hard_lockout"):
-                    m_code = "peak_lockout"
-                    m_lbl = f"{peak_info['name']} ({peak_info['duration_mins']}m 🔒)"
+                    # 1. Geforceerd uit (blok) - Rood (#EF4444)
+                    m_code = "forced_off"
+                    m_lbl = f"Geforceerd uit (blok) — {peak_info['name']}"
                     m_col = "#EF4444"
                     m_pwr = 0.0
-                    m_desc = f"{peak_info['name']} ({peak_info['start_time']}–{peak_info['end_time']}, {peak_info['duration_mins']}m): Prijspiek max €{peak_info['max_price']:.3f}/kWh (+€{peak_info['delta_median']:.3f} t.o.v. mediaan). Compressor SG4 vergrendeld."
+                    m_desc = f"Geforceerd uit ({it['label']}): Prijspiek max €{peak_info['max_price']:.3f}/kWh. Compressor SG4 vergrendeld tegen piektarieven."
                 elif peak_info and not peak_info.get("is_hard_lockout") and boiler[q_idx] == 0:
-                    m_code = "peak_advice"
-                    m_lbl = f"Standby (Piek-Advies: Vermijd Lasten ⚠️)"
-                    m_col = "#1E293B"
+                    # 2. Geadviseerd uit - Oranje (#F59E0B)
+                    m_code = "advised_off"
+                    m_lbl = f"Geadviseerd uit — {peak_info['name']}"
+                    m_col = "#F59E0B"
                     m_pwr = 0.0
-                    m_desc = f"Standby ({it['label']}): Boiler staat in rust (0 kW). {peak_info['name']} flank (€{p_val:.3f}/kWh): uitstel van zware apparaten aanbevolen."
+                    m_desc = f"Geadviseerd uit ({it['label']}): Verhoogd tarief (€{p_val:.3f}/kWh). Uitstel van grote verbruikers aanbevolen; CV op lage modulatie."
                 elif boiler[q_idx] > 0:
-                    m_code = planned_mode
-                    m_lbl = planned_mode_label
-                    m_col = "#A855F7" if planned_mode == "forced_solar_boost_60" else ("#10B981" if planned_mode == "forced_night_50" else "#EAB308")
+                    if planned_mode in ["forced_solar_boost_60", "max_on"]:
+                        # 6. Maximaal aan (60°C) - Paars (#A855F7)
+                        m_code = "max_on"
+                        m_lbl = "Maximaal aan (doorverwarming tot 60°C)"
+                        m_col = "#A855F7"
+                        m_desc = f"Maximaal aan om {it['label']}: Zonnebuffer doorverwarming naar 60°C · Vermogen {boiler[q_idx]} kW elektrisch."
+                    else:
+                        # 5. Geforceerd aan (50°C) - Groen (#10B981) (voor zowel dagrun als nachtbuffer!)
+                        m_code = "forced_on"
+                        m_lbl = "Geforceerd aan (verwarmen tot 50°C)"
+                        m_col = "#10B981"
+                        m_desc = f"Geforceerd aan om {it['label']}: Verwarmen naar setpoint 50°C · Vermogen {boiler[q_idx]} kW elektrisch."
                     m_pwr = boiler[q_idx]
-                    m_desc = f"{planned_mode_label} om {it['label']}: Vermogen {m_pwr} kW elektrisch · Doeltemperatuur {sww_target_temp}°C."
+                elif (sol_val >= 1.5 or p_val <= min_timeline_price + 0.030) and (10 <= it["dt"].hour <= 16):
+                    # 4. Geadviseerd aan - Gestreept lichtgroen (#4ADE80)
+                    m_code = "advised_on"
+                    m_lbl = "Geadviseerd aan (Doorverwarmen)"
+                    m_col = "#4ADE80"
+                    m_pwr = 0.0
+                    m_desc = f"Geadviseerd aan ({it['label']}): Voordelig venster (€{p_val:.3f}/kWh). Warmtepomp mag hoger doorverwarmen voor CV vloerbuffer."
                 else:
-                    m_code = "standby_normal"
-                    m_lbl = "Normale Operatie (Vrijloop 🔓)"
+                    # 3. Normaal - Grijs (#1E293B)
+                    m_code = "normal"
+                    m_lbl = "Normaal (Standby)"
                     m_col = "#1E293B"
                     m_pwr = 0.0
-                    m_desc = f"Vrijloopvenster ({it['label']}): Geen prijspiek gedetecteerd (€{p_val:.3f}/kWh). Vrij voor warmtepomp / boiler."
+                    m_desc = f"Normaal ({it['label']}): Vrijloopvenster (€{p_val:.3f}/kWh). Warmtepomp en boiler in normale werking."
 
                 dhw_mode_timeline.append({
                     "slot": q_idx,
@@ -3658,7 +3676,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.88.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.88.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -7167,13 +7185,28 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         const block = document.createElement('div');
                         block.className = 'flex-1 h-full rounded-sm transition-all duration-150 cursor-pointer relative group';
                         block.style.backgroundColor = seg.color;
-                        if (seg.mode === 'peak_lockout') {
+                        if (seg.mode === 'forced_off' || seg.mode === 'peak_lockout') {
                             block.style.backgroundColor = '#EF4444';
                             block.style.backgroundImage = 'repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(0,0,0,0.35) 3px, rgba(0,0,0,0.35) 6px)';
-                        } else if (seg.mode === 'peak_advice') {
+                        } else if (seg.mode === 'advised_off' || seg.mode === 'peak_advice') {
+                            block.style.backgroundColor = '#F59E0B';
+                            block.style.backgroundImage = 'none';
+                            block.style.border = 'none';
+                        } else if (seg.mode === 'advised_on') {
+                            block.style.backgroundColor = '#4ADE80';
+                            block.style.backgroundImage = 'repeating-linear-gradient(45deg, #10B981, #10B981 3px, #86EFAC 3px, #86EFAC 6px)';
+                        } else if (seg.mode === 'forced_on' || seg.mode === 'forced_standard_50' || seg.mode === 'forced_night_50') {
+                            block.style.backgroundColor = '#10B981';
+                            block.style.backgroundImage = 'none';
+                            block.style.border = 'none';
+                        } else if (seg.mode === 'max_on' || seg.mode === 'forced_solar_boost_60') {
+                            block.style.backgroundColor = '#A855F7';
+                            block.style.backgroundImage = 'none';
+                            block.style.border = 'none';
+                        } else {
                             block.style.backgroundColor = '#1E293B';
-                            block.style.border = '1px dashed rgba(245, 158, 11, 0.6)';
-                            block.style.backgroundImage = 'repeating-linear-gradient(45deg, #1E293B, #1E293B 3px, rgba(245, 158, 11, 0.25) 3px, rgba(245, 158, 11, 0.25) 6px)';
+                            block.style.backgroundImage = 'none';
+                            block.style.border = 'none';
                         }
                         // Tooltip on hover
                         block.title = `${seg.time} | ${seg.label}\n${seg.description}`;
