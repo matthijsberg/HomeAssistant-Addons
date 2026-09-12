@@ -445,3 +445,116 @@ def detect_dynamic_price_peaks(timeline_items: List[Dict[str, Any]], step_mins: 
             slot_lockout_map[k] = slot_entry
 
     return peak_objects, slot_lockout_map
+
+
+class StandardizedState(str, Enum):
+    """
+    Strict 6-state taxonomy for all HEMS devices, timeline bars, legends, and cards.
+    """
+    FORCED_OFF = "forced_off"   # 1. Geforceerd uit (blok) - Rood (#EF4444)
+    ADVISED_OFF = "advised_off" # 2. Geadviseerd uit - Oranje (#F59E0B)
+    NORMAL = "normal"           # 3. Normaal - Grijs (#1E293B)
+    ADVISED_ON = "advised_on"   # 4. Geadviseerd aan - Lichtgroen gestreept (#4ADE80)
+    FORCED_ON = "forced_on"     # 5. Geforceerd aan (50°C) - Groen (#10B981)
+    MAX_ON = "max_on"           # 6. Maximaal aan (60°C) - Paars (#A855F7)
+
+
+STATE_METADATA = {
+    StandardizedState.FORCED_OFF: {
+        "code": "forced_off",
+        "label": "Geforceerd uit (blok)",
+        "color_hex": "#EF4444",
+        "tailwind_text": "text-red-400",
+        "description": "Harde spitsvergrendeling: compressor SG4 vergrendeld tegen piektarieven."
+    },
+    StandardizedState.ADVISED_OFF: {
+        "code": "advised_off",
+        "label": "Geadviseerd uit",
+        "color_hex": "#F59E0B",
+        "tailwind_text": "text-amber-400",
+        "description": "Schouderpiek / verhoogd tarief: uitstel van grote verbruikers aanbevolen."
+    },
+    StandardizedState.NORMAL: {
+        "code": "normal",
+        "label": "Normaal",
+        "color_hex": "#1E293B",
+        "tailwind_text": "text-slate-400",
+        "description": "Vrijloopvenster: warmtepomp en boiler in normale werking."
+    },
+    StandardizedState.ADVISED_ON: {
+        "code": "advised_on",
+        "label": "Geadviseerd aan",
+        "color_hex": "#4ADE80",
+        "tailwind_text": "text-emerald-300",
+        "description": "Voordelig venster: warmtepomp mag hoger doorverwarmen voor CV vloerbuffer."
+    },
+    StandardizedState.FORCED_ON: {
+        "code": "forced_on",
+        "label": "Geforceerd aan",
+        "color_hex": "#10B981",
+        "tailwind_text": "text-emerald-400",
+        "description": "Verwarmen naar setpoint (50°C): actieve stookrun voor boiler of CV."
+    },
+    StandardizedState.MAX_ON: {
+        "code": "max_on",
+        "label": "Maximaal aan (60°C)",
+        "color_hex": "#A855F7",
+        "tailwind_text": "text-purple-300",
+        "description": "Zonnebuffer doorverwarming naar 60°C bij hoge zonne-overschotten."
+    }
+}
+
+
+@dataclass
+class DispatchPlanSlot:
+    """A single canonical dispatch slot in the published plan."""
+    slot_idx: int
+    time_label: str
+    dt_iso: str
+    price_eur: float
+    solar_kw: float
+    unallocated_kw: float
+    heating_kw: float
+    dhw_kw: float
+    net_import_kw: float
+    mode_code: str
+    mode_label: str
+    color_hex: str
+    tailwind_class: str
+    description: str
+
+
+@dataclass
+class DHWPlanSummary:
+    """Canonical summary of DHW boiler dispatch decision."""
+    planned_mode: str
+    planned_mode_label: str
+    color_hex: str
+    tailwind_class: str
+    target_temp_c: float
+    run_start: str
+    run_end: str
+    run_duration_min: int
+    power_kw: float
+    total_stroom_kwh: float
+    spits_lockout_hours: float
+    dynamic_peaks: List[Dict[str, Any]]
+    unheated_trajectory: List[Dict[str, Any]]
+    counterfactual_reason: str
+    arbitrage_saving_eur: float
+
+
+@dataclass
+class CanonicalDispatchPlan:
+    """The central immutable published dispatch plan for the entire HEMS system."""
+    generated_at: str
+    horizon_hours: float
+    resolution_mins: int
+    is_fresh: bool
+    freshness_age_seconds: float
+    slots: List[DispatchPlanSlot]
+    dhw_summary: DHWPlanSummary
+    dynamic_peaks: List[Dict[str, Any]]
+    validation_issues: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
