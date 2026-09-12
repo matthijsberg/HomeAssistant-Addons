@@ -169,7 +169,19 @@ class CentralPlanner:
                 "upper_bound_p95": round(sim_temp + 0.5, 1)
             })
 
-        # 4. Assemble Canonical Dispatch Slots (with strict 6-state taxonomy)
+        # 4. Space Heating Optimization & Pre-Heat Floor Buffering (2R1C model)
+        from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
+
+        heating_plan = SpaceHeatingPolicy.plan_space_heating(
+            outdoor_temps_c=[s.outdoor_temp_c for s in slots],
+            prices_eur=[s.price_all_in for s in slots],
+            solar_kw=[s.solar_kw for s in slots],
+            active_dhw_slots=final_dhw_slots,
+            dynamic_peaks=dynamic_peaks,
+            step_hours=step_hours
+        )
+
+        # 5. Assemble Canonical Dispatch Slots (with strict 6-state taxonomy)
         min_timeline_price = min([s.price_all_in for s in slots] or [0.20])
         dispatch_slots: List[DispatchPlanSlot] = []
 
@@ -179,13 +191,9 @@ class CentralPlanner:
             unalloc_val = s.unallocated_kw
             peak_info = slot_lockout_map.get(i)
 
-            # Determine Heat Pump Heating demand (modulation floor ~950W, modulated by outdoor temp)
-            heating_kw = 0.0
-            is_heating_active = False
-            if s.outdoor_temp_c < 16.0:
-                # Modulated baseline floor heating
-                heating_kw = max(0.95, round(0.95 + 0.08 * (16.0 - s.outdoor_temp_c), 2))
-                is_heating_active = True
+            # Space heating allocation from 2R1C floor buffer model
+            h_slot = heating_plan.slots[i] if i < len(heating_plan.slots) else None
+            heating_kw = h_slot.heating_kw_el if h_slot else 0.0
 
             # DHW allocation
             dhw_kw = sww_power_kw if i in final_dhw_slots else 0.0
@@ -198,14 +206,14 @@ class CentralPlanner:
                 # 1. Geforceerd uit (blok)
                 state = StandardizedState.FORCED_OFF
                 mode_lbl = f"Geforceerd uit (blok) — {peak_info['name']}"
-                desc = f"Geforceerd uit ({s.label}): Prijspiek max €{peak_info['max_price']:.3f}/kWh. Compressor SG4 vergrendeld tegen piektarieven."
+                desc = f"Geforceerd uit ({s.label}): Prijspiek max €{peak_info['max_price']:.3f}/kWh. Compressor SG4/CV vergrendeld tegen piektarieven."
                 heating_kw = 0.0
                 dhw_kw = 0.0
             elif peak_info and not peak_info.get("is_hard_lockout") and dhw_kw == 0.0:
                 # 2. Geadviseerd uit
                 state = StandardizedState.ADVISED_OFF
                 mode_lbl = f"Geadviseerd uit — {peak_info['name']}"
-                desc = f"Geadviseerd uit ({s.label}): Verhoogd tarief (€{p_val:.3f}/kWh). Uitstel van grote verbruikers aanbevolen; CV op minimale modulatie."
+                desc = f"Geadviseerd uit ({s.label}): Verhoogd tarief (€{p_val:.3f}/kWh). CV op minimale modulatievloer (950W)."
                 if heating_kw > 0.0:
                     heating_kw = 0.95  # clamp to bottom modulation floor
             elif dhw_kw > 0.0:
@@ -219,11 +227,16 @@ class CentralPlanner:
                     state = StandardizedState.FORCED_ON
                     mode_lbl = "Geforceerd aan (verwarmen tot 50°C)"
                     desc = f"Geforceerd aan ({s.label}): Verwarmen naar setpoint 50°C · Vermogen {dhw_kw} kW elektrisch."
-            elif (sol_val >= 1.5 or p_val <= min_timeline_price + 0.030) and (10 <= s.dt.hour <= 16):
-                # 4. Geadviseerd aan
+            elif h_slot and h_slot.is_preheat_active:
+                # 4. Geadviseerd aan (Vloerbuffer Pre-Heat SG3)
                 state = StandardizedState.ADVISED_ON
-                mode_lbl = "Geadviseerd aan (Doorverwarmen)"
-                desc = f"Geadviseerd aan ({s.label}): Voordelig venster (€{p_val:.3f}/kWh). Warmtepomp mag hoger doorverwarmen voor CV vloerbuffer."
+                mode_lbl = "Geadviseerd aan (Vloerbuffer Pre-Heat SG3)"
+                desc = f"Geadviseerd aan ({s.label}): Voordelig daltarief (€{p_val:.3f}/kWh). Betondekvloer wordt preventief voorverwarmd ({heating_kw} kW) om spitsblokkades comfortabel te overbruggen."
+            elif (sol_val >= 1.5 or p_val <= min_timeline_price + 0.030) and (10 <= s.dt.hour <= 16):
+                # 4. Geadviseerd aan (Zonne-overschot)
+                state = StandardizedState.ADVISED_ON
+                mode_lbl = "Geadviseerd aan (Zonne-overschot)"
+                desc = f"Geadviseerd aan ({s.label}): Voordelig venster (€{p_val:.3f}/kWh). Warmtepomp mag hoger doorverwarmen voor zonnebuffer."
             else:
                 # 3. Normaal
                 state = StandardizedState.NORMAL
@@ -301,7 +314,16 @@ class CentralPlanner:
             metadata={
                 "aligned_grid_start": frame.metadata.get("aligned_grid_start"),
                 "dhw_tank_liters": cls.DHW_TANK_LITERS,
-                "solar_surplus_day_kwh": round(day_solar_surplus, 2)
+                "solar_surplus_day_kwh": round(day_solar_surplus, 2),
+                "is_heating_season": heating_plan.is_heating_season,
+                "season_status_label": heating_plan.season_status_label,
+                "total_heating_kwh_el": heating_plan.total_heating_kwh_el,
+                "total_heating_kwh_th": heating_plan.total_heating_kwh_th,
+                "heating_average_cop": heating_plan.average_cop,
+                "preheat_hours": heating_plan.preheat_hours,
+                "lockout_hours": heating_plan.lockout_hours,
+                "min_projected_room_temp_c": heating_plan.min_projected_room_temp_c,
+                "max_projected_room_temp_c": heating_plan.max_projected_room_temp_c
             }
         )
 

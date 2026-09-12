@@ -129,6 +129,13 @@ When an unscheduled draw-off (e.g. an afternoon shower) causes the DHW tank to d
   3. The upcoming planned run in `PlanStore` is cancelled and reverted to `normal` (50°C).
   4. Benefit: Eliminates 1 compressor start/stop cycle, saves ~0.25 kWh compressor ramp-up overhead, and achieves full 24-hour thermal coverage without a second run.
 
+### 2.6 Space Heating & Concrete Floor Thermal Buffer Optimization (2R1C)
+During the heating season (mean outdoor temperature < 16.0°C), Open HEMS optimizes the underfloor heating circuit via a physical 2R1C thermal model:
+* **Thermal Floor Capacity:** Exploits the concrete screed (~14.5 kWh/K thermal capacity, 3–4 hour lag) as a high-efficiency thermal battery.
+* **Pre-Heat Valley Boost (SG3 / advised_on):** Charges the floor screed during cheap night valleys (02:00–06:00) or solar surplus hours with elevated heat pump output (SG3 boost, +1°C setpoint), raising room temperature within comfort limits (max 21.2°C).
+* **Peak Price Lockouts (SG1 / forced_off):** Disables space heating or clamps to modulation floor (950W) during morning (07:00–09:30) and evening (17:00–21:00) price spikes. The building passive thermal mass coasts through peaks with < 0.5°C indoor temperature drop (enforcing >= 19.5°C comfort minimum).
+* **Hydraulic Isolation:** CV heating is strictly paused during domestic hot water runs to protect compressor COP and prevent backup heater firing.
+
 ---
 
 ## 3. Generic Data Model & Schema Contracts
