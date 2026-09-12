@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.90.0
+Version: 0.91.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -38,6 +38,12 @@ try:
     sys.path.insert(0, "/config/projects/energy-scheduler")
     from layer2_calibration.learned_forecaster import HybridForecastingModel
     from layer2_calibration.dhw_thermal_model import DhwThermalModel
+    from layer1_data_collection.sanitizer import TelemetrySanitizer, CleanTelemetryFrame
+    from layer3_scheduling.central_planner import CentralPlanner
+    from layer3_scheduling.plan_store import get_plan_store, PlanStore
+    from layer3_scheduling.tariff_provider import TariffProvider
+    from models.mode_catalog import get_mode_meta, load_mode_catalog
+    from models.canonical import StandardizedState, STATE_METADATA
     GLOBAL_MODEL = HybridForecastingModel()
     GLOBAL_DHW_MODEL = DhwThermalModel()
 except Exception as _e_model:
@@ -657,6 +663,113 @@ def ensure_framework_defaults(cfg: dict):
 
     if dirty:
         save_json(CONFIG_FILE, cfg)
+
+
+_LAST_CANONICAL_PLAN_TIME = None
+
+def ensure_active_canonical_plan(force_refresh=False):
+    """
+    Ensures an authoritative, synchronized CanonicalDispatchPlan is cached in PlanStore.
+    Re-plans every 60 seconds or when explicitly forced.
+    """
+    global _LAST_CANONICAL_PLAN_TIME
+    now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
+    store = get_plan_store()
+    current_plan = store.get_plan()
+
+    if not force_refresh and current_plan is not None and _LAST_CANONICAL_PLAN_TIME is not None:
+        if (now_ams - _LAST_CANONICAL_PLAN_TIME).total_seconds() < 60:
+            return current_plan
+
+    # 1. Fetch EPEX prices for today & tomorrow
+    today_str = now_ams.strftime("%d-%m-%Y")
+    tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
+    raw_prices = []
+    for d_str in [today_str, tomorrow_str]:
+        try:
+            url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval=INTERVAL_QUARTER"
+            req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
+            with urllib.request.urlopen(req_p, timeout=5) as r_p:
+                res_p = json.loads(r_p.read().decode())
+                for it in res_p.get("all_in_with_vat", []):
+                    dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Amsterdam"))
+                    raw_prices.append({
+                        "dt": dt,
+                        "price": float(it.get("price", {}).get("value", 0.25))
+                    })
+        except Exception:
+            pass
+
+    # 2. Fetch Open-Meteo Weather for Culemborg
+    raw_solar = []
+    raw_weather = []
+    try:
+        url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m&timezone=Europe%2FAmsterdam&forecast_days=2"
+        req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
+        with urllib.request.urlopen(req_m, timeout=5) as r_m:
+            m_data = json.loads(r_m.read().decode())
+            m_times = m_data.get("hourly", {}).get("time", [])
+            m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
+            m_temps = m_data.get("hourly", {}).get("temperature_2m", [])
+            cfg = load_json(CONFIG_FILE)
+            s_cfg = cfg.get("solar", {})
+            s_kwp = float(s_cfg.get("kwp", 5.76))
+            s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
+            s_tilt = float(s_cfg.get("tilt_degrees", 34))
+            s_az = float(s_cfg.get("azimuth_degrees", 225))
+            s_eff = float(s_cfg.get("efficiency_factor", 0.88))
+
+            for t, rad, tmp in zip(m_times, m_rads, m_temps):
+                k_t = t.replace('T', ' ')[:13] + ':00'
+                dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
+                poa_kw = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
+                raw_solar.append({"dt": dt_h, "solar_kw": poa_kw})
+                raw_weather.append({"dt": dt_h, "temperature": float(tmp)})
+    except Exception as e_w:
+        print(f"Warning fetching Open-Meteo in ensure_active_canonical_plan: {e_w}")
+
+    # 3. Read current tank and room temperature
+    cur_dhw = 48.0
+    cur_room = 20.0
+    last_hw_time = None
+    try:
+        sec = load_secrets()
+        pw = sec.get("influx_password", "")
+        if pw:
+            query = 'SELECT last("temperature") FROM "daikin_heat_pump" WHERE "mode" = \'dhw\' AND time > now() - 2h'
+            q_url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pw}&db=openhems&q={urllib.parse.quote(query)}"
+            with urllib.request.urlopen(q_url, timeout=3) as r:
+                res = json.loads(r.read().decode())
+                series = res.get("results", [{}])[0].get("series", [])
+                if series:
+                    cur_dhw = float(series[0]["values"][0][1])
+                    last_hw_time = datetime.now(ZoneInfo("Europe/Amsterdam"))
+    except Exception:
+        pass
+
+    # 4. Extract unallocated profile
+    grid_96 = []
+    if GLOBAL_MODEL and GLOBAL_MODEL.profile:
+        grid_96 = GLOBAL_MODEL.profile.get("profile_96_quarters", [])
+
+    # 5. Sanitize telemetry
+    frame = TelemetrySanitizer.sanitize(
+        now=now_ams,
+        raw_prices=raw_prices,
+        raw_solar=raw_solar,
+        raw_weather=raw_weather,
+        raw_unallocated_matrix=grid_96,
+        current_dhw_temp=cur_dhw,
+        current_room_temp=cur_room,
+        last_hardware_reading_time=last_hw_time,
+        horizon_slots=96,
+        step_mins=15
+    )
+
+    # 6. Plan & Publish
+    plan = CentralPlanner.plan(frame, current_dhw_temp=cur_dhw)
+    _LAST_CANONICAL_PLAN_TIME = now_ams
+    return plan
 
 
 class HemsApiHandler(BaseHTTPRequestHandler):
@@ -1895,7 +2008,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.90.0",
+                "version": "0.91.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3642,7 +3755,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.90.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.91.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
