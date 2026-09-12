@@ -72,8 +72,10 @@ ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "${SSH_KEY}" 
 echo "Step 5: Upgrading running app in Home Assistant..."
 if ! ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "${SSH_KEY}" -p "${SSH_PORT}" "root@${SSH_HOST}" \
     "ha apps update local_open_hems || (ha apps rebuild local_open_hems && ha apps restart local_open_hems)"; then
-    echo "❌ Upgrade failed! Initiating automatic rollback to ${SNAPSHOT_DIR}..."
-    bash "${ADDON_DIR}/scripts/rollback.sh" "${SNAPSHOT_DIR}"
+    echo "❌ Upgrade/rebuild failed on host! Diagnostic information follows:"
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "${SSH_KEY}" -p "${SSH_PORT}" "root@${SSH_HOST}" \
+        "ha apps logs local_open_hems | tail -n 40" || true
+    echo "⚠️ Code preserved on disk for developer / AI agent triage (no automatic rollback)."
     exit 1
 fi
 
@@ -81,8 +83,8 @@ fi
 echo "Step 6: Running Post-Deploy Live Data & API Smoke Test..."
 sleep 4
 if ! python3 "${ADDON_DIR}/scripts/verify_data_integrity.py" --live --url "http://172.30.33.10:8099"; then
-    echo "❌ Post-deploy data integrity smoke test failed! Initiating automatic rollback..."
-    bash "${ADDON_DIR}/scripts/rollback.sh" "${SNAPSHOT_DIR}"
+    echo "❌ Post-deploy data integrity smoke test failed!"
+    echo "⚠️ Diagnostic details reported above. Code preserved for developer / AI agent forward-fixing (no rollback)."
     exit 1
 fi
 echo "✓ Post-deploy live data integrity verified!"
