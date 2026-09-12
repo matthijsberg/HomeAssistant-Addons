@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.11
+Version: 0.92.12
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -32,6 +32,7 @@ import base64
 import time
 import threading
 import math
+from typing import Optional, Dict, Any, List
 
 try:
     sys.path.insert(0, str(Path(__file__).parent))
@@ -43,7 +44,7 @@ try:
     from layer3_scheduling.plan_store import get_plan_store, PlanStore
     from layer3_scheduling.tariff_provider import TariffProvider
     from models.mode_catalog import get_mode_meta, load_mode_catalog
-    from models.canonical import StandardizedState, STATE_METADATA
+    from models.canonical import StandardizedState, STATE_METADATA, CanonicalDispatchPlan
     GLOBAL_MODEL = HybridForecastingModel()
     GLOBAL_DHW_MODEL = DhwThermalModel()
 except Exception as _e_model:
@@ -350,6 +351,110 @@ def fetch_ha_entities():
 def get_ha_states_map():
     """Returns a dict mapping entity_id -> state dict from HA Core."""
     return {e["entity_id"]: e for e in fetch_ha_entities()}
+
+
+def call_ha_service(domain: str, service: str, service_data: dict) -> bool:
+    """Calls a Home Assistant Core REST API service."""
+    sec = load_secrets()
+    ha_cfg_tok = sec.get("homeassistant", {}).get("token")
+    if ha_cfg_tok:
+        token = ha_cfg_tok
+        ha_url = sec.get("homeassistant", {}).get("url") or "https://hass.b3rg.nl:8123"
+    elif os.environ.get("SUPERVISOR_TOKEN"):
+        token = os.environ["SUPERVISOR_TOKEN"]
+        ha_url = "http://supervisor/core"
+    else:
+        token = os.environ.get("HASS_TOKEN", "")
+        ha_url = os.environ.get("HASS_URL", "https://hass.b3rg.nl:8123")
+
+    if not token and HA_API_CONFIG.exists():
+        cfg = load_json(HA_API_CONFIG)
+        token = cfg.get("HASS_TOKEN")
+        ha_url = cfg.get("HASS_URL") or ha_url
+
+    if not token:
+        return False
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    url = f"{ha_url}/api/services/{domain}/{service}"
+    try:
+        req = urllib.request.Request(url, data=json.dumps(service_data).encode("utf-8"), headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=5, context=ctx) as r:
+            return r.status in [200, 201]
+    except Exception as e:
+        print(f"Warning calling HA service {domain}.{service}: {e}")
+        return False
+
+
+from layer3_scheduling.opportunistic_merger import OpportunisticDHWMerger, OpportunisticMergeResult
+
+GLOBAL_OPPORTUNISTIC_MERGE: Optional[OpportunisticMergeResult] = None
+
+
+def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
+    """
+    Evaluates whether the heat pump has autonomously started heating DHW (e.g. after a shower)
+    and merges an upcoming 60C solar boost run into the active run if cost-effective.
+    """
+    global GLOBAL_OPPORTUNISTIC_MERGE
+    states_map = get_ha_states_map()
+
+    wp_power_sensor = states_map.get("sensor.warmtepomp_power", {})
+    try:
+        wp_power = float(wp_power_sensor.get("state", 0.0))
+    except (ValueError, TypeError):
+        wp_power = 0.0
+
+    dhw_climate = states_map.get("climate.hc_dhw_dhw_setpoint", {})
+    is_actively_heating = (wp_power > 700.0 and t_live < 56.0) or (dhw_climate.get("state") == "heat" and wp_power > 500.0)
+
+    solar_kw_now = GLOBAL_CENTRAL_CACHE.get("current_solar_kw", 0.0)
+    price_now = GLOBAL_CENTRAL_CACHE.get("current_price_eur", 0.24)
+
+    is_hard_lockout = False
+    if plan and getattr(plan, "dynamic_peaks", None):
+        for p_peak in plan.dynamic_peaks:
+            if p_peak.get("is_hard_lockout") and p_peak.get("start_idx", 99) <= 0 <= p_peak.get("end_idx", -1):
+                is_hard_lockout = True
+                break
+
+    merge_res = OpportunisticDHWMerger.evaluate_merge(
+        plan=plan,
+        is_dhw_actively_heating=is_actively_heating,
+        current_tank_temp_c=t_live,
+        current_solar_kw=solar_kw_now,
+        current_price_eur=price_now,
+        is_hard_lockout_now=is_hard_lockout
+    )
+
+    if merge_res.should_merge:
+        GLOBAL_OPPORTUNISTIC_MERGE = merge_res
+        call_ha_service("climate", "set_temperature", {"entity_id": "climate.hc_dhw_dhw_setpoint", "temperature": 60.0})
+        call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
+        call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_2_s11s"})
+        call_ha_service("switch", "turn_off", {"entity_id": "switch.hc_mode_altherma_on"})
+
+        for slot_idx in merge_res.cancelled_slots:
+            if slot_idx < len(plan.slots):
+                plan.slots[slot_idx].mode_code = "normal"
+                plan.slots[slot_idx].mode_label = "Normaal (50°C)"
+                plan.slots[slot_idx].color_hex = "#1E293B"
+                plan.slots[slot_idx].tailwind_class = "bg-slate-800"
+
+        if plan.slots:
+            plan.slots[0].mode_code = "max_on"
+            plan.slots[0].mode_label = "Zonnebuffer (Fusie)"
+            plan.slots[0].color_hex = "#A855F7"
+            plan.slots[0].tailwind_class = "bg-purple-900"
+
+        store = PlanStore.get_instance()
+        store.publish_plan(plan)
+
+    return merge_res
 
 
 def test_influxdb_connection(url, database, username="", password="", retention="autogen"):
@@ -1980,6 +2085,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     else:
                         badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Wachten op Middagzon (Besparing)</span>'
 
+                # Evaluate Opportunistic Run Merger
+                merge_outcome = None
+                try:
+                    plan_for_merger = ensure_active_canonical_plan()
+                    merge_outcome = evaluate_and_apply_dhw_run_merger(plan_for_merger, t_live)
+                    if merge_outcome and merge_outcome.should_merge:
+                        badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-950/80 text-purple-300 border border-purple-800/80"><span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span> ⚡ Opportunistische Zonnebuffer Actief (tot 60°C)</span>'
+                except Exception as e_mrg:
+                    print(f"Warning in evaluate_and_apply_dhw_run_merger: {e_mrg}")
+
                 decision = {
                     "status": "SCHEDULE_NIGHT_CHARGE" if planned_mode == "forced_night_50" else "SKIP_NIGHT_CHARGE",
                     "planned_mode": planned_mode,
@@ -1994,7 +2109,15 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     "morning_dip_c": unh_morning_dip,
                     "morning_dip_time": unh_morning_dip_time,
                     "morning_dip_p95_c": unh_morning_p95,
-                    "dynamic_peaks": cached_dyn_peaks
+                    "dynamic_peaks": cached_dyn_peaks,
+                    "opportunistic_merge": {
+                        "should_merge": merge_outcome.should_merge,
+                        "reason": merge_outcome.reason,
+                        "promoted_mode": merge_outcome.promoted_mode,
+                        "target_temp_c": merge_outcome.target_temp_c,
+                        "original_slot_time": merge_outcome.original_slot_time,
+                        "savings_estimate_eur": merge_outcome.savings_estimate_eur
+                    } if merge_outcome else None
                 }
 
                 self._send_json({
@@ -2153,7 +2276,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.11",
+                "version": "0.92.12",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3924,7 +4047,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.11</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.12</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4298,6 +4421,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                     <!-- Dynamic Status Badge -->
                                 </div>
                             </div>
+                            
+                            <!-- Opportunistic Merger Banner -->
+                            <div id="dhw-merge-banner" class="hidden"></div>
                             
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-[11px] leading-relaxed">
                                 <!-- Links: Comfort & Fysisch Verloop -->
@@ -10100,6 +10226,17 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         boxPill.innerHTML = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Nachtlading Gepland (Comfortzekerheid)</span>';
                     } else {
                         boxPill.innerHTML = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Wachten op Middagzon (Besparing)</span>';
+                    }
+                }
+
+                const mergeEl = document.getElementById('dhw-merge-banner');
+                if (mergeEl) {
+                    if (dec.opportunistic_merge && dec.opportunistic_merge.should_merge) {
+                        mergeEl.className = 'p-2.5 rounded-lg bg-purple-950/70 border border-purple-800 text-purple-200 flex items-start gap-2 text-xs mb-2 shadow-lg';
+                        mergeEl.innerHTML = `<span class="text-sm">⚡</span> <div class="space-y-0.5"><strong class="font-bold text-white">Opportunistische Run-Fusie:</strong> <span>${dec.opportunistic_merge.reason}</span> <div class="text-[10px] text-purple-300 font-mono">Besparing: ~€${Number(dec.opportunistic_merge.savings_estimate_eur || 0.20).toFixed(2)} op start/stop &amp; voorverwarmverlies</div></div>`;
+                        mergeEl.classList.remove('hidden');
+                    } else {
+                        mergeEl.classList.add('hidden');
                     }
                 }
 

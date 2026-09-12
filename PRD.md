@@ -120,6 +120,15 @@ Detailed in authoritative companion document `docs/PRD_CHARTING_AND_VISUALIZATIO
 * **Standardized Tokens (`OpenHEMSTokens`):** Strict shared color palette: Solar (`#F59E0B`), Unallocated (`#3B82F6`), DHW (`#EC4899`), Space Heating (`#6366F1`), Battery Charge (`#10B981`), Netto (`#EF4444`), Price Line (`#38BDF8`).
 * **Uniform Time Contract:** Slot labels always anchor to `Nu (HH:MM)` for current slot, `Za 00:00`/`Zo 00:00` for midnight boundaries, and enforce $0.00\text{ kW}$ solar production at night.
 
+### 2.5 Opportunistic In-Flight Run Merger (Smart Grid 60°C Promotion)
+When an unscheduled draw-off (e.g. an afternoon shower) causes the DHW tank to dip below reheat threshold and triggers autonomous heat pump operation:
+* Open HEMS evaluates whether an upcoming 60°C thermal storage / solar boost run (`max_on`) is already scheduled within the lookahead window ($\le 2\text{ hours}$).
+* If cost-effective (current wholesale price is within $+€0.05/\text{kWh}$ or active solar surplus $\ge 1.0\text{ kW}$ is present, and no hard peak lockout is active):
+  1. The running cycle is immediately promoted to `max_on` (target 60°C, SG4 boost).
+  2. Hydraulic interlock is enforced (CV master switch turned OFF).
+  3. The upcoming planned run in `PlanStore` is cancelled and reverted to `normal` (50°C).
+  4. Benefit: Eliminates 1 compressor start/stop cycle, saves ~0.25 kWh compressor ramp-up overhead, and achieves full 24-hour thermal coverage without a second run.
+
 ---
 
 ## 3. Generic Data Model & Schema Contracts
