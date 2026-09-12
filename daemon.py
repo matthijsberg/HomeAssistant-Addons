@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.91.3
+Version: 0.92.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -906,27 +906,23 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     except Exception as e_p:
                         print(f"Warning fetching EPEX prices for {d_str}: {e_p}")
 
-                # 2. Fetch Open-Meteo Solar Forecast for Culemborg (Today & Tomorrow)
+                # 2. Fetch Calibrated Solar Forecast (Forecast.Solar with fallback)
                 solar_hourly = {}
                 try:
-                    url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=shortwave_radiation&timezone=Europe%2FAmsterdam&forecast_days=2"
-                    req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
-                    with urllib.request.urlopen(req_m, timeout=5) as r_m:
-                        m_data = json.loads(r_m.read().decode())
-                        m_times = m_data.get("hourly", {}).get("time", [])
-                        m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
-                        s_cfg = load_json(CONFIG_FILE).get("solar", {})
-                        s_kwp = float(s_cfg.get("kwp", 5.76))
-                        s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
-                        s_tilt = float(s_cfg.get("tilt_degrees", 34))
-                        s_az = float(s_cfg.get("azimuth_degrees", 225))
-                        s_eff = float(s_cfg.get("efficiency_factor", 0.88))
-                        for t, rad in zip(m_times, m_rads):
-                            k_t = t.replace('T', ' ')[:13] + ':00'
-                            dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
-                            solar_hourly[k_t] = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
-                except Exception as e_m:
-                    print(f"Warning fetching Open-Meteo solar forecast: {e_m}")
+                    s_cfg = load_json(CONFIG_FILE).get("solar", {})
+                    s_kwp = float(s_cfg.get("kwp", 5.76))
+                    s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
+                    s_tilt = float(s_cfg.get("tilt_degrees", 34))
+                    s_az = float(s_cfg.get("azimuth_degrees", 225))
+                    s_cal = float(s_cfg.get("calibration_factor", 1.18))
+                    from layer1_data_collection.forecast_solar import ForecastSolarProvider
+                    fs_prov = ForecastSolarProvider(lat=51.9537, lon=5.2320, tilt=s_tilt, azimuth_deg_south=45.0, kwp=s_kwp, inverter_max_kw=s_inv, calibration_factor=s_cal)
+                    fs_slots = fs_prov.get_calibrated_quarter_slots(base_dt, horizon_slots=total_slots, step_mins=step_mins)
+                    for sl in fs_slots:
+                        k_s = sl["dt"].strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
+                        solar_hourly[k_s] = sl["solar_kw"]
+                except Exception as e_fs:
+                    print(f"Warning fetching Forecast.Solar in electricity_prices: {e_fs}")
 
                 labels = []
                 prices_all_in = []
@@ -2026,7 +2022,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.91.3",
+                "version": "0.92.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2302,36 +2298,44 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 except Exception as e_p:
                     pass
 
-            # 2. Fetch Open-Meteo Solar & Weather for Culemborg
+            # 2. Fetch Calibrated Solar Forecast (Forecast.Solar) & Weather
             solar_map = {}
             temp_map = {}
             wind_map = {}
             rh_map = {}
+            s_cfg = load_json(CONFIG_FILE).get("solar", {})
+            s_kwp = float(s_cfg.get("kwp", 5.76))
+            s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
+            s_tilt = float(s_cfg.get("tilt_degrees", 34))
+            s_az = float(s_cfg.get("azimuth_degrees", 225))
+            s_cal = float(s_cfg.get("calibration_factor", 1.18))
+
             try:
-                url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
+                from layer1_data_collection.forecast_solar import ForecastSolarProvider
+                fs_prov = ForecastSolarProvider(lat=51.9537, lon=5.2320, tilt=s_tilt, azimuth_deg_south=45.0, kwp=s_kwp, inverter_max_kw=s_inv, calibration_factor=s_cal)
+                fs_slots = fs_prov.get_calibrated_quarter_slots(base_dt, horizon_slots=total_slots, step_mins=step_mins)
+                for sl in fs_slots:
+                    k_s = sl["dt"].strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
+                    solar_map[k_s] = sl["solar_kw"]
+            except Exception as e_fs:
+                print(f"Warning fetching Forecast.Solar in chart-data: {e_fs}")
+
+            try:
+                url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
                 req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
                 with urllib.request.urlopen(req_m, timeout=5) as r_m:
                     m_data = json.loads(r_m.read().decode())
                     m_times = m_data.get("hourly", {}).get("time", [])
-                    m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
                     m_temps = m_data.get("hourly", {}).get("temperature_2m", [])
                     m_winds = m_data.get("hourly", {}).get("wind_speed_10m", [])
                     m_rhs = m_data.get("hourly", {}).get("relative_humidity_2m", [])
-                    s_cfg = load_json(CONFIG_FILE).get("solar", {})
-                    s_kwp = float(s_cfg.get("kwp", 5.76))
-                    s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
-                    s_tilt = float(s_cfg.get("tilt_degrees", 34))
-                    s_az = float(s_cfg.get("azimuth_degrees", 225))
-                    s_eff = float(s_cfg.get("efficiency_factor", 0.88))
-                    for t, rad, tmp, wnd, rh in zip(m_times, m_rads, m_temps, m_winds, m_rhs):
+                    for t, tmp, wnd, rh in zip(m_times, m_temps, m_winds, m_rhs):
                         k_t = t.replace('T', ' ')[:13] + ':00'
-                        dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
-                        solar_map[k_t] = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
                         temp_map[k_t] = round(float(tmp), 1)
                         wind_map[k_t] = round(float(wnd), 1)
                         rh_map[k_t] = round(float(rh), 1)
             except Exception as e_m:
-                print(f"Warning fetching Open-Meteo forecast: {e_m}")
+                print(f"Warning fetching weather forecast: {e_m}")
 
             # 3. Load 7x96 Learned Quarters & Hybrid Physics Model
             grid_96 = []
@@ -3773,7 +3777,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.91.3</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4016,7 +4020,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <!-- Chart 1.2: Prijzen & Zonnevoorspelling (EPEX Rates & Solar Forecast) -->
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                            <h3 class="text-sm font-bold text-white tracking-wide">Prijzen & Zonnevoorspelling</h3>
+                            <h3 class="text-sm font-bold text-white tracking-wide">Prijzen & Zonnevoorspelling (Forecast.Solar)</h3>
                             <div class="flex items-center gap-2 text-xs">
                                 <select id="epex-res-select" onchange="loadElectricityPricesChart()" class="bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 text-xs font-medium focus:outline-none focus:border-blue-500 font-mono">
                                     <option value="15m" selected>Kwartiertarieven (15m)</option>
@@ -4046,7 +4050,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
                                     <div class="text-[10px] text-slate-500 uppercase">Piek Zonverwachting</div>
                                     <div class="text-sm font-bold text-amber-400 mt-0.5" id="stat-epex-solar-peak">--</div>
-                                    <div class="text-[10px] text-slate-400">Open-Meteo GHI</div>
+                                    <div class="text-[10px] text-slate-400">Forecast.Solar</div>
                                 </div>
                                 <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
                                     <div class="text-[10px] text-slate-500 uppercase">Zon Besparingsmarge</div>
@@ -4612,7 +4616,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span>Externe Data APIs & Feeds</span>
                                 <span class="text-xs font-normal text-purple-400">(Beurstarieven & Weersvoorspelling)</span>
                             </h2>
-                            <p class="text-xs text-slate-400">Publieke data-interfaces voor dynamische stroomprijzen (EPEX Spot) en zonnestralingsvoorspellingen (Open-Meteo).</p>
+                            <p class="text-xs text-slate-400">Publieke data-interfaces voor dynamische stroomprijzen (EPEX Spot) en zonnevoorspellingen (Forecast.Solar).</p>
                         </div>
                         <button onclick="loadProviders()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs rounded-lg font-medium">
                             🔄 Verversen
@@ -4666,7 +4670,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <div class="flex items-center justify-between pt-2 border-t border-slate-800/80">
                             <div class="text-[11px] text-slate-400 font-sans flex items-center gap-1.5">
                                 <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                                <span>NOAA Plane-of-Array stralingsprojectie actief op Open-Meteo GHI data.</span>
+                                <span>Gekalibreerde zonnevoorspelling actief via Forecast.Solar (+18% adaptieve schaalfactor).</span>
                             </div>
                             <button onclick="saveSolarRoofConfig()" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow-lg transition flex items-center gap-1.5">
                                 <span>💾 Opslaan &amp; Direct Toepassen</span>
