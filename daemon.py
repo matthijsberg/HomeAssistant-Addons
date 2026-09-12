@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.88.2
+Version: 0.88.3
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1931,7 +1931,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.88.2",
+                "version": "0.88.3",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2563,11 +2563,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         boiler[target_slot] = sww_power_kw
                         advices[target_slot] = f"♨️ SWW Boiler 350L: {reason}"
 
-            # Build 24h Mode Timeline for Horizontal Bar Diagram
+            # Build 24h Mode Timeline for Horizontal Bar Diagram (Standardized 6 States)
             dhw_mode_timeline = []
+            min_timeline_price = min([it.get("price", 0.30) for it in timeline_items] or [0.20])
             for it in timeline_items:
                 q_idx = it["idx"]
                 p_val = it.get("price", 0.30)
+                sol_val = it.get("solar", 0.0) if "solar" in it else (solar[q_idx] if q_idx < len(solar) else 0.0)
                 peak_info = slot_lockout_map.get(q_idx)
 
                 if peak_info and peak_info.get("is_hard_lockout"):
@@ -3676,7 +3678,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.88.2</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.88.3</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
