@@ -2,34 +2,39 @@
 Layer 3: Plan Store & Recommendation Registry
 ==============================================
 The single authoritative store and publication channel for HEMS plans.
-All dashboards, UI tabs, relay actuators, and Home Assistant sensors
-read exclusively from this store.
+Can be instantiated as an injected dependency for tests or accessed via
+the singleton convenience method `get_plan_store()`.
+Supports atomic local disk snapshot persistence for cold-boot resilience.
 """
 
 import threading
+import json
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from dataclasses import asdict
-from models.canonical import CanonicalDispatchPlan, DispatchPlanSlot, DHWPlanSummary
+from models.canonical import CanonicalDispatchPlan
 
 
 class PlanStore:
-    """Thread-safe singleton storing and serving the active canonical dispatch plan."""
+    """Thread-safe store serving the active canonical dispatch plan."""
 
     _instance: Optional["PlanStore"] = None
     _lock = threading.Lock()
 
-    def __init__(self):
+    def __init__(self, persistence_path: Optional[Path] = None):
         self._current_plan: Optional[CanonicalDispatchPlan] = None
         self._last_updated: Optional[datetime] = None
         self._plan_version: int = 0
         self._publication_history: List[Dict[str, Any]] = []
+        self._persistence_path = persistence_path
 
     @classmethod
-    def get_instance(cls) -> "PlanStore":
+    def get_instance(cls, persistence_path: Optional[Path] = None) -> "PlanStore":
         with cls._lock:
             if cls._instance is None:
-                cls._instance = cls()
+                default_path = persistence_path or Path("/config/open_hems_plan_snapshot.json")
+                cls._instance = cls(persistence_path=default_path)
             return cls._instance
 
     def publish_plan(self, plan: CanonicalDispatchPlan) -> None:
@@ -49,6 +54,18 @@ class PlanStore:
             })
             if len(self._publication_history) > 50:
                 self._publication_history = self._publication_history[-50:]
+
+            # Atomic disk snapshot persistence
+            if self._persistence_path:
+                try:
+                    tmp_file = self._persistence_path.with_suffix(".tmp")
+                    plan_dict = asdict(plan)
+                    with open(tmp_file, "w", encoding="utf-8") as f:
+                        json.dump(plan_dict, f, indent=2)
+                    tmp_file.replace(self._persistence_path)
+                except Exception as e:
+                    # Persistence failure must not crash the memory pipeline
+                    pass
 
     def get_plan(self) -> Optional[CanonicalDispatchPlan]:
         """Get the active canonical dispatch plan."""
@@ -72,5 +89,5 @@ class PlanStore:
 
 
 # Convenient module-level access
-def get_plan_store() -> PlanStore:
-    return PlanStore.get_instance()
+def get_plan_store(persistence_path: Optional[Path] = None) -> PlanStore:
+    return PlanStore.get_instance(persistence_path=persistence_path)

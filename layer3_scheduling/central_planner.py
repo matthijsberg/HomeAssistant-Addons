@@ -24,7 +24,8 @@ from models.canonical import (
     detect_dynamic_price_peaks
 )
 from layer1_data_collection.sanitizer import CleanTelemetryFrame
-from layer3_scheduling.plan_store import get_plan_store
+from layer3_scheduling.plan_store import get_plan_store, PlanStore
+from layer3_scheduling.tariff_provider import TariffProvider
 
 
 class CentralPlanner:
@@ -42,7 +43,9 @@ class CentralPlanner:
         cls,
         frame: CleanTelemetryFrame,
         current_dhw_temp: float = 48.0,
-        model_parameters: Optional[Dict[str, Any]] = None
+        model_parameters: Optional[Dict[str, Any]] = None,
+        tariffs: Optional[TariffProvider] = None,
+        store: Optional[PlanStore] = None
     ) -> CanonicalDispatchPlan:
         """
         Executes central optimization and returns the single authoritative CanonicalDispatchPlan.
@@ -302,7 +305,8 @@ class CentralPlanner:
             }
         )
 
-        # Automatically publish to the central singleton store
-        get_plan_store().publish_plan(plan)
+        # Automatically publish to the injected or default singleton store
+        target_store = store or get_plan_store()
+        target_store.publish_plan(plan)
 
         return plan
