@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.0
+Version: 0.92.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -724,6 +724,10 @@ def ensure_active_canonical_plan(force_refresh=False):
         except Exception as e_fs:
             print(f"Warning fetching Forecast.Solar: {e_fs}")
 
+    has_solar_plan = any(s.get("solar_kw", 0.0) > 0.05 for s in raw_solar)
+    if not has_solar_plan:
+        raw_solar = []
+
     raw_weather = []
     try:
         url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m&timezone=Europe%2FAmsterdam&forecast_days=2"
@@ -738,8 +742,7 @@ def ensure_active_canonical_plan(force_refresh=False):
             for t, rad, tmp in zip(m_times, m_rads, m_temps):
                 k_t = t.replace('T', ' ')[:13] + ':00'
                 dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
-                # Fallback solar if Forecast.Solar failed
-                if not raw_solar:
+                if not has_solar_plan:
                     poa_kw = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
                     raw_solar.append({"dt": dt_h, "solar_kw": poa_kw})
                 raw_weather.append({"dt": dt_h, "temperature": float(tmp)})
@@ -2022,7 +2025,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.0",
+                "version": "0.92.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2320,17 +2323,22 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             except Exception as e_fs:
                 print(f"Warning fetching Forecast.Solar in chart-data: {e_fs}")
 
+            has_solar_chart = any(v > 0.05 for v in solar_map.values())
             try:
-                url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
+                url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
                 req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
                 with urllib.request.urlopen(req_m, timeout=5) as r_m:
                     m_data = json.loads(r_m.read().decode())
                     m_times = m_data.get("hourly", {}).get("time", [])
+                    m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
                     m_temps = m_data.get("hourly", {}).get("temperature_2m", [])
                     m_winds = m_data.get("hourly", {}).get("wind_speed_10m", [])
                     m_rhs = m_data.get("hourly", {}).get("relative_humidity_2m", [])
-                    for t, tmp, wnd, rh in zip(m_times, m_temps, m_winds, m_rhs):
+                    for t, rad, tmp, wnd, rh in zip(m_times, m_rads, m_temps, m_winds, m_rhs):
                         k_t = t.replace('T', ' ')[:13] + ':00'
+                        if not has_solar_chart:
+                            dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
+                            solar_map[k_t] = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
                         temp_map[k_t] = round(float(tmp), 1)
                         wind_map[k_t] = round(float(wnd), 1)
                         rh_map[k_t] = round(float(rh), 1)
@@ -3777,7 +3785,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>

@@ -59,15 +59,34 @@ class ForecastSolarProvider:
         url = f"https://api.forecast.solar/estimate/{self.lat:.4f}/{self.lon:.4f}/{int(self.tilt)}/{int(self.azimuth)}/{self.kwp:.2f}"
         req = urllib.request.Request(url, headers={"User-Agent": "OpenHEMS/1.0"})
 
+        cache_file = Path("/config/forecast_solar_cache.json")
+        if not self._cached_watts and cache_file.exists():
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    disk_d = json.load(f)
+                    f_time = datetime.fromisoformat(disk_d.get("timestamp", ""))
+                    if (now - f_time).total_seconds() < 7200:
+                        self._cached_watts = {k: float(v) for k, v in disk_d.get("watts", {}).items()}
+                        self._last_fetch_time = f_time
+                        if self._cached_watts:
+                            return self._cached_watts
+            except Exception:
+                pass
+
         try:
             with urllib.request.urlopen(req, timeout=6) as r:
                 res = json.loads(r.read().decode())
                 raw_watts = res.get("result", {}).get("watts", {})
-                self._cached_watts = {k: float(v) for k, v in raw_watts.items()}
-                self._last_fetch_time = now
+                if raw_watts:
+                    self._cached_watts = {k: float(v) for k, v in raw_watts.items()}
+                    self._last_fetch_time = now
+                    try:
+                        with open(cache_file, "w", encoding="utf-8") as f:
+                            json.dump({"timestamp": now.isoformat(), "watts": self._cached_watts}, f)
+                    except Exception:
+                        pass
                 return self._cached_watts
         except Exception as e:
-            # If rate-limited or offline, return cached or empty
             return self._cached_watts
 
     def get_calibrated_quarter_slots(
@@ -81,6 +100,8 @@ class ForecastSolarProvider:
         Applies empirical calibration factor and clamps to inverter capacity.
         """
         watts_map = self.fetch_forecast_watts()
+        if not watts_map:
+            return []  # Return empty list so callers safely trigger Open-Meteo fallback
         ams_tz = ZoneInfo("Europe/Amsterdam")
 
         # Convert timestamps in watts_map to parsed datetime
