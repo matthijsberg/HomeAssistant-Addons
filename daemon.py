@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.5
+Version: 0.92.6
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -880,6 +880,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 interval_api = "INTERVAL_QUARTER" if res_mode == "15m" else "INTERVAL_HOUR"
 
                 now_ams = datetime.now(AMS_TZ)
+                plan = ensure_active_canonical_plan()
                 today_str = now_ams.strftime("%d-%m-%Y")
                 tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
 
@@ -909,24 +910,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     except Exception as e_p:
                         print(f"Warning fetching EPEX prices for {d_str}: {e_p}")
 
-                # 2. Fetch Calibrated Solar Forecast (Forecast.Solar with fallback)
-                solar_hourly = {}
-                try:
-                    s_cfg = load_json(CONFIG_FILE).get("solar", {})
-                    s_kwp = float(s_cfg.get("kwp", 5.76))
-                    s_inv = float(s_cfg.get("inverter_max_w", 5500)) / 1000.0
-                    s_tilt = float(s_cfg.get("tilt_degrees", 34))
-                    s_az = float(s_cfg.get("azimuth_degrees", 225))
-                    s_cal = float(s_cfg.get("calibration_factor", 1.18))
-                    from layer1_data_collection.forecast_solar import ForecastSolarProvider
-                    fs_prov = ForecastSolarProvider(lat=51.9537, lon=5.2320, tilt=s_tilt, azimuth_deg_south=45.0, kwp=s_kwp, inverter_max_kw=s_inv, calibration_factor=s_cal)
-                    fs_slots = fs_prov.get_calibrated_quarter_slots(base_dt, horizon_slots=total_slots, step_mins=step_mins)
-                    for sl in fs_slots:
-                        k_s = sl["dt"].strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
-                        solar_hourly[k_s] = sl["solar_kw"]
-                except Exception as e_fs:
-                    print(f"Warning fetching Forecast.Solar in electricity_prices: {e_fs}")
-
                 labels = []
                 prices_all_in = []
                 prices_base = []
@@ -936,15 +919,36 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 for i in range(total_slots):
                     dt_slot = base_dt + timedelta(minutes=step_mins * i)
                     k_full = dt_slot.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
-                    k_hour = dt_slot.strftime("%Y-%m-%d %H:00")
-
                     lbl = format_slot_label(dt_slot, prev_ep_dt, i == 0, is_15m)
                     prev_ep_dt = dt_slot
-
                     labels.append(lbl)
-                    prices_all_in.append(prices_map.get(k_full, 0.25))
-                    prices_base.append(prices_base_map.get(k_full, 0.10))
-                    solar_forecast_kw.append(solar_hourly.get(k_hour, 0.0))
+
+                    if is_15m:
+                        plan_slot = plan.slots[i] if plan and i < len(plan.slots) else None
+                        if plan_slot:
+                            s_val = plan_slot.solar_kw
+                            p_val = plan_slot.price_eur
+                        else:
+                            s_val = 0.0
+                            p_val = prices_map.get(k_full, 0.25)
+                    else:
+                        q_start = i * 4
+                        q_end = min(len(plan.slots), (i + 1) * 4) if plan else 0
+                        q_slots = plan.slots[q_start:q_end] if plan else []
+                        if q_slots:
+                            s_val = round(sum(s.solar_kw for s in q_slots) / len(q_slots), 2)
+                            p_val = round(sum(s.price_eur for s in q_slots) / len(q_slots), 4)
+                        else:
+                            s_val = 0.0
+                            p_val = prices_map.get(k_full, 0.25)
+
+                    # Physical night guard
+                    if dt_slot.hour >= 21 or dt_slot.hour < 7:
+                        s_val = 0.0
+
+                    prices_all_in.append(p_val)
+                    prices_base.append(prices_base_map.get(k_full, round(p_val - 0.15, 4)))
+                    solar_forecast_kw.append(s_val)
 
                 min_p = min(prices_all_in) if prices_all_in else 0.0
                 max_p = max(prices_all_in) if prices_all_in else 0.0
@@ -2025,7 +2029,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.5",
+                "version": "0.92.6",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3796,7 +3800,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.5</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.6</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4038,14 +4042,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                     <!-- Chart 1.2: Prijzen & Zonnevoorspelling (EPEX Rates & Solar Forecast) -->
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
-                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
                             <h3 class="text-sm font-bold text-white tracking-wide">Prijzen & Zonnevoorspelling (Forecast.Solar)</h3>
-                            <div class="flex items-center gap-2 text-xs">
-                                <select id="epex-res-select" onchange="loadElectricityPricesChart()" class="bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1 text-slate-200 text-xs font-medium focus:outline-none focus:border-blue-500 font-mono">
-                                    <option value="15m" selected>Kwartiertarieven (15m)</option>
-                                    <option value="1h">Uurtarieven (1h)</option>
-                                </select>
-                            </div>
                         </div>
 
                         <!-- Canvas -->
@@ -8614,8 +8612,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             if (!canvas) return;
 
             try {
-                const resSelect = document.getElementById('epex-res-select');
-                const resVal = predictionResolution || (resSelect ? resSelect.value : '15m');
+                const resVal = predictionResolution || '15m';
                 const res = await fetch('./api/analytics/electricity_prices?resolution=' + encodeURIComponent(resVal));
                 const data = await res.json();
                 window.__lastElectricityPricesData = data;
