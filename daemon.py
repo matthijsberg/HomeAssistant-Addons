@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.12
+Version: 0.92.13
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -455,6 +455,29 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
         store.publish_plan(plan)
 
     return merge_res
+
+
+from integrations.daikin_altherma.actuator import DaikinActuator
+
+
+def make_daikin_ha_actuator() -> DaikinActuator:
+    def switch_caller(switch_name: str, state: bool):
+        entity_map = {
+            "s10s": "switch.warmtepomp_smart_grid_1_s10s",
+            "s11s": "switch.warmtepomp_smart_grid_2_s11s",
+            "cv_master": "switch.hc_mode_altherma_on"
+        }
+        eid = entity_map.get(switch_name)
+        if eid:
+            service = "turn_on" if state else "turn_off"
+            call_ha_service("switch", service, {"entity_id": eid})
+        return True
+
+    def climate_caller(climate_name: str, temp: float):
+        call_ha_service("climate", "set_temperature", {"entity_id": "climate.hc_dhw_dhw_setpoint", "temperature": temp})
+        return True
+
+    return DaikinActuator(switch_caller=switch_caller, climate_caller=climate_caller)
 
 
 def test_influxdb_connection(url, database, username="", password="", retention="autogen"):
@@ -2217,6 +2240,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 },
                 "dynamic_peaks_count": len(plan.dynamic_peaks),
                 "lockout_hours": plan.dhw_summary.spits_lockout_hours,
+                "live_actuation": getattr(GLOBAL_COLLECTOR, "last_actuation", {}),
                 "state_taxonomy": {
                     state.value: STATE_METADATA[state]["color_hex"] for state in StandardizedState
                 }
@@ -2276,7 +2300,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.12",
+                "version": "0.92.13",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4047,7 +4071,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.12</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.13</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -11030,6 +11054,7 @@ class HemsBackgroundCollector(threading.Thread):
         self.live_hp_disagg = None
         self.mqtt_sub = HemsMqttSubscriberThread()
         self.mqtt_sub.start()
+        self.last_actuation = {}
         self.live_balance = {
             "p1_import_w": 0.0,
             "p1_export_w": 0.0,
@@ -11043,7 +11068,7 @@ class HemsBackgroundCollector(threading.Thread):
         }
 
     def run(self):
-        print(f"[Open HEMS Collector] Started 60s Window Accumulator (Sample: {self.sample_interval}s, Flush: {self.flush_window}s)")
+        print(f"[Open HEMS Collector & Dispatcher] Started 60s Loop (Sample: {self.sample_interval}s, Flush & Dispatch: {self.flush_window}s)")
         time.sleep(3)
         while self.running:
             try:
@@ -11052,8 +11077,64 @@ class HemsBackgroundCollector(threading.Thread):
                 if now - self._last_flush_time >= self.flush_window:
                     self.flush_window_to_influx()
                     self._last_flush_time = now
+                    # Layer 4 Active Live Dispatch Execution
+                    self.execute_live_dispatch()
             except Exception as e:
                 print(f"[Open HEMS Collector] Error in loop: {e}")
+            time.sleep(self.sample_interval)
+
+    def execute_live_dispatch(self):
+        """
+        Active Layer 4 Dispatch Execution:
+        Takes the active CanonicalDispatchPlan, evaluates opportunistic mergers,
+        and enforces physical relay & setpoint actuation via DaikinActuator.
+        """
+        try:
+            plan = ensure_active_canonical_plan()
+            if not plan or not plan.slots:
+                return
+
+            states_map = get_ha_states_map()
+            dhw_st = states_map.get("sensor.hc_dhw_temperature_r5t_dhw_tank", {})
+            try:
+                t_live = float(dhw_st.get("state", 50.0))
+            except (ValueError, TypeError):
+                t_live = 50.0
+
+            cv_st = states_map.get("switch.hc_mode_altherma_on", {})
+            cv_active = (cv_st.get("state") == "on")
+
+            # 1. Run opportunistic run merger (e.g. if showering occurred)
+            merge_res = evaluate_and_apply_dhw_run_merger(plan, t_live)
+
+            # 2. Get current slot mode
+            cur_slot = plan.slots[0]
+            mode_to_execute = cur_slot.mode_code
+
+            # 3. Instantiate DaikinActuator and execute mode
+            actuator = make_daikin_ha_actuator()
+            target_t = 60.0 if mode_to_execute in ["max_on", "forced_solar_boost_60"] else (50.0 if mode_to_execute in ["forced_on", "forced_night_50"] else None)
+            res = actuator.execute_mode(
+                requested_mode=mode_to_execute,
+                current_cv_switch_state=cv_active,
+                target_temp=target_t
+            )
+
+            self.last_actuation = {
+                "timestamp": datetime.now(AMS_TZ).isoformat(),
+                "slot_time": cur_slot.time_label,
+                "requested_mode": mode_to_execute,
+                "effective_mode": res.effective_mode,
+                "downgrade_reason": res.downgrade_reason,
+                "s10s": res.command.s10s_relay_on,
+                "s11s": res.command.s11s_relay_on,
+                "cv_master": res.command.cv_master_switch_on,
+                "target_dhw_c": res.command.target_dhw_temp_c,
+                "success": res.success
+            }
+            print(f"[Open HEMS Dispatcher] Live actuation: {mode_to_execute} -> {res.effective_mode} (target {target_t}°C, S10S={res.command.s10s_relay_on}, S11S={res.command.s11s_relay_on}, CV={res.command.cv_master_switch_on})", flush=True)
+        except Exception as e:
+            print(f"[Open HEMS Dispatcher] Error executing live dispatch: {e}", flush=True)
             time.sleep(self.sample_interval)
 
     def sample_devices(self):
