@@ -113,6 +113,13 @@ integrations/daikin_altherma/
 ```
 * **Hardware Invariant Enforcement:** Specific physical safety rules (such as disabling the central heating master switch during domestic hot water runs to prevent backup heater activation) belong **inside the device integration package as a verified device invariant**, never hardcoded inside the general planning engine!
 
+### 2.4 Layer 5 Presentation Specification (Dumb Views, Charting & Tokens)
+Detailed in authoritative companion document `docs/PRD_CHARTING_AND_VISUALIZATION.md`:
+* **Single Source of Truth:** Views perform ZERO math and zero separate interpolations. All data series stream from `plan.slots` (`CanonicalDispatchPlan`).
+* **Central State & Sticky Filters:** Global toolbar controls (`OpenHEMSChartEngine`) synchronize all charts simultaneously (Staven vs. Lijn, 15m vs. 1h) and persist state across sessions via `localStorage`.
+* **Standardized Tokens (`OpenHEMSTokens`):** Strict shared color palette: Solar (`#F59E0B`), Unallocated (`#3B82F6`), DHW (`#EC4899`), Space Heating (`#6366F1`), Battery Charge (`#10B981`), Netto (`#EF4444`), Price Line (`#38BDF8`).
+* **Uniform Time Contract:** Slot labels always anchor to `Nu (HH:MM)` for current slot, `Za 00:00`/`Zo 00:00` for midnight boundaries, and enforce $0.00\text{ kW}$ solar production at night.
+
 ---
 
 ## 3. Generic Data Model & Schema Contracts

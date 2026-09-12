@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.6
+Version: 0.92.7
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2029,7 +2029,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.6",
+                "version": "0.92.7",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3800,7 +3800,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.6</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.7</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5857,6 +5857,99 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
     <!-- CLIENT CONTROLLER & CHART.JS ENGINE -->
     <script>
+        // =========================================================================
+        // OPEN HEMS UNIFIED CHARTING DESIGN SYSTEM & CONTROLLER
+        // Single Source of Truth for Colors, Typography, Time Format & Sticky State
+        // =========================================================================
+        const OpenHEMSTokens = {
+            colors: {
+                solar: '#F59E0B',              // Amber 500: Zon opwek & prognose
+                solarBg: 'rgba(245, 158, 11, 0.70)', // Amber bar fill
+                solarArea: 'rgba(245, 158, 11, 0.22)', // Amber line area fill
+                price: '#06B6D4',              // Cyan 500: EPEX Stroomtarief referentie
+                priceLine: '#38BDF8',          // Sky 400: EPEX Stepped tarieflijn
+                unallocated: '#3B82F6',        // Blue 500: Ongedefinieerd verbruik (7x24)
+                unallocatedBg: 'rgba(59, 130, 246, 0.75)',
+                unallocatedArea: 'rgba(59, 130, 246, 0.15)',
+                dhw: '#EC4899',                // Pink 500: SWW Tapwater
+                dhwBg: 'rgba(236, 72, 153, 0.80)',
+                heating: '#6366F1',            // Indigo 500: CV Vloerverwarming
+                heatingBg: 'rgba(99, 102, 241, 0.80)',
+                batteryCharge: '#10B981',      // Emerald 500: Thuisbatterij Laden
+                batteryDischarge: '#14B8A6',   // Teal 500: Thuisbatterij Ontladen
+                netto: '#EF4444',              // Red 500: Verwacht Netto
+                solarCost: '#EAB308',          // Yellow 500: Zon Kostprijs (€0.06/kWh)
+                gridLine: 'rgba(30, 41, 59, 0.4)',
+                gridLineZero: 'rgba(255, 255, 255, 0.18)',
+                textMuted: '#94A3B8',
+                textLight: '#E2E8F0',
+                tooltipBg: '#0B0F17',
+                tooltipBorder: '#334155'
+            },
+            fonts: {
+                mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                sans: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+            }
+        };
+
+        const OpenHEMSChartEngine = {
+            getChartType() {
+                return localStorage.getItem('openhems_chart_type') || window.predictionChartType || 'bar';
+            },
+            setChartType(type) {
+                window.predictionChartType = type;
+                localStorage.setItem('openhems_chart_type', type);
+                this.syncTypeButtons(type);
+                this.refreshAllCharts();
+            },
+            getResolution() {
+                return localStorage.getItem('openhems_resolution') || predictionResolution || '1h';
+            },
+            setResolution(res) {
+                predictionResolution = res;
+                localStorage.setItem('openhems_resolution', res);
+                this.syncResolutionButtons(res);
+                this.refreshAllCharts();
+            },
+            syncTypeButtons(type) {
+                const btnBar = document.getElementById('pred-btn-type-bar');
+                const btnLine = document.getElementById('pred-btn-type-line');
+                if (btnBar && btnLine) {
+                    if (type === 'bar') {
+                        btnBar.className = 'px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow';
+                        btnLine.className = 'px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                    } else {
+                        btnBar.className = 'px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                        btnLine.className = 'px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow';
+                    }
+                }
+            },
+            syncResolutionButtons(res) {
+                document.querySelectorAll('.res-btn-1h').forEach(b => {
+                    b.className = (res === '1h') ? 'res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow' : 'res-btn-1h px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                });
+                document.querySelectorAll('.res-btn-15m').forEach(b => {
+                    b.className = (res === '15m') ? 'res-btn-15m px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow' : 'res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                });
+            },
+            refreshAllCharts() {
+                if (typeof loadChartData === 'function') loadChartData();
+                if (typeof loadElectricityPricesChart === 'function') loadElectricityPricesChart();
+                if (typeof renderDhwTemperatureChart === 'function') renderDhwTemperatureChart();
+                if (typeof renderHeatingForecastChart === 'function') renderHeatingForecastChart();
+                if (typeof renderModelDecompositionChart === 'function') renderModelDecompositionChart();
+            },
+            init() {
+                const savedType = this.getChartType();
+                window.predictionChartType = savedType;
+                this.syncTypeButtons(savedType);
+
+                const savedRes = this.getResolution();
+                predictionResolution = savedRes;
+                this.syncResolutionButtons(savedRes);
+            }
+        };
+
         var chartInstance = null;
         var analyticsChartInstance = null;
         var powerProducersChartInstance = null;
@@ -5993,22 +6086,10 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 window.predictionChartType = 'bar'; // Default to Staven
 
         function setPredictionChartType(type) {
-            window.predictionChartType = type;
-            const btnBar = document.getElementById('pred-btn-type-bar');
-            const btnLine = document.getElementById('pred-btn-type-line');
-            if (btnBar && btnLine) {
-                if (type === 'bar') {
-                    btnBar.className = 'px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow';
-                    btnLine.className = 'px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
-                } else {
-                    btnBar.className = 'px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
-                    btnLine.className = 'px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow';
-                }
-            }
-            loadChartData();
+            OpenHEMSChartEngine.setChartType(type);
         }
 
-                function toggleBatterySimFromSettings() {
+        function toggleBatterySimFromSettings() {
             setBatterySimulation(!window.__simulateBattery);
             renderDevicesGrid();
         }
@@ -6025,31 +6106,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         }
 
         function setPredictionResolution(res) {
-            predictionResolution = res;
-            document.querySelectorAll('.res-btn-1h').forEach(b => {
-                if (res === '1h') {
-                    b.className = 'res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow';
-                } else {
-                    b.className = 'res-btn-1h px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
-                }
-            });
-            document.querySelectorAll('.res-btn-15m').forEach(b => {
-                if (res === '15m') {
-                    b.className = 'res-btn-15m px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow';
-                } else {
-                    b.className = 'res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
-                }
-            });
-
-            // Synchronize EPEX dropdown if present
-            const epexSel = document.getElementById('epex-res-select');
-            if (epexSel) epexSel.value = res;
-
-            // Reload all 4 forecast charts synchronously
-            loadChartData();
-            loadElectricityPricesChart();
-            renderDhwTemperatureChart();
-            renderHeatingForecastChart();
+            OpenHEMSChartEngine.setResolution(res);
         }
         let cachedInfra = { influxdb_connections: [], mqtt_connections: [] };
 
@@ -8639,53 +8696,66 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 // Destroy old instance
                 if (electricityPricesChartInstance) electricityPricesChartInstance.destroy();
 
+                const isBarMode = (OpenHEMSChartEngine.getChartType() === 'bar');
+
+                const solarDataset = isBarMode ? {
+                    type: 'bar',
+                    label: 'Verwachte Zonneproductie (kW)',
+                    data: data.solar_forecast_kw || [],
+                    yAxisID: 'y1',
+                    borderColor: OpenHEMSTokens.colors.solar,
+                    backgroundColor: OpenHEMSTokens.colors.solarBg,
+                    borderWidth: 1,
+                    borderRadius: 4,
+                    order: 2
+                } : {
+                    type: 'line',
+                    label: 'Verwachte Zonneproductie (kW)',
+                    data: data.solar_forecast_kw || [],
+                    yAxisID: 'y1',
+                    borderColor: OpenHEMSTokens.colors.solar,
+                    backgroundColor: OpenHEMSTokens.colors.solarArea,
+                    fill: true,
+                    borderWidth: 2,
+                    tension: 0.35,
+                    pointRadius: 0,
+                    order: 2
+                };
+
+                const priceDataset = {
+                    type: 'line',
+                    label: 'EPEX Stroomtarief All-in (€/kWh)',
+                    data: data.epex_prices || [],
+                    yAxisID: 'y',
+                    borderColor: OpenHEMSTokens.colors.priceLine,
+                    backgroundColor: 'transparent',
+                    borderWidth: 2.5,
+                    stepped: 'before',
+                    pointRadius: 0,
+                    tension: 0,
+                    order: 1
+                };
+
                 const solarCostLine = data.labels.map(() => data.solar_cost);
+                const solarCostDataset = {
+                    type: 'line',
+                    label: `Zon Kostprijs (€${Number(data.solar_cost).toFixed(3)}/kWh)`,
+                    data: solarCostLine,
+                    yAxisID: 'y',
+                    borderColor: OpenHEMSTokens.colors.solarCost,
+                    borderWidth: 1.5,
+                    borderDash: [6, 4],
+                    pointRadius: 0,
+                    fill: false,
+                    order: 3
+                };
 
                 const ctx = canvas.getContext('2d');
                 electricityPricesChartInstance = new Chart(ctx, {
-                    type: 'line',
+                    type: isBarMode ? 'bar' : 'line',
                     data: {
                         labels: data.labels,
-                        datasets: [
-                            // 1. Zonnestroom Verwachting Area Curve (Right Y-Axis)
-                            {
-                                label: 'Verwachte Zonneproductie (kW)',
-                                data: data.solar_forecast_kw || [],
-                                yAxisID: 'y1',
-                                borderColor: '#F59E0B',
-                                backgroundColor: 'rgba(245, 158, 11, 0.22)',
-                                fill: true,
-                                borderWidth: 2,
-                                tension: 0.35,
-                                pointRadius: 0,
-                                order: 2
-                            },
-                            // 2. EPEX Stroomtarief Stepped Line (Left Y-Axis)
-                            {
-                                label: 'EPEX Stroomtarief All-in (€/kWh)',
-                                data: data.epex_prices || [],
-                                yAxisID: 'y',
-                                borderColor: '#3B82F6',
-                                backgroundColor: 'transparent',
-                                borderWidth: 2.5,
-                                stepped: 'before',
-                                pointRadius: 0,
-                                tension: 0,
-                                order: 1
-                            },
-                            // 3. Configured Solar Cost Reference Line (Left Y-Axis)
-                            {
-                                label: `Zon Kostprijs (€${Number(data.solar_cost).toFixed(3)}/kWh)`,
-                                data: solarCostLine,
-                                yAxisID: 'y',
-                                borderColor: '#EAB308',
-                                borderWidth: 1.5,
-                                borderDash: [6, 4],
-                                pointRadius: 0,
-                                fill: false,
-                                order: 3
-                            }
-                        ]
+                        datasets: [solarDataset, priceDataset, solarCostDataset]
                     },
                     options: {
                         responsive: true,
@@ -8699,8 +8769,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 display: true,
                                 position: 'top',
                                 labels: {
-                                    color: '#94A3B8',
-                                    font: { family: 'monospace', size: 10 },
+                                    color: OpenHEMSTokens.colors.textMuted,
+                                    font: { family: OpenHEMSTokens.fonts.mono, size: 10 },
                                     boxWidth: 10
                                 }
                             },
@@ -8713,10 +8783,10 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         },
                         scales: {
                             x: {
-                                grid: { color: 'rgba(30, 41, 59, 0.4)' },
+                                grid: { color: OpenHEMSTokens.colors.gridLine },
                                 ticks: {
-                                    color: '#94A3B8',
-                                    font: { family: 'monospace', size: 10 },
+                                    color: OpenHEMSTokens.colors.textMuted,
+                                    font: { family: OpenHEMSTokens.fonts.mono, size: 10 },
                                     maxTicksLimit: 12
                                 }
                             },
@@ -8724,11 +8794,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 type: 'linear',
                                 display: true,
                                 position: 'left',
-                                title: { display: true, text: 'Tarief (€/kWh)', color: '#60A5FA', font: { family: 'monospace', size: 10 } },
-                                grid: { color: 'rgba(30, 41, 59, 0.6)' },
+                                title: { display: true, text: 'Tarief (€/kWh)', color: OpenHEMSTokens.colors.priceLine, font: { family: OpenHEMSTokens.fonts.mono, size: 10 } },
+                                grid: { color: OpenHEMSTokens.colors.gridLine },
                                 ticks: {
-                                    color: '#60A5FA',
-                                    font: { family: 'monospace', size: 10 },
+                                    color: OpenHEMSTokens.colors.priceLine,
+                                    font: { family: OpenHEMSTokens.fonts.mono, size: 10 },
                                     callback: function(val) { return '€' + Number(val).toFixed(2); }
                                 }
                             },
@@ -8736,11 +8806,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 type: 'linear',
                                 display: true,
                                 position: 'right',
-                                title: { display: true, text: 'Zon (kW)', color: '#F59E0B', font: { family: 'monospace', size: 10 } },
+                                title: { display: true, text: 'Zon (kW)', color: OpenHEMSTokens.colors.solar, font: { family: OpenHEMSTokens.fonts.mono, size: 10 } },
                                 grid: { drawOnChartArea: false },
                                 ticks: {
-                                    color: '#F59E0B',
-                                    font: { family: 'monospace', size: 10 },
+                                    color: OpenHEMSTokens.colors.solar,
+                                    font: { family: OpenHEMSTokens.fonts.mono, size: 10 },
                                     callback: function(val) { return Number(val).toFixed(1) + ' kW'; }
                                 },
                                 min: 0
@@ -9332,6 +9402,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         }
 
         // Boot
+        OpenHEMSChartEngine.init();
         fetchHaEntities();
         const initialHashTab = (window.location.hash || '').replace('#', '');
         showTab(initialHashTab || "prediction");
@@ -10161,7 +10232,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const canvas = document.getElementById('chart-model-decomposition');
             if (!canvas) return;
             try {
-                const res = await fetch('./api/schedule/chart-data?resolution=15m');
+                const curRes = OpenHEMSChartEngine.getResolution();
+                const res = await fetch('./api/schedule/chart-data?resolution=' + encodeURIComponent(curRes));
                 const data = await res.json();
                 if (!data || !data.labels) return;
 
@@ -10194,7 +10266,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 data: pricesArr,
                                 type: 'line',
                                 yAxisID: 'y1',
-                                borderColor: '#22D3EE',
+                                borderColor: OpenHEMSTokens.colors.price,
                                 backgroundColor: 'transparent',
                                 borderWidth: 1.75,
                                 tension: 0.25,
@@ -10206,7 +10278,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 data: netPowerArr,
                                 type: 'line',
                                 yAxisID: 'y',
-                                borderColor: '#E2E8F0',
+                                borderColor: OpenHEMSTokens.colors.netto,
                                 borderDash: [4, 4],
                                 backgroundColor: 'transparent',
                                 borderWidth: 1.5,
@@ -10218,7 +10290,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 label: 'Ongedefinieerd (Huis)',
                                 data: unallocArr,
                                 yAxisID: 'y',
-                                backgroundColor: '#3B82F6',
+                                backgroundColor: OpenHEMSTokens.colors.unallocated,
                                 stack: 'consumption',
                                 borderRadius: 2,
                                 order: 3
@@ -10227,7 +10299,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 label: 'CV Verwarming (Woning)',
                                 data: heatingArr,
                                 yAxisID: 'y',
-                                backgroundColor: '#EF4444',
+                                backgroundColor: OpenHEMSTokens.colors.heating,
                                 stack: 'consumption',
                                 borderRadius: 2,
                                 order: 4
@@ -10236,7 +10308,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 label: 'SWW Boiler 350L',
                                 data: boilerArr,
                                 yAxisID: 'y',
-                                backgroundColor: '#F59E0B',
+                                backgroundColor: OpenHEMSTokens.colors.dhw,
                                 stack: 'consumption',
                                 borderRadius: 2,
                                 order: 5
@@ -10245,7 +10317,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 label: 'Zonnepanelen Opwek',
                                 data: solarNegArr,
                                 yAxisID: 'y',
-                                backgroundColor: '#10B981',
+                                backgroundColor: OpenHEMSTokens.colors.solar,
                                 stack: 'generation',
                                 borderRadius: 2,
                                 order: 6
