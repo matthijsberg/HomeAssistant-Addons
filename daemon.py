@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.85.1
+Version: 0.86.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1931,7 +1931,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.85.1",
+                "version": "0.86.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3658,7 +3658,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.85.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.86.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3954,12 +3954,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 </div>
                             </div>
                             <div class="flex items-center gap-2.5 text-[11px] font-mono flex-wrap">
-                                <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-2 bg-red-600 rounded-sm"></span> Hard Uit (Spits 🔒)</span>
-                                <span class="flex items-center gap-1.5 text-amber-400"><span class="w-3 h-2 border border-amber-500/70 rounded-sm" style="background: repeating-linear-gradient(45deg, #1E293B, #1E293B 2px, rgba(245, 158, 11, 0.4) 2px, rgba(245, 158, 11, 0.4) 4px)"></span> Standby (Piekadvies ⚠️)</span>
-                                <span class="flex items-center gap-1.5 text-slate-400"><span class="w-3 h-2 bg-slate-700 rounded-sm"></span> Normale Standby (Vrij 🔓)</span>
-                                <span class="flex items-center gap-1.5 text-purple-300"><span class="w-3 h-2 bg-purple-600 rounded-sm"></span> Zonnebuffer (60°C)</span>
-                                <span class="flex items-center gap-1.5 text-yellow-300"><span class="w-3 h-2 bg-yellow-500 rounded-sm"></span> Geforceerd (50°C)</span>
-                                <span class="flex items-center gap-1.5 text-emerald-300"><span class="w-3 h-2 bg-emerald-500 rounded-sm"></span> Nachtlading (50°C)</span>
+                                <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-2 bg-red-600 rounded-sm"></span> Geforceerd uit (blok)</span>
+                                <span class="flex items-center gap-1.5 text-amber-400"><span class="w-3 h-2 bg-amber-500 rounded-sm"></span> Geadviseerd uit</span>
+                                <span class="flex items-center gap-1.5 text-slate-400"><span class="w-3 h-2 bg-slate-700 rounded-sm"></span> Normaal</span>
+                                <span class="flex items-center gap-1.5 text-emerald-300"><span class="w-3 h-2 border border-emerald-400/80 rounded-sm" style="background: repeating-linear-gradient(45deg, #10B981, #10B981 2px, #86EFAC 2px, #86EFAC 4px)"></span> Geadviseerd aan</span>
+                                <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-2 bg-emerald-500 rounded-sm"></span> Geforceerd aan</span>
+                                <span class="flex items-center gap-1.5 text-purple-300"><span class="w-3 h-2 bg-purple-600 rounded-sm"></span> Maximaal aan (60°C)</span>
                             </div>
                         </div>
 
