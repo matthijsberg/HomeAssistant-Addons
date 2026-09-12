@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.83.0
+Version: 0.84.0
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1912,7 +1912,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.83.0",
+                "version": "0.84.0",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2613,7 +2613,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "run_duration_min": slots_to_fill * (15 if is_15m else 60),
                 "power_kw": sww_power_kw,
                 "total_stroom_kwh": round(sww_power_kw * slots_to_fill * (0.25 if is_15m else 1.0), 2),
-                "spits_lockout_hours": 5.5,
+                "spits_lockout_hours": round(len([s for s in slot_lockout_map.values() if s.get("is_hard_lockout")]) * (0.25 if is_15m else 1.0), 1),
+                "dynamic_peaks": dynamic_peaks,
                 "arbitrage_saving_eur": boost_net_saving_eur,
                 "arbitrage_p_midday": round(p_midday, 4),
                 "arbitrage_p_future": round(p_future_avoided, 4),
@@ -3636,7 +3637,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.83.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.84.0</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4378,7 +4379,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                                 </div>
                                                 <div>
                                                     <span class="text-red-400 font-semibold">🚫 Spitsblokkades (Strikte Lockouts):</span>
-                                                    <p class="text-slate-400">Ochtendspits (07:00–09:30) en Avondspits (17:00–20:00) zijn strikt geblokkeerd voor boiler-opwarming om piektarieven en overbelasting te voorkomen.</p>
+                                                    <p class="text-slate-400">Dynamische Spitsblokkades: Het systeem berekent per kwartier de EPEX prijspieken en vergrendelt uitsluitend de absolute top-kam (maximaal 2,5 uur) met automatische comfort-overrule bij koude (<19,5°C).</p>
                                                 </div>
                                                 <div>
                                                     <span class="text-sky-400 font-semibold">📊 P95 Veiligheidsmarge (Stress Scenario):</span>
@@ -7147,6 +7148,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
                 // Update Dynamic Spitsblokkades Summary Card & Decision Box
                 const dynPeaks = data.dynamic_peaks || [];
+                window.__lastDynamicPeaks = dynPeaks;
                 const hTitle = document.getElementById('dhw-dyn-lockout-title');
                 const hHours = document.getElementById('dhw-dyn-lockout-hours');
                 const hSub = document.getElementById('dhw-dyn-lockout-sub');
@@ -7161,15 +7163,21 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     if (hSub) hSub.innerText = 'Tarief schommelt minimaal: warmtepomp mag overdag vrij opereren.';
                     if (spitsDetailEl) spitsDetailEl.innerHTML = '<span class="text-emerald-400 font-bold">Geen prijspieken gedetecteerd 🔓 (volledige vrijloop)</span>';
                 } else {
-                    const totMins = dynPeaks.reduce((acc, p) => acc + (p.duration_mins || 0), 0);
-                    const totHours = (totMins / 60).toFixed(1);
-                    if (hTitle) hTitle.innerText = `🚫 Spitsblokkades (${totHours} Uur)`;
+                    const hardMins = dynPeaks.reduce((acc, p) => acc + (p.hard_duration_mins || (p.is_hard_lockout ? p.duration_mins : 0)), 0);
+                    const hardHours = (hardMins / 60).toFixed(1);
+                    if (hTitle) hTitle.innerText = `🚫 Spitsblokkades (${hardHours} Uur)`;
                     if (hHours) {
-                        hHours.innerText = dynPeaks.map(p => `${p.name} ${p.start_time}–${p.end_time} (${p.duration_mins}m)`).join(' · ');
-                        hHours.className = 'text-xs font-bold text-red-400';
+                        hHours.innerText = dynPeaks.map(p => {
+                            if (p.hard_start_time) {
+                                return `${p.name} ${p.hard_start_time}–${p.hard_end_time} (${p.hard_duration_mins}m 🔒)`;
+                            } else {
+                                return `${p.name} ${p.start_time}–${p.end_time} (${p.duration_mins}m ⚠️)`;
+                            }
+                        }).join(' · ');
+                        hHours.className = hardMins > 0 ? 'text-xs font-bold text-red-400' : 'text-xs font-bold text-amber-400';
                     }
                     const maxPeakP = Math.max(...dynPeaks.map(p => p.max_price));
-                    if (hSub) hSub.innerText = `Piekhoogte tot €${maxPeakP.toFixed(3)}/kWh. Compressor vergrendeld.`;
+                    if (hSub) hSub.innerText = `Piekhoogte tot €${maxPeakP.toFixed(3)}/kWh. Gecapt op max 2,5u tegen woningafkoeling.`;
                     if (spitsDetailEl) {
                         spitsDetailEl.innerHTML = dynPeaks.map(p => {
                             const badgeColor = p.is_hard_lockout ? 'text-red-300' : 'text-amber-300';
@@ -9698,6 +9706,18 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 const dipValEl = document.getElementById('dhw-box-dip-val');
                 if (dipValEl && dec.morning_dip_c !== undefined) {
                     dipValEl.innerText = `${dec.morning_dip_c}°C om ${dec.morning_dip_time || '09:44'}`;
+                }
+                const dBoxSpits = document.getElementById('dhw-box-spits-detail');
+                const cachedPeaks = window.__lastDynamicPeaks || [];
+                if (dBoxSpits) {
+                    if (cachedPeaks.length === 0) {
+                        dBoxSpits.innerHTML = '<span class="text-emerald-400 font-bold">Geen prijspieken 🔓 (volledige vrijloop)</span>';
+                    } else {
+                        dBoxSpits.innerHTML = cachedPeaks.map(p => {
+                            const lbl = p.hard_start_time ? `${p.name} ${p.hard_start_time}–${p.hard_end_time} (${p.hard_duration_mins}m 🔒)` : `${p.name} ${p.start_time}–${p.end_time} (Advies ⚠️)`;
+                            return `<span class="text-slate-200 font-bold">${lbl}</span>`;
+                        }).join(' · ');
+                    }
                 }
                 const dipTextEl = document.getElementById('dhw-box-dip-text');
                 if (dipTextEl && dec.morning_dip_c !== undefined) {

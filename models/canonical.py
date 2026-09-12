@@ -323,14 +323,14 @@ def calc_percentile(data: List[float], p: float) -> float:
     return float(s[int(f)] * (c - k) + s[int(c)] * (k - f))
 
 
-def detect_dynamic_price_peaks(timeline_items: List[Dict[str, Any]], step_mins: int = 15) -> Tuple[List[Dict[str, Any]], Dict[int, Dict[str, Any]]]:
+def detect_dynamic_price_peaks(timeline_items: List[Dict[str, Any]], step_mins: int = 15, max_lockout_mins: int = 150) -> Tuple[List[Dict[str, Any]], Dict[int, Dict[str, Any]]]:
     """
-    Dynamische Spitsdetector op kwartier- of uurbasis.
-    Geheel onafhankelijk van starre kloktijden (zoals 07:00-09:30).
-    Bepaalt pieken dynamisch op basis van:
-      1. Hoogte: P_slot >= P75 en delta met mediaan >= €0,030/kWh.
-      2. Lengte & Duur: Aaneengesloten kwartieren met overbrugging van 15m rimpels.
-      3. Gradatie: HARD_LOCKOUT (max >= P85 en delta >= €0,050) vs SOFT_ADVICE.
+    Verfijnde Dynamische Spitsdetector op kwartierbasis met Winter Comfort Safeguard:
+      1. Micro-piek filter: Negeert rimpels korter dan 30 min (filtert pendelstops weg).
+      2. Piek-Kam Prominentie: Een continue harde blokkade wordt gecapt op maximaal 150 min (2,5 uur)
+         op de absolute top van de prijsgolf om afkoeling van de vloer/woning in de winter te voorkomen.
+      3. Flank-degradatie: Schouder-uren buiten de 2,5u top-kam worden 'Economisch Blokadvies' (⚠️),
+         waarin de warmtepomp op minimale modulatie (950W) mag doorpruttelen indien nodig.
     """
     if not timeline_items:
         return [], {}
@@ -340,14 +340,14 @@ def detect_dynamic_price_peaks(timeline_items: List[Dict[str, Any]], step_mins: 
     p75 = calc_percentile(prices, 75)
     p85 = calc_percentile(prices, 85)
 
-    # 1. Kandidaat slots
+    # 1. Kandidaat slots: moet significant boven mediaan liggen en in hoogste kwartiel
     is_cand = []
     for it in timeline_items:
         p = float(it.get("price", 0.0))
-        cand = (p >= p75) and ((p - p_med) >= 0.030)
+        cand = (p >= p75) and ((p - p_med) >= 0.035)
         is_cand.append(cand)
 
-    # 2. Overbrug 1-slot dipjes binnen een bredere piek (smoothing)
+    # 2. Overbrug 1-slot dipjes binnen een bredere piek
     n = len(is_cand)
     bridged = list(is_cand)
     p70 = calc_percentile(prices, 70)
@@ -370,38 +370,50 @@ def detect_dynamic_price_peaks(timeline_items: List[Dict[str, Any]], step_mins: 
     if in_event:
         events.append((start_idx, n - 1))
 
-    # 4. Formuleer Peak Events en Slot Lookup Map
+    # 4. Formuleer Peak Events met Duur-Cap en Crest Focus
     peak_objects = []
     slot_lockout_map = {}
 
     for s_idx, e_idx in events:
         cluster_len = e_idx - s_idx + 1
         dur_mins = cluster_len * step_mins
+
+        # Micro-peak filter: negeer pieken korter dan 30 min (2 kwartieren)
+        if dur_mins < 30:
+            continue
+
         cluster_prices = [float(timeline_items[k].get("price", 0.0)) for k in range(s_idx, e_idx + 1)]
         max_p = max(cluster_prices)
         avg_p = sum(cluster_prices) / cluster_len
         dt_start = timeline_items[s_idx]["dt"]
         dt_end = timeline_items[e_idx]["dt"] + timedelta(minutes=step_mins)
 
-        # Gradatie van blokkade
-        if max_p >= p85 and (max_p - p_med) >= 0.050:
-            sev = "HARD_LOCKOUT"
-            sev_lbl = "Harde Spitsblokkade 🔒"
-            is_hard = True
-        else:
-            sev = "SOFT_ADVICE"
-            sev_lbl = "Economisch Blokadvies ⚠️"
-            is_hard = False
+        # Bepaal of deze piek een harde blokkade rechtvaardigt
+        is_hard_cluster = (max_p >= p85) and ((max_p - p_med) >= 0.050)
+        max_slots_cap = max(2, max_lockout_mins // step_mins)
 
         h = dt_start.hour
-        if 5 <= h < 11:
-            name = "Ochtendspits"
-        elif 11 <= h < 16:
-            name = "Middagpiek"
-        elif 16 <= h < 22:
-            name = "Avondspits"
+        name = "Ochtendspits" if 5 <= h < 11 else ("Middagpiek" if 11 <= h < 16 else ("Avondspits" if 16 <= h < 22 else "Nachtpiek"))
+
+        # Vind de top-kam binnen het cluster (max 150 min / 2,5 uur)
+        if is_hard_cluster and cluster_len > max_slots_cap:
+            best_sub_start = s_idx
+            best_sub_avg = -1.0
+            for w_start in range(s_idx, e_idx - max_slots_cap + 2):
+                w_end = w_start + max_slots_cap
+                sub_avg = sum(float(timeline_items[k].get("price", 0.0)) for k in range(w_start, w_end)) / max_slots_cap
+                if sub_avg > best_sub_avg:
+                    best_sub_avg = sub_avg
+                    best_sub_start = w_start
+            hard_start_idx = best_sub_start
+            hard_end_idx = best_sub_start + max_slots_cap - 1
         else:
-            name = "Nachtpiek"
+            hard_start_idx = s_idx if is_hard_cluster else -1
+            hard_end_idx = e_idx if is_hard_cluster else -1
+
+        h_start_lbl = timeline_items[hard_start_idx]["dt"].strftime("%H:%M") if hard_start_idx >= 0 else None
+        h_end_lbl = (timeline_items[hard_end_idx]["dt"] + timedelta(minutes=step_mins)).strftime("%H:%M") if hard_end_idx >= 0 else None
+        h_dur_mins = (hard_end_idx - hard_start_idx + 1) * step_mins if hard_start_idx >= 0 else 0
 
         peak_obj = {
             "start_idx": s_idx,
@@ -411,9 +423,12 @@ def detect_dynamic_price_peaks(timeline_items: List[Dict[str, Any]], step_mins: 
             "duration_mins": dur_mins,
             "slots_count": cluster_len,
             "name": name,
-            "severity": sev,
-            "severity_label": sev_lbl,
-            "is_hard_lockout": is_hard,
+            "severity": "HARD_LOCKOUT" if is_hard_cluster else "SOFT_ADVICE",
+            "severity_label": "Harde Spitsblokkade 🔒" if is_hard_cluster else "Economisch Blokadvies ⚠️",
+            "is_hard_lockout": is_hard_cluster,
+            "hard_start_time": h_start_lbl,
+            "hard_end_time": h_end_lbl,
+            "hard_duration_mins": h_dur_mins,
             "max_price": round(max_p, 4),
             "avg_price": round(avg_p, 4),
             "delta_median": round(max_p - p_med, 4)
@@ -421,6 +436,21 @@ def detect_dynamic_price_peaks(timeline_items: List[Dict[str, Any]], step_mins: 
         peak_objects.append(peak_obj)
 
         for k in range(s_idx, e_idx + 1):
-            slot_lockout_map[k] = peak_obj
+            if hard_start_idx <= k <= hard_end_idx and hard_start_idx >= 0:
+                slot_lockout_map[k] = {
+                    "is_hard_lockout": True,
+                    "severity": "HARD_LOCKOUT",
+                    "severity_label": "Harde Spitsblokkade 🔒",
+                    "name": name,
+                    "peak_obj": peak_obj
+                }
+            else:
+                slot_lockout_map[k] = {
+                    "is_hard_lockout": False,
+                    "severity": "SOFT_ADVICE",
+                    "severity_label": "Economisch Blokadvies ⚠️",
+                    "name": name,
+                    "peak_obj": peak_obj
+                }
 
     return peak_objects, slot_lockout_map
