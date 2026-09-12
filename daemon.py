@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.85.0
+Version: 0.85.1
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1931,7 +1931,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.85.0",
+                "version": "0.85.1",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2578,14 +2578,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     m_desc = f"{peak_info['name']} ({peak_info['start_time']}–{peak_info['end_time']}, {peak_info['duration_mins']}m): Prijspiek max €{peak_info['max_price']:.3f}/kWh (+€{peak_info['delta_median']:.3f} t.o.v. mediaan). Compressor SG4 vergrendeld."
                 elif peak_info and not peak_info.get("is_hard_lockout") and boiler[q_idx] == 0:
                     m_code = "peak_advice"
-                    m_lbl = f"{peak_info['name']} ({peak_info['duration_mins']}m ⚠️)"
-                    m_col = "#F59E0B"
+                    m_lbl = f"Standby (Piek-Advies: Vermijd Lasten ⚠️)"
+                    m_col = "#1E293B"
                     m_pwr = 0.0
-                    m_desc = f"{peak_info['name']} ({peak_info['start_time']}–{peak_info['end_time']}, {peak_info['duration_mins']}m): Matige prijspiek (gem. €{peak_info['avg_price']:.3f}/kWh). Uitstel opwarming aanbevolen."
+                    m_desc = f"Standby ({it['label']}): Boiler staat in rust (0 kW). {peak_info['name']} flank (€{p_val:.3f}/kWh): uitstel van zware apparaten aanbevolen."
                 elif boiler[q_idx] > 0:
                     m_code = planned_mode
                     m_lbl = planned_mode_label
-                    m_col = "#A855F7" if planned_mode == "forced_solar_boost_60" else ("#10B981" if planned_mode == "forced_night_50" else "#F59E0B")
+                    m_col = "#A855F7" if planned_mode == "forced_solar_boost_60" else ("#10B981" if planned_mode == "forced_night_50" else "#EAB308")
                     m_pwr = boiler[q_idx]
                     m_desc = f"{planned_mode_label} om {it['label']}: Vermogen {m_pwr} kW elektrisch · Doeltemperatuur {sww_target_temp}°C."
                 else:
@@ -3658,7 +3658,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.85.0</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.85.1</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -3954,10 +3954,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 </div>
                             </div>
                             <div class="flex items-center gap-2.5 text-[11px] font-mono flex-wrap">
-                                <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-2 bg-red-600 rounded-sm"></span> Hard Uit (Spits)</span>
-                                <span class="flex items-center gap-1.5 text-slate-400"><span class="w-3 h-2 bg-slate-700 rounded-sm"></span> Normale Standby</span>
-                                <span class="flex items-center gap-1.5 text-amber-300"><span class="w-3 h-2 bg-amber-500 rounded-sm"></span> Geforceerd (50°C)</span>
+                                <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-2 bg-red-600 rounded-sm"></span> Hard Uit (Spits 🔒)</span>
+                                <span class="flex items-center gap-1.5 text-amber-400"><span class="w-3 h-2 border border-amber-500/70 rounded-sm" style="background: repeating-linear-gradient(45deg, #1E293B, #1E293B 2px, rgba(245, 158, 11, 0.4) 2px, rgba(245, 158, 11, 0.4) 4px)"></span> Standby (Piekadvies ⚠️)</span>
+                                <span class="flex items-center gap-1.5 text-slate-400"><span class="w-3 h-2 bg-slate-700 rounded-sm"></span> Normale Standby (Vrij 🔓)</span>
                                 <span class="flex items-center gap-1.5 text-purple-300"><span class="w-3 h-2 bg-purple-600 rounded-sm"></span> Zonnebuffer (60°C)</span>
+                                <span class="flex items-center gap-1.5 text-yellow-300"><span class="w-3 h-2 bg-yellow-500 rounded-sm"></span> Geforceerd (50°C)</span>
                                 <span class="flex items-center gap-1.5 text-emerald-300"><span class="w-3 h-2 bg-emerald-500 rounded-sm"></span> Nachtlading (50°C)</span>
                             </div>
                         </div>
@@ -7159,7 +7160,12 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         block.className = 'flex-1 h-full rounded-sm transition-all duration-150 cursor-pointer relative group';
                         block.style.backgroundColor = seg.color;
                         if (seg.mode === 'peak_lockout') {
-                            block.style.backgroundImage = 'repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(0,0,0,0.3) 3px, rgba(0,0,0,0.3) 6px)';
+                            block.style.backgroundColor = '#EF4444';
+                            block.style.backgroundImage = 'repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(0,0,0,0.35) 3px, rgba(0,0,0,0.35) 6px)';
+                        } else if (seg.mode === 'peak_advice') {
+                            block.style.backgroundColor = '#1E293B';
+                            block.style.border = '1px dashed rgba(245, 158, 11, 0.6)';
+                            block.style.backgroundImage = 'repeating-linear-gradient(45deg, #1E293B, #1E293B 3px, rgba(245, 158, 11, 0.25) 3px, rgba(245, 158, 11, 0.25) 6px)';
                         }
                         // Tooltip on hover
                         block.title = `${seg.time} | ${seg.label}\n${seg.description}`;
