@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.18
+Version: 0.92.19
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2499,7 +2499,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.18",
+                "version": "0.92.19",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4350,7 +4350,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.18</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.19</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -7577,18 +7577,40 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const label = tooltip.title[0] || '';
             const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
 
-            let tempC = 0.0, comfort = 40.0, target = 50.0, liters = 0, p05 = 0.0, p95 = 0.0;
+            let tempC = 0.0, comfort = 40.0, target = 50.0, liters = 0, p05 = 0.0, p95 = 0.0, unheatedC = 0.0;
             chart.data.datasets.forEach(ds => {
                 const v = ds.data[dataIndex];
                 if (!ds.label) return;
-                if (ds.label.includes('Verwacht')) tempC = Number(v) || 0.0;
-                else if (ds.label.includes('Boilertemperatuur')) tempC = Number(v) || 0.0;
-                if (ds.label.includes('P05') || ds.label.includes('Minimaal')) p05 = Number(v) || 0.0;
-                if (ds.label.includes('P95') || ds.label.includes('Piekverbruik')) p95 = Number(v) || 0.0;
-                if (ds.label.includes('Comfort')) comfort = Number(v) || 0.0;
-                if (ds.label.includes('Doel')) target = Number(v) || 0.0;
-                if (ds.label.includes('Tapvraag') || ds.label.includes('Waterverbruik')) liters = Math.round(Number(v) || 0);
+                if (ds.label.includes('Temperatuur P50') || ds.label === 'Verwachte Temperatuur P50 (°C)' || ds.label === 'Boilertemperatuur (°C)') {
+                    tempC = Number(v) || 0.0;
+                }
+                else if (ds.label.includes('Zonder Verwarming')) {
+                    unheatedC = Number(v) || 0.0;
+                }
+                else if (ds.label.includes('P05') || ds.label.includes('Minimaal')) {
+                    p05 = Number(v) || 0.0;
+                }
+                else if (ds.label.includes('P95') || ds.label.includes('Piekverbruik')) {
+                    p95 = Number(v) || 0.0;
+                }
+                else if (ds.label.includes('Comfort')) {
+                    comfort = Number(v) || 0.0;
+                }
+                else if (ds.label.includes('Doel')) {
+                    target = Number(v) || 0.0;
+                }
+                else if (ds.label.includes('Tapvraag') || ds.label.includes('Liters') || ds.label.includes('Waterverbruik')) {
+                    liters = Math.round(Number(v) || 0);
+                }
             });
+
+            // Fallback if tempC is still 0
+            if (tempC === 0.0) {
+                const p50Ds = chart.data.datasets.find(d => d.label && d.label.includes('Temperatuur P50'));
+                if (p50Ds && p50Ds.data[dataIndex] !== undefined) {
+                    tempC = Number(p50Ds.data[dataIndex]) || 0.0;
+                }
+            }
 
             const tempBadgeColor = tempC >= 45 ? 'text-emerald-400 bg-emerald-950/80 border-emerald-800' : (tempC >= 40 ? 'text-amber-400 bg-amber-950/80 border-amber-800' : 'text-red-400 bg-red-950/80 border-red-800');
 
@@ -7618,6 +7640,14 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             <span class="text-amber-200/80">Bandbreedte (P95–P05)</span>
                         </div>
                         <span class="font-mono text-amber-300/90">${p95.toFixed(1)}°C (veel) – ${p05.toFixed(1)}°C (weinig)</span>
+                    </div>` : ''}
+                    ${unheatedC > 0 ? `
+                    <div class="flex items-center justify-between gap-3 text-[11px]">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #94A3B8; margin-right:8px;"></span>
+                            <span class="text-slate-400">Zonder Verwarming</span>
+                        </div>
+                        <span class="text-slate-300 font-mono">${unheatedC.toFixed(1)}°C</span>
                     </div>` : ''}
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
