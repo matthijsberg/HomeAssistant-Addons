@@ -172,7 +172,19 @@ class DecisionAuditLogger:
                                         "savings_estimate_eur": d.get("financial_impact_eur", 0.0)
                                     })
                                 elif meas == "hems_annotations":
-                                    rec_dom = "dhw" if "dhw" in (d.get("event_type") or "").lower() or "dhw" in (d.get("title") or "").lower() else "space_heating" if "cv" in (d.get("title") or "").lower() else "general"
+                                    evt = (d.get("event_type") or "").lower()
+                                    tit = (d.get("title") or "").lower()
+                                    if "hardware" in evt or "relais" in tit:
+                                        rec_dom = "hardware"
+                                    elif "peak" in evt or "spits" in tit:
+                                        rec_dom = "grid_tariff"
+                                    elif "space_heating" in evt or "cv" in tit or "ruimteverwarming" in tit:
+                                        rec_dom = "space_heating"
+                                    elif "dhw" in evt or "dhw" in tit or "boiler" in tit or "zonnebuffer" in tit or "nacht" in tit:
+                                        rec_dom = "dhw"
+                                    else:
+                                        rec_dom = "general"
+
                                     if domain and rec_dom != domain:
                                         continue
                                     records.append({

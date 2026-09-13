@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.25
+Version: 0.92.26
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -612,6 +612,7 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
 
 
 _LAST_NIGHT_AUDIT_LOG: Dict[str, Any] = {"state": None, "ts": 0.0}
+_LAST_LOGGED_ACTUATION: Dict[str, Any] = {"state": None, "ts": 0.0}
 
 def evaluate_and_log_night_boiler_decision(plan: Any, t_live: float):
     global _LAST_NIGHT_AUDIT_LOG
@@ -682,6 +683,94 @@ def evaluate_and_log_night_boiler_decision(plan: Any, t_live: float):
             )
     except Exception as e:
         print(f"Warning in evaluate_and_log_night_boiler_decision: {e}")
+
+
+_LAST_PLAN_LOGS: Dict[str, Any] = {
+    "peaks_key": None,
+    "cv_key": None,
+    "dhw_strategy_key": None,
+    "last_ts": 0.0
+}
+
+def evaluate_and_log_planner_decisions(plan: Any, frame: Any):
+    global _LAST_PLAN_LOGS
+    now_ts = time.time()
+
+    # 1. Dynamic Spitsblokkades (Peak Lockouts)
+    if hasattr(plan, "dynamic_peaks") and plan.dynamic_peaks:
+        p_names = [f"{p.get('name', 'Spits')} ({p.get('start_time')}–{p.get('end_time')}, max €{p.get('max_price', 0):.2f})" for p in plan.dynamic_peaks]
+        peaks_key = "; ".join(p_names)
+        if _LAST_PLAN_LOGS.get("peaks_key") != peaks_key or (now_ts - _LAST_PLAN_LOGS.get("last_ts", 0)) >= 14400.0:
+            _LAST_PLAN_LOGS["peaks_key"] = peaks_key
+            _LAST_PLAN_LOGS["last_ts"] = now_ts
+
+            title = f"🚫 Dynamische Spitsblokkades Actief ({len(plan.dynamic_peaks)} pieken)"
+            desc = f"Prijspieken gedetecteerd in EPEX stroomtarieven: {peaks_key}. Warmtepomp wordt tijdens deze uren vergrendeld (SG1) om dure piekafname te vermijden."
+
+            write_hems_annotation(
+                event_type="peak_lockout",
+                title=title,
+                description=desc,
+                state_code="forced_off",
+                power_kw=0.0,
+                target_temp_c=0.0,
+                savings_eur=0.45
+            )
+            DecisionAuditLogger.log_decision(
+                domain="grid_tariff",
+                decision_type="peak_detection",
+                chosen_mode="forced_off",
+                target_temp_c=None,
+                inputs={"pieken": peaks_key, "aantal": len(plan.dynamic_peaks)},
+                reason=title,
+                explanation=desc,
+                savings_estimate_eur=0.45
+            )
+
+    # 2. CV Ruimteverwarming Policy (Space Heating)
+    if hasattr(plan, "space_heating_summary") and plan.space_heating_summary:
+        sh = plan.space_heating_summary
+        cv_state = "summer_lockout" if sh.is_summer_lockout else ("preheat" if sh.preheat_hours > 0 else "modulating")
+        if _LAST_PLAN_LOGS.get("cv_key") != cv_state or (now_ts - _LAST_PLAN_LOGS.get("last_ts", 0)) >= 14400.0:
+            _LAST_PLAN_LOGS["cv_key"] = cv_state
+
+            if sh.is_summer_lockout:
+                title = f"☀️ CV Vloerverwarming: Zomerstop Actief ({sh.mean_outdoor_temp_c:.1f}°C)"
+                desc = f"Gemiddelde buitentemperatuur is {sh.mean_outdoor_temp_c:.1f}°C (>= 16,0°C drempel). Ruimteverwarming is uitgeschakeld; warmtepomp blijft 100% beschikbaar voor tapwater."
+                mode = "normal"
+            elif sh.preheat_hours > 0:
+                title = f"♨️ CV Vloerverwarming: Nachtdal Pre-Heat Gepland ({sh.preheat_hours:.1f}u)"
+                desc = f"Verwarming laadt {sh.preheat_kwh_th:.1f} kWh thermische buffer in de dekvloer tijdens goedkope nachturen (02:00–06:00). Voorkomt piekafname overdag."
+                mode = "advised_on"
+            else:
+                title = f"♨️ CV Vloerverwarming: Stooklijn Modulatie"
+                desc = f"Verwarming volgt reguliere stooklijn (gemiddeld {sh.mean_outdoor_temp_c:.1f}°C buiten)."
+                mode = "normal"
+
+            write_hems_annotation(
+                event_type="space_heating_policy",
+                title=title,
+                description=desc,
+                state_code=mode,
+                power_kw=round(sh.total_electric_kwh / 24.0, 2),
+                target_temp_c=20.0,
+                savings_eur=0.35 if sh.preheat_hours > 0 else 0.0
+            )
+            DecisionAuditLogger.log_decision(
+                domain="space_heating",
+                decision_type="heating_policy",
+                chosen_mode=mode,
+                target_temp_c=20.0,
+                inputs={
+                    "buitentemp_gem_c": round(sh.mean_outdoor_temp_c, 1),
+                    "zomerstop_actief": sh.is_summer_lockout,
+                    "cop_gemiddeld": round(sh.average_cop, 2),
+                    "warmtevraag_24u_kwh": round(sh.total_heat_demand_kwh, 1)
+                },
+                reason=title,
+                explanation=desc,
+                savings_estimate_eur=0.35 if sh.preheat_hours > 0 else 0.0
+            )
 
 
 def write_hems_annotation(event_type: str, title: str, description: str, state_code: str, power_kw: float = 0.0, target_temp_c: float = 0.0, savings_eur: float = 0.0):
@@ -1263,6 +1352,10 @@ def ensure_active_canonical_plan(force_refresh=False):
     # 6. Plan & Publish
     plan = CentralPlanner.plan(frame, current_dhw_temp=cur_dhw)
     _LAST_CANONICAL_PLAN_TIME = now_ams
+    try:
+        evaluate_and_log_planner_decisions(plan, frame)
+    except Exception as e_pld:
+        print(f"Warning in evaluate_and_log_planner_decisions: {e_pld}")
     return plan
 
 
@@ -2700,7 +2793,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.25",
+                "version": "0.92.26",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4556,7 +4649,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.25</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.26</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5080,10 +5173,12 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                     <!-- Filter & Controls -->
                     <div class="flex flex-wrap items-center justify-between gap-2.5 pt-1">
-                        <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-2 flex-wrap">
                             <button type="button" onclick="filterDecisionAudit('all')" id="btn-filter-all" class="px-3 py-1 rounded-full text-xs font-semibold bg-purple-600 text-white shadow">Alles</button>
                             <button type="button" onclick="filterDecisionAudit('dhw')" id="btn-filter-dhw" class="px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">🚰 DHW Tapwater</button>
-                            <button type="button" onclick="filterDecisionAudit('space_heating')" id="btn-filter-space_heating" class="px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">♨️ CV Ruimteverwarming</button>
+                            <button type="button" onclick="filterDecisionAudit('space_heating')" id="btn-filter-space_heating" class="px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">♨️ CV Verwarming</button>
+                            <button type="button" onclick="filterDecisionAudit('grid_tariff')" id="btn-filter-grid_tariff" class="px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">🚫 Spitsblokkades</button>
+                            <button type="button" onclick="filterDecisionAudit('hardware')" id="btn-filter-hardware" class="px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">⚙️ Relais &amp; Actuatie</button>
                         </div>
                         <div class="text-xs text-slate-500 font-mono">
                             Bron: <span class="text-slate-300">openhems.hems_annotations &amp; hems_decisions</span>
@@ -11278,6 +11373,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     
                     const domainBadge = (d.domain === 'dhw') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-pink-950/80 border border-pink-700/50 text-pink-300">🚰 DHW</span>' :
                                         (d.domain === 'space_heating') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-950/80 border border-indigo-700/50 text-indigo-300">♨️ CV</span>' :
+                                        (d.domain === 'grid_tariff') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950/80 border border-amber-700/50 text-amber-300">🚫 Tarief &amp; Spits</span>' :
+                                        (d.domain === 'hardware') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-950/80 border border-cyan-700/50 text-cyan-300">⚙️ Relais</span>' :
                                         `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">${d.domain}</span>`;
 
                     const inputsHtml = Object.entries(newest.inputs || {}).filter(([_, v]) => v !== null && v !== undefined).map(([k, v]) => {
@@ -11354,13 +11451,13 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
         function filterDecisionAudit(domain) {
             activeDecisionFilter = domain;
-            ['all', 'dhw', 'space_heating'].forEach(dom => {
+            ['all', 'dhw', 'space_heating', 'grid_tariff', 'hardware'].forEach(dom => {
                 const btn = document.getElementById('btn-filter-' + dom);
                 if (btn) {
                     if (dom === domain) {
-                        btn.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-purple-600 text-white shadow';
+                        btn.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-purple-600 text-white shadow';
                     } else {
-                        btn.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800';
+                        btn.className = 'px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800';
                     }
                 }
             });
@@ -11961,6 +12058,7 @@ class HemsBackgroundCollector(threading.Thread):
         Takes the active CanonicalDispatchPlan, evaluates opportunistic mergers,
         and enforces physical relay & setpoint actuation via DaikinActuator.
         """
+        global _LAST_LOGGED_ACTUATION
         try:
             plan = ensure_active_canonical_plan()
             if not plan or not plan.slots:
@@ -11972,6 +12070,12 @@ class HemsBackgroundCollector(threading.Thread):
                 t_live = float(dhw_st.get("state", 50.0))
             except (ValueError, TypeError):
                 t_live = 50.0
+
+            wp_st = states_map.get("sensor.warmtepomp_power", {})
+            try:
+                wp_power_val = float(wp_st.get("state", 0.0))
+            except (ValueError, TypeError):
+                wp_power_val = 0.0
 
             cv_st = states_map.get("switch.hc_mode_altherma_on", {})
             cv_active = (cv_st.get("state") == "on")
@@ -11992,6 +12096,55 @@ class HemsBackgroundCollector(threading.Thread):
                 current_cv_switch_state=cv_active,
                 target_temp=target_t
             )
+
+            # 4. Audit Log Hardware Actuation & Dispatch State
+            now_ts = time.time()
+            actuation_key = f"{mode_to_execute}_{res.effective_mode}_{res.command.s10s_relay_on}_{res.command.s11s_relay_on}_{res.command.cv_master_switch_on}"
+            if _LAST_LOGGED_ACTUATION.get("state") != actuation_key or (now_ts - _LAST_LOGGED_ACTUATION.get("ts", 0)) >= 1800.0:
+                _LAST_LOGGED_ACTUATION["state"] = actuation_key
+                _LAST_LOGGED_ACTUATION["ts"] = now_ts
+
+                mode_titles = {
+                    "normal": "⚙️ Smart Grid Relais: Ruststand / Automatisch (SG2)",
+                    "max_on": "⚡ Smart Grid Relais: DHW Zonnebuffer 60°C (SG4)",
+                    "forced_on": "🚿 Smart Grid Relais: DHW Basislading 50°C (SG4)",
+                    "advised_on": "♨️ Smart Grid Relais: Pre-Heat Vloerbuffer (SG3)",
+                    "forced_off": "🚫 Smart Grid Relais: Spitsblokkade (SG1)",
+                    "advised_off": "⏸️ Smart Grid Relais: Gereduceerde Modulatie (SG1)"
+                }
+                act_title = mode_titles.get(res.effective_mode, f"⚙️ Smart Grid Relais: {res.effective_mode}")
+                act_desc = f"Smart Grid relais aangestuurd: S10S={'AAN' if res.command.s10s_relay_on else 'UIT'}, S11S={'AAN' if res.command.s11s_relay_on else 'UIT'}, CV Master={'AAN' if res.command.cv_master_switch_on else 'UIT'}."
+                if res.downgrade_reason:
+                    act_desc += f" (Veiligheidsinterlock: {res.downgrade_reason})"
+                elif target_t:
+                    act_desc += f" Tapwater setpoint: {target_t}°C."
+
+                write_hems_annotation(
+                    event_type="hardware_actuation",
+                    title=act_title,
+                    description=act_desc,
+                    state_code=res.effective_mode,
+                    power_kw=round(wp_power_val / 1000.0, 2),
+                    target_temp_c=target_t or 0.0,
+                    savings_eur=0.0
+                )
+                DecisionAuditLogger.log_decision(
+                    domain="hardware",
+                    decision_type="live_actuation",
+                    chosen_mode=res.effective_mode,
+                    target_temp_c=target_t,
+                    inputs={
+                        "s10s": res.command.s10s_relay_on,
+                        "s11s": res.command.s11s_relay_on,
+                        "cv_master": res.command.cv_master_switch_on,
+                        "effective_mode": res.effective_mode,
+                        "tank_temp_c": round(t_live, 1),
+                        "downgrade_reason": res.downgrade_reason
+                    },
+                    reason=act_title,
+                    explanation=act_desc,
+                    savings_estimate_eur=0.0
+                )
 
             self.last_actuation = {
                 "timestamp": datetime.now(AMS_TZ).isoformat(),
