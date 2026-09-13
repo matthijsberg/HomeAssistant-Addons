@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.17
+Version: 0.92.18
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -469,8 +469,36 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
 
         store = PlanStore.get_instance()
         store.publish_plan(plan)
+    elif is_actively_heating and t_live >= 49.8:
+        # 50°C target already reached! Stop forced mode and return relays to SG2 (Automatisch)
+        call_ha_service("switch", "turn_off", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
+        call_ha_service("switch", "turn_off", {"entity_id": "switch.warmtepomp_smart_grid_2_s11s"})
+        call_ha_service("switch", "turn_on", {"entity_id": "switch.hc_mode_altherma_on"})
+        call_ha_service("climate", "set_temperature", {"entity_id": "climate.hc_dhw_dhw_setpoint", "temperature": 50.0})
+
+        if plan and plan.slots:
+            for slot_idx in merge_res.cancelled_slots:
+                if slot_idx < len(plan.slots):
+                    plan.slots[slot_idx].mode_code = "normal"
+                    plan.slots[slot_idx].mode_label = "Normaal"
+                    plan.slots[slot_idx].dhw_kw = 0.0
+                    plan.slots[slot_idx].color_hex = "#1E293B"
+                    plan.slots[slot_idx].tailwind_class = "bg-slate-800"
+
+            plan.slots[0].mode_code = "normal"
+            plan.slots[0].mode_label = "Normaal (Standby)"
+            plan.slots[0].dhw_kw = 0.0
+            plan.slots[0].color_hex = "#1E293B"
+            plan.slots[0].tailwind_class = "bg-slate-800"
+
+            store = PlanStore.get_instance()
+            store.publish_plan(plan)
     elif is_actively_heating and plan and plan.slots:
-        # Boiler is actively heating to 50°C standard comfort!
+        # Boiler is actively heating to 50°C standard comfort (still below 49.8°C)!
+        call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
+        call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_2_s11s"})
+        call_ha_service("switch", "turn_off", {"entity_id": "switch.hc_mode_altherma_on"})
+
         run_pwr = max(1.8, round(wp_power / 1000.0, 2))
         for run_i in range(min(3, len(plan.slots))):
             plan.slots[run_i].mode_code = "forced_on"
@@ -2471,7 +2499,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.17",
+                "version": "0.92.18",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4322,7 +4350,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.17</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.18</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4435,30 +4463,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <div id="solar-recommendation-banner" class="bg-gradient-to-r from-emerald-950/60 via-[#0B0F17] to-teal-950/60 p-2.5 rounded-xl border border-emerald-500/30 flex items-center gap-2 text-xs text-emerald-200">
                             <span>🧺</span>
                             <span id="solar-recommendation-text" class="font-medium truncate">Zonne-overschot advies wordt geladen...</span>
-                        </div>
-
-                        <!-- DYNAMIC LIVE DHW ACTIVE STATUS & TRADE-OFF BANNER (VISIBLE ONLY WHEN HEATING) -->
-                        <div id="live-dhw-active-card" class="hidden bg-gradient-to-r from-purple-950/80 via-[#0E1422] to-indigo-950/80 p-4 rounded-2xl border border-purple-500/50 shadow-2xl space-y-2.5">
-                            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-purple-800/40 pb-2">
-                                <div class="flex items-center gap-2">
-                                    <span class="p-1.5 rounded-lg bg-purple-500/20 text-purple-300 text-base animate-pulse">♨️</span>
-                                    <div>
-                                        <div class="flex items-center gap-2">
-                                            <h3 class="text-xs font-black uppercase tracking-wider text-purple-200">Warmtepomp Actief: Tapwater Verwarming (DHW Live)</h3>
-                                            <span id="live-dhw-target-badge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-900 text-purple-200 border border-purple-400">Doel: --°C</span>
-                                        </div>
-                                        <p class="text-[11px] text-slate-400" id="live-dhw-metrics-sub">Vermogen: -- kW · Boilervat: --°C · Modus: --</p>
-                                    </div>
-                                </div>
-                                <div id="live-dhw-decision-badge-container"></div>
-                            </div>
-                            <div class="text-xs text-slate-300 leading-relaxed bg-[#060911]/60 p-2.5 rounded-xl border border-purple-900/30 flex items-start gap-2">
-                                <span class="text-purple-400 flex-shrink-0 mt-0.5">🧠</span>
-                                <div>
-                                    <span class="font-bold text-white block" id="live-dhw-decision-title">Besluitvorming & Economische Afweging:</span>
-                                    <p class="text-[11px] text-slate-300 mt-0.5" id="live-dhw-decision-text">Beoordelen of doorwarmen naar 60°C voordeliger is...</p>
-                                </div>
-                            </div>
                         </div>
 
                         <!-- Prediction Chart Canvas -->
@@ -4698,6 +4702,30 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-0.5 border-b border-red-500 border-dashed"></span> Comfort 40°C</span>
                                 <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-0.5 border-b border-emerald-500 border-dashed"></span> Doel 50°C</span>
                                 <span class="flex items-center gap-1.5 text-sky-300"><span class="w-2.5 h-2.5 bg-sky-500/50 rounded-sm"></span> Vraag (Liter)</span>
+                            </div>
+                        </div>
+
+                        <!-- DYNAMIC LIVE DHW ACTIVE STATUS & TRADE-OFF BANNER (VISIBLE ONLY WHEN HEATING) -->
+                        <div id="live-dhw-active-card" class="hidden bg-gradient-to-r from-purple-950/80 via-[#0E1422] to-indigo-950/80 p-4 rounded-2xl border border-purple-500/50 shadow-2xl space-y-2.5">
+                            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-purple-800/40 pb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="p-1.5 rounded-lg bg-purple-500/20 text-purple-300 text-base animate-pulse">♨️</span>
+                                    <div>
+                                        <div class="flex items-center gap-2">
+                                            <h3 class="text-xs font-black uppercase tracking-wider text-purple-200">Warmtepomp Actief: Tapwater Verwarming (DHW Live)</h3>
+                                            <span id="live-dhw-target-badge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-900 text-purple-200 border border-purple-400">Doel: --°C</span>
+                                        </div>
+                                        <p class="text-[11px] text-slate-400" id="live-dhw-metrics-sub">Vermogen: -- kW · Boilervat: --°C · Modus: --</p>
+                                    </div>
+                                </div>
+                                <div id="live-dhw-decision-badge-container"></div>
+                            </div>
+                            <div class="text-xs text-slate-300 leading-relaxed bg-[#060911]/60 p-2.5 rounded-xl border border-purple-900/30 flex items-start gap-2">
+                                <span class="text-purple-400 flex-shrink-0 mt-0.5">🧠</span>
+                                <div>
+                                    <span class="font-bold text-white block" id="live-dhw-decision-title">Besluitvorming & Economische Afweging:</span>
+                                    <p class="text-[11px] text-slate-300 mt-0.5" id="live-dhw-decision-text">Beoordelen of doorwarmen naar 60°C voordeliger is...</p>
+                                </div>
                             </div>
                         </div>
 

@@ -143,3 +143,18 @@ def test_reject_merge_when_current_price_excessive():
     )
     assert not res.should_merge
     assert "te hoog" in res.reason
+
+
+def test_release_to_normal_when_50c_reached():
+    # When tank is already >= 50C and no merge is desired, mode must be normal (SG2 Automatisch)
+    plan = _make_dummy_plan(boost_slot_idx=30)
+    res = OpportunisticDHWMerger.evaluate_merge(
+        plan=plan,
+        is_dhw_actively_heating=True,
+        current_tank_temp_c=52.5,
+        current_solar_kw=0.5,
+        current_price_eur=0.25
+    )
+    assert not res.should_merge
+    assert res.promoted_mode == "normal"
+    assert "reeds op gewenste temperatuur" in res.decision_explanation

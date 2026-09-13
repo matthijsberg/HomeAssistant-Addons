@@ -71,7 +71,7 @@ class OpportunisticDHWMerger:
         if is_hard_lockout_now:
             return OpportunisticMergeResult(
                 should_merge=False,
-                promoted_mode="normal",
+                promoted_mode="forced_off",
                 target_temp_c=50.0,
                 reason="Harde spitsblokkade actief: doorverwarmen geblokkeerd",
                 decision_explanation=f"Warmtepomp is actief ({current_power_kw:.2f} kW, {current_tank_temp_c:.1f}°C) maar een harde spitsblokkade is actief. Doorverwarmen naar 60°C is niet toegestaan tegen piektarieven.",
@@ -83,13 +83,13 @@ class OpportunisticDHWMerger:
                 current_tank_temp_c=current_tank_temp_c,
                 current_power_kw=current_power_kw,
                 active_target_temp_c=50.0,
-                active_mode_label="Stoppen bij 50°C (Spitsblokkade)"
+                active_mode_label="Spitsblokkade (SG1)"
             )
 
         if not plan or not plan.slots:
             return OpportunisticMergeResult(
                 should_merge=False,
-                promoted_mode="normal",
+                promoted_mode="normal" if current_tank_temp_c >= 50.0 else "forced_on",
                 target_temp_c=50.0,
                 reason="Geen actief dispatch plan beschikbaar",
                 decision_explanation="Geen dispatch plan geladen.",
@@ -105,6 +105,7 @@ class OpportunisticDHWMerger:
             )
 
         active_lookahead = lookahead_slots if lookahead_slots is not None else cls.LOOKAHEAD_SLOTS_MAX
+        tank_target_50_reached = (current_tank_temp_c >= 49.8)
 
         # Scan upcoming slots within lookahead window
         candidate_slots_60: List[int] = []
@@ -142,7 +143,7 @@ class OpportunisticDHWMerger:
                 )
                 decision_expl = (
                     f"Besluit: Doorwarmen naar 60°C (Zonnebuffer Fusie). De warmtepomp is reeds op bedrijfstemperatuur ({current_power_kw:.2f} kW, {current_tank_temp_c:.1f}°C). "
-                    f"Omdat er om {candidate_time_60} een 60°C run gepland stond en het tariefverschil (+€{max(0.0, price_diff):.3f}/kWh) ruimschoots wordt goedgemaakt door het vermeden opstartverlies (~0,25 kWh), "
+                    f"Omdat er om {candidate_time_60} een 60°C run gepland stond en het tariefverschil (+€{max(0.0, price_diff):.3f}/kWh) ruimschoots wordt gecompenseerd door het vermeden opstartverlies (~0,25 kWh), "
                     f"wordt de cyclus direct in één keer doorgewarmd tot 60°C. De latere run van {candidate_time_60} is geannuleerd."
                 )
                 return OpportunisticMergeResult(
@@ -162,16 +163,21 @@ class OpportunisticDHWMerger:
                     active_mode_label="Doorwarmen naar 60°C (Zonnebuffer Fusie)"
                 )
             else:
-                reason = f"Huidig tarief (€{current_price_eur:.3f}) te hoog t.o.v. geplande run (€{candidate_price_60:.3f})"
+                fallback_mode = "normal" if tank_target_50_reached else "forced_on"
+                fallback_label = f"Doel 50°C bereikt ({current_tank_temp_c:.1f}°C) — Automatisch (SG2)" if tank_target_50_reached else "Opwarmen naar 50°C (Basislading)"
                 decision_expl = (
-                    f"Besluit: Stoppen bij 50°C (Standaard Basislading). De warmtepomp herstelt het basiscomfort ({current_power_kw:.2f} kW, {current_tank_temp_c:.1f}°C). "
-                    f"Doorwarmen naar 60°C wordt nu niet gedaan omdat de geplande middagrun om {candidate_time_60} aanzienlijk goedkoper is (€{candidate_price_60:.3f} vs €{current_price_eur:.3f}/kWh)."
+                    f"Besluit: {fallback_label}. Het vat is met {current_tank_temp_c:.1f}°C op doeltemperatuur. "
+                    f"Doorwarmen naar 60°C wordt nu niet gedaan omdat de geplande middagrun om {candidate_time_60} aanzienlijk voordeliger is (€{candidate_price_60:.3f} vs €{current_price_eur:.3f}/kWh). "
+                    f"Relais staan in SG2 (Automatisch)."
+                ) if tank_target_50_reached else (
+                    f"Besluit: Opwarmen naar 50°C. De warmtepomp herstelt basiscomfort tot 50°C. "
+                    f"Doorwarmen naar 60°C wordt bewaard voor het goedkopere venster van {candidate_time_60}."
                 )
                 return OpportunisticMergeResult(
                     should_merge=False,
-                    promoted_mode="forced_on",
+                    promoted_mode=fallback_mode,
                     target_temp_c=50.0,
-                    reason=reason,
+                    reason=f"Geen fusie: Huidig tarief te hoog (€{current_price_eur:.3f} vs €{candidate_price_60:.3f})",
                     decision_explanation=decision_expl,
                     original_slot_idx=candidate_slots_60[0],
                     original_slot_time=candidate_time_60,
@@ -181,19 +187,22 @@ class OpportunisticDHWMerger:
                     current_tank_temp_c=current_tank_temp_c,
                     current_power_kw=current_power_kw,
                     active_target_temp_c=50.0,
-                    active_mode_label="Stoppen bij 50°C (Basislading)"
+                    active_mode_label=fallback_label
                 )
 
-        # CASE B: Only a 50°C run is planned (or no run planned)
+        # CASE B: Only a 50°C run is planned (or already fulfilled)
         if candidate_slots_50:
-            # Active run fulfills the 50C planned run!
+            fallback_mode = "normal" if tank_target_50_reached else "forced_on"
+            fallback_label = f"Doel 50°C bereikt ({current_tank_temp_c:.1f}°C) — Automatisch (SG2)" if tank_target_50_reached else "Opwarmen naar 50°C (Basislading)"
             decision_expl = (
-                f"Besluit: Stoppen bij 50°C (Standaard Basislading). De warmtepomp is aangeslagen en levert {current_power_kw:.2f} kW bij {current_tank_temp_c:.1f}°C. "
-                f"Hiermee is het vat reeds op 50°C niveau. De latere run van {candidate_time_50} is vervallen."
+                f"Besluit: {fallback_label}. Het vat is met {current_tank_temp_c:.1f}°C reeds op de gewenste 50°C. "
+                f"De Smart Grid relais zijn vrijgegeven naar Automatisch (SG2), zodat de warmtepomp kan stoppen. De latere run van {candidate_time_50} is vervallen."
+            ) if tank_target_50_reached else (
+                f"Besluit: Opwarmen naar 50°C. De warmtepomp is aangeslagen ({current_power_kw:.2f} kW, {current_tank_temp_c:.1f}°C) en maakt de basislading naar 50°C af. De latere run van {candidate_time_50} is vervallen."
             )
             return OpportunisticMergeResult(
                 should_merge=False,
-                promoted_mode="forced_on",
+                promoted_mode=fallback_mode,
                 target_temp_c=50.0,
                 reason="Lopende run vervangt geplande 50°C basisrun",
                 decision_explanation=decision_expl,
@@ -205,17 +214,21 @@ class OpportunisticDHWMerger:
                 current_tank_temp_c=current_tank_temp_c,
                 current_power_kw=current_power_kw,
                 active_target_temp_c=50.0,
-                active_mode_label="Stoppen bij 50°C (Basislading)"
+                active_mode_label=fallback_label
             )
 
         # CASE C: No upcoming run planned
+        fallback_mode = "normal" if tank_target_50_reached else "forced_on"
+        fallback_label = f"Doel 50°C bereikt ({current_tank_temp_c:.1f}°C) — Automatisch (SG2)" if tank_target_50_reached else "Opwarmen naar 50°C (Autonoom)"
         decision_expl = (
-            f"Besluit: Stoppen bij 50°C (Standaard Basislading). De warmtepomp herstelt autonoom het basiscomfort tot 50°C ({current_power_kw:.2f} kW, {current_tank_temp_c:.1f}°C). "
-            f"Er was geen 60°C zonnebuffer gepland in de komende {active_lookahead // 4} uur."
+            f"Besluit: {fallback_label}. Het vat is met {current_tank_temp_c:.1f}°C reeds op gewenste temperatuur (≥ 50°C). "
+            f"Er is geen 60°C zonnebuffer vereist. Relais vrijgegeven naar Automatisch (SG2 in rust)."
+        ) if tank_target_50_reached else (
+            f"Besluit: Opwarmen naar 50°C (Autonoom). De warmtepomp herstelt het basiscomfort ({current_power_kw:.2f} kW, {current_tank_temp_c:.1f}°C)."
         )
         return OpportunisticMergeResult(
             should_merge=False,
-            promoted_mode="forced_on",
+            promoted_mode=fallback_mode,
             target_temp_c=50.0,
             reason=f"Geen 60°C zonnebuffer gepland binnen het venster ({active_lookahead // 4} uur)",
             decision_explanation=decision_expl,
@@ -227,5 +240,5 @@ class OpportunisticDHWMerger:
             current_tank_temp_c=current_tank_temp_c,
             current_power_kw=current_power_kw,
             active_target_temp_c=50.0,
-            active_mode_label="Stoppen bij 50°C (Autonoom)"
+            active_mode_label=fallback_label
         )
