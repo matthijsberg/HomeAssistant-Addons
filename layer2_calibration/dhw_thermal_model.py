@@ -140,7 +140,11 @@ class DhwThermalModel:
             if i in heat_pump_schedule_slots and current_temp < (target_temp_c - 0.1):
                 cop_run = 2.85 if target_temp_c <= 52.0 else 2.15
                 q_hp_th = heat_pump_power_kw * cop_run * 0.25
-                dt_hp = q_hp_th / C_TANK_KWH_PER_C
+                max_dt = max(0.0, target_temp_c - current_temp)
+                dt_hp = min(q_hp_th / C_TANK_KWH_PER_C, max_dt)
+
+            dt_hp_p05 = min(dt_hp, max(0.0, target_temp_c - current_p05)) if i in heat_pump_schedule_slots else 0.0
+            dt_hp_p95 = min(dt_hp, max(0.0, target_temp_c - current_p95)) if i in heat_pump_schedule_slots else 0.0
 
             # Tap draw-off demand: Normal (P50), Minimal (P05), Heavy (P95)
             q_tap_th = self.get_learned_tap_kwh_th(dow, q_idx)
@@ -163,11 +167,10 @@ class DhwThermalModel:
             energy_usable_kwh.append(round(q_usable, 2))
             demand_kwh_th.append(round(q_tap_th, 3))
 
-            # Advance temperatures for next slot i+1: strictly bounded
-            cap_temp = max(50.0, target_temp_c) + 0.2
-            current_temp = max(15.0, min(cap_temp, current_temp - dt_standby - (q_tap_th / C_TANK_KWH_PER_C) + dt_hp))
-            current_p05 = max(15.0, min(cap_temp, current_p05 - dt_standby_p05 - (q_tap_p05 / C_TANK_KWH_PER_C) + (dt_hp if current_p05 < cap_temp else 0.0)))
-            current_p95 = max(15.0, min(cap_temp, current_p95 - dt_standby_p95 - (q_tap_p95 / C_TANK_KWH_PER_C) + (dt_hp if current_p95 < cap_temp else 0.0)))
+            # Advance temperatures for next slot i+1: strictly physical bounded
+            current_temp = max(15.0, min(75.0, current_temp - dt_standby - (q_tap_th / C_TANK_KWH_PER_C) + dt_hp))
+            current_p05 = max(15.0, min(75.0, current_p05 - dt_standby_p05 - (q_tap_p05 / C_TANK_KWH_PER_C) + dt_hp_p05))
+            current_p95 = max(15.0, min(75.0, current_p95 - dt_standby_p95 - (q_tap_p95 / C_TANK_KWH_PER_C) + dt_hp_p95))
 
             if current_temp < min_projected_temp:
                 min_projected_temp = current_temp
