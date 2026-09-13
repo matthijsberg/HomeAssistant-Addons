@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.20
+Version: 0.92.21
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -392,6 +392,7 @@ def call_ha_service(domain: str, service: str, service_data: dict) -> bool:
 
 from layer3_scheduling.opportunistic_merger import OpportunisticDHWMerger, OpportunisticMergeResult
 from layer3_scheduling.plan_store import PlanStore
+from layer3_scheduling.decision_audit import DecisionAuditLogger
 
 GLOBAL_OPPORTUNISTIC_MERGE: Optional[OpportunisticMergeResult] = None
 
@@ -478,6 +479,22 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
             target_temp_c=60.0,
             savings_eur=merge_res.savings_estimate_eur
         )
+        DecisionAuditLogger.log_decision(
+            domain="dhw",
+            decision_type="opportunistic_merge",
+            chosen_mode="max_on",
+            target_temp_c=60.0,
+            inputs={
+                "tank_temp_c": t_live,
+                "wp_power_w": wp_power,
+                "solar_kw": solar_kw_now,
+                "current_price_eur": price_now,
+                "price_tolerance_eur": 0.05
+            },
+            reason=merge_res.reason,
+            explanation=merge_res.decision_explanation,
+            savings_estimate_eur=merge_res.savings_estimate_eur
+        )
     elif is_actively_heating and t_live >= 49.8:
         # 50°C target already reached! Stop forced mode and return relays to SG2 (Automatisch)
         call_ha_service("switch", "turn_off", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
@@ -510,6 +527,20 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
             state_code="normal",
             power_kw=0.0,
             target_temp_c=50.0
+        )
+        DecisionAuditLogger.log_decision(
+            domain="dhw",
+            decision_type="system_release",
+            chosen_mode="normal",
+            target_temp_c=50.0,
+            inputs={
+                "tank_temp_c": t_live,
+                "wp_power_w": wp_power,
+                "target_temp_c": 50.0
+            },
+            reason="✅ DHW Doel 50°C Bereikt — Automatisch (SG2)",
+            explanation="Boilervat is op doeltemperatuur (>= 50°C). Smart Grid relais zijn vrijgegeven naar Automatisch (SG2 ruststand).",
+            savings_estimate_eur=0.00
         )
     elif is_actively_heating and plan and plan.slots:
         # Boiler is actively heating to 50°C standard comfort (still below 49.8°C)!
@@ -544,6 +575,20 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
             state_code="forced_on",
             power_kw=run_pwr,
             target_temp_c=50.0
+        )
+        DecisionAuditLogger.log_decision(
+            domain="dhw",
+            decision_type="standard_charge",
+            chosen_mode="forced_on",
+            target_temp_c=50.0,
+            inputs={
+                "tank_temp_c": t_live,
+                "wp_power_w": wp_power,
+                "target_temp_c": 50.0
+            },
+            reason="DHW Basislading (50°C) Gestart",
+            explanation=merge_res.decision_explanation,
+            savings_estimate_eur=0.10
         )
 
     return merge_res
@@ -2409,6 +2454,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "error", "message": "DHW model niet geladen"}, 500)
             return
 
+        # ANALYTICS: Structured Decision Audit Trail (OTel-aligned)
+        if path.startswith("/api/analytics/decisions"):
+            qp = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            limit = int(qp.get("limit", [50])[0])
+            domain = qp.get("domain", [None])[0]
+            from layer3_scheduling.decision_audit import DecisionAuditLogger
+            recs = DecisionAuditLogger.get_recent_decisions(limit=limit, domain=domain)
+            self._send_json({"status": "success", "total": len(recs), "decisions": recs})
+            return
+
         if path == "/api/model/algorithm-config":
             params = load_json(PARAMS_FILE) if PARAMS_FILE.exists() else {}
             self._send_json({
@@ -2555,7 +2610,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.20",
+                "version": "0.92.21",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4406,7 +4461,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.20</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.21</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4870,6 +4925,37 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <!-- Canvas for Heating Forecast -->
                         <div class="relative w-full h-64 sm:h-72">
                             <canvas id="chart-heating-forecast"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Section 1.5: Beslis-Logboek & Observability Audit Trail -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5" id="decision-audit-container">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                            <div class="flex items-center gap-2.5">
+                                <span class="p-2 rounded-lg bg-purple-500/10 text-purple-300 text-base">📋</span>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white tracking-wide">Beslis-Logboek &amp; Observability Audit Trail</h3>
+                                    <p class="text-[11px] text-slate-400">Chronologisch overzicht van alle systeem- en regelbeslissingen inclusief sensor-inputs, marges en economische motivatie.</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-[10px] font-mono text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg">OTel &amp; InfluxDB Synced</span>
+                                <button type="button" onclick="loadDecisionAuditLog()" class="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1.5 transition">
+                                    <span>🔄</span> <span>Vernieuwen</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Filter Chips -->
+                        <div class="flex items-center gap-2 text-xs flex-wrap">
+                            <button type="button" onclick="filterDecisionAudit('all')" id="btn-filter-all" class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-purple-600 text-white shadow">Alles</button>
+                            <button type="button" onclick="filterDecisionAudit('dhw')" id="btn-filter-dhw" class="px-2.5 py-0.5 rounded-full text-[11px] font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">DHW Tapwater</button>
+                            <button type="button" onclick="filterDecisionAudit('space_heating')" id="btn-filter-space_heating" class="px-2.5 py-0.5 rounded-full text-[11px] font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">CV Ruimteverwarming</button>
+                        </div>
+
+                        <!-- Decision Log Timeline -->
+                        <div class="space-y-2.5 max-h-[380px] overflow-y-auto pr-1" id="decision-audit-list">
+                            <div class="text-xs text-slate-500 py-6 text-center">Beslis-logboek wordt geladen...</div>
                         </div>
                     </div>
 
@@ -6638,6 +6724,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 if (typeof renderDhwTemperatureChart === 'function') renderDhwTemperatureChart();
                 if (typeof renderHeatingForecastChart === 'function') renderHeatingForecastChart();
                 if (typeof renderModelDecompositionChart === 'function') renderModelDecompositionChart();
+                if (typeof loadDecisionAuditLog === 'function') loadDecisionAuditLog();
             },
             init() {
                 const savedType = this.getChartType();
@@ -6855,6 +6942,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 loadElectricityPricesChart();
                 renderDhwTemperatureChart();
                 renderHeatingForecastChart();
+                loadDecisionAuditLog();
             }
             if (tabId === 'history') {
                 loadAnalytics();
@@ -10983,6 +11071,78 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             } catch (e) {
                 console.warn("Error rendering DHW temperature chart:", e);
             }
+        }
+
+        let activeDecisionFilter = 'all';
+        async function loadDecisionAuditLog() {
+            const listEl = document.getElementById('decision-audit-list');
+            if (!listEl) return;
+            try {
+                const domainParam = (activeDecisionFilter !== 'all') ? `&domain=${encodeURIComponent(activeDecisionFilter)}` : '';
+                const res = await fetch(`./api/analytics/decisions?limit=30${domainParam}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                const decisions = data.decisions || [];
+
+                if (decisions.length === 0) {
+                    listEl.innerHTML = '<div class="text-xs text-slate-500 py-6 text-center">Geen beslissingen geregistreerd in dit venster.</div>';
+                    return;
+                }
+
+                listEl.innerHTML = decisions.map(d => {
+                    const dt = new Date(d.timestamp_iso);
+                    const timeStr = dt.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const dateStr = dt.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' });
+                    
+                    const modeColor = (d.chosen_mode === 'max_on') ? 'bg-purple-900/60 border-purple-500/40 text-purple-300' :
+                                      (d.chosen_mode === 'forced_on') ? 'bg-emerald-900/60 border-emerald-500/40 text-emerald-300' :
+                                      (d.chosen_mode === 'advised_on') ? 'bg-indigo-900/60 border-indigo-500/40 text-indigo-300' :
+                                      (d.chosen_mode === 'forced_off') ? 'bg-red-900/60 border-red-500/40 text-red-300' :
+                                      'bg-slate-800/80 border-slate-700 text-slate-300';
+                    
+                    const domainBadge = (d.domain === 'dhw') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-pink-950/80 border border-pink-700/50 text-pink-300">🚰 DHW</span>' :
+                                        (d.domain === 'space_heating') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-950/80 border border-indigo-700/50 text-indigo-300">♨️ CV</span>' :
+                                        `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">${d.domain}</span>`;
+
+                    const inputsHtml = Object.entries(d.inputs || {}).map(([k, v]) => {
+                        return `<span class="px-2 py-0.5 rounded bg-black/40 border border-slate-800 text-[10px] font-mono text-slate-300">${k}: <strong class="text-white">${v}</strong></span>`;
+                    }).join(' ');
+
+                    return `
+                        <div class="bg-[#0B0F17]/80 border border-slate-800 hover:border-slate-700 p-3 rounded-xl transition space-y-2">
+                            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/60 pb-1.5">
+                                <div class="flex items-center gap-2">
+                                    ${domainBadge}
+                                    <span class="text-xs font-bold text-white">${d.reason}</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${modeColor}">${d.chosen_mode}</span>
+                                    <span class="text-[10px] font-mono text-slate-500">${dateStr} ${timeStr}</span>
+                                </div>
+                            </div>
+                            <p class="text-[11px] text-slate-300 leading-relaxed">${d.explanation}</p>
+                            ${inputsHtml ? `<div class="flex flex-wrap gap-1.5 pt-1">${inputsHtml}</div>` : ''}
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.warn('Error loading decision audit log:', e);
+            }
+        }
+
+        function filterDecisionAudit(domain) {
+            activeDecisionFilter = domain;
+            ['all', 'dhw', 'space_heating'].forEach(dom => {
+                const btn = document.getElementById('btn-filter-' + dom);
+                if (btn) {
+                    if (dom === domain) {
+                        btn.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-purple-600 text-white shadow';
+                    } else {
+                        btn.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800';
+                    }
+                }
+            });
+            loadDecisionAuditLog();
         }
 
         async function loadModelDashboard() {
