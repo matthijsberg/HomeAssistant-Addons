@@ -46,32 +46,32 @@ class DaikinInterlock:
         """
         Resolves physical states and enforces hydraulic interlocks.
         """
-        # 1. Forced Off (SG Stand 1)
+        # 1. Forced Off (SG Stand 1: S10S=OFF, S11S=ON)
         if requested_mode == "forced_off":
             return DaikinHardwareCommand(
-                s10s_relay_on=True,
-                s11s_relay_on=False,
+                s10s_relay_on=False,
+                s11s_relay_on=True,
                 cv_master_switch_on=False,
                 effective_mode="forced_off",
                 downgrade_reason=None
             )
 
-        # 2. Recommended On / Pre-heat (SG Stand 3)
+        # 2. Recommended On / Pre-heat (SG Stand 3: S10S=ON, S11S=OFF)
         elif requested_mode == "advised_on":
             return DaikinHardwareCommand(
                 s10s_relay_on=True,
-                s11s_relay_on=True,
+                s11s_relay_on=False,
                 cv_master_switch_on=True,
                 effective_mode="advised_on",
                 downgrade_reason=None
             )
 
-        # 3. Forced On (DHW Run 50°C) or Max On (DHW Solar Boost 60°C) (SG Stand 4)
+        # 3. Forced On (DHW Run 50°C) or Max On (DHW Solar Boost 60°C) (SG Stand 4: S10S=ON, S11S=ON)
         elif requested_mode in ["forced_on", "max_on", "forced_solar_boost_60", "forced_night_50"]:
             target_dhw = 60.0 if requested_mode in ["max_on", "forced_solar_boost_60"] else 50.0
             # CRITICAL HYDRAULIC INTERLOCK: CV Master Switch MUST be turned OFF
             return DaikinHardwareCommand(
-                s10s_relay_on=False,
+                s10s_relay_on=True,
                 s11s_relay_on=True,
                 cv_master_switch_on=False,  # Enforce OFF
                 effective_mode=requested_mode if requested_mode in ["forced_on", "max_on"] else "forced_on",
