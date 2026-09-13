@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.19
+Version: 0.92.20
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -456,9 +456,9 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
                 plan.slots[slot_idx].color_hex = "#1E293B"
                 plan.slots[slot_idx].tailwind_class = "bg-slate-800"
 
+        run_pwr = max(1.8, round(wp_power / 1000.0, 2))
         # Reflect active run on current slot (slot 0) and next slots
         if plan and plan.slots:
-            run_pwr = max(1.8, round(wp_power / 1000.0, 2))
             for run_i in range(min(4, len(plan.slots))):
                 plan.slots[run_i].mode_code = "max_on"
                 plan.slots[run_i].mode_label = "Zonnebuffer (Fusie tot 60°C)"
@@ -469,6 +469,15 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
 
         store = PlanStore.get_instance()
         store.publish_plan(plan)
+        write_hems_annotation(
+            event_type="run_merger",
+            title="⚡ DHW Zonnebuffer Fusie (60°C)",
+            description=merge_res.decision_explanation,
+            state_code="max_on",
+            power_kw=run_pwr,
+            target_temp_c=60.0,
+            savings_eur=merge_res.savings_estimate_eur
+        )
     elif is_actively_heating and t_live >= 49.8:
         # 50°C target already reached! Stop forced mode and return relays to SG2 (Automatisch)
         call_ha_service("switch", "turn_off", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
@@ -493,6 +502,15 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
 
             store = PlanStore.get_instance()
             store.publish_plan(plan)
+
+        write_hems_annotation(
+            event_type="system_release",
+            title="✅ DHW Doel 50°C Bereikt — Automatisch (SG2)",
+            description="Boilervat op doeltemperatuur. Warmtepomp vrijgegeven naar ruststand.",
+            state_code="normal",
+            power_kw=0.0,
+            target_temp_c=50.0
+        )
     elif is_actively_heating and plan and plan.slots:
         # Boiler is actively heating to 50°C standard comfort (still below 49.8°C)!
         call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
@@ -519,7 +537,45 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
         store = PlanStore.get_instance()
         store.publish_plan(plan)
 
+        write_hems_annotation(
+            event_type="dhw_run",
+            title="🚿 DHW Basislading (50°C) Gestart",
+            description=merge_res.decision_explanation,
+            state_code="forced_on",
+            power_kw=run_pwr,
+            target_temp_c=50.0
+        )
+
     return merge_res
+
+
+def write_hems_annotation(event_type: str, title: str, description: str, state_code: str, power_kw: float = 0.0, target_temp_c: float = 0.0, savings_eur: float = 0.0):
+    """Writes a native semantic event annotation to openhems InfluxDB for Grafana dashboards."""
+    try:
+        cfg = load_json(CONFIG_FILE)
+        sec = load_secrets()
+        active_conn = cfg.get("influxdb_connections", [{}])[0]
+        db_name = active_conn.get("database", "openhems")
+        db_user = active_conn.get("username", "openhems")
+        db_url = active_conn.get("url", "http://a0d7b954-influxdb:8086")
+        db_pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
+
+        now_ns = int(time.time() * 1e9)
+        safe_title = title.replace('"', '\\"').replace('\n', ' ')
+        safe_desc = description.replace('"', '\\"').replace('\n', ' ')
+
+        line = (
+            f'hems_annotations,event_type={event_type},severity=info,state_code={state_code} '
+            f'title="{safe_title}",description="{safe_desc}",power_kw={power_kw:.2f},'
+            f'target_temp_c={target_temp_c:.1f},savings_eur={savings_eur:.2f} {now_ns}'
+        )
+
+        write_url = f"{db_url}/write?" + urllib.parse.urlencode({"u": db_user, "p": db_pwd, "db": db_name})
+        req = urllib.request.Request(write_url, data=line.encode("utf-8"), method="POST")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            pass
+    except Exception as e:
+        print(f"Warning writing Grafana annotation: {e}")
 
 
 def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
@@ -2499,7 +2555,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.19",
+                "version": "0.92.20",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4350,7 +4406,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.19</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.20</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
