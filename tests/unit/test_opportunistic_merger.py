@@ -84,8 +84,8 @@ def test_no_merge_during_hard_lockout():
 
 
 def test_no_merge_when_no_boost_in_lookahead():
-    # Boost is planned at slot 15 (> 2 hours away)
-    plan = _make_dummy_plan(boost_slot_idx=15)
+    # Boost is planned at slot 30 (> 6 hours away)
+    plan = _make_dummy_plan(boost_slot_idx=30)
     res = OpportunisticDHWMerger.evaluate_merge(
         plan=plan,
         is_dhw_actively_heating=True,

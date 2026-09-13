@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.15
+Version: 0.92.16
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -391,6 +391,7 @@ def call_ha_service(domain: str, service: str, service_data: dict) -> bool:
 
 
 from layer3_scheduling.opportunistic_merger import OpportunisticDHWMerger, OpportunisticMergeResult
+from layer3_scheduling.plan_store import PlanStore
 
 GLOBAL_OPPORTUNISTIC_MERGE: Optional[OpportunisticMergeResult] = None
 
@@ -409,8 +410,13 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
     except (ValueError, TypeError):
         wp_power = 0.0
 
-    dhw_climate = states_map.get("climate.hc_dhw_dhw_setpoint", {})
-    is_actively_heating = (wp_power > 700.0 and t_live < 56.0) or (dhw_climate.get("state") == "heat" and wp_power > 500.0)
+    dhw_demand_sensor = states_map.get("binary_sensor.hc_dhw_dhw_demand", {})
+    dhw_valve_sensor = states_map.get("binary_sensor.hc_dhw_valve_dhw_tank", {})
+
+    is_actively_heating = (
+        (wp_power > 600.0 and (dhw_demand_sensor.get("state") == "on" or dhw_valve_sensor.get("state") == "on"))
+        or (wp_power > 1200.0 and t_live < 58.0)
+    )
 
     solar_kw_now = GLOBAL_CENTRAL_CACHE.get("current_solar_kw", 0.0)
     price_now = GLOBAL_CENTRAL_CACHE.get("current_price_eur", 0.24)
@@ -428,28 +434,59 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
         current_tank_temp_c=t_live,
         current_solar_kw=solar_kw_now,
         current_price_eur=price_now,
-        is_hard_lockout_now=is_hard_lockout
+        is_hard_lockout_now=is_hard_lockout,
+        current_power_kw=round(wp_power / 1000.0, 2)
     )
 
+    GLOBAL_OPPORTUNISTIC_MERGE = merge_res
+
     if merge_res.should_merge:
-        GLOBAL_OPPORTUNISTIC_MERGE = merge_res
+        # Actuate HA to promote setpoint to 60°C and set hardware interlocks
         call_ha_service("climate", "set_temperature", {"entity_id": "climate.hc_dhw_dhw_setpoint", "temperature": 60.0})
         call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
         call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_2_s11s"})
         call_ha_service("switch", "turn_off", {"entity_id": "switch.hc_mode_altherma_on"})
 
+        # Cancel the upcoming planned slots in the plan!
         for slot_idx in merge_res.cancelled_slots:
             if slot_idx < len(plan.slots):
                 plan.slots[slot_idx].mode_code = "normal"
                 plan.slots[slot_idx].mode_label = "Normaal (50°C)"
+                plan.slots[slot_idx].dhw_kw = 0.0
                 plan.slots[slot_idx].color_hex = "#1E293B"
                 plan.slots[slot_idx].tailwind_class = "bg-slate-800"
 
-        if plan.slots:
-            plan.slots[0].mode_code = "max_on"
-            plan.slots[0].mode_label = "Zonnebuffer (Fusie)"
-            plan.slots[0].color_hex = "#A855F7"
-            plan.slots[0].tailwind_class = "bg-purple-900"
+        # Reflect active run on current slot (slot 0) and next slots
+        if plan and plan.slots:
+            run_pwr = max(1.8, round(wp_power / 1000.0, 2))
+            for run_i in range(min(4, len(plan.slots))):
+                plan.slots[run_i].mode_code = "max_on"
+                plan.slots[run_i].mode_label = "Zonnebuffer (Fusie tot 60°C)"
+                plan.slots[run_i].dhw_kw = run_pwr
+                plan.slots[run_i].heating_kw = 0.0
+                plan.slots[run_i].color_hex = "#A855F7"
+                plan.slots[run_i].tailwind_class = "bg-purple-900"
+
+        store = PlanStore.get_instance()
+        store.publish_plan(plan)
+    elif is_actively_heating and plan and plan.slots:
+        # Boiler is actively heating to 50°C standard comfort!
+        run_pwr = max(1.8, round(wp_power / 1000.0, 2))
+        for run_i in range(min(3, len(plan.slots))):
+            plan.slots[run_i].mode_code = "forced_on"
+            plan.slots[run_i].mode_label = "Geforceerd aan (50°C)"
+            plan.slots[run_i].dhw_kw = run_pwr
+            plan.slots[run_i].heating_kw = 0.0
+            plan.slots[run_i].color_hex = "#10B981"
+            plan.slots[run_i].tailwind_class = "bg-emerald-900"
+
+        for slot_idx in merge_res.cancelled_slots:
+            if slot_idx < len(plan.slots):
+                plan.slots[slot_idx].mode_code = "normal"
+                plan.slots[slot_idx].mode_label = "Normaal"
+                plan.slots[slot_idx].dhw_kw = 0.0
+                plan.slots[slot_idx].color_hex = "#1E293B"
+                plan.slots[slot_idx].tailwind_class = "bg-slate-800"
 
         store = PlanStore.get_instance()
         store.publish_plan(plan)
@@ -2434,7 +2471,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.15",
+                "version": "0.92.16",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3018,58 +3055,85 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             sww_power_kw = 1.8
             sww_target_temp = 60.0 if (is_solar_boost_eligible and today_daylight_slots) else 50.0
 
-            # LIVE THERMAL FEEDBACK: Is the tank ALREADY at or above target temperature?
-            # (e.g. the heat pump has already run autonomously or completed its heating cycle!)
-            tank_already_warm = (t_dhw_live >= (sww_target_temp - 0.8))
+            # Evaluate Live In-Flight DHW Heating & Run Merger
+            merge_res = evaluate_and_apply_dhw_run_merger(plan, t_dhw_live)
+            active_dhw_status = {
+                "is_active": merge_res.is_dhw_active,
+                "power_kw": round(merge_res.current_power_kw, 2),
+                "tank_temp_c": round(merge_res.current_tank_temp_c, 1),
+                "target_temp_c": merge_res.active_target_temp_c,
+                "mode_code": merge_res.promoted_mode,
+                "mode_label": merge_res.active_mode_label,
+                "decision_title": "Doorwarmen naar 60°C (Zonnebuffer Fusie)" if merge_res.should_merge else ("Stoppen bij 50°C (Basislading)" if merge_res.is_dhw_active else "Standby"),
+                "decision_explanation": merge_res.decision_explanation,
+                "savings_eur": merge_res.savings_estimate_eur,
+                "should_merge": merge_res.should_merge,
+                "original_slot_time": merge_res.original_slot_time
+            }
 
-            if tank_already_warm and not needs_night_charge:
-                # Target already achieved! Standby in effect: cancel any redundant daytime runs!
-                planned_mode = "normal"
-                planned_mode_label = f"Normaal: Doeltemperatuur bereikt ({t_dhw_live:.1f}°C) — Standby"
-                reason = f"Boilervat is met {t_dhw_live:.1f}°C reeds op gewenste temperatuur (≥ {sww_target_temp:.0f}°C). Warmtepomp staat in rust."
-                sww_start_idx = -1
-                slots_to_fill = 0
-                sww_power_kw = 0.0
-            elif is_solar_boost_eligible and today_daylight_slots:
-                # 1. Mode: Maximaal aan (60°C Zonnebuffer Boost) during today's solar peak!
-                best_sww_slot = max(today_daylight_slots, key=lambda x: x["solar"])
-                sww_start_idx = max(0, best_sww_slot["idx"] - (1 if is_15m else 0))
-                sww_power_kw = 2.65
-                sww_target_temp = 60.0
-                planned_mode = "forced_solar_boost_60"
-                planned_mode_label = "Maximaal aan (doorverwarming tot 60°C)"
-                reason = f"Maximaal aan (60°C): {tot_net_surplus_kwh:.1f} kWh netto zonne-overschot buffert voordelig door naar 60°C"
-            elif today_daylight_slots:
-                # 2. Mode: Geforceerd aan (50°C Dagrun) during today's best solar/tariff slot!
-                best_sww_slot = max(today_daylight_slots, key=lambda x: (x["solar"] - x["price"] * 0.5))
-                sww_start_idx = best_sww_slot["idx"]
-                sww_power_kw = 1.8
-                sww_target_temp = 50.0
-                planned_mode = "forced_standard_50"
-                planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
-                reason = f"Geforceerd aan (50°C): Laadt vanaf {best_sww_slot['label']} op zonnestroom naar 50°C"
-            elif needs_night_charge:
-                # 3. Mode: Geforceerd aan (Nachtlading tot 50°C) only when daylight has passed!
-                night_slots = [it for it in timeline_items if (1 <= it["dt"].hour <= 5)]
-                best_sww_slot = min(night_slots, key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5))) if night_slots else min(timeline_items[:24], key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5)))
-                sww_start_idx = best_sww_slot["idx"]
-                sww_power_kw = 1.8
-                sww_target_temp = 50.0
-                planned_mode = "forced_night_50"
-                planned_mode_label = "Geforceerd aan (Nachtlading tot 50°C)"
-                reason = f"Geforceerd aan (€{best_sww_slot['price']:.3f}/kWh) waarborgt ochtendcomfort vóór prijspiek"
+            if merge_res.is_dhw_active:
+                # Active DHW heating takes priority over future schedule!
+                sww_start_idx = 0  # Starts immediately on slot 'Nu'
+                sww_power_kw = max(2.2 if merge_res.should_merge else 1.8, round(merge_res.current_power_kw, 2))
+                sww_target_temp = merge_res.active_target_temp_c
+                planned_mode = merge_res.promoted_mode
+                planned_mode_label = merge_res.active_mode_label
+                reason = merge_res.reason
+                tank_already_warm = False
+                slots_to_fill = 4 if is_15m else 1
             else:
-                # Fallback to cheapest price slot outside peaks
-                valid_slots = [it for it in timeline_items if not ((it["idx"] in slot_lockout_map) and slot_lockout_map[it["idx"]].get("is_hard_lockout"))]
-                best_sww_slot = min(valid_slots, key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5))) if valid_slots else timeline_items[0]
-                sww_start_idx = best_sww_slot["idx"]
-                sww_power_kw = 1.8
-                sww_target_temp = 50.0
-                planned_mode = "forced_standard_50"
-                planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
-                reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh) om {best_sww_slot['label']}"
+                # LIVE THERMAL FEEDBACK: Is the tank ALREADY at or above target temperature?
+                # (e.g. the heat pump has already run autonomously or completed its heating cycle!)
+                tank_already_warm = (t_dhw_live >= (sww_target_temp - 0.8))
 
-            if not tank_already_warm and sww_start_idx >= 0:
+                if tank_already_warm and not needs_night_charge:
+                    # Target already achieved! Standby in effect: cancel any redundant daytime runs!
+                    planned_mode = "normal"
+                    planned_mode_label = f"Normaal: Doeltemperatuur bereikt ({t_dhw_live:.1f}°C) — Standby"
+                    reason = f"Boilervat is met {t_dhw_live:.1f}°C reeds op gewenste temperatuur (≥ {sww_target_temp:.0f}°C). Warmtepomp staat in rust."
+                    sww_start_idx = -1
+                    slots_to_fill = 0
+                    sww_power_kw = 0.0
+                elif is_solar_boost_eligible and today_daylight_slots:
+                    # 1. Mode: Maximaal aan (60°C Zonnebuffer Boost) during today's solar peak!
+                    best_sww_slot = max(today_daylight_slots, key=lambda x: x["solar"])
+                    sww_start_idx = max(0, best_sww_slot["idx"] - (1 if is_15m else 0))
+                    sww_power_kw = 2.65
+                    sww_target_temp = 60.0
+                    planned_mode = "forced_solar_boost_60"
+                    planned_mode_label = "Maximaal aan (doorverwarming tot 60°C)"
+                    reason = f"Maximaal aan (60°C): {tot_net_surplus_kwh:.1f} kWh netto zonne-overschot buffert voordelig door naar 60°C"
+                elif today_daylight_slots:
+                    # 2. Mode: Geforceerd aan (50°C Dagrun) during today's best solar/tariff slot!
+                    best_sww_slot = max(today_daylight_slots, key=lambda x: (x["solar"] - x["price"] * 0.5))
+                    sww_start_idx = best_sww_slot["idx"]
+                    sww_power_kw = 1.8
+                    sww_target_temp = 50.0
+                    planned_mode = "forced_standard_50"
+                    planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
+                    reason = f"Geforceerd aan (50°C): Laadt vanaf {best_sww_slot['label']} op zonnestroom naar 50°C"
+                elif needs_night_charge:
+                    # 3. Mode: Geforceerd aan (Nachtlading tot 50°C) only when daylight has passed!
+                    night_slots = [it for it in timeline_items if (1 <= it["dt"].hour <= 5)]
+                    best_sww_slot = min(night_slots, key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5))) if night_slots else min(timeline_items[:24], key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5)))
+                    sww_start_idx = best_sww_slot["idx"]
+                    sww_power_kw = 1.8
+                    sww_target_temp = 50.0
+                    planned_mode = "forced_night_50"
+                    planned_mode_label = "Geforceerd aan (Nachtlading tot 50°C)"
+                    reason = f"Geforceerd aan (€{best_sww_slot['price']:.3f}/kWh) waarborgt ochtendcomfort vóór prijspiek"
+                else:
+                    # Fallback to cheapest price slot outside peaks
+                    valid_slots = [it for it in timeline_items if not ((it["idx"] in slot_lockout_map) and slot_lockout_map[it["idx"]].get("is_hard_lockout"))]
+                    best_sww_slot = min(valid_slots, key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5))) if valid_slots else timeline_items[0]
+                    sww_start_idx = best_sww_slot["idx"]
+                    sww_power_kw = 1.8
+                    sww_target_temp = 50.0
+                    planned_mode = "forced_standard_50"
+                    planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
+                    reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh) om {best_sww_slot['label']}"
+
+            if not tank_already_warm and sww_start_idx >= 0 and slots_to_fill == 0:
                 # Calculate required slots dynamically based on thermal mass so the tank ACTUALLY reaches sww_target_temp (50°C of 60°C)
                 c_tank_kwh_per_c = 350.0 * 4.186 / 3600.0  # 0.407 kWh/K
                 step_h = 0.25 if is_15m else 1.0
@@ -3449,6 +3513,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "dhw_mode_timeline": all_dhw_timeline,
                 "dynamic_peaks": dynamic_peaks,
                 "dhw_planning_summary": dhw_planning_summary,
+                "active_dhw_status": active_dhw_status,
                 "history_count": len(hist_pts),
                 "datasets": {
                     "unallocated_kw": all_unalloc,
@@ -4257,7 +4322,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.15</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.16</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4370,6 +4435,30 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         <div id="solar-recommendation-banner" class="bg-gradient-to-r from-emerald-950/60 via-[#0B0F17] to-teal-950/60 p-2.5 rounded-xl border border-emerald-500/30 flex items-center gap-2 text-xs text-emerald-200">
                             <span>🧺</span>
                             <span id="solar-recommendation-text" class="font-medium truncate">Zonne-overschot advies wordt geladen...</span>
+                        </div>
+
+                        <!-- DYNAMIC LIVE DHW ACTIVE STATUS & TRADE-OFF BANNER (VISIBLE ONLY WHEN HEATING) -->
+                        <div id="live-dhw-active-card" class="hidden bg-gradient-to-r from-purple-950/80 via-[#0E1422] to-indigo-950/80 p-4 rounded-2xl border border-purple-500/50 shadow-2xl space-y-2.5">
+                            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-purple-800/40 pb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="p-1.5 rounded-lg bg-purple-500/20 text-purple-300 text-base animate-pulse">♨️</span>
+                                    <div>
+                                        <div class="flex items-center gap-2">
+                                            <h3 class="text-xs font-black uppercase tracking-wider text-purple-200">Warmtepomp Actief: Tapwater Verwarming (DHW Live)</h3>
+                                            <span id="live-dhw-target-badge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-900 text-purple-200 border border-purple-400">Doel: --°C</span>
+                                        </div>
+                                        <p class="text-[11px] text-slate-400" id="live-dhw-metrics-sub">Vermogen: -- kW · Boilervat: --°C · Modus: --</p>
+                                    </div>
+                                </div>
+                                <div id="live-dhw-decision-badge-container"></div>
+                            </div>
+                            <div class="text-xs text-slate-300 leading-relaxed bg-[#060911]/60 p-2.5 rounded-xl border border-purple-900/30 flex items-start gap-2">
+                                <span class="text-purple-400 flex-shrink-0 mt-0.5">🧠</span>
+                                <div>
+                                    <span class="font-bold text-white block" id="live-dhw-decision-title">Besluitvorming & Economische Afweging:</span>
+                                    <p class="text-[11px] text-slate-300 mt-0.5" id="live-dhw-decision-text">Beoordelen of doorwarmen naar 60°C voordeliger is...</p>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Prediction Chart Canvas -->
@@ -7876,6 +7965,40 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
                 if (document.getElementById('solar-recommendation-text')) {
                     document.getElementById('solar-recommendation-text').innerText = data.solar_recommendation || "☀️ Geen overschot";
+                }
+
+                // Populate Live Active DHW Banner (Visible only when heating)
+                const liveDhwCard = document.getElementById('live-dhw-active-card');
+                const adh = data.active_dhw_status;
+                if (liveDhwCard) {
+                    if (adh && adh.is_active) {
+                        liveDhwCard.classList.remove('hidden');
+                        const targetBadge = document.getElementById('live-dhw-target-badge');
+                        if (targetBadge) {
+                            targetBadge.innerText = `Doel: ${Number(adh.target_temp_c).toFixed(0)}°C`;
+                            targetBadge.className = adh.should_merge 
+                                ? 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-600 text-white border border-purple-400 shadow'
+                                : 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600 text-white border border-emerald-400 shadow';
+                        }
+                        const metricsSub = document.getElementById('live-dhw-metrics-sub');
+                        if (metricsSub) {
+                            metricsSub.innerText = `Actueel Vermogen: ${adh.power_kw} kW · Boilervat: ${adh.tank_temp_c}°C · Modus: ${adh.mode_label}`;
+                        }
+                        const badgeContainer = document.getElementById('live-dhw-decision-badge-container');
+                        if (badgeContainer) {
+                            if (adh.should_merge) {
+                                badgeContainer.innerHTML = '<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow"><span class="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span> Gekozen: Doorwarmen tot 60°C (Fusie)</span>';
+                            } else {
+                                badgeContainer.innerHTML = '<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Gekozen: Stoppen bij 50°C (Basislading)</span>';
+                            }
+                        }
+                        const decTitle = document.getElementById('live-dhw-decision-title');
+                        if (decTitle) decTitle.innerText = adh.decision_title || 'Besluitvorming:';
+                        const decText = document.getElementById('live-dhw-decision-text');
+                        if (decText) decText.innerText = adh.decision_explanation || '';
+                    } else {
+                        liveDhwCard.classList.add('hidden');
+                    }
                 }
 
                 // Render Horizontal Mode Timeline Bar & Dynamic Rolling Ticks
