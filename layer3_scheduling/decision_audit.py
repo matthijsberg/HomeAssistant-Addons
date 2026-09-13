@@ -17,6 +17,7 @@ from models.decision_log import DecisionRecord
 AMS_TZ = ZoneInfo("Europe/Amsterdam")
 AUDIT_FILE = Path("/config/open_hems_decisions.jsonl")
 MAX_AUDIT_RECORDS = 500
+ENABLE_INFLUX_QUERY = True
 
 
 class DecisionAuditLogger:
@@ -101,23 +102,104 @@ class DecisionAuditLogger:
 
     @classmethod
     def get_recent_decisions(cls, limit: int = 50, domain: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Retrieves recent decisions from local JSONL storage."""
-        if not AUDIT_FILE.exists():
-            return []
-        try:
-            records = []
-            with open(AUDIT_FILE, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            d = json.loads(line)
-                            if domain and d.get("domain") != domain:
-                                continue
-                            records.append(d)
-                        except Exception:
-                            pass
-            return list(reversed(records))[:limit]
-        except Exception as e:
-            print(f"Warning reading decision audit JSONL: {e}")
-            return []
+        """
+        Retrieves recent decisions, combining persistent JSONL storage
+        with live InfluxDB measurements (hems_decisions and hems_annotations).
+        """
+        records = []
+
+        # 1. Read from local JSONL files
+        for audit_path in [Path("/data/open_hems_decisions.jsonl"), AUDIT_FILE]:
+            if audit_path.exists():
+                try:
+                    with open(audit_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                try:
+                                    d = json.loads(line)
+                                    if domain and d.get("domain") != domain:
+                                        continue
+                                    records.append(d)
+                                except Exception:
+                                    pass
+                except Exception as e:
+                    print(f"Warning reading {audit_path}: {e}")
+
+        # 2. Query InfluxDB for hems_decisions & hems_annotations
+        if ENABLE_INFLUX_QUERY:
+            try:
+                sec_file = Path("/config/open_hems_secrets.json")
+                if not sec_file.exists():
+                    sec_file = Path("/data/open_hems_secrets.json")
+
+                sec = {}
+                if sec_file.exists():
+                    with open(sec_file, "r", encoding="utf-8") as f:
+                        sec = json.load(f)
+
+                pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
+                if pwd:
+                    q = f'SELECT * FROM "hems_decisions" ORDER BY time DESC LIMIT {limit}; SELECT * FROM "hems_annotations" ORDER BY time DESC LIMIT {limit};'
+                    url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
+                    with urllib.request.urlopen(url, timeout=3) as resp:
+                        res = json.loads(resp.read().decode())
+
+                    for stmt in res.get("results", []):
+                        for s in stmt.get("series", []):
+                            meas = s.get("name")
+                            cols = s.get("columns", [])
+                            for val in s.get("values", []):
+                                d = dict(zip(cols, val))
+                                if meas == "hems_decisions":
+                                    rec_dom = d.get("domain", "general")
+                                    if domain and rec_dom != domain:
+                                        continue
+                                    records.append({
+                                        "timestamp_iso": d.get("time"),
+                                        "domain": rec_dom,
+                                        "decision_type": d.get("decision_type", "dispatch"),
+                                        "chosen_mode": d.get("chosen_mode", "normal"),
+                                        "target_temp_c": d.get("target_temp_c"),
+                                        "inputs": {
+                                            "tank_temp_c": d.get("tank_temp_c"),
+                                            "target_temp_c": d.get("target_temp_c"),
+                                            "solar_surplus_kw": d.get("solar_surplus_kw"),
+                                            "financial_impact_eur": d.get("financial_impact_eur")
+                                        },
+                                        "reason": d.get("reason", "HEMS dispatch besluit"),
+                                        "explanation": d.get("explanation", d.get("reason", "")),
+                                        "savings_estimate_eur": d.get("financial_impact_eur", 0.0)
+                                    })
+                                elif meas == "hems_annotations":
+                                    rec_dom = "dhw" if "dhw" in (d.get("event_type") or "").lower() or "dhw" in (d.get("title") or "").lower() else "space_heating" if "cv" in (d.get("title") or "").lower() else "general"
+                                    if domain and rec_dom != domain:
+                                        continue
+                                    records.append({
+                                        "timestamp_iso": d.get("time"),
+                                        "domain": rec_dom,
+                                        "decision_type": d.get("event_type", "annotation"),
+                                        "chosen_mode": d.get("state_code", "normal"),
+                                        "target_temp_c": d.get("target_temp_c"),
+                                        "inputs": {
+                                            "power_kw": d.get("power_kw"),
+                                            "target_temp_c": d.get("target_temp_c")
+                                        },
+                                        "reason": d.get("title", "HEMS Statuswijziging"),
+                                        "explanation": d.get("description", ""),
+                                        "savings_estimate_eur": d.get("savings_eur", 0.0)
+                                    })
+            except Exception as e:
+                print(f"Warning querying InfluxDB decisions: {e}")
+
+        # Deduplicate records based on timestamp_iso + reason
+        seen = set()
+        deduped = []
+        for r in records:
+            key = (r.get("timestamp_iso"), r.get("reason"))
+            if key not in seen:
+                seen.add(key)
+                deduped.append(r)
+
+        deduped.sort(key=lambda x: x.get("timestamp_iso", ""), reverse=True)
+        return deduped[:limit]

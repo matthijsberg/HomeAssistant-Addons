@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.22
+Version: 0.92.23
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2610,7 +2610,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.22",
+                "version": "0.92.23",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4457,11 +4457,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 <a href="#data" onclick="showTab('data')" id="nav-data" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
                     <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
                     <span>Data</span>
+                </a>
+                <a href="#decisions" onclick="showTab('decisions')" id="nav-decisions" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
+                    <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    <span>Beslis-Logboek</span>
+                    <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-purple-900/40 text-purple-300 font-medium rounded border border-purple-800" id="badge-dec-count">--</span>
                 </a></nav>
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.22</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.23</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4928,41 +4933,78 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         </div>
                     </div>
 
-                    <!-- Section 1.5: Beslis-Logboek & Observability Audit Trail -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5" id="decision-audit-container">
-                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                            <div class="flex items-center gap-2.5">
-                                <span class="p-2 rounded-lg bg-purple-500/10 text-purple-300 text-base">📋</span>
-                                <div>
-                                    <h3 class="text-sm font-bold text-white tracking-wide">Beslis-Logboek &amp; Observability Audit Trail</h3>
-                                    <p class="text-[11px] text-slate-400">Chronologisch overzicht van alle systeem- en regelbeslissingen inclusief sensor-inputs, marges en economische motivatie.</p>
-                                </div>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <span class="text-[10px] font-mono text-slate-400 bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg">OTel &amp; InfluxDB Synced</span>
-                                <button type="button" onclick="loadDecisionAuditLog()" class="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1.5 transition">
-                                    <span>🔄</span> <span>Vernieuwen</span>
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Filter Chips -->
-                        <div class="flex items-center gap-2 text-xs flex-wrap">
-                            <button type="button" onclick="filterDecisionAudit('all')" id="btn-filter-all" class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-purple-600 text-white shadow">Alles</button>
-                            <button type="button" onclick="filterDecisionAudit('dhw')" id="btn-filter-dhw" class="px-2.5 py-0.5 rounded-full text-[11px] font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">DHW Tapwater</button>
-                            <button type="button" onclick="filterDecisionAudit('space_heating')" id="btn-filter-space_heating" class="px-2.5 py-0.5 rounded-full text-[11px] font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">CV Ruimteverwarming</button>
-                        </div>
-
-                        <!-- Decision Log Timeline -->
-                        <div class="space-y-2.5 max-h-[380px] overflow-y-auto pr-1" id="decision-audit-list">
-                            <div class="text-xs text-slate-500 py-6 text-center">Beslis-logboek wordt geladen...</div>
-                        </div>
-                    </div>
-
                 </div>
 
                 <!-- ========================================================================= -->
                 
+            </div>
+
+            <!-- ========================================== -->
+            <!-- TAB: BESLIS-LOGBOEK & OBSERVABILITY        -->
+            <!-- ========================================== -->
+            <div id="view-decisions" class="tab-content space-y-6">
+                <!-- TOP KPI METRIC CARDS FOR DECISIONS -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow-xl">
+                        <span class="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">Totaal Gelogde Besluiten</span>
+                        <div class="mt-1 flex items-baseline gap-2">
+                            <span class="text-2xl font-black text-white font-mono" id="stat-total-decisions">--</span>
+                            <span class="text-xs text-purple-400 font-mono">InfluxDB &amp; OTel</span>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1">Audit trail van optimalisaties en statuswissels</p>
+                    </div>
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow-xl">
+                        <span class="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">DHW Tapwater Acties</span>
+                        <div class="mt-1 flex items-baseline gap-2">
+                            <span class="text-2xl font-black text-pink-400 font-mono" id="stat-dhw-decisions">--</span>
+                            <span class="text-xs text-slate-400">Fusies &amp; Vrijgaven</span>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1">Opportunistische 60°C en 50°C releases</p>
+                    </div>
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow-xl">
+                        <span class="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">Gerealiseerde Besparing</span>
+                        <div class="mt-1 flex items-baseline gap-2">
+                            <span class="text-2xl font-black text-emerald-400 font-mono" id="stat-savings-decisions">€0,00</span>
+                            <span class="text-xs text-emerald-500/80 font-mono font-bold">Direct berekend</span>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1">Vermeden opstart- en voorverwarmingsverliezen</p>
+                    </div>
+                </div>
+
+                <!-- MAIN DECISION AUDIT TIMELINE CARD -->
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
+                        <div class="flex items-center gap-3">
+                            <div class="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 text-lg">📋</div>
+                            <div>
+                                <h3 class="text-base font-bold text-white tracking-wide">Systeem- en Regelbeslissingen Audit Trail</h3>
+                                <p class="text-xs text-slate-400">Chronologisch overzicht van alle keuzes van de CentralPlanner en In-Flight Run Merger met geregistreerde sensoren en economische motivering.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="loadDecisionAuditLog()" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-2 transition">
+                                <span>🔄</span> <span>Vernieuwen</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Filter & Controls -->
+                    <div class="flex flex-wrap items-center justify-between gap-2.5 pt-1">
+                        <div class="flex items-center gap-2">
+                            <button type="button" onclick="filterDecisionAudit('all')" id="btn-filter-all" class="px-3 py-1 rounded-full text-xs font-semibold bg-purple-600 text-white shadow">Alles</button>
+                            <button type="button" onclick="filterDecisionAudit('dhw')" id="btn-filter-dhw" class="px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">🚰 DHW Tapwater</button>
+                            <button type="button" onclick="filterDecisionAudit('space_heating')" id="btn-filter-space_heating" class="px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">♨️ CV Ruimteverwarming</button>
+                        </div>
+                        <div class="text-xs text-slate-500 font-mono">
+                            Bron: <span class="text-slate-300">openhems.hems_annotations &amp; hems_decisions</span>
+                        </div>
+                    </div>
+
+                    <!-- Timeline List Container -->
+                    <div class="space-y-3 pt-2" id="decision-audit-list">
+                        <div class="text-xs text-slate-500 py-10 text-center">Beslis-logboek wordt geladen...</div>
+                    </div>
+                </div>
             </div>
 
             <div id="view-history" class="tab-content space-y-6">
@@ -6926,6 +6968,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const titles = {
                 'prediction': ['Voorspelling & Optimalisatie', '24-uurs kwartier-vooruitblik met dynamische beurstarieven en sturingsadviezen.'],
                 'history': ['Historie & Verbruiksstatistieken', 'Werkelijke energiestromen, kosten, opbrengsten en COP-prestaties.'],
+                'decisions': ['Beslis-Logboek & Observability', 'Audit trail van alle sturingsbeslissingen, sensor-inputs, fysieke marges en financiële motivatie.'],
                 'policies': ['Apparaat Policies & Aansturing', 'Automatische beslisregels, nachtelijk boilerlaadbesluit en beleidsarchetypen.'],
                 'calibration': ['Zelflerend Model & Fysica', 'Physics-informed gebouwmodel, 7×96 kwartieren matrices en boilertemperatuurtraject.'],
                 'devices': ['Apparaten', 'Beheer fysieke apparaten, meters en actuatoren gekoppeld via Home Assistant of MQTT.'],
@@ -6948,6 +6991,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 loadAnalytics();
                 loadPowerProducersChart();
                 loadValidationOverlayChart();
+            }
+            if (tabId === 'decisions') {
+                loadDecisionAuditLog();
             }
             if (tabId === 'policies') {
                 loadPolicies();
@@ -10258,6 +10304,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         fetchHaEntities();
         const initialHashTab = (window.location.hash || '').replace('#', '');
         showTab(initialHashTab || "prediction");
+        loadDecisionAuditLog();
         window.addEventListener('hashchange', () => {
             const hTab = (window.location.hash || '').replace('#', '');
             if (hTab) showTab(hTab);
@@ -11084,8 +11131,25 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 const data = await res.json();
                 const decisions = data.decisions || [];
 
+                // Update summary badges & KPIs
+                const totalEl = document.getElementById('stat-total-decisions');
+                const dhwEl = document.getElementById('stat-dhw-decisions');
+                const savEl = document.getElementById('stat-savings-decisions');
+                const badgeDecCount = document.getElementById('badge-dec-count');
+                if (badgeDecCount) badgeDecCount.innerText = decisions.length;
+                if (totalEl) totalEl.innerText = decisions.length;
+
+                let dhwCount = 0;
+                let totalSav = 0;
+                decisions.forEach(d => {
+                    if (d.domain === 'dhw') dhwCount++;
+                    if (d.savings_estimate_eur) totalSav += parseFloat(d.savings_estimate_eur);
+                });
+                if (dhwEl) dhwEl.innerText = dhwCount;
+                if (savEl) savEl.innerText = '€' + totalSav.toFixed(2).replace('.', ',');
+
                 if (decisions.length === 0) {
-                    listEl.innerHTML = '<div class="text-xs text-slate-500 py-6 text-center">Geen beslissingen geregistreerd in dit venster.</div>';
+                    listEl.innerHTML = '<div class="text-xs text-slate-500 py-12 text-center bg-[#0B0F17]/40 rounded-xl border border-dashed border-slate-800">Geen beslissingen geregistreerd in dit venster.</div>';
                     return;
                 }
 
@@ -11094,33 +11158,36 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     const timeStr = dt.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     const dateStr = dt.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' });
                     
-                    const modeColor = (d.chosen_mode === 'max_on') ? 'bg-purple-900/60 border-purple-500/40 text-purple-300' :
-                                      (d.chosen_mode === 'forced_on') ? 'bg-emerald-900/60 border-emerald-500/40 text-emerald-300' :
-                                      (d.chosen_mode === 'advised_on') ? 'bg-indigo-900/60 border-indigo-500/40 text-indigo-300' :
-                                      (d.chosen_mode === 'forced_off') ? 'bg-red-900/60 border-red-500/40 text-red-300' :
+                    const modeColor = (d.chosen_mode === 'max_on') ? 'bg-purple-950/80 border-purple-500/50 text-purple-300' :
+                                      (d.chosen_mode === 'forced_on') ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300' :
+                                      (d.chosen_mode === 'advised_on') ? 'bg-indigo-950/80 border-indigo-500/50 text-indigo-300' :
+                                      (d.chosen_mode === 'forced_off') ? 'bg-red-950/80 border-red-500/50 text-red-300' :
                                       'bg-slate-800/80 border-slate-700 text-slate-300';
                     
                     const domainBadge = (d.domain === 'dhw') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-pink-950/80 border border-pink-700/50 text-pink-300">🚰 DHW</span>' :
                                         (d.domain === 'space_heating') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-950/80 border border-indigo-700/50 text-indigo-300">♨️ CV</span>' :
                                         `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">${d.domain}</span>`;
 
-                    const inputsHtml = Object.entries(d.inputs || {}).map(([k, v]) => {
-                        return `<span class="px-2 py-0.5 rounded bg-black/40 border border-slate-800 text-[10px] font-mono text-slate-300">${k}: <strong class="text-white">${v}</strong></span>`;
+                    const inputsHtml = Object.entries(d.inputs || {}).filter(([_, v]) => v !== null && v !== undefined).map(([k, v]) => {
+                        return `<span class="px-2 py-0.5 rounded bg-black/40 border border-slate-800 text-[10px] font-mono text-slate-400">${k}: <strong class="text-white">${v}</strong></span>`;
                     }).join(' ');
 
+                    const savingsHtml = (d.savings_estimate_eur > 0) ? `<span class="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/40 text-[10px] font-mono font-bold text-emerald-300">+€${Number(d.savings_estimate_eur).toFixed(2)} bespaard</span>` : '';
+
                     return `
-                        <div class="bg-[#0B0F17]/80 border border-slate-800 hover:border-slate-700 p-3 rounded-xl transition space-y-2">
-                            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/60 pb-1.5">
+                        <div class="bg-[#0B0F17]/90 border border-slate-800 hover:border-slate-700 p-4 rounded-xl transition space-y-2.5 shadow-lg">
+                            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/60 pb-2">
                                 <div class="flex items-center gap-2">
                                     ${domainBadge}
-                                    <span class="text-xs font-bold text-white">${d.reason}</span>
+                                    <span class="text-xs font-bold text-white tracking-wide">${d.reason}</span>
                                 </div>
                                 <div class="flex items-center gap-2">
+                                    ${savingsHtml}
                                     <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${modeColor}">${d.chosen_mode}</span>
-                                    <span class="text-[10px] font-mono text-slate-500">${dateStr} ${timeStr}</span>
+                                    <span class="text-[10px] font-mono text-slate-400 bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800">${dateStr} ${timeStr}</span>
                                 </div>
                             </div>
-                            <p class="text-[11px] text-slate-300 leading-relaxed">${d.explanation}</p>
+                            <p class="text-xs text-slate-300 leading-relaxed">${d.explanation}</p>
                             ${inputsHtml ? `<div class="flex flex-wrap gap-1.5 pt-1">${inputsHtml}</div>` : ''}
                         </div>
                     `;

@@ -6,6 +6,7 @@ from layer3_scheduling.decision_audit import DecisionAuditLogger, AUDIT_FILE
 def test_decision_audit_logger_roundtrip(tmp_path, monkeypatch):
     test_file = tmp_path / "test_decisions.jsonl"
     monkeypatch.setattr("layer3_scheduling.decision_audit.AUDIT_FILE", test_file)
+    monkeypatch.setattr("layer3_scheduling.decision_audit.ENABLE_INFLUX_QUERY", False)
 
     rec1 = DecisionAuditLogger.log_decision(
         domain="dhw",
