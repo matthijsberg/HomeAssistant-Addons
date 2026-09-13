@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.23
+Version: 0.92.24
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -395,6 +395,7 @@ from layer3_scheduling.plan_store import PlanStore
 from layer3_scheduling.decision_audit import DecisionAuditLogger
 
 GLOBAL_OPPORTUNISTIC_MERGE: Optional[OpportunisticMergeResult] = None
+_LAST_LOGGED_DECISION: Dict[str, Any] = {"state": None, "ts": 0.0}
 
 
 def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
@@ -470,31 +471,36 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
 
         store = PlanStore.get_instance()
         store.publish_plan(plan)
-        write_hems_annotation(
-            event_type="run_merger",
-            title="⚡ DHW Zonnebuffer Fusie (60°C)",
-            description=merge_res.decision_explanation,
-            state_code="max_on",
-            power_kw=run_pwr,
-            target_temp_c=60.0,
-            savings_eur=merge_res.savings_estimate_eur
-        )
-        DecisionAuditLogger.log_decision(
-            domain="dhw",
-            decision_type="opportunistic_merge",
-            chosen_mode="max_on",
-            target_temp_c=60.0,
-            inputs={
-                "tank_temp_c": t_live,
-                "wp_power_w": wp_power,
-                "solar_kw": solar_kw_now,
-                "current_price_eur": price_now,
-                "price_tolerance_eur": 0.05
-            },
-            reason=merge_res.reason,
-            explanation=merge_res.decision_explanation,
-            savings_estimate_eur=merge_res.savings_estimate_eur
-        )
+        
+        now_ts = time.time()
+        if _LAST_LOGGED_DECISION.get("state") != "max_on" or (now_ts - _LAST_LOGGED_DECISION.get("ts", 0)) >= 900.0:
+            _LAST_LOGGED_DECISION["state"] = "max_on"
+            _LAST_LOGGED_DECISION["ts"] = now_ts
+            write_hems_annotation(
+                event_type="run_merger",
+                title="⚡ DHW Zonnebuffer Fusie (60°C)",
+                description=merge_res.decision_explanation,
+                state_code="max_on",
+                power_kw=run_pwr,
+                target_temp_c=60.0,
+                savings_eur=merge_res.savings_estimate_eur
+            )
+            DecisionAuditLogger.log_decision(
+                domain="dhw",
+                decision_type="opportunistic_merge",
+                chosen_mode="max_on",
+                target_temp_c=60.0,
+                inputs={
+                    "tank_temp_c": t_live,
+                    "wp_power_w": wp_power,
+                    "solar_kw": solar_kw_now,
+                    "current_price_eur": price_now,
+                    "price_tolerance_eur": 0.05
+                },
+                reason=merge_res.reason,
+                explanation=merge_res.decision_explanation,
+                savings_estimate_eur=merge_res.savings_estimate_eur
+            )
     elif is_actively_heating and t_live >= 49.8:
         # 50°C target already reached! Stop forced mode and return relays to SG2 (Automatisch)
         call_ha_service("switch", "turn_off", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
@@ -520,28 +526,32 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
             store = PlanStore.get_instance()
             store.publish_plan(plan)
 
-        write_hems_annotation(
-            event_type="system_release",
-            title="✅ DHW Doel 50°C Bereikt — Automatisch (SG2)",
-            description="Boilervat op doeltemperatuur. Warmtepomp vrijgegeven naar ruststand.",
-            state_code="normal",
-            power_kw=0.0,
-            target_temp_c=50.0
-        )
-        DecisionAuditLogger.log_decision(
-            domain="dhw",
-            decision_type="system_release",
-            chosen_mode="normal",
-            target_temp_c=50.0,
-            inputs={
-                "tank_temp_c": t_live,
-                "wp_power_w": wp_power,
-                "target_temp_c": 50.0
-            },
-            reason="✅ DHW Doel 50°C Bereikt — Automatisch (SG2)",
-            explanation="Boilervat is op doeltemperatuur (>= 50°C). Smart Grid relais zijn vrijgegeven naar Automatisch (SG2 ruststand).",
-            savings_estimate_eur=0.00
-        )
+        now_ts = time.time()
+        if _LAST_LOGGED_DECISION.get("state") != "released_50" or (now_ts - _LAST_LOGGED_DECISION.get("ts", 0)) >= 900.0:
+            _LAST_LOGGED_DECISION["state"] = "released_50"
+            _LAST_LOGGED_DECISION["ts"] = now_ts
+            write_hems_annotation(
+                event_type="system_release",
+                title="✅ DHW Doel 50°C Bereikt — Automatisch (SG2)",
+                description="Boilervat op doeltemperatuur. Warmtepomp vrijgegeven naar ruststand.",
+                state_code="normal",
+                power_kw=0.0,
+                target_temp_c=50.0
+            )
+            DecisionAuditLogger.log_decision(
+                domain="dhw",
+                decision_type="system_release",
+                chosen_mode="normal",
+                target_temp_c=50.0,
+                inputs={
+                    "tank_temp_c": t_live,
+                    "wp_power_w": wp_power,
+                    "target_temp_c": 50.0
+                },
+                reason="✅ DHW Doel 50°C Bereikt — Automatisch (SG2)",
+                explanation="Boilervat is op doeltemperatuur (>= 50°C). Smart Grid relais zijn vrijgegeven naar Automatisch (SG2 ruststand).",
+                savings_estimate_eur=0.00
+            )
     elif is_actively_heating and plan and plan.slots:
         # Boiler is actively heating to 50°C standard comfort (still below 49.8°C)!
         call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
@@ -568,28 +578,35 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
         store = PlanStore.get_instance()
         store.publish_plan(plan)
 
-        write_hems_annotation(
-            event_type="dhw_run",
-            title="🚿 DHW Basislading (50°C) Gestart",
-            description=merge_res.decision_explanation,
-            state_code="forced_on",
-            power_kw=run_pwr,
-            target_temp_c=50.0
-        )
-        DecisionAuditLogger.log_decision(
-            domain="dhw",
-            decision_type="standard_charge",
-            chosen_mode="forced_on",
-            target_temp_c=50.0,
-            inputs={
-                "tank_temp_c": t_live,
-                "wp_power_w": wp_power,
-                "target_temp_c": 50.0
-            },
-            reason="DHW Basislading (50°C) Gestart",
-            explanation=merge_res.decision_explanation,
-            savings_estimate_eur=0.10
-        )
+        now_ts = time.time()
+        if _LAST_LOGGED_DECISION.get("state") != "forced_50" or (now_ts - _LAST_LOGGED_DECISION.get("ts", 0)) >= 900.0:
+            _LAST_LOGGED_DECISION["state"] = "forced_50"
+            _LAST_LOGGED_DECISION["ts"] = now_ts
+            write_hems_annotation(
+                event_type="dhw_run",
+                title="🚿 DHW Basislading (50°C) Gestart",
+                description=merge_res.decision_explanation,
+                state_code="forced_on",
+                power_kw=run_pwr,
+                target_temp_c=50.0
+            )
+            DecisionAuditLogger.log_decision(
+                domain="dhw",
+                decision_type="standard_charge",
+                chosen_mode="forced_on",
+                target_temp_c=50.0,
+                inputs={
+                    "tank_temp_c": t_live,
+                    "wp_power_w": wp_power,
+                    "target_temp_c": 50.0
+                },
+                reason="DHW Basislading (50°C) Gestart",
+                explanation=merge_res.decision_explanation,
+                savings_estimate_eur=0.10
+            )
+    else:
+        if _LAST_LOGGED_DECISION.get("state") in ["max_on", "released_50", "forced_50"]:
+            _LAST_LOGGED_DECISION["state"] = "idle"
 
     return merge_res
 
@@ -2610,7 +2627,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.23",
+                "version": "0.92.24",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4466,7 +4483,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.23</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.24</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -11153,11 +11170,33 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     return;
                 }
 
-                listEl.innerHTML = decisions.map(d => {
-                    const dt = new Date(d.timestamp_iso);
-                    const timeStr = dt.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                    const dateStr = dt.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' });
-                    
+                // Group consecutive identical decisions (domain, decision_type, chosen_mode, reason)
+                const foldedGroups = [];
+                decisions.forEach(d => {
+                    const key = `${d.domain}|${d.decision_type}|${d.chosen_mode}|${d.reason}`;
+                    if (foldedGroups.length > 0 && foldedGroups[foldedGroups.length - 1].key === key) {
+                        foldedGroups[foldedGroups.length - 1].entries.push(d);
+                    } else {
+                        foldedGroups.push({
+                            key: key,
+                            representative: d,
+                            entries: [d]
+                        });
+                    }
+                });
+
+                listEl.innerHTML = foldedGroups.map((g, gIdx) => {
+                    const d = g.representative;
+                    const count = g.entries.length;
+                    const newest = g.entries[0];
+                    const oldest = g.entries[g.entries.length - 1];
+
+                    const dtNew = new Date(newest.timestamp_iso);
+                    const dtOld = new Date(oldest.timestamp_iso);
+                    const timeNew = dtNew.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const timeOld = dtOld.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const dateStr = dtNew.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' });
+
                     const modeColor = (d.chosen_mode === 'max_on') ? 'bg-purple-950/80 border-purple-500/50 text-purple-300' :
                                       (d.chosen_mode === 'forced_on') ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300' :
                                       (d.chosen_mode === 'advised_on') ? 'bg-indigo-950/80 border-indigo-500/50 text-indigo-300' :
@@ -11168,11 +11207,39 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                         (d.domain === 'space_heating') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-950/80 border border-indigo-700/50 text-indigo-300">♨️ CV</span>' :
                                         `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">${d.domain}</span>`;
 
-                    const inputsHtml = Object.entries(d.inputs || {}).filter(([_, v]) => v !== null && v !== undefined).map(([k, v]) => {
+                    const inputsHtml = Object.entries(newest.inputs || {}).filter(([_, v]) => v !== null && v !== undefined).map(([k, v]) => {
                         return `<span class="px-2 py-0.5 rounded bg-black/40 border border-slate-800 text-[10px] font-mono text-slate-400">${k}: <strong class="text-white">${v}</strong></span>`;
                     }).join(' ');
 
                     const savingsHtml = (d.savings_estimate_eur > 0) ? `<span class="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/40 text-[10px] font-mono font-bold text-emerald-300">+€${Number(d.savings_estimate_eur).toFixed(2)} bespaard</span>` : '';
+
+                    const timeRangeBadge = (count > 1) 
+                        ? `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-900/40 text-purple-300 border border-purple-800/60 flex items-center gap-1"><span>🔄 ${count}× herhaald</span> <span class="text-slate-400 font-normal">(${timeOld} – ${timeNew})</span></span>`
+                        : `<span class="text-[10px] font-mono text-slate-400 bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800">${dateStr} ${timeNew}</span>`;
+
+                    const subEntriesHtml = (count > 1) ? g.entries.map((sub) => {
+                        const subDt = new Date(sub.timestamp_iso);
+                        const subTime = subDt.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                        const subInputs = Object.entries(sub.inputs || {}).filter(([_, v]) => v !== null && v !== undefined).map(([k, v]) => `${k}: ${v}`).join(' · ');
+                        return `
+                            <div class="flex items-center justify-between text-[11px] py-1 px-2.5 rounded bg-black/40 border border-slate-800/80 font-mono text-slate-400">
+                                <span class="text-slate-300 font-bold">${subTime}</span>
+                                <span class="truncate ml-2 text-slate-400">${subInputs || 'Status actief'}</span>
+                            </div>
+                        `;
+                    }).join('') : '';
+
+                    const toggleBtn = (count > 1) ? `
+                        <div class="pt-2 border-t border-slate-800/70 flex items-center justify-between">
+                            <button type="button" onclick="toggleDecisionGroup(${gIdx})" id="btn-group-${gIdx}" class="text-[11px] font-medium text-purple-400 hover:text-purple-300 flex items-center gap-1.5 transition">
+                                <span>▼</span> <span>Toon alle ${count} evaluaties &amp; temperatuurmetingen</span>
+                            </button>
+                            <span class="text-[10px] font-mono text-slate-500">Duur: ${Math.max(1, Math.round((dtNew - dtOld) / 60000))} min</span>
+                        </div>
+                        <div id="group-entries-${gIdx}" class="hidden space-y-1 pt-2 max-h-52 overflow-y-auto pr-1">
+                            ${subEntriesHtml}
+                        </div>
+                    ` : '';
 
                     return `
                         <div class="bg-[#0B0F17]/90 border border-slate-800 hover:border-slate-700 p-4 rounded-xl transition space-y-2.5 shadow-lg">
@@ -11184,16 +11251,31 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 <div class="flex items-center gap-2">
                                     ${savingsHtml}
                                     <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${modeColor}">${d.chosen_mode}</span>
-                                    <span class="text-[10px] font-mono text-slate-400 bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800">${dateStr} ${timeStr}</span>
+                                    ${timeRangeBadge}
                                 </div>
                             </div>
                             <p class="text-xs text-slate-300 leading-relaxed">${d.explanation}</p>
-                            ${inputsHtml ? `<div class="flex flex-wrap gap-1.5 pt-1">${inputsHtml}</div>` : ''}
+                            ${inputsHtml ? `<div class="flex flex-wrap gap-1.5 pt-0.5">${inputsHtml}</div>` : ''}
+                            ${toggleBtn}
                         </div>
                     `;
                 }).join('');
             } catch (e) {
                 console.warn('Error loading decision audit log:', e);
+            }
+        }
+
+        function toggleDecisionGroup(idx) {
+            const container = document.getElementById('group-entries-' + idx);
+            const btn = document.getElementById('btn-group-' + idx);
+            if (!container || !btn) return;
+            const isHidden = container.classList.contains('hidden');
+            if (isHidden) {
+                container.classList.remove('hidden');
+                btn.innerHTML = '<span>▲</span> <span>Verberg evaluaties</span>';
+            } else {
+                container.classList.add('hidden');
+                btn.innerHTML = '<span>▼</span> <span>Toon alle evaluaties &amp; temperatuurmetingen</span>';
             }
         }
 
