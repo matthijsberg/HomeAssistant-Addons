@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.14
+Version: 0.92.15
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -455,6 +455,95 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
         store.publish_plan(plan)
 
     return merge_res
+
+
+def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
+    """Fetches real historical telemetry for the 1 hour immediately preceding the forecast horizon."""
+    num_slots = 4 if is_15m else 1
+    step_mins = 15 if is_15m else 60
+    start_dt = base_dt - timedelta(minutes=num_slots * step_mins)
+
+    start_utc = start_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:00Z")
+    end_utc = base_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:00Z")
+    bucket = "15m" if is_15m else "1h"
+
+    en_map, tank_map, out_map = {}, {}, {}
+    try:
+        sec = load_secrets()
+        pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
+
+        q = f"""
+        SELECT mean("solar_w")/1000.0 as solar, mean("total_house_w")/1000.0 as house, mean("unallocated_w")/1000.0 as unalloc, mean("heatpump_w")/1000.0 as hp
+        FROM "energy_telemetry" 
+        WHERE time >= '{start_utc}' AND time < '{end_utc}'
+        GROUP BY time({bucket}) fill(linear);
+        SELECT mean("temperature_c") as tank_temp
+        FROM "energy_telemetry" 
+        WHERE "device_id" = 'dhw_tank' AND time >= '{start_utc}' AND time < '{end_utc}'
+        GROUP BY time({bucket}) fill(linear);
+        SELECT mean("temperature_c") as outdoor_temp
+        FROM "energy_telemetry" 
+        WHERE "device_id" = 'outdoor_weather' AND time >= '{start_utc}' AND time < '{end_utc}'
+        GROUP BY time({bucket}) fill(linear);
+        """
+        url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
+        with urllib.request.urlopen(url, timeout=4) as r:
+            res = json.loads(r.read().decode())
+
+        res_list = res.get("results", [])
+        if len(res_list) > 0 and "series" in res_list[0]:
+            en_map = {row[0]: row[1:] for row in res_list[0]["series"][0].get("values", [])}
+        if len(res_list) > 1 and "series" in res_list[1]:
+            tank_map = {row[0]: row[1] for row in res_list[1]["series"][0].get("values", [])}
+        if len(res_list) > 2 and "series" in res_list[2]:
+            out_map = {row[0]: row[1] for row in res_list[2]["series"][0].get("values", [])}
+    except Exception as e:
+        print(f"Warning fetching history telemetry: {e}")
+
+    history_pts = []
+    last_tank = 50.0
+    for i in range(num_slots):
+        slot_dt = start_dt + timedelta(minutes=step_mins * i)
+        slot_utc_str = slot_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:00Z")
+
+        en_row = en_map.get(slot_utc_str, [0.0, 0.45, 0.45, 0.033])
+        solar_kw = round(max(0.0, float(en_row[0] or 0.0)), 3)
+        house_kw = round(max(0.0, float(en_row[1] or 0.45)), 3)
+        unalloc_kw = round(max(0.0, float(en_row[2] or 0.35)), 3)
+        hp_kw = round(max(0.0, float(en_row[3] or 0.033)), 3)
+
+        tank_t = tank_map.get(slot_utc_str)
+        if tank_t is not None:
+            last_tank = round(float(tank_t), 1)
+        tank_t = last_tank
+
+        out_t = out_map.get(slot_utc_str)
+        out_t = round(float(out_t), 1) if out_t is not None else 18.0
+
+        dhw_kw = hp_kw if hp_kw > 0.5 else 0.0
+        cv_kw = hp_kw if hp_kw > 0.5 and dhw_kw == 0.0 else 0.0
+
+        lbl = slot_dt.strftime("%H:%M" if is_15m else "%H:00")
+        k_full = slot_dt.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
+
+        history_pts.append({
+            "idx": -num_slots + i,
+            "dt": slot_dt,
+            "key": k_full,
+            "label": lbl,
+            "is_history": True,
+            "solar_kw": solar_kw,
+            "total_house_kw": house_kw,
+            "unallocated_kw": unalloc_kw,
+            "heatpump_kw": hp_kw,
+            "dhw_kw": dhw_kw,
+            "heating_kw": cv_kw,
+            "tank_temp_c": tank_t,
+            "outdoor_temp_c": out_t,
+            "indoor_temp_c": 22.0
+        })
+
+    return history_pts
 
 
 from integrations.daikin_altherma.actuator import DaikinActuator
@@ -1085,14 +1174,29 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 max_time = labels[prices_all_in.index(max_p)] if prices_all_in else "--:--"
                 peak_solar = max(solar_forecast_kw) if solar_forecast_kw else 0.0
 
+                # Prepend 1 hour of actual historical telemetry
+                hist_pts = fetch_recent_telemetry_history(is_15m, base_dt)
+                hist_labels = []
+                hist_prices_all_in = []
+                hist_prices_base = []
+                hist_solar = []
+                for hp in hist_pts:
+                    p_val = prices_map.get(hp["key"], prices_map.get(hp["dt"].strftime("%Y-%m-%d %H:00"), 0.25))
+                    p_base = prices_base_map.get(hp["key"], prices_base_map.get(hp["dt"].strftime("%Y-%m-%d %H:00"), round(p_val - 0.15, 4)))
+                    hist_labels.append(hp["label"])
+                    hist_prices_all_in.append(p_val)
+                    hist_prices_base.append(p_base)
+                    hist_solar.append(hp["solar_kw"])
+
                 res = {
                     "status": "success",
                     "resolution": res_mode,
-                    "labels": labels,
-                    "epex_prices": prices_all_in,
-                    "epex_base_prices": prices_base,
-                    "solar_forecast_kw": solar_forecast_kw,
+                    "labels": hist_labels + labels,
+                    "epex_prices": hist_prices_all_in + prices_all_in,
+                    "epex_base_prices": hist_prices_base + prices_base,
+                    "solar_forecast_kw": hist_solar + solar_forecast_kw,
                     "solar_cost": solar_cost,
+                    "history_count": len(hist_pts),
                     "stats": {
                         "min_price": f"€{min_p:.4f}/kWh",
                         "min_time": min_time,
@@ -1856,16 +1960,28 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 el_power_kw.append(el_kw)
                 costs_eur.append(slot_cost)
 
+            # Prepend 1 hour of actual historical telemetry
+            hist_pts = fetch_recent_telemetry_history(is_15m, base_dt)
+            hist_labels = [hp["label"] for hp in hist_pts]
+            hist_outdoor = [hp["outdoor_temp_c"] for hp in hist_pts]
+            hist_indoor = [hp["indoor_temp_c"] for hp in hist_pts]
+            hist_floor = [hp["indoor_temp_c"] for hp in hist_pts]
+            hist_cops = [5.2 for _ in hist_pts]
+            hist_th_loss = [round((321.1 / 1000.0) * max(0.0, hp["indoor_temp_c"] - hp["outdoor_temp_c"]), 2) for hp in hist_pts]
+            hist_el_kw = [hp["heating_kw"] for hp in hist_pts]
+            hist_costs = [round(hp["heating_kw"] * (0.25 if is_15m else 1.0) * 0.25, 3) for hp in hist_pts]
+
             self._send_json({
                 "resolution": res_mode,
-                "labels": labels,
-                "outdoor_temps_c": out_temps,
-                "indoor_temps_c": in_temps,
-                "floor_temps_c": floor_temps,
-                "cops": cops,
-                "thermal_loss_kw": th_loss_kw,
-                "electrical_kw": el_power_kw,
-                "costs_eur": costs_eur,
+                "labels": hist_labels + labels,
+                "outdoor_temps_c": hist_outdoor + out_temps,
+                "indoor_temps_c": hist_indoor + in_temps,
+                "floor_temps_c": hist_floor + floor_temps,
+                "cops": hist_cops + cops,
+                "thermal_loss_kw": hist_th_loss + th_loss_kw,
+                "electrical_kw": hist_el_kw + el_power_kw,
+                "costs_eur": hist_costs + costs_eur,
+                "history_count": len(hist_pts),
                 "total_thermal_kwh": round(tot_th_kwh, 2),
                 "total_electrical_kwh": round(tot_el_kwh, 2),
                 "total_cost_eur": round(tot_cost, 2),
@@ -2143,12 +2259,30 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     } if merge_outcome else None
                 }
 
+                # Prepend 1 hour of actual historical telemetry
+                hist_pts = fetch_recent_telemetry_history(is_15m, base_sim_dt)
+                hist_labels = [hp["label"] for hp in hist_pts]
+                hist_temps = [hp["tank_temp_c"] for hp in hist_pts]
+
+                if traj and "labels" in traj:
+                    traj["labels"] = hist_labels + traj.get("labels", [])
+                    traj["temperatures_c"] = hist_temps + traj.get("temperatures_c", [])
+                    traj["temperatures_p05_c"] = hist_temps + traj.get("temperatures_p05_c", [])
+                    traj["temperatures_p95_c"] = hist_temps + traj.get("temperatures_p95_c", [])
+                    traj["demand_kwh_th"] = [0.0] * len(hist_pts) + traj.get("demand_kwh_th", [])
+                    traj["history_count"] = len(hist_pts)
+                if unheated_traj and "temperatures_c" in unheated_traj:
+                    unheated_traj["temperatures_c"] = hist_temps + unheated_traj.get("temperatures_c", [])
+                    unheated_traj["temperatures_p05_c"] = hist_temps + unheated_traj.get("temperatures_p05_c", [])
+                    unheated_traj["temperatures_p95_c"] = hist_temps + unheated_traj.get("temperatures_p95_c", [])
+
                 self._send_json({
                     "status": "online",
                     "resolution": res_mode,
                     "decision": decision,
                     "trajectory": traj,
-                    "unheated_trajectory": unheated_traj
+                    "unheated_trajectory": unheated_traj,
+                    "history_count": len(hist_pts)
                 })
             else:
                 self._send_json({"status": "error", "message": "DHW model niet geladen"}, 500)
@@ -2300,7 +2434,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.14",
+                "version": "0.92.15",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3254,30 +3388,82 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             # Calculate dynamic export prices for forecast (kale spot min opslag)
             export_prices = [max(0.0, round((p / 1.21) - 0.11085 - 0.0121 - 0.00605, 4)) for p in prices]
 
+            # Prepend 1 hour of actual historical telemetry
+            hist_pts = fetch_recent_telemetry_history(is_15m, base_dt)
+            hist_labels = []
+            hist_solar = []
+            hist_unalloc = []
+            hist_boiler = []
+            hist_heating = []
+            hist_bat_charge = []
+            hist_bat_discharge = []
+            hist_prices = []
+            hist_advices = []
+            hist_dhw_timeline = []
+
+            for hp in hist_pts:
+                p_val = prices_map.get(hp["key"], prices_map.get(hp["dt"].strftime("%Y-%m-%d %H:00"), 0.25))
+                hist_labels.append(hp["label"])
+                hist_solar.append(hp["solar_kw"])
+                hist_unalloc.append(hp["unallocated_kw"])
+                hist_boiler.append(hp["dhw_kw"])
+                hist_heating.append(hp["heating_kw"])
+                hist_bat_charge.append(0.0)
+                hist_bat_discharge.append(0.0)
+                hist_prices.append(p_val)
+                hist_advices.append("Actueel gemeten (Historie)")
+                hist_dhw_timeline.append({
+                    "time": hp["label"],
+                    "mode": "measured_actual",
+                    "label": f"Actueel ({hp['label']})",
+                    "description": f"Historische meting: Tapwater {hp['dhw_kw']:.2f} kW · Verwarming {hp['heating_kw']:.2f} kW."
+                })
+
+            all_labels = hist_labels + labels
+            all_unalloc = hist_unalloc + unallocated
+            all_boiler = hist_boiler + boiler
+            all_heating = hist_heating + heating
+            all_bat_charge = hist_bat_charge + battery_charge
+            all_solar = hist_solar + solar
+            all_bat_discharge = hist_bat_discharge + battery_discharge
+            all_prices = hist_prices + prices
+            all_export_prices = [max(0.0, round((p / 1.21) - 0.11085 - 0.0121 - 0.00605, 4)) for p in all_prices]
+
+            all_solar_neg = [-round(s, 2) for s in all_solar]
+            all_bat_discharge_neg = [-round(d, 2) for d in all_bat_discharge]
+            all_net_power = [
+                round((u + bl + h + ch) - (s + d), 2)
+                for u, bl, h, ch, s, d in zip(all_unalloc, all_boiler, all_heating, all_bat_charge, all_solar, all_bat_discharge)
+            ]
+            all_surplus = [0.0] * len(hist_pts) + surplus_kw_list
+            all_advices = hist_advices + advices
+            all_dhw_timeline = hist_dhw_timeline + dhw_mode_timeline
+
             self._send_json({
-                "hours": labels,
-                "labels": labels,
+                "hours": all_labels,
+                "labels": all_labels,
                 "interval_h": step_h,
                 "battery_enabled": is_battery_active,
                 "battery_simulated": bool(sim_battery_param and not battery_installed),
-                "export_prices_eur": export_prices,
-                "dhw_mode_timeline": dhw_mode_timeline,
+                "export_prices_eur": all_export_prices,
+                "dhw_mode_timeline": all_dhw_timeline,
                 "dynamic_peaks": dynamic_peaks,
                 "dhw_planning_summary": dhw_planning_summary,
+                "history_count": len(hist_pts),
                 "datasets": {
-                    "unallocated_kw": unallocated,
-                    "baseload_kw": unallocated,
-                    "boiler_kw": boiler,
-                    "heating_kw": heating,
-                    "battery_charge_kw": battery_charge,
-                    "solar_kw_neg": solar_neg,
-                    "battery_discharge_kw_neg": bat_discharge_neg,
-                    "surplus_kw": surplus_kw_list,
-                    "net_power_kw": net_power,
-                    "prices_eur": prices,
-                    "export_prices_eur": export_prices
+                    "unallocated_kw": all_unalloc,
+                    "baseload_kw": all_unalloc,
+                    "boiler_kw": all_boiler,
+                    "heating_kw": all_heating,
+                    "battery_charge_kw": all_bat_charge,
+                    "solar_kw_neg": all_solar_neg,
+                    "battery_discharge_kw_neg": all_bat_discharge_neg,
+                    "surplus_kw": all_surplus,
+                    "net_power_kw": all_net_power,
+                    "prices_eur": all_prices,
+                    "export_prices_eur": all_export_prices
                 },
-                "advices": advices,
+                "advices": all_advices,
                 "cheapest_hour": cheapest_hour_lbl,
                 "cheapest_price_eur": cheapest_price,
                 "battery_status_msg": bat_msg,
@@ -4071,7 +4257,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.14</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.15</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -6165,6 +6351,73 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 sans: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
             }
         };
+
+        // Universal Chart.js Shading Plugin for Open HEMS
+        const OpenHEMSHistoryPlugin = {
+            id: 'openhemsHistoryShading',
+            beforeDraw(chart) {
+                const { ctx, chartArea, scales } = chart;
+                if (!chartArea || !scales || !scales.x) return;
+
+                const labels = chart.data?.labels || [];
+                let histCount = chart.options?.plugins?.openhemsHistory?.count;
+                if (histCount === undefined) {
+                    const nuIdx = labels.findIndex(l => typeof l === 'string' && l.startsWith('Nu'));
+                    if (nuIdx > 0) histCount = nuIdx;
+                }
+                if (!histCount || histCount <= 0) return;
+
+                const xNu = scales.x.getPixelForValue(histCount);
+                const xPrev = scales.x.getPixelForValue(histCount - 1);
+                const xBoundary = (xPrev !== undefined && !isNaN(xPrev) && xNu !== undefined && !isNaN(xNu)) ? (xPrev + xNu) / 2 : (xNu || chartArea.left);
+
+                ctx.save();
+
+                // 1. Darker shaded background for historical zone
+                ctx.fillStyle = 'rgba(3, 7, 18, 0.78)';
+                ctx.fillRect(chartArea.left, chartArea.top, xBoundary - chartArea.left, chartArea.height);
+
+                // 2. Crisp dashed vertical divider at the boundary
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 3]);
+                ctx.moveTo(xBoundary, chartArea.top);
+                ctx.lineTo(xBoundary, chartArea.bottom);
+                ctx.stroke();
+
+                // 3. Subtle pill badge in the historical zone
+                ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
+                const badgeWidth = 92;
+                const badgeHeight = 18;
+                const badgeX = chartArea.left + 8;
+                const badgeY = chartArea.top + 8;
+                ctx.beginPath();
+                ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 4);
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // Badge text
+                ctx.fillStyle = '#94A3B8';
+                ctx.font = '700 9px ui-sans-serif, system-ui, sans-serif';
+                ctx.fillText('HISTORIE (1U)', badgeX + 10, badgeY + 12);
+
+                // 4. Subtle "Nu" marker tag next to boundary line
+                ctx.fillStyle = 'rgba(168, 85, 247, 0.90)';
+                ctx.beginPath();
+                ctx.roundRect(xBoundary + 4, chartArea.top + 8, 38, 18, 4);
+                ctx.fill();
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '700 9px ui-sans-serif, system-ui, sans-serif';
+                ctx.fillText('NU ▶', xBoundary + 10, chartArea.top + 20);
+
+                ctx.restore();
+            }
+        };
+        Chart.register(OpenHEMSHistoryPlugin);
 
         const OpenHEMSChartEngine = {
             getChartType() {
