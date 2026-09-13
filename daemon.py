@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.24
+Version: 0.92.25
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -609,6 +609,79 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
             _LAST_LOGGED_DECISION["state"] = "idle"
 
     return merge_res
+
+
+_LAST_NIGHT_AUDIT_LOG: Dict[str, Any] = {"state": None, "ts": 0.0}
+
+def evaluate_and_log_night_boiler_decision(plan: Any, t_live: float):
+    global _LAST_NIGHT_AUDIT_LOG
+    now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
+    # Active during evening and night (19:00 - 06:00)
+    is_evening_or_night = (now_ams.hour >= 19 or now_ams.hour < 6)
+    if not is_evening_or_night:
+        return
+
+    try:
+        from layer2_calibration.dhw_thermal_model import DhwThermalModel
+        dhw_model = DhwThermalModel()
+        decision_data = dhw_model.evaluate_night_heating_decision(
+            t_current_c=t_live,
+            now_dt=now_ams,
+            tomorrow_solar_peak_kw=2.5,
+            planned_heat_hour=12.5
+        )
+
+        comfort_safe = decision_data.get("morning_is_safe", True)
+        m_dip = decision_data.get("morning_dip_temp_c", 40.0)
+        m_time = decision_data.get("morning_dip_time", "08:30")
+        p95_dip = decision_data.get("morning_dip_p95_c", 38.0)
+        savings = float(decision_data.get("savings_by_waiting", 0.23))
+        chosen_mode = "normal" if comfort_safe else "forced_on"
+        decision_state_key = f"{chosen_mode}_{round(m_dip, 0)}"
+
+        now_ts = time.time()
+        # Log if state changed or if at least 2 hours have passed since last night decision log
+        if _LAST_NIGHT_AUDIT_LOG.get("state") != decision_state_key or (now_ts - _LAST_NIGHT_AUDIT_LOG.get("ts", 0)) >= 7200.0:
+            _LAST_NIGHT_AUDIT_LOG["state"] = decision_state_key
+            _LAST_NIGHT_AUDIT_LOG["ts"] = now_ts
+
+            reason = "🌙 DHW Nachtbesluit: Wachten op Middagzon (Geen nachtlading nodig)" if comfort_safe else "🌙 DHW Nachtbesluit: Nachtlading Gepland (Comfortzekerheid)"
+            explanation = decision_data.get("decision_explanation", "")
+            if not explanation:
+                if comfort_safe:
+                    explanation = f"Het vat daalt vannacht zonder verwarming naar prognose {m_dip}°C om {m_time}u (P95 zware douche: {p95_dip}°C). Ochtendcomfort blijft ruim boven 40°C gewaarborgd. Nachtlading overbodig; wachten op middagzon bespaart ~€{savings:.2f}."
+                else:
+                    explanation = f"Comfortrisico dreigt: vat daalt naar prognose {m_dip}°C om {m_time}u (<40°C). Een nachtlading naar 50°C is ingepland in het goedkoopste dalkwartier."
+
+            write_hems_annotation(
+                event_type="night_decision",
+                title=reason,
+                description=explanation,
+                state_code=chosen_mode,
+                power_kw=0.0 if comfort_safe else 1.8,
+                target_temp_c=50.0 if not comfort_safe else 0.0,
+                savings_eur=savings if comfort_safe else 0.0
+            )
+
+            DecisionAuditLogger.log_decision(
+                domain="dhw",
+                decision_type="night_decision",
+                chosen_mode=chosen_mode,
+                target_temp_c=50.0 if not comfort_safe else None,
+                inputs={
+                    "tank_nu_c": round(t_live, 1),
+                    "ochtend_dip_c": m_dip,
+                    "ochtend_dip_tijd": m_time,
+                    "ochtend_dip_p95_c": p95_dip,
+                    "comfort_gewaarborgd": comfort_safe,
+                    "besparing_wachten_eur": savings
+                },
+                reason=reason,
+                explanation=explanation,
+                savings_estimate_eur=savings if comfort_safe else 0.0
+            )
+    except Exception as e:
+        print(f"Warning in evaluate_and_log_night_boiler_decision: {e}")
 
 
 def write_hems_annotation(event_type: str, title: str, description: str, state_code: str, power_kw: float = 0.0, target_temp_c: float = 0.0, savings_eur: float = 0.0):
@@ -2627,7 +2700,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.24",
+                "version": "0.92.25",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4483,7 +4556,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.24</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.25</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -11905,6 +11978,7 @@ class HemsBackgroundCollector(threading.Thread):
 
             # 1. Run opportunistic run merger (e.g. if showering occurred)
             merge_res = evaluate_and_apply_dhw_run_merger(plan, t_live)
+            evaluate_and_log_night_boiler_decision(plan, t_live)
 
             # 2. Get current slot mode
             cur_slot = plan.slots[0]
