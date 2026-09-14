@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.47
+Version: 0.92.48
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -937,8 +937,18 @@ def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
     except Exception as e:
         print(f"Warning fetching history telemetry: {e}")
 
+    # Read live tank temperature from HA to avoid artificial 50°C cliff
+    cur_tank_default = 42.8
+    try:
+        sm = get_ha_states_map()
+        v = float(sm.get("sensor.hc_dhw_temperature_r5t_dhw_tank", {}).get("state", 42.8))
+        if 20.0 <= v <= 75.0:
+            cur_tank_default = v
+    except Exception:
+        pass
+
     history_pts = []
-    last_tank = 50.0
+    last_tank = cur_tank_default
     for i in range(num_slots):
         slot_dt = start_dt + timedelta(minutes=step_mins * i)
         slot_utc_str = slot_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:00Z")
@@ -2642,10 +2652,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             "morning_dip_temp_c": traj.get("morning_dip_temp_c"),
                             "morning_dip_time": traj.get("morning_dip_time")
                         }
+                        raw_unh_dip = unheated_traj.get("morning_dip_temp_c", 37.2)
+                        raw_unh_dip_time = unheated_traj.get("morning_dip_time", "09:45")
                         unheated_traj = {
                             "temperatures_c": h_unh_temps,
                             "temperatures_p05_c": h_unh_p05,
-                            "temperatures_p95_c": h_unh_p95
+                            "temperatures_p95_c": h_unh_p95,
+                            "morning_dip_temp_c": raw_unh_dip,
+                            "morning_dip_time": raw_unh_dip_time
                         }
                     else:
                         # Ensure 15m labels have clean format_slot_label applied
@@ -2660,8 +2674,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 # === Unified Buffer Efficiëntie & Laadbesluit Analysis ===
                 is_daytime = (7 <= now_ams.hour < 19)
 
-                unh_morning_dip = traj.get("morning_dip_temp_c", 39.5) if traj else 39.5
-                unh_morning_dip_time = traj.get("morning_dip_time", "09:30") if traj else "09:30"
+                unh_morning_dip = unheated_traj.get("morning_dip_temp_c", 37.5) if unheated_traj else 37.5
+                unh_morning_dip_time = unheated_traj.get("morning_dip_time", "09:30") if unheated_traj else "09:30"
                 unh_morning_p95 = round(max(25.0, float(unh_morning_dip) - 1.6), 1)
                 comfort_guaranteed = (unh_morning_dip >= 40.0)
 
@@ -2746,14 +2760,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     comfort_card_title = "1️⃣ Basislading 50°C Nodig voor Ochtendspits?"
                     finance_card_title = "2️⃣ Afweging: Nu Laden vs. Wachten op Morgenmiddag?"
 
+                    heated_morning_dip = traj.get("morning_dip_temp_c", 45.4) if traj else 45.4
                     # Stap 1 Nacht: Is 50C nodig voor ochtendcomfort?
                     if not comfort_guaranteed:
                         comfort_text = (
-                            f"Zonder nachtlading (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat door nachtelijk stilstand en ochtenddouches naar "
+                            f"Zonder nachtlading (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat door nachtelijke stilstand en ochtenddouches naar "
                             f"<strong class='text-amber-300'>{unh_morning_dip}°C</strong> (bij piekverbruik zelfs <strong class='text-red-400'>{unh_morning_p95}°C</strong>) vóór 10:00 uur. "
-                            f"Comfortrisico: een lading naar 50°C vannacht is <strong>noodzakelijk voor ochtendcomfort</strong>."
+                            f"Comfortrisico: een lading naar 50°C vannacht is <strong>noodzakelijk voor ochtendcomfort</strong>. "
+                            f"Met de geplande nachtlading (<span class='text-amber-400 font-mono'>gele lijn</span>) blijft het vat tijdens de ochtendspits comfortabel op minimaal <strong>{heated_morning_dip}°C</strong>."
                         )
-                        bullet_1 = f"Basislading 50°C: Noodzakelijk (ochtenddip zakt naar {unh_morning_dip}°C)"
+                        bullet_1 = f"Basislading 50°C: Noodzakelijk (zonder lading dip naar {unh_morning_dip}°C; met lading {heated_morning_dip}°C)"
                     else:
                         comfort_text = (
                             f"Het vat daalt vannacht zonder lading (<span class='text-slate-400 font-mono'>grijze lijn</span>) naar {unh_morning_dip}°C. "
@@ -2763,9 +2779,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                     finance_text = (
                         f"Nachtstroom kost vannacht ~€0,26/kWh (~€0,38 per run). Morgenmiddag rond 12:00–14:00 is stroom goedkoper met zonne-energie (~€0,15 per run). "
-                        + ("Comfortzekerheid vóór 10:00u weegt zwaarder dan wachten op zon." if not comfort_guaranteed else "Wachten tot middagzon bespaart ~€0,23.")
+                        + (f"Comfortzekerheid vóór 10:00u weegt zwaarder dan wachten op zon (garandeert {heated_morning_dip}°C)." if not comfort_guaranteed else "Wachten tot middagzon bespaart ~€0,23.")
                     )
-                    bullet_2 = "Nachtlading gepland voor gegarandeerd ochtendcomfort" if not comfort_guaranteed else "Afwachten tot middagzon bespaart ~€0,23"
+                    bullet_2 = f"Nachtlading gepland voor gegarandeerd ochtendcomfort ({heated_morning_dip}°C)" if not comfort_guaranteed else "Afwachten tot middagzon bespaart ~€0,23"
 
                     if planned_mode in ["forced_night_50", "forced_on"]:
                         badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Nachtlading Gepland (Comfortzekerheid)</span>'
@@ -2992,7 +3008,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.47",
+                "version": "0.92.48",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4654,7 +4670,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.47</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.48</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
