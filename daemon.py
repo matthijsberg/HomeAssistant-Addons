@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.42
+Version: 0.92.43
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2950,7 +2950,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.42",
+                "version": "0.92.43",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4776,7 +4776,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.42</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.43</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5042,7 +5042,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden (+kW)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-slate-300">Zon (-kW)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500 rounded"></span> <span class="text-red-400 font-bold">Netto Verbruik (kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400">Prijs (€/kWh)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-blue-500 rounded"></span> <span class="text-blue-400 font-medium">EPEX Inkoop (€/kWh)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-cyan-400 rounded border-dashed"></span> <span class="text-cyan-400 font-medium">EPEX Teruglevering (€/kWh)</span></div>
                         </div>
                     </div>
 
@@ -5473,6 +5474,36 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                 <span>Verversen</span>
                             </button>
+                        </div>
+                    </div>
+
+                    <!-- Chart 2.0: Kosten Historie (Cost History) -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                            <div class="flex items-center gap-2">
+                                <span class="text-base">💶</span>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white tracking-wide" id="cost-history-chart-title">Kosten Historie (24h)</h3>
+                                    <p class="text-[11px] text-slate-400">Gerealiseerde netto kosten/baten en dynamische inkoop- en verkoopmarkttarieven over de geselecteerde periode.</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 text-xs flex-wrap">
+                                <span class="text-[10px] text-slate-300 font-mono bg-slate-900 px-2 py-0.5 rounded-md border border-slate-700" id="cost-history-total-net-kwh">Netto: -- kWh</span>
+                                <span class="text-[10px] text-amber-300 font-mono bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-500/40 font-bold" id="cost-history-netto">Netto: €--</span>
+                            </div>
+                        </div>
+
+                        <!-- Canvas -->
+                        <div class="relative w-full h-[300px] sm:h-[340px]">
+                            <canvas id="costHistoryChart"></canvas>
+                        </div>
+
+                        <!-- Legend Chips -->
+                        <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-5 text-xs font-mono">
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-amber-400 font-bold">Netto Kosten (€)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500 rounded"></span> <span class="text-red-400 font-bold">Netto Verbruik (kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-blue-500 rounded"></span> <span class="text-blue-400 font-medium">EPEX Inkoop All-in (€/kWh)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-cyan-400 rounded border-dashed"></span> <span class="text-cyan-400 font-medium">EPEX Teruglevering (€/kWh)</span></div>
                         </div>
                     </div>
 
@@ -7192,6 +7223,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         var powerProducersResolution = '1h';  // Default to 1 Uur for 24h range
         var electricityPricesChartInstance = null;
         var costForecastChartInstance = null;
+        var costHistoryChartInstance = null;
         var pipelinePollInterval = null;
         var activeUnallocDay = (new Date().getDay() + 6) % 7; // Auto-defaults to today (0=Ma ... 5=Za, 6=Zo)
         var cachedUnallocModel = null;
@@ -8241,11 +8273,94 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         <span class="font-bold text-blue-300 font-mono">€${pBuy.toFixed(4)}/kWh</span>
                     </div>
 
-                    <!-- 4. EPEX Verkoop (€/kWh) -->
+                    <!-- 4. EPEX Teruglevering (€/kWh) -->
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
                             <span style="display:inline-block; width:14px; height:0; border-top:2px dashed #06B6D4; margin-right:8px;"></span>
-                            <span class="text-slate-400">EPEX Verkoop</span>
+                            <span class="text-slate-400">EPEX Teruglevering</span>
+                        </div>
+                        <span class="font-bold text-cyan-300 font-mono">€${pSell.toFixed(4)}/kWh</span>
+                    </div>
+                </div>
+            `;
+            tooltipEl.innerHTML = html;
+            positionTooltipCustom(chart, tooltip, tooltipEl);
+        }
+
+        // 1.6. Cost History Tooltip
+        function customCostHistoryTooltipHandler(context, netKwArr, netCostArr, pricesArr, exportPricesArr, intervalH) {
+            const { chart, tooltip } = context;
+            const tooltipEl = createOrGetTooltipEl(chart);
+            if (tooltip.opacity === 0 || !tooltip.body || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
+                tooltipEl.style.opacity = '0';
+                tooltipEl.style.pointerEvents = 'none';
+                return;
+            }
+
+            tooltipEl.style.opacity = '1';
+            const dataIndex = tooltip.dataPoints[0].dataIndex;
+            const label = tooltip.title[0] || '';
+            const intervalStr = (intervalH === 0.25) ? '15 min' : ((intervalH === 1.0) ? '1 uur' : `${intervalH}u`);
+
+            const pBuy = (pricesArr && pricesArr[dataIndex] !== undefined) ? Number(pricesArr[dataIndex]) : 0.25;
+            const pSell = (exportPricesArr && exportPricesArr[dataIndex] !== undefined)
+                ? Number(exportPricesArr[dataIndex])
+                : Math.max(0.0, (pBuy / 1.21) - 0.11085 - 0.0121 - 0.00605);
+
+            const netKwVal = (netKwArr && netKwArr[dataIndex] !== undefined) ? Number(netKwArr[dataIndex]) : 0.0;
+            const netKwhVal = netKwVal * intervalH;
+            const netCostVal = (netCostArr && netCostArr[dataIndex] !== undefined) ? Number(netCostArr[dataIndex]) : 0.0;
+            const isProfit = netCostVal < 0;
+
+            let html = `
+                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
+                        <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
+                    </div>
+                    <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${!isProfit ? 'bg-red-950/80 border-red-800 text-red-300' : 'bg-emerald-950/80 border-emerald-800 text-emerald-300'}">
+                        ${!isProfit ? 'Netto Kosten: +€' : 'Netto Baten: -€'}${Math.abs(netCostVal).toFixed(2)}
+                    </span>
+                </div>
+                <div class="space-y-2 text-xs">
+                    <!-- 1. Netto Kosten (€) -->
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:10px; height:10px; background-color:#F59E0B; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300 font-medium">Netto Kosten</span>
+                        </div>
+                        <span class="font-bold font-mono ${!isProfit ? 'text-amber-400' : 'text-emerald-400'}">
+                            ${!isProfit ? '+€' : '-€'}${Math.abs(netCostVal).toFixed(2)}
+                        </span>
+                    </div>
+
+                    <!-- 2. Netto Verbruik (kW / kWh) -->
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:14px; height:2px; background-color:#EF4444; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300 font-medium">Netto Verbruik</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 font-mono">
+                            <span class="${netKwVal >= 0 ? 'text-red-400' : 'text-emerald-400'} font-bold">${netKwVal >= 0 ? '+' : ''}${netKwVal.toFixed(2)} kW</span>
+                            <span class="text-slate-400 text-[10px]">(${netKwVal >= 0 ? '+' : ''}${netKwhVal.toFixed(2)} kWh)</span>
+                        </div>
+                    </div>
+
+                    <!-- 3. EPEX Inkoop (€/kWh) -->
+                    <div class="flex items-center justify-between gap-3 border-t border-slate-800/80 pt-1.5">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:14px; height:2px; background-color:#3B82F6; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-400">EPEX Inkoop All-in</span>
+                        </div>
+                        <span class="font-bold text-blue-300 font-mono">€${pBuy.toFixed(4)}/kWh</span>
+                    </div>
+
+                    <!-- 4. EPEX Teruglevering (€/kWh) -->
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:14px; height:0; border-top:2px dashed #06B6D4; margin-right:8px;"></span>
+                            <span class="text-slate-400">EPEX Teruglevering</span>
                         </div>
                         <span class="font-bold text-cyan-300 font-mono">€${pSell.toFixed(4)}/kWh</span>
                     </div>
@@ -8948,15 +9063,31 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     data: {
                         labels: labels,
                         datasets: (() => {
+                            const exportPricesArr = data.export_prices_eur || [];
                             const ds = [
                                 {
-                                    label: 'Stroomprijs All-in (€/kWh)',
+                                    label: 'EPEX Inkoop All-in (€/kWh)',
                                     data: pricesArr,
+                                    type: 'line',
+                                    borderColor: '#3B82F6',
+                                    backgroundColor: 'transparent',
+                                    borderWidth: 1.5,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 4,
+                                    yAxisID: 'y1',
+                                    tension: 0,
+                                    order: 0
+                                },
+                                {
+                                    label: 'EPEX Teruglevering (€/kWh)',
+                                    data: exportPricesArr,
                                     type: 'line',
                                     borderColor: '#06B6D4',
                                     borderDash: [4, 4],
+                                    backgroundColor: 'transparent',
                                     borderWidth: 1.5,
                                     pointRadius: 0,
+                                    pointHoverRadius: 4,
                                     yAxisID: 'y1',
                                     tension: 0,
                                     order: 0
@@ -9397,7 +9528,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     });
 
                     // Canvas mouseleave listeners
-                    ['costForecastChart', 'hemsChartAnalytics', 'hemsChart', 'powerProducersChart', 'electricityPricesChart', 'chart-dhw-temperature', 'chart-heating-forecast'].forEach(id => {
+                    ['costForecastChart', 'costHistoryChart', 'hemsChartAnalytics', 'hemsChart', 'powerProducersChart', 'electricityPricesChart', 'chart-dhw-temperature', 'chart-heating-forecast'].forEach(id => {
                         const c = document.getElementById(id);
                         if (c) {
                             c.addEventListener('mouseleave', hideTooltip);
@@ -10317,29 +10448,31 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
                 const priceDataset = {
                     type: 'line',
-                    label: 'Stroom Afname All-in (€/kWh)',
+                    label: 'EPEX Inkoop All-in (€/kWh)',
                     data: data.epex_prices || [],
                     yAxisID: 'y',
-                    borderColor: OpenHEMSTokens.colors.priceLine,
+                    borderColor: '#3B82F6',
                     backgroundColor: 'transparent',
-                    borderWidth: 2.5,
+                    borderWidth: 1.5,
                     stepped: 'before',
                     pointRadius: 0,
+                    pointHoverRadius: 4,
                     tension: 0,
                     order: 1
                 };
 
                 const exportDataset = {
                     type: 'line',
-                    label: 'Teruglevertarief Export (€/kWh)',
+                    label: 'EPEX Teruglevering (€/kWh)',
                     data: data.export_prices || [],
                     yAxisID: 'y',
-                    borderColor: '#38BDF8',
+                    borderColor: '#06B6D4',
                     backgroundColor: 'transparent',
-                    borderWidth: 2,
-                    borderDash: [5, 4],
+                    borderWidth: 1.5,
+                    borderDash: [4, 4],
                     stepped: 'before',
                     pointRadius: 0,
+                    pointHoverRadius: 4,
                     tension: 0,
                     fill: false,
                     order: 3
@@ -10749,16 +10882,33 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
                 if (powerProducersChartType === 'bar') {
                     // === STAVEN (BAR) MODUS: 100% ZUIVER VERMOGEN (kW) PER INTERVAL ===
-                    // 0. EPEX Stroomprijs All-in Stepped/Dashed Curve (Rechter Y-as)
+                    // 0. EPEX Inkoop & Teruglevering Curves (Rechter Y-as)
                     if (data.prices && data.prices.length > 0) {
                         datasets.push({
-                            label: 'Stroomprijs All-in (€/kWh)',
+                            label: 'EPEX Inkoop All-in (€/kWh)',
                             data: data.prices,
+                            type: 'line',
+                            borderColor: '#3B82F6',
+                            backgroundColor: 'transparent',
+                            borderWidth: 1.5,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            yAxisID: 'y1',
+                            tension: 0,
+                            order: 0
+                        });
+                    }
+                    if (data.export_prices && data.export_prices.length > 0) {
+                        datasets.push({
+                            label: 'EPEX Teruglevering (€/kWh)',
+                            data: data.export_prices,
                             type: 'line',
                             borderColor: '#06B6D4',
                             borderDash: [4, 4],
+                            backgroundColor: 'transparent',
                             borderWidth: 1.5,
                             pointRadius: 0,
+                            pointHoverRadius: 4,
                             yAxisID: 'y1',
                             tension: 0,
                             order: 0
@@ -10771,20 +10921,22 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         type: 'line',
                         borderColor: '#F97316',
                         backgroundColor: 'transparent',
-                        borderWidth: 2.5,
-                        pointRadius: 2,
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
                         tension: 0.25,
                         order: 1
                     });
-                    // 2. Netto Grid Stroom Lijn (Felrood) in kW
+                    // 2. Netto Verbruik Lijn (Felrood) in kW
                     datasets.push({
-                        label: 'Netto Grid Stroom (kW)',
+                        label: 'Netto Verbruik (kW)',
                         data: netKw,
                         type: 'line',
                         borderColor: '#EF4444',
                         backgroundColor: 'transparent',
-                        borderWidth: 2,
-                        pointRadius: 2,
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
                         tension: 0.25,
                         order: 2
                     });
@@ -10978,6 +11130,197 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         }
                     }
                 });
+
+                // === RENDER KOSTEN HISTORIE CHART ===
+                const canvasCostHist = document.getElementById('costHistoryChart');
+                if (canvasCostHist) {
+                    if (costHistoryChartInstance) costHistoryChartInstance.destroy();
+
+                    const histPrices = data.prices || [];
+                    const histExportPrices = data.export_prices || [];
+
+                    // Calculate Net Cost / Revenue per slot for history
+                    const histNetCostEurArr = netKw.map((nKw, idx) => {
+                        const kwh = Math.abs(nKw) * intervalH;
+                        if (nKw >= 0) {
+                            const pBuy = histPrices[idx] || 0.25;
+                            return Number((kwh * pBuy).toFixed(3));
+                        } else {
+                            const pSell = (histExportPrices[idx] !== undefined) ? histExportPrices[idx] : 0.10;
+                            return Number((- (kwh * pSell)).toFixed(3));
+                        }
+                    });
+
+                    // Summary statistics
+                    const totHistNetKwh = netKw.reduce((acc, kw) => acc + (kw * intervalH), 0);
+                    const totHistNetCostEur = histNetCostEurArr.reduce((acc, c) => acc + c, 0);
+
+                    // Update title with selected range
+                    const titleEl = document.getElementById('cost-history-chart-title');
+                    if (titleEl) {
+                        titleEl.innerText = `Kosten Historie (${rangeVal})`;
+                    }
+                    if (document.getElementById('cost-history-total-net-kwh')) {
+                        document.getElementById('cost-history-total-net-kwh').innerText = `Netto: ${totHistNetKwh >= 0 ? '+' : ''}${totHistNetKwh.toFixed(1)} kWh`;
+                    }
+                    if (document.getElementById('cost-history-netto')) {
+                        document.getElementById('cost-history-netto').innerText = `Netto: ${totHistNetCostEur >= 0 ? '+€' : '-€'}${Math.abs(totHistNetCostEur).toFixed(2)}`;
+                    }
+
+                    // Symmetrical bounds
+                    let maxAbsCost = Math.max(...histNetCostEurArr.map(Math.abs), 0.20);
+                    maxAbsCost = Math.ceil(maxAbsCost * 10) / 10;
+                    if (maxAbsCost < 0.25) maxAbsCost = 0.25;
+
+                    const costHistConfig = {
+                        type: 'bar',
+                        data: {
+                            labels: data.labels,
+                            datasets: [
+                                {
+                                    label: 'Netto Kosten (€)',
+                                    data: histNetCostEurArr,
+                                    type: 'bar',
+                                    backgroundColor: 'rgba(245, 158, 11, 0.75)', // Amber 500 bar
+                                    borderColor: '#D97706',
+                                    borderWidth: 1,
+                                    borderRadius: 3,
+                                    yAxisID: 'yCost',
+                                    order: 4
+                                },
+                                {
+                                    label: 'Netto Verbruik (kW)',
+                                    data: netKw,
+                                    type: 'line',
+                                    borderColor: '#EF4444', // Red 500
+                                    backgroundColor: 'transparent',
+                                    fill: false,
+                                    borderWidth: 1.5,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 4,
+                                    tension: 0.25,
+                                    yAxisID: 'y',
+                                    order: 1
+                                },
+                                {
+                                    label: 'EPEX Inkoop All-in (€/kWh)',
+                                    data: histPrices,
+                                    type: 'line',
+                                    borderColor: '#3B82F6', // Blue 500
+                                    backgroundColor: 'transparent',
+                                    borderWidth: 1.5,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 4,
+                                    tension: 0,
+                                    yAxisID: 'yPrice',
+                                    order: 2
+                                },
+                                {
+                                    label: 'EPEX Teruglevering (€/kWh)',
+                                    data: histExportPrices,
+                                    type: 'line',
+                                    borderColor: '#06B6D4', // Cyan 500
+                                    borderDash: [4, 4],
+                                    backgroundColor: 'transparent',
+                                    borderWidth: 1.5,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 4,
+                                    tension: 0,
+                                    yAxisID: 'yPrice',
+                                    order: 3
+                                }
+                            ]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            interaction: { mode: 'index', intersect: false },
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    enabled: false,
+                                    external: function(context) {
+                                        customCostHistoryTooltipHandler(context, netKw, histNetCostEurArr, histPrices, histExportPrices, intervalH);
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    grid: { color: 'rgba(30, 41, 59, 0.4)' },
+                                    ticks: { color: '#94A3B8', font: { family: 'monospace', size: 10 } }
+                                },
+                                y: {
+                                    type: 'linear',
+                                    position: 'left',
+                                    min: -maxAbsKw,
+                                    max: maxAbsKw,
+                                    title: {
+                                        display: true,
+                                        text: 'Netto Vermogen (kW)',
+                                        color: '#EF4444',
+                                        font: { family: 'monospace', size: 10, weight: 'bold' }
+                                    },
+                                    grid: {
+                                        color: (ctx) => ctx.tick && ctx.tick.value === 0 ? '#CBD5E1' : 'rgba(30, 41, 59, 0.5)',
+                                        lineWidth: (ctx) => ctx.tick && ctx.tick.value === 0 ? 2 : 1
+                                    },
+                                    ticks: {
+                                        color: '#EF4444',
+                                        font: { family: 'monospace', size: 10 },
+                                        callback: function(val) {
+                                            return (val >= 0 ? '+' : '') + val.toFixed(1) + ' kW';
+                                        }
+                                    }
+                                },
+                                yCost: {
+                                    type: 'linear',
+                                    position: 'right',
+                                    display: true,
+                                    min: -maxAbsCost,
+                                    max: maxAbsCost,
+                                    title: {
+                                        display: true,
+                                        text: 'Netto Kosten (€)',
+                                        color: '#F59E0B',
+                                        font: { family: 'monospace', size: 10, weight: 'bold' }
+                                    },
+                                    grid: { drawOnChartArea: false },
+                                    ticks: {
+                                        color: '#F59E0B',
+                                        font: { family: 'monospace', size: 10 },
+                                        callback: function(val) {
+                                            return (val >= 0 ? '+€' : '-€') + Math.abs(val).toFixed(2);
+                                        }
+                                    }
+                                },
+                                yPrice: {
+                                    type: 'linear',
+                                    position: 'right',
+                                    display: true,
+                                    min: -maxAbsPrice,
+                                    max: maxAbsPrice,
+                                    title: {
+                                        display: true,
+                                        text: 'EPEX Tarieven (€/kWh)',
+                                        color: '#06B6D4',
+                                        font: { family: 'monospace', size: 10, weight: 'bold' }
+                                    },
+                                    grid: { drawOnChartArea: false },
+                                    ticks: {
+                                        color: '#06B6D4',
+                                        font: { family: 'monospace', size: 10 },
+                                        callback: function(val) {
+                                            return val >= 0 ? '€' + Number(val).toFixed(2) : '';
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    costHistoryChartInstance = new Chart(canvasCostHist.getContext('2d'), costHistConfig);
+                    window.costHistoryChartInstance = costHistoryChartInstance;
+                }
             } catch (err) {
                 console.error('Failed to load power producers chart:', err);
             }
