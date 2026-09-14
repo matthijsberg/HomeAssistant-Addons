@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.36
+Version: 0.92.37
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2950,7 +2950,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.36",
+                "version": "0.92.37",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4776,7 +4776,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.36</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.37</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -8438,14 +8438,12 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     return;
                 }
 
-                // Format PURE ENERGY (kWh) as primary metric (both charts now store kWh!)
-                const absVal = Math.abs(rawVal);
-                const kwhVal = absVal;
-                const powerW = Math.round((absVal * 1000.0) / intervalH);
-
-                const unitLabel = (intervalH === 0.25) ? 'kWh/q' : 'kWh';
-                const energyStr = `${kwhVal >= 10.0 ? kwhVal.toFixed(1) : kwhVal.toFixed(2)} ${unitLabel} (${powerStr})`;
-                const powerStr = powerW >= 1000 ? `${(powerW / 1000.0).toFixed(2)} kW` : `${powerW} W`;
+                // Format PURE POWER (kW) as primary and INTERVAL ENERGY (kWh) as secondary
+                const absKw = Math.abs(rawVal);
+                const kwhVal = Number((absKw * intervalH).toFixed(3));
+                const powerStr = `${absKw.toFixed(2)} kW`;
+                const energyStr = `${kwhVal >= 10.0 ? kwhVal.toFixed(1) : kwhVal.toFixed(2)} kWh`;
+                const intervalLabel = (intervalH === 0.25) ? 'kwartier' : 'uur';
 
                 // Calculate monetary cost / revenue per dataset type
                 let costBadge = '';
@@ -8503,9 +8501,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             ${indicatorHtml}
                             <span class="text-slate-300 truncate">${cleanLabel}</span>
                         </div>
-                        <div class="flex items-center gap-2 flex-shrink-0">
-                            <span class="font-bold text-white font-mono">${rawVal < 0 ? '-' : ''}${energyStr}</span>
-                            <span class="text-[10px] text-slate-400 font-mono">(${powerStr})</span>
+                        <div class="flex items-center gap-2 flex-shrink-0 font-mono">
+                            <span class="font-bold text-white">${rawVal < 0 ? '-' : ''}${powerStr}</span>
+                            <span class="text-[10px] text-slate-400 font-sans">(${energyStr})</span>
                             ${costBadge}
                         </div>
                     </div>
@@ -8788,36 +8786,32 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     if (document.getElementById('pred-stat-verbruik-max')) document.getElementById('pred-stat-verbruik-max').innerText = ps.totaal_verbruik.max || '--';
                 }
 
-                // === UNIFIED ENERGY (kWh) STANDARDIZATION & SYMMETRIC 0-AXIS ALIGNMENT ===
+                // === UNIFIED POWER (kW) STANDARDIZATION & SYMMETRIC 0-AXIS ALIGNMENT ===
                 const intervalH = data.interval_h || (predictionResolution === '15m' ? 0.25 : 1.0);
 
-                // Convert instantaneous power (kW) to actual interval energy (kWh = kW * hours)
-                const toKwh = (arr) => (arr || []).map(kw => Number((kw * intervalH).toFixed(3)));
-                const toKwhNeg = (arr) => (arr || []).map(kw => Number((-Math.abs(kw * intervalH)).toFixed(3)));
+                const unallocKw = (data.datasets.unallocated_kw || data.datasets.baseload_kw || []).map(Number);
+                const boilerKw = (data.datasets.boiler_kw || []).map(Number);
+                const heatingKw = (data.datasets.heating_kw || []).map(Number);
+                const batteryChargeKw = (data.datasets.battery_charge_kw || []).map(Number);
+                const solarNegKw = (data.datasets.solar_kw_neg || []).map(v => -Math.abs(Number(v)));
+                const batteryDischargeNegKw = (data.datasets.battery_discharge_kw_neg || []).map(v => -Math.abs(Number(v)));
+                const netKw = (netPowerArr || []).map(Number);
 
-                const unallocKwh = toKwh(data.datasets.unallocated_kw || data.datasets.baseload_kw);
-                const boilerKwh = toKwh(data.datasets.boiler_kw);
-                const heatingKwh = toKwh(data.datasets.heating_kw || []);
-                const batteryChargeKwh = toKwh(data.datasets.battery_charge_kw || []);
-                const solarNegKwh = toKwhNeg(data.datasets.solar_kw_neg || []);
-                const batteryDischargeNegKwh = toKwhNeg(data.datasets.battery_discharge_kw_neg || []);
-                const netKwh = toKwh(netPowerArr);
-
-                // Calculate symmetric center-aligned bounds (0 line exactly at 50% height)
-                let consKwhArr = [];
+                // Calculate symmetric center-aligned bounds in kW (0 line exactly at 50% height)
+                let consKwArr = [];
                 for (let i = 0; i < labels.length; i++) {
-                    consKwhArr.push((unallocKwh[i] || 0) + (boilerKwh[i] || 0) + (heatingKwh[i] || 0) + (batteryChargeKwh[i] || 0));
+                    consKwArr.push((unallocKw[i] || 0) + (boilerKw[i] || 0) + (heatingKw[i] || 0) + (batteryChargeKw[i] || 0));
                 }
 
-                let maxAbsKwh = Math.max(
-                    ...consKwhArr,
-                    ...solarNegKwh.map(Math.abs),
-                    ...batteryDischargeNegKwh.map(Math.abs),
-                    ...netKwh.map(Math.abs),
-                    1.0
+                let maxAbsKw = Math.max(
+                    ...consKwArr,
+                    ...solarNegKw.map(Math.abs),
+                    ...batteryDischargeNegKw.map(Math.abs),
+                    ...netKw.map(Math.abs),
+                    2.0
                 );
-                maxAbsKwh = Math.ceil(maxAbsKwh * 2) / 2; // Stappen van 0.5 kWh
-                if (maxAbsKwh < 1.5) maxAbsKwh = 1.5;
+                maxAbsKw = Math.ceil(maxAbsKw * 2) / 2; // Steps of 0.5 kW
+                if (maxAbsKw < 2.5) maxAbsKw = 2.5;
 
                 let maxAbsPrice = Math.max(...pricesArr.map(Math.abs), 0.30);
                 maxAbsPrice = Math.ceil(maxAbsPrice * 10) / 10;
@@ -8843,8 +8837,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     order: 0
                                 },
                                 {
-                                    label: 'Verwacht Netto (kWh)',
-                                    data: netKwh,
+                                    label: 'Verwacht Netto (kW)',
+                                    data: netKw,
                                     type: 'line',
                                     borderColor: '#EF4444',
                                     backgroundColor: 'transparent',
@@ -8859,8 +8853,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
                             if (isLineMode) {
                                 ds.push({
-                                    label: 'Ongedefinieerd (kWh)',
-                                    data: unallocKwh,
+                                    label: 'Ongedefinieerd (kW)',
+                                    data: unallocKw,
                                     type: 'line',
                                     borderColor: '#3B82F6',
                                     backgroundColor: 'rgba(59, 130, 246, 0.15)',
@@ -8870,8 +8864,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     order: 2
                                 });
                                 ds.push({
-                                    label: 'SWW Tapwater (kWh)',
-                                    data: boilerKwh,
+                                    label: 'SWW Tapwater (kW)',
+                                    data: boilerKw,
                                     type: 'line',
                                     borderColor: '#EC4899',
                                     backgroundColor: 'rgba(236, 72, 153, 0.2)',
@@ -8881,8 +8875,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     order: 3
                                 });
                                 ds.push({
-                                    label: 'CV Verwarming (kWh)',
-                                    data: heatingKwh,
+                                    label: 'CV Verwarming (kW)',
+                                    data: heatingKw,
                                     type: 'line',
                                     borderColor: '#6366F1',
                                     backgroundColor: 'rgba(99, 102, 241, 0.2)',
@@ -8893,8 +8887,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 });
                                 if (data.battery_enabled) {
                                     ds.push({
-                                        label: 'Accu Laden (kWh)',
-                                        data: batteryChargeKwh,
+                                        label: 'Accu Laden (kW)',
+                                        data: batteryChargeKw,
                                         type: 'line',
                                         borderColor: '#10B981',
                                         backgroundColor: 'transparent',
@@ -8905,8 +8899,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     });
                                 }
                                 ds.push({
-                                    label: 'Zon Productie (kWh)',
-                                    data: solarNegKwh,
+                                    label: 'Zon Productie (kW)',
+                                    data: solarNegKw,
                                     type: 'line',
                                     borderColor: '#F59E0B',
                                     backgroundColor: 'rgba(245, 158, 11, 0.15)',
@@ -8917,8 +8911,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 });
                                 if (data.battery_enabled) {
                                     ds.push({
-                                        label: 'Accu Ontladen (kWh)',
-                                        data: batteryDischargeNegKwh,
+                                        label: 'Accu Ontladen (kW)',
+                                        data: batteryDischargeNegKw,
                                         type: 'line',
                                         borderColor: '#14B8A6',
                                         backgroundColor: 'transparent',
@@ -8930,24 +8924,24 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 }
                             } else {
                                 ds.push({
-                                    label: 'Ongedefinieerd (kWh)',
-                                    data: unallocKwh,
+                                    label: 'Ongedefinieerd (kW)',
+                                    data: unallocKw,
                                     backgroundColor: '#3B82F6',
                                     stack: 'energy',
                                     borderRadius: 2,
                                     order: 3
                                 });
                                 ds.push({
-                                    label: 'SWW Tapwater (kWh)',
-                                    data: boilerKwh,
+                                    label: 'SWW Tapwater (kW)',
+                                    data: boilerKw,
                                     backgroundColor: '#EC4899',
                                     stack: 'energy',
                                     borderRadius: 2,
                                     order: 3
                                 });
                                 ds.push({
-                                    label: 'CV Verwarming (kWh)',
-                                    data: heatingKwh,
+                                    label: 'CV Verwarming (kW)',
+                                    data: heatingKw,
                                     backgroundColor: '#6366F1',
                                     stack: 'energy',
                                     borderRadius: 2,
@@ -8955,8 +8949,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 });
                                 if (data.battery_enabled) {
                                     ds.push({
-                                        label: 'Accu Laden (kWh)',
-                                        data: batteryChargeKwh,
+                                        label: 'Accu Laden (kW)',
+                                        data: batteryChargeKw,
                                         backgroundColor: '#10B981',
                                         stack: 'energy',
                                         borderRadius: 2,
@@ -8964,8 +8958,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     });
                                 }
                                 ds.push({
-                                    label: 'Zon Productie (kWh)',
-                                    data: solarNegKwh,
+                                    label: 'Zon Productie (kW)',
+                                    data: solarNegKw,
                                     backgroundColor: '#F59E0B',
                                     stack: 'energy',
                                     borderRadius: 2,
@@ -8973,8 +8967,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 });
                                 if (data.battery_enabled) {
                                     ds.push({
-                                        label: 'Accu Ontladen (kWh)',
-                                        data: batteryDischargeNegKwh,
+                                        label: 'Accu Ontladen (kW)',
+                                        data: batteryDischargeNegKw,
                                         backgroundColor: '#14B8A6',
                                         stack: 'energy',
                                         borderRadius: 2,
@@ -9006,11 +9000,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             },
                             y: {
                                 stacked: !isLineMode,
-                                min: -maxAbsKwh,
-                                max: maxAbsKwh,
+                                min: -maxAbsKw,
+                                max: maxAbsKw,
                                 title: { 
                                     display: true, 
-                                    text: (predictionResolution === '15m') ? 'Opbrengst < 0 < Verbruik (kWh / kwartier)' : 'Opbrengst < 0 < Verbruik (kWh / uur)', 
+                                    text: 'Opbrengst (-kW)  <  0  <  Verbruik (+kW)', 
                                     color: '#94A3B8', 
                                     font: { family: 'monospace', size: 10 } 
                                 },
@@ -9024,8 +9018,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     callback: function(val) {
                                         const absV = Math.abs(val);
                                         const prefix = val < 0 ? '-' : '';
-                                        const unitStr = (predictionResolution === '15m') ? 'kWh/q' : 'kWh';
-                                        return `${prefix}${absV.toFixed(2)} ${unitStr}`;
+                                        return `${prefix}${absV.toFixed(1)} kW`;
                                     }
                                 }
                             },
@@ -10414,29 +10407,29 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
                 const ctx = canvas.getContext('2d');
 
-                // === PURE ENERGY (kWh) STANDARDIZATION ===
+                // === PURE POWER (kW) STANDARDIZATION ===
                 const intervalH = data.interval_h || window.__lastHistoricalIntervalH || (resParam === '15m' ? 0.25 : 1.0);
 
-                // Convert instantaneous power (Watts) to actual interval energy (kWh = W * hours / 1000)
-                const toKwh = (arr) => (arr || []).map(w => Number(((w * intervalH) / 1000.0).toFixed(3)));
-                const toKwhNeg = (arr) => (arr || []).map(w => Number((-Math.abs(w * intervalH) / 1000.0).toFixed(3)));
+                // Convert instantaneous power (Watts) to pure kW (W / 1000)
+                const toKw = (arr) => (arr || []).map(w => Number((w / 1000.0).toFixed(2)));
+                const toKwNeg = (arr) => (arr || []).map(w => Number((-Math.abs(w) / 1000.0).toFixed(2)));
 
-                const afnameKwh = toKwh(data.afname);
-                const verbruikKwh = toKwh(data.verbruik);
-                const selfConsKwh = toKwh(data.self_consumption);
-                const terugKwh = toKwhNeg(data.teruglevering_negative);
-                const selfConsNegKwh = toKwhNeg(data.self_consumption);
-                const solarNegKwh = toKwhNeg(data.solar_negative);
+                const afnameKw = toKw(data.afname);
+                const verbruikKw = toKw(data.verbruik);
+                const selfConsKw = toKw(data.self_consumption);
+                const terugKw = toKwNeg(data.teruglevering_negative);
+                const selfConsNegKw = toKwNeg(data.self_consumption);
+                const solarNegKw = toKwNeg(data.solar_negative);
 
-                const netKwh = afnameKwh.map((afn, idx) => {
-                    const ter = Math.abs(terugKwh[idx] || 0);
-                    return Number((afn - ter).toFixed(3));
+                const netKw = afnameKw.map((afn, idx) => {
+                    const ter = Math.abs(terugKw[idx] || 0);
+                    return Number((afn - ter).toFixed(2));
                 });
 
                 let datasets = [];
 
                 if (powerProducersChartType === 'bar') {
-                    // === STAVEN (BAR) MODUS: 100% ZUIVERE ENERGIE (kWh) PER INTERVAL ===
+                    // === STAVEN (BAR) MODUS: 100% ZUIVER VERMOGEN (kW) PER INTERVAL ===
                     // 0. EPEX Stroomprijs All-in Stepped/Dashed Curve (Rechter Y-as)
                     if (data.prices && data.prices.length > 0) {
                         datasets.push({
@@ -10452,10 +10445,10 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             order: 0
                         });
                     }
-                    // 1. Totaal Verbruik Lijn (Oranje) in kWh
+                    // 1. Totaal Verbruik Lijn (Oranje) in kW
                     datasets.push({
-                        label: 'Totaal Verbruik (kWh)',
-                        data: verbruikKwh,
+                        label: 'Totaal Verbruik (kW)',
+                        data: verbruikKw,
                         type: 'line',
                         borderColor: '#F97316',
                         backgroundColor: 'transparent',
@@ -10464,10 +10457,10 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         tension: 0.25,
                         order: 1
                     });
-                    // 2. Netto Grid Stroom Lijn (Felrood) in kWh
+                    // 2. Netto Grid Stroom Lijn (Felrood) in kW
                     datasets.push({
-                        label: 'Netto Grid Stroom (kWh)',
-                        data: netKwh,
+                        label: 'Netto Grid Stroom (kW)',
+                        data: netKw,
                         type: 'line',
                         borderColor: '#EF4444',
                         backgroundColor: 'transparent',
@@ -10478,16 +10471,16 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     });
                     // 3. Positieve gestapelde staven: Afname + Opgewekt Gebruikt = Totaal Verbruik
                     datasets.push({
-                        label: 'Afname (kWh)',
-                        data: afnameKwh,
+                        label: 'Afname (kW)',
+                        data: afnameKw,
                         backgroundColor: '#EF4444',
                         stack: 'energy',
                         borderRadius: 2,
                         order: 3
                     });
                     datasets.push({
-                        label: 'Opgewekt Gebruikt (kWh)',
-                        data: selfConsKwh,
+                        label: 'Opgewekt Gebruikt (kW)',
+                        data: selfConsKw,
                         backgroundColor: '#06B6D4',
                         stack: 'energy',
                         borderRadius: 2,
@@ -10495,27 +10488,27 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     });
                     // 4. Negatieve gestapelde staven: Teruglevering + Direct Benut = Totale Zonneproductie
                     datasets.push({
-                        label: 'Teruglevering (kWh)',
-                        data: terugKwh,
+                        label: 'Teruglevering (kW)',
+                        data: terugKw,
                         backgroundColor: '#10B981',
                         stack: 'energy',
                         borderRadius: 2,
                         order: 4
                     });
                     datasets.push({
-                        label: 'Zon Direct Benut (kWh)',
-                        data: selfConsNegKwh,
+                        label: 'Zon Direct Benut (kW)',
+                        data: selfConsNegKw,
                         backgroundColor: '#EAB308',
                         stack: 'energy',
                         borderRadius: 2,
                         order: 4
                     });
                 } else {
-                    // === LIJN (LINE / AREA) MODUS in kWh ===
+                    // === LIJN (LINE / AREA) MODUS in kW ===
                     datasets = [
                         {
-                            label: 'Totaal Verbruik (kWh)',
-                            data: verbruikKwh,
+                            label: 'Totaal Verbruik (kW)',
+                            data: verbruikKw,
                             borderColor: '#F97316',
                             backgroundColor: 'transparent',
                             borderWidth: 2,
@@ -10524,8 +10517,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             order: 1
                         },
                         {
-                            label: 'Afname (kWh)',
-                            data: afnameKwh,
+                            label: 'Afname (kW)',
+                            data: afnameKw,
                             borderColor: '#EF4444',
                             backgroundColor: 'rgba(239, 68, 68, 0.45)',
                             fill: true,
@@ -10535,8 +10528,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             order: 2
                         },
                         {
-                            label: 'Opgewekt Gebruikt (kWh)',
-                            data: selfConsKwh,
+                            label: 'Opgewekt Gebruikt (kW)',
+                            data: selfConsKw,
                             borderColor: '#14B8A6',
                             backgroundColor: 'rgba(20, 184, 166, 0.25)',
                             fill: true,
@@ -10546,8 +10539,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             order: 3
                         },
                         {
-                            label: 'Teruglevering (kWh)',
-                            data: terugKwh,
+                            label: 'Teruglevering (kW)',
+                            data: terugKw,
                             borderColor: '#10B981',
                             backgroundColor: 'rgba(16, 185, 129, 0.45)',
                             fill: true,
@@ -10557,8 +10550,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             order: 4
                         },
                         {
-                            label: 'Zonnepanelen (kWh)',
-                            data: solarNegKwh,
+                            label: 'Zonnepanelen (kW)',
+                            data: solarNegKw,
                             borderColor: '#EAB308',
                             backgroundColor: 'rgba(234, 179, 8, 0.55)',
                             fill: true,
@@ -10570,17 +10563,17 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     ];
                 }
 
-                // Symmetrische 0-as schaling in zuivere kWh
-                const allKwhVals = [
-                    ...afnameKwh,
-                    ...verbruikKwh,
-                    ...solarNegKwh.map(Math.abs),
-                    ...terugKwh.map(Math.abs),
-                    1.0
+                // Symmetrische 0-as schaling in zuivere kW
+                const allKwVals = [
+                    ...afnameKw,
+                    ...verbruikKw,
+                    ...solarNegKw.map(Math.abs),
+                    ...terugKw.map(Math.abs),
+                    2.0
                 ];
-                let maxAbsKwh = Math.max(...allKwhVals);
-                maxAbsKwh = Math.ceil(maxAbsKwh * 2) / 2; // Stappen van 0.5 kWh
-                if (maxAbsKwh < 1.5) maxAbsKwh = 1.5;
+                let maxAbsKw = Math.max(...allKwVals);
+                maxAbsKw = Math.ceil(maxAbsKw * 2) / 2; // Stappen van 0.5 kW
+                if (maxAbsKw < 2.5) maxAbsKw = 2.5;
 
                 const allPriceVals = [
                     ...(data.prices || []).map(Math.abs),
@@ -10625,11 +10618,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 }
                             },
                             y: {
-                                min: -maxAbsKwh,
-                                max: maxAbsKwh,
+                                min: -maxAbsKw,
+                                max: maxAbsKw,
                                 title: { 
                                     display: true, 
-                                    text: (chart.data.labels.length > 50) ? 'Opbrengst < 0 < Verbruik (kWh / kwartier)' : 'Opbrengst < 0 < Verbruik (kWh / uur)', 
+                                    text: 'Opbrengst (-kW)  <  0  <  Verbruik (+kW)', 
                                     color: '#94A3B8', 
                                     font: { family: 'monospace', size: 10 } 
                                 },
@@ -10643,8 +10636,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     callback: function(val) {
                                         const absV = Math.abs(val);
                                         const prefix = val < 0 ? '-' : '';
-                                        const unitStr = (chart.data.labels.length > 50) ? 'kWh/q' : 'kWh';
-                                        return `${prefix}${absV.toFixed(2)} ${unitStr}`;
+                                        return `${prefix}${absV.toFixed(1)} kW`;
                                     }
                                 }
                             },
