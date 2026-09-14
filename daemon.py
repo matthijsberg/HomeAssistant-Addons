@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.34
+Version: 0.92.35
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1707,12 +1707,16 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     hist_prices_base.append(p_base)
                     hist_solar.append(hp["solar_kw"])
 
+                full_export_prices = [round(b - 0.00605, 4) for b in (hist_prices_base + prices_base)]
+                avg_export = (sum(full_export_prices) / len(full_export_prices)) if full_export_prices else 0.0
+
                 res = {
                     "status": "success",
                     "resolution": res_mode,
                     "labels": hist_labels + labels,
                     "epex_prices": hist_prices_all_in + prices_all_in,
                     "epex_base_prices": hist_prices_base + prices_base,
+                    "export_prices": full_export_prices,
                     "solar_forecast_kw": hist_solar + solar_forecast_kw,
                     "solar_cost": solar_cost,
                     "history_count": len(hist_pts),
@@ -1722,7 +1726,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         "max_price": f"€{max_p:.4f}/kWh",
                         "max_time": max_time,
                         "avg_price": f"€{avg_p:.4f}/kWh",
-                        "solar_savings_avg": f"€{max(0.0, avg_p - solar_cost):.4f}/kWh",
+                        "solar_savings_avg": f"€{max(0.0, avg_p - avg_export):.4f}/kWh",
+                        "avg_export_price": f"€{avg_export:.4f}/kWh",
                         "peak_solar_forecast": f"{peak_solar:.2f} kW"
                     }
                 }
@@ -2945,7 +2950,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.34",
+                "version": "0.92.35",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4770,7 +4775,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.34</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.35</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5040,9 +5045,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                     <div class="text-[10px] text-slate-400">Forecast.Solar</div>
                                 </div>
                                 <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
-                                    <div class="text-[10px] text-slate-500 uppercase">Zon Besparingsmarge</div>
-                                    <div class="text-sm font-bold text-yellow-400 mt-0.5" id="stat-epex-solar-margin">--</div>
-                                    <div class="text-[10px] text-emerald-400">Voordeel t.o.v. net</div>
+                                    <div class="text-[10px] text-slate-500 uppercase">Gem. Terugleverprijs</div>
+                                    <div class="text-sm font-bold text-cyan-400 mt-0.5" id="stat-epex-solar-margin">--</div>
+                                    <div class="text-[10px] text-slate-400">Export vergoeding</div>
                                 </div>
                             </div>
                         </div>
@@ -8067,13 +8072,13 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const label = tooltip.title[0] || '';
             const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
 
-            let epexPrice = 0.0, solarCost = 0.0, solarProd = 0.0;
+            let epexPrice = 0.0, exportPrice = 0.0, solarProd = 0.0;
             chart.data.datasets.forEach(ds => {
                 const v = ds.data[dataIndex];
                 if (!ds.label) return;
-                if (ds.label.includes('EPEX')) epexPrice = Number(v) || 0.0;
-                if (ds.label.includes('Kostprijs')) solarCost = Number(v) || 0.0;
-                if (ds.label.includes('Productie') || ds.label.includes('Zonnepanelen')) solarProd = Number(v) || 0.0;
+                if (ds.label.includes('Afname') || ds.label.includes('All-in')) epexPrice = Number(v) || 0.0;
+                else if (ds.label.includes('Teruglever')) exportPrice = Number(v) || 0.0;
+                else if (ds.label.includes('Productie') || ds.label.includes('Zonnepanelen')) solarProd = Number(v) || 0.0;
             });
 
             let html = `
@@ -8084,23 +8089,23 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
                     </div>
                     <span class="text-[10px] text-blue-300 font-mono font-semibold px-2 py-0.5 rounded bg-blue-950/80 border border-blue-800">
-                        Tarief: €${epexPrice.toFixed(4)}/kWh
+                        Afname: €${epexPrice.toFixed(4)}/kWh
                     </span>
                 </div>
                 <div class="space-y-1.5 text-xs">
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
                             <span style="display:inline-block; width:18px; height:3px; background-color:#3B82F6; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">EPEX Stroomtarief</span>
+                            <span class="text-slate-300">Stroom Afname (All-in)</span>
                         </div>
                         <span class="font-bold text-white font-mono">€${epexPrice.toFixed(4)}/kWh</span>
                     </div>
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #EAB308; margin-right:8px;"></span>
-                            <span class="text-slate-300">Zon Kostprijs</span>
+                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #38BDF8; margin-right:8px;"></span>
+                            <span class="text-slate-300">Teruglevering (Export)</span>
                         </div>
-                        <span class="font-medium text-amber-300 font-mono">€${solarCost.toFixed(4)}/kWh</span>
+                        <span class="font-medium text-cyan-300 font-mono">€${exportPrice.toFixed(4)}/kWh</span>
                     </div>
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
@@ -8111,12 +8116,12 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     </div>
                 </div>
             `;
-            if (solarProd > 0.05 && epexPrice > solarCost) {
-                const margin = epexPrice - solarCost;
+            const taxOpslag = epexPrice - exportPrice;
+            if (taxOpslag > 0) {
                 html += `
                     <div class="mt-2.5 pt-2 border-t border-slate-700/80 flex items-center justify-between font-bold text-xs font-mono">
-                        <span class="text-emerald-400 uppercase tracking-wider">Zonbesparing Marge:</span>
-                        <span class="text-emerald-300">+€${margin.toFixed(4)}/kWh</span>
+                        <span class="text-slate-400">Belasting &amp; Opslag:</span>
+                        <span class="text-slate-300">€${taxOpslag.toFixed(4)}/kWh</span>
                     </div>
                 `;
             }
@@ -9992,7 +9997,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
                 const priceDataset = {
                     type: 'line',
-                    label: 'EPEX Stroomtarief All-in (€/kWh)',
+                    label: 'Stroom Afname All-in (€/kWh)',
                     data: data.epex_prices || [],
                     yAxisID: 'y',
                     borderColor: OpenHEMSTokens.colors.priceLine,
@@ -10004,16 +10009,18 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     order: 1
                 };
 
-                const solarCostLine = data.labels.map(() => data.solar_cost);
-                const solarCostDataset = {
+                const exportDataset = {
                     type: 'line',
-                    label: `Zon Kostprijs (€${Number(data.solar_cost).toFixed(3)}/kWh)`,
-                    data: solarCostLine,
+                    label: 'Teruglevertarief Export (€/kWh)',
+                    data: data.export_prices || [],
                     yAxisID: 'y',
-                    borderColor: OpenHEMSTokens.colors.solarCost,
-                    borderWidth: 1.5,
-                    borderDash: [6, 4],
+                    borderColor: '#38BDF8',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2,
+                    borderDash: [5, 4],
+                    stepped: 'before',
                     pointRadius: 0,
+                    tension: 0,
                     fill: false,
                     order: 3
                 };
@@ -10023,7 +10030,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     type: isBarMode ? 'bar' : 'line',
                     data: {
                         labels: data.labels,
-                        datasets: [solarDataset, priceDataset, solarCostDataset]
+                        datasets: [solarDataset, priceDataset, exportDataset]
                     },
                     options: {
                         responsive: true,
