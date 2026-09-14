@@ -85,47 +85,50 @@ class CentralPlanner:
             mins_since_last_lockout=mins_since_last_lockout
         )
 
-        # 2. Simulate Counterfactual (Unheated) DHW Tank Trajectory
-        # Evaluates baseline cooldown and determines whether comfort is at risk during the morning peak (<40°C)
-        sim_temp = current_dhw_temp
+        # 2. Simulate Counterfactual (Unheated) DHW Tank Trajectory using Calibrated DhwThermalModel
+        from layer2_calibration.dhw_thermal_model import DhwThermalModel
+        dhw_model = DhwThermalModel()
+        unheated_sim = dhw_model.simulate_trajectory(
+            t_start_c=current_dhw_temp,
+            start_dt=now,
+            hours_ahead=24,
+            heat_pump_schedule_slots=[]
+        )
+        sim_temps = unheated_sim.get("temperatures_c", [])
+        sim_labels = unheated_sim.get("labels", [])
+        sim_p05 = unheated_sim.get("temps_p05", [])
+        sim_p95 = unheated_sim.get("temps_p95", [])
+
         unheated_trajectory = []
-        dip_time = None
-        dip_temp = 99.0
-
-        for i, s in enumerate(slots):
-            # Standing loss (58.9W for 350L tank at 50°C)
-            dT_loss = (cls.DHW_STANDBY_LOSS_KW * step_hours) / cls.DHW_THERMAL_CAPACITY_KWH_PER_K
-            # Shower draw assumption: 07:15 and 20:00 draws
-            draw_loss = 0.0
-            if s.dt.hour == 7 and s.dt.minute == 15:
-                draw_loss = 4.5  # ~50L hot water draw
-            elif s.dt.hour == 20 and s.dt.minute == 0:
-                draw_loss = 3.0
-
-            sim_temp = max(20.0, sim_temp - dT_loss - draw_loss)
-            if sim_temp < dip_temp:
-                dip_temp = sim_temp
-                dip_time = s.dt.strftime("%H:%M")
-
+        for i in range(min(n_slots, len(sim_temps))):
+            t_val = sim_temps[i]
             unheated_trajectory.append({
-                "time": s.label,
-                "temp_c": round(sim_temp, 1),
-                "lower_bound_p05": round(max(20.0, sim_temp - 1.8), 1),
-                "upper_bound_p95": round(sim_temp + 0.5, 1)
+                "time": sim_labels[i] if i < len(sim_labels) else slots[i].label,
+                "temp_c": round(t_val, 1),
+                "lower_bound_p05": round(sim_p05[i] if i < len(sim_p05) else max(20.0, t_val - 1.8), 1),
+                "upper_bound_p95": round(sim_p95[i] if i < len(sim_p95) else t_val + 0.5, 1)
             })
 
-        # Morning comfort check: check tank temperature in slots between 06:30 and 09:30 tomorrow
+        # Morning comfort check: check tank temperature in morning slots (06:00 - 09:45 tomorrow)
         morning_slots_sim = [
-            (i, s, unheated_trajectory[i]["temp_c"]) for i, s in enumerate(slots)
-            if 6 <= s.dt.hour <= 9 and (s.dt.date() > now.date() or (now.hour < 6 and s.dt.date() == now.date()))
+            (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(sim_labels, sim_temps))
+            if ("06:00" <= lbl <= "09:45" and idx >= 16)
         ]
-        morning_dip_c = min([t for _, _, t in morning_slots_sim]) if morning_slots_sim else dip_temp
+        if morning_slots_sim:
+            min_morn_slot = min(morning_slots_sim, key=lambda x: x[2])
+            morning_dip_c = round(min_morn_slot[2], 1)
+            morning_dip_time = min_morn_slot[1]
+        else:
+            morning_dip_c = round(min(sim_temps[:36]), 1) if sim_temps else current_dhw_temp
+            morning_dip_time = "08:30"
+
         morning_comfort_risk = (morning_dip_c < 40.0)
 
         # 3. DHW Boiler 350L Dispatch Engine
         # Physical daytime priority (10:00-16:00) vs night run
         cur_h = now.hour
-        has_daytime_ahead = (cur_h < 15)
+        is_night_time = (cur_h >= 20 or cur_h < 6)
+        has_daytime_ahead = (cur_h < 15 and not is_night_time)
 
         day_solar_surplus = 0.0
         day_solar_slots = []
@@ -142,38 +145,18 @@ class CentralPlanner:
         sww_target_temp = 50.0
         sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
 
-        # Strategy A: Solar Boost (60°C) if surplus >= 2.5 kWh during daytime
-        if has_daytime_ahead and day_solar_surplus >= 2.5 and len(day_solar_slots) >= 4:
-            planned_mode = "forced_solar_boost_60"
-            planned_mode_label = "Maximaal aan (doorverwarming tot 60°C)"
-            sww_target_temp = 60.0
-            sww_power_kw = cls.DHW_SOLAR_BOOST_ELECTRIC_KW
-            # Choose best 6 contiguous solar slots (1.5 hours)
-            best_solar_start = day_solar_slots[0]
-            planned_dhw_slots = list(range(best_solar_start, min(n_slots, best_solar_start + 6)))
-
-        # Strategy B: Standard Daytime Run (50°C) if daytime remains and tank drops
-        elif has_daytime_ahead and current_dhw_temp <= 49.0:
-            planned_mode = "forced_on"
-            planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
-            sww_target_temp = 50.0
-            sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
-            # Pick lowest price window between 11:00 and 16:00
-            day_cand = [i for i, s in enumerate(slots) if 11 <= s.dt.hour <= 15]
-            if day_cand:
-                best_day_start = min(day_cand, key=lambda idx: slots[idx].price_all_in)
-                planned_dhw_slots = list(range(best_day_start, min(n_slots, best_day_start + 4)))
-
-        # Strategy C: Nachtverwarmen Logic (Evening/Night when morning peak comfort is at risk)
-        # Zoekt het optimale venster tussen na het avondblok (of >= 20:00) en vóór de ochtendspits (of <= 06:00)
-        elif morning_comfort_risk or (cur_h >= 20 or cur_h < 6):
+        # Priority 1: Morning comfort risk (<40°C) during night/evening -> Nachtverwarming (20:00 - 06:00)
+        # Comfortzekerheid vóór 10:00u weegt zwaarder dan wachten op zon.
+        if (morning_comfort_risk or current_dhw_temp <= 41.0) and is_night_time:
             # 1. Thermal heat requirement to reach 50°C setpoint
-            delta_t = max(1.0, 50.0 - current_dhw_temp)
+            # Factor in estimated cooldown until night run (~1.5K)
+            est_tank_temp = max(35.0, current_dhw_temp - 1.5)
+            delta_t = max(1.0, 50.0 - est_tank_temp)
             th_need_kwh = delta_t * cls.DHW_THERMAL_CAPACITY_KWH_PER_K
 
             # Daikin thermal capacity ~6.5 kW_th -> 1.625 kWh_th per 15-min slot
             th_per_slot = 6.5 * step_hours
-            n_req_slots = max(1, min(8, math.ceil(th_need_kwh / th_per_slot)))
+            n_req_slots = max(2, min(8, math.ceil(th_need_kwh / th_per_slot)))
 
             # 2. Find morning peak start slot or first slot with hour >= 6
             morn_start_idx = n_slots
@@ -231,18 +214,40 @@ class CentralPlanner:
 
                 candidate_windows.append((total_window_cost_eur, start_idx, n_req_slots, total_el_kwh, mean_cop))
 
-            if candidate_windows and (morning_comfort_risk or current_dhw_temp <= 44.0):
+            if candidate_windows:
                 candidate_windows.sort(key=lambda x: x[0])
                 best_cost, best_start, best_len, best_el, best_cop = candidate_windows[0]
-                planned_mode = "forced_on"
-                planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
+                planned_mode = "forced_night_50"
+                planned_mode_label = "Geforceerd aan (Nachtlading tot 50°C)"
                 sww_target_temp = 50.0
-                sww_power_kw = round((th_need_kwh / (best_len * step_hours)) / best_cop, 2)
+                sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
                 planned_dhw_slots = list(range(best_start, best_start + best_len))
             else:
                 planned_mode = "normal"
-                planned_mode_label = "Normaal (Standby — Wachten op middag/zon)"
+                planned_mode_label = "Normaal (Standby — Geen nachtvenster)"
                 planned_dhw_slots = []
+
+        # Priority 2: Strategy A: Solar Boost (60°C) if surplus >= 2.5 kWh during daytime
+        elif has_daytime_ahead and day_solar_surplus >= 2.5 and len(day_solar_slots) >= 4:
+            planned_mode = "forced_solar_boost_60"
+            planned_mode_label = "Maximaal aan (doorverwarming tot 60°C)"
+            sww_target_temp = 60.0
+            sww_power_kw = cls.DHW_SOLAR_BOOST_ELECTRIC_KW
+            # Choose best 6 contiguous solar slots (1.5 hours)
+            best_solar_start = day_solar_slots[0]
+            planned_dhw_slots = list(range(best_solar_start, min(n_slots, best_solar_start + 6)))
+
+        # Priority 3: Strategy B: Standard Daytime Run (50°C) if daytime remains and tank drops
+        elif has_daytime_ahead and current_dhw_temp <= 49.0:
+            planned_mode = "forced_on"
+            planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
+            sww_target_temp = 50.0
+            sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
+            # Pick lowest price window between 11:00 and 16:00
+            day_cand = [i for i, s in enumerate(slots) if 11 <= s.dt.hour <= 15]
+            if day_cand:
+                best_day_start = min(day_cand, key=lambda idx: slots[idx].price_all_in)
+                planned_dhw_slots = list(range(best_day_start, min(n_slots, best_day_start + 4)))
         else:
             planned_mode = "normal"
             planned_mode_label = "Normaal (Standby — Wachten op middag/zon)"
@@ -311,7 +316,7 @@ class CentralPlanner:
                 else:
                     # 5. Geforceerd aan (50°C)
                     state = StandardizedState.FORCED_ON
-                    mode_lbl = "Geforceerd aan (verwarmen tot 50°C)"
+                    mode_lbl = "Geforceerd aan (Nachtlading tot 50°C)" if planned_mode == "forced_night_50" else "Geforceerd aan (verwarmen tot 50°C)"
                     desc = f"Geforceerd aan ({s.label}): Verwarmen naar setpoint 50°C · Vermogen {dhw_kw} kW elektrisch."
             elif h_slot and h_slot.is_preheat_active:
                 # 4. Geadviseerd aan (Vloerbuffer Pre-Heat SG3)
@@ -381,8 +386,8 @@ class CentralPlanner:
             dynamic_peaks=dynamic_peaks,
             unheated_trajectory=unheated_trajectory,
             counterfactual_reason=(
-                f"Zonder geplande run daalt de boilertemperatuur naar {dip_temp:.1f}°C rond {dip_time}. "
-                f"Tijdens de avondspits ({spits_lockout_hours}u vergrendeling) kan de warmtepomp niet meer bijverwarmen."
+                f"Zonder geplande run daalt de boilertemperatuur naar {morning_dip_c:.1f}°C rond {morning_dip_time}. "
+                f"Tijdens de ochtendspits ({spits_lockout_hours}u vergrendeling) kan de warmtepomp niet meer bijverwarmen."
             ),
             arbitrage_saving_eur=0.30
         )

@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.46
+Version: 0.92.47
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1503,19 +1503,32 @@ def ensure_active_canonical_plan(force_refresh=False):
     cur_room = 20.0
     last_hw_time = None
     try:
-        sec = load_secrets()
-        pw = sec.get("influx_password", "")
-        if pw:
-            query = 'SELECT last("temperature") FROM "daikin_heat_pump" WHERE "mode" = \'dhw\' AND time > now() - 2h'
-            q_url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pw}&db=openhems&q={urllib.parse.quote(query)}"
-            with urllib.request.urlopen(q_url, timeout=3) as r:
-                res = json.loads(r.read().decode())
-                series = res.get("results", [{}])[0].get("series", [])
-                if series:
-                    cur_dhw = float(series[0]["values"][0][1])
-                    last_hw_time = datetime.now(ZoneInfo("Europe/Amsterdam"))
-    except Exception:
-        pass
+        states_map = get_ha_states_map()
+        t_tank = float(states_map.get("sensor.hc_dhw_temperature_r5t_dhw_tank", {}).get("state", 0.0))
+        if 20.0 <= t_tank <= 75.0:
+            cur_dhw = t_tank
+            last_hw_time = datetime.now(ZoneInfo("Europe/Amsterdam"))
+        t_room = float(states_map.get("sensor.woonkamer_temperatuur", {}).get("state", 0.0))
+        if 15.0 <= t_room <= 30.0:
+            cur_room = t_room
+    except Exception as e_st:
+        print(f"Warning reading HA states in ensure_active_canonical_plan: {e_st}")
+
+    if last_hw_time is None:
+        try:
+            sec = load_secrets()
+            pw = sec.get("influx_password", "")
+            if pw:
+                query = 'SELECT last("temperature") FROM "daikin_heat_pump" WHERE "mode" = \'dhw\' AND time > now() - 2h'
+                q_url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pw}&db=openhems&q={urllib.parse.quote(query)}"
+                with urllib.request.urlopen(q_url, timeout=3) as r:
+                    res = json.loads(r.read().decode())
+                    series = res.get("results", [{}])[0].get("series", [])
+                    if series:
+                        cur_dhw = float(series[0]["values"][0][1])
+                        last_hw_time = datetime.now(ZoneInfo("Europe/Amsterdam"))
+        except Exception:
+            pass
 
     # 4. Extract unallocated profile
     grid_96 = []
@@ -2770,7 +2783,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     print(f"Warning in evaluate_and_apply_dhw_run_merger: {e_mrg}")
 
                 decision = {
-                    "status": "SCHEDULE_NIGHT_CHARGE" if planned_mode == "forced_night_50" else "SKIP_NIGHT_CHARGE",
+                    "status": "SCHEDULE_NIGHT_CHARGE" if (planned_mode in ["forced_night_50", "forced_on"] and not comfort_guaranteed) else "SKIP_NIGHT_CHARGE",
                     "planned_mode": planned_mode,
                     "box_title": box_title,
                     "badge_html": badge_html,
@@ -2979,7 +2992,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.46",
+                "version": "0.92.47",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4641,7 +4654,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.46</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.47</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
