@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.30
+Version: 0.92.31
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -165,6 +165,72 @@ def save_secret(domain: str, conn_id: str, secret: str):
         json.dump(sec, f, indent=2)
     os.replace(tmp, SECRETS_FILE)
 
+
+_WORKING_HA_BASE_URL = None
+
+def get_ha_client_config() -> Tuple[str, str]:
+    """
+    Returns (ha_url, token) for Home Assistant Core REST API.
+    Auto-discovers and caches the responsive endpoint among:
+      - Direct internal HA Docker bridge: https://172.30.32.1:8123
+      - Direct internal Docker service name: https://homeassistant:8123
+      - User-configured URL in secrets
+      - http://supervisor/core
+    """
+    global _WORKING_HA_BASE_URL
+    sec = load_secrets()
+    ha_sec = sec.get("homeassistant", {})
+    token = ha_sec.get("token") or os.environ.get("HASS_TOKEN", "")
+    
+    if not token and HA_API_CONFIG.exists():
+        cfg = load_json(HA_API_CONFIG)
+        token = cfg.get("HASS_TOKEN")
+
+    if not token and os.path.exists("/data/options.json"):
+        try:
+            with open("/data/options.json") as f:
+                opts = json.load(f)
+                token = opts.get("homeassistant_token") or token
+        except Exception:
+            pass
+
+    if _WORKING_HA_BASE_URL:
+        return _WORKING_HA_BASE_URL, token
+
+    configured_url = ha_sec.get("url") or os.environ.get("HASS_URL")
+    candidates = [
+        "https://172.30.32.1:8123",
+        "https://homeassistant:8123",
+        configured_url,
+        "http://supervisor/core",
+        "https://hass.b3rg.nl:8123"
+    ]
+    seen = set()
+    uniq_candidates = []
+    for c in candidates:
+        if c and c not in seen:
+            seen.add(c)
+            uniq_candidates.append(c)
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    for candidate in uniq_candidates:
+        try:
+            req = urllib.request.Request(f"{candidate}/api/states/zone.home", headers=headers)
+            with urllib.request.urlopen(req, timeout=1.5, context=ctx) as r:
+                if r.status in [200, 201]:
+                    _WORKING_HA_BASE_URL = candidate
+                    return _WORKING_HA_BASE_URL, token
+        except Exception:
+            continue
+
+    default_url = configured_url or "https://172.30.32.1:8123"
+    return default_url, token
+
+
 def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
     """
     Fetches Open-Meteo weather forecast for Culemborg (51.9537, 5.2320),
@@ -180,9 +246,7 @@ def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
     wb_solar = None
     wb_rh = None
     try:
-        ha_sec = load_secrets()
-        ha_tok = ha_sec.get("homeassistant", {}).get("token")
-        ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
+        ha_url, ha_tok = get_ha_client_config()
         if ha_tok and ha_url:
             ctx_ssl = ssl.create_default_context()
             ctx_ssl.check_hostname = False
@@ -300,23 +364,7 @@ def save_json(p: Path, data: dict):
 
 def fetch_ha_entities():
     """Queries Home Assistant Core REST API for available entities for dropdown selection."""
-    sec = load_secrets()
-    ha_cfg_tok = sec.get("homeassistant", {}).get("token")
-    if ha_cfg_tok:
-        token = ha_cfg_tok
-        ha_url = sec.get("homeassistant", {}).get("url") or "https://hass.b3rg.nl:8123"
-    elif os.environ.get("SUPERVISOR_TOKEN"):
-        token = os.environ["SUPERVISOR_TOKEN"]
-        ha_url = "http://supervisor/core"
-    else:
-        token = os.environ.get("HASS_TOKEN", "")
-        ha_url = os.environ.get("HASS_URL", "https://hass.b3rg.nl:8123")
-
-    if not token and HA_API_CONFIG.exists():
-        cfg = load_json(HA_API_CONFIG)
-        token = cfg.get("HASS_TOKEN")
-        ha_url = cfg.get("HASS_URL") or ha_url
-
+    ha_url, token = get_ha_client_config()
     if not token:
         return []
 
@@ -413,23 +461,8 @@ def log_technical_error(domain: str, event_type: str, reason: str, explanation: 
 
 def call_ha_service_detailed(domain: str, service: str, service_data: dict) -> Tuple[bool, Optional[str]]:
     """Calls a Home Assistant Core REST API service and returns success status plus error message."""
-    sec = load_secrets()
-    ha_cfg_tok = sec.get("homeassistant", {}).get("token")
-    if ha_cfg_tok:
-        token = ha_cfg_tok
-        ha_url = sec.get("homeassistant", {}).get("url") or "https://hass.b3rg.nl:8123"
-    elif os.environ.get("SUPERVISOR_TOKEN"):
-        token = os.environ["SUPERVISOR_TOKEN"]
-        ha_url = "http://supervisor/core"
-    else:
-        token = os.environ.get("HASS_TOKEN", "")
-        ha_url = os.environ.get("HASS_URL", "https://hass.b3rg.nl:8123")
-
-    if not token and HA_API_CONFIG.exists():
-        cfg = load_json(HA_API_CONFIG)
-        token = cfg.get("HASS_TOKEN")
-        ha_url = cfg.get("HASS_URL") or ha_url
-
+    global _WORKING_HA_BASE_URL
+    ha_url, token = get_ha_client_config()
     if not token:
         return False, "Geen Home Assistant token geconfigureerd in options.json of environment"
 
@@ -448,8 +481,10 @@ def call_ha_service_detailed(domain: str, service: str, service_data: dict) -> T
     except urllib.error.HTTPError as he:
         return False, f"HTTP Fout {he.code}: {he.reason}"
     except urllib.error.URLError as ue:
+        _WORKING_HA_BASE_URL = None
         return False, f"Verbindingsfout naar HA ({ha_url}): {ue.reason}"
     except Exception as e:
+        _WORKING_HA_BASE_URL = None
         return False, str(e)
 
 
@@ -2229,9 +2264,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             thermostat_active = True
             thermostat_status_msg = "Actief (CV Verwarming Standby)"
             try:
-                ha_sec = load_secrets()
-                ha_tok = ha_sec.get("homeassistant", {}).get("token")
-                ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
+                ha_url, ha_tok = get_ha_client_config()
                 if ha_tok and ha_url:
                     ctx_ssl = ssl.create_default_context()
                     ctx_ssl.check_hostname = False
@@ -2408,9 +2441,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             is_15m = (res_mode == "15m")
             t_live = 49.2
             try:
-                ha_sec = load_secrets()
-                ha_tok = ha_sec.get("homeassistant", {}).get("token")
-                ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
+                ha_url, ha_tok = get_ha_client_config()
                 if ha_tok and ha_url:
                     req_t = urllib.request.Request(
                         f"{ha_url}/api/states/sensor.hc_dhw_temperature_r5t_dhw_tank",
@@ -2854,7 +2885,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.30",
+                "version": "0.92.31",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -2895,16 +2926,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             # Home Assistant Core Connection info (Bi-directional: Bron & Doel)
             ha_sec = load_secrets()
-            ha_cfg_tok = ha_sec.get("homeassistant", {}).get("token")
-            if ha_cfg_tok:
-                ha_token = ha_cfg_tok
-                ha_base_url = ha_sec.get("homeassistant", {}).get("url") or "https://hass.b3rg.nl:8123"
-            elif os.environ.get("SUPERVISOR_TOKEN"):
-                ha_token = os.environ["SUPERVISOR_TOKEN"]
-                ha_base_url = "http://supervisor/core"
-            else:
-                ha_token = os.environ.get("HASS_TOKEN", "")
-                ha_base_url = os.environ.get("HASS_URL", "https://hass.b3rg.nl:8123")
+            ha_base_url, ha_token = get_ha_client_config()
             
             ha_sources = []
             ha_targets = []
@@ -3266,9 +3288,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             indoor_temp_c = 22.0
             plan_thermostat_active = True
             try:
-                ha_sec = load_secrets()
-                ha_tok = ha_sec.get("homeassistant", {}).get("token")
-                ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
+                ha_url, ha_tok = get_ha_client_config()
                 if ha_tok and ha_url:
                     ctx = ssl.create_default_context()
                     ctx.check_hostname = False
@@ -3370,9 +3390,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             # Query live tank temperature
             t_dhw_live = 49.2
             try:
-                ha_sec = load_secrets()
-                ha_tok = ha_sec.get("homeassistant", {}).get("token")
-                ha_url = ha_sec.get("homeassistant", {}).get("url", "https://hass.b3rg.nl:8123")
+                ha_url, ha_tok = get_ha_client_config()
                 if ha_tok and ha_url:
                     req_t = urllib.request.Request(
                         f"{ha_url}/api/states/sensor.hc_dhw_temperature_r5t_dhw_tank",
@@ -4037,16 +4055,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         # INFRASTRUCTURE: Test Home Assistant Core
         if path == "/api/infrastructure/homeassistant/test":
             ha_sec = load_secrets()
-            ha_cfg_tok = ha_sec.get("homeassistant", {}).get("token")
-            if ha_cfg_tok:
-                ha_token = ha_cfg_tok
-                ha_base_url = ha_sec.get("homeassistant", {}).get("url") or "https://hass.b3rg.nl:8123"
-            elif os.environ.get("SUPERVISOR_TOKEN"):
-                ha_token = os.environ["SUPERVISOR_TOKEN"]
-                ha_base_url = "http://supervisor/core"
-            else:
-                ha_token = os.environ.get("HASS_TOKEN", "")
-                ha_base_url = os.environ.get("HASS_URL", "https://hass.b3rg.nl:8123")
+            ha_base_url, ha_token = get_ha_client_config()
             if not ha_token:
                 self._send_json({"status": "error", "message": "Geen Supervisor of HASS token gevonden"}, 400)
                 return
@@ -4710,7 +4719,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.30</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.31</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>

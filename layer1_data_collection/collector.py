@@ -67,10 +67,10 @@ class EnergyDataCollector:
             try:
                 with open(HA_CONFIG_PATH, "r") as f:
                     data = json.load(f)
-                    return data.get("HASS_URL", "https://hass.b3rg.nl:8123"), data.get("HASS_TOKEN", "")
+                    return data.get("HASS_URL", "https://172.30.32.1:8123"), data.get("HASS_TOKEN", "")
             except Exception:
                 pass
-        return "https://hass.b3rg.nl:8123", ""
+        return "https://172.30.32.1:8123", ""
 
     # =========================================================================
     # DATA EXCLUSION & QUALITY MASK
