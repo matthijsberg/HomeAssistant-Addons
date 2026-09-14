@@ -12,6 +12,7 @@ Strictly preserves all operational and physical directives:
 - Gestandaardiseerde 6-status taxonomie (forced_off, advised_off, normal, advised_on, forced_on, max_on)
 """
 
+import math
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from models.canonical import (
@@ -84,7 +85,44 @@ class CentralPlanner:
             mins_since_last_lockout=mins_since_last_lockout
         )
 
-        # 2. DHW Boiler 350L Dispatch Engine
+        # 2. Simulate Counterfactual (Unheated) DHW Tank Trajectory
+        # Evaluates baseline cooldown and determines whether comfort is at risk during the morning peak (<40°C)
+        sim_temp = current_dhw_temp
+        unheated_trajectory = []
+        dip_time = None
+        dip_temp = 99.0
+
+        for i, s in enumerate(slots):
+            # Standing loss (58.9W for 350L tank at 50°C)
+            dT_loss = (cls.DHW_STANDBY_LOSS_KW * step_hours) / cls.DHW_THERMAL_CAPACITY_KWH_PER_K
+            # Shower draw assumption: 07:15 and 20:00 draws
+            draw_loss = 0.0
+            if s.dt.hour == 7 and s.dt.minute == 15:
+                draw_loss = 4.5  # ~50L hot water draw
+            elif s.dt.hour == 20 and s.dt.minute == 0:
+                draw_loss = 3.0
+
+            sim_temp = max(20.0, sim_temp - dT_loss - draw_loss)
+            if sim_temp < dip_temp:
+                dip_temp = sim_temp
+                dip_time = s.dt.strftime("%H:%M")
+
+            unheated_trajectory.append({
+                "time": s.label,
+                "temp_c": round(sim_temp, 1),
+                "lower_bound_p05": round(max(20.0, sim_temp - 1.8), 1),
+                "upper_bound_p95": round(sim_temp + 0.5, 1)
+            })
+
+        # Morning comfort check: check tank temperature in slots between 06:30 and 09:30 tomorrow
+        morning_slots_sim = [
+            (i, s, unheated_trajectory[i]["temp_c"]) for i, s in enumerate(slots)
+            if 6 <= s.dt.hour <= 9 and (s.dt.date() > now.date() or (now.hour < 6 and s.dt.date() == now.date()))
+        ]
+        morning_dip_c = min([t for _, _, t in morning_slots_sim]) if morning_slots_sim else dip_temp
+        morning_comfort_risk = (morning_dip_c < 40.0)
+
+        # 3. DHW Boiler 350L Dispatch Engine
         # Physical daytime priority (10:00-16:00) vs night run
         cur_h = now.hour
         has_daytime_ahead = (cur_h < 15)
@@ -104,7 +142,6 @@ class CentralPlanner:
         sww_target_temp = 50.0
         sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
 
-        # Decide DHW Strategy:
         # Strategy A: Solar Boost (60°C) if surplus >= 2.5 kWh during daytime
         if has_daytime_ahead and day_solar_surplus >= 2.5 and len(day_solar_slots) >= 4:
             planned_mode = "forced_solar_boost_60"
@@ -127,21 +164,89 @@ class CentralPlanner:
                 best_day_start = min(day_cand, key=lambda idx: slots[idx].price_all_in)
                 planned_dhw_slots = list(range(best_day_start, min(n_slots, best_day_start + 4)))
 
-        # Strategy C: Night Dip Safeguard (00:00-06:00 with 03:30 tie-breaker)
-        else:
-            night_cand = [i for i, s in enumerate(slots) if 0 <= s.dt.hour <= 5]
-            if night_cand:
+        # Strategy C: Nachtverwarmen Logic (Evening/Night when morning peak comfort is at risk)
+        # Zoekt het optimale venster tussen na het avondblok (of >= 20:00) en vóór de ochtendspits (of <= 06:00)
+        elif morning_comfort_risk or (cur_h >= 20 or cur_h < 6):
+            # 1. Thermal heat requirement to reach 50°C setpoint
+            delta_t = max(1.0, 50.0 - current_dhw_temp)
+            th_need_kwh = delta_t * cls.DHW_THERMAL_CAPACITY_KWH_PER_K
+
+            # Daikin thermal capacity ~6.5 kW_th -> 1.625 kWh_th per 15-min slot
+            th_per_slot = 6.5 * step_hours
+            n_req_slots = max(1, min(8, math.ceil(th_need_kwh / th_per_slot)))
+
+            # 2. Find morning peak start slot or first slot with hour >= 6
+            morn_start_idx = n_slots
+            for idx, s in enumerate(slots):
+                if idx > 0 and ((s.dt.hour >= 6 and (s.dt.date() > now.date() or now.hour < 6)) or (slot_lockout_map.get(idx, {}).get("is_hard_lockout") and s.dt.hour < 11)):
+                    morn_start_idx = idx
+                    break
+
+            candidate_windows = []
+            for start_idx in range(n_slots - n_req_slots + 1):
+                end_idx = start_idx + n_req_slots
+                if end_idx > morn_start_idx:
+                    continue
+
+                window_slots = slots[start_idx:end_idx]
+                s_start = window_slots[0]
+                # Start must be after evening peak / >= 20:00, or early morning < 06:00
+                is_night_window = (s_start.dt.hour >= 20 or s_start.dt.hour < 6)
+                if not is_night_window:
+                    continue
+
+                # Must not intersect any hard peak lockout
+                has_lockout = any(slot_lockout_map.get(k, {}).get("is_hard_lockout") for k in range(start_idx, end_idx))
+                if has_lockout:
+                    continue
+
+                # Calculate window cost:
+                # a. COP per quarter based on predicted outdoor temperature: COP = 2.55 + 0.075 * T_outdoor
+                total_window_cost_eur = 0.0
+                total_el_kwh = 0.0
+                cops = []
+                for k_idx, s_k in enumerate(window_slots):
+                    t_out = s_k.outdoor_temp_c
+                    cop_slot = max(1.8, min(4.5, 2.55 + 0.075 * t_out))
+                    cops.append(cop_slot)
+                    el_slot_kwh = (th_need_kwh / n_req_slots) / cop_slot
+                    total_el_kwh += el_slot_kwh
+
+                    p_in = s_k.price_all_in
+                    p_exp = max(0.0, (p_in / 1.21) - 0.11085 - 0.0121 - 0.00605)
+                    surplus_kw = max(0.0, s_k.solar_kw - s_k.unallocated_kw)
+                    surplus_kwh = surplus_kw * step_hours
+                    self_kwh = min(el_slot_kwh, surplus_kwh)
+                    grid_kwh = max(0.0, el_slot_kwh - self_kwh)
+
+                    total_window_cost_eur += (grid_kwh * p_in) + (self_kwh * p_exp)
+
+                # b. Standing loss from end of run until morning peak start (58.9W standby loss)
+                mean_cop = sum(cops) / len(cops) if cops else 2.8
+                hours_until_morn = max(0.0, (morn_start_idx - end_idx) * step_hours)
+                extra_th_loss_kwh = hours_until_morn * cls.DHW_STANDBY_LOSS_KW
+                extra_el_loss_kwh = extra_th_loss_kwh / mean_cop
+                mean_price = sum(s_k.price_all_in for s_k in window_slots) / len(window_slots)
+                total_window_cost_eur += extra_el_loss_kwh * mean_price
+
+                candidate_windows.append((total_window_cost_eur, start_idx, n_req_slots, total_el_kwh, mean_cop))
+
+            if candidate_windows and (morning_comfort_risk or current_dhw_temp <= 44.0):
+                candidate_windows.sort(key=lambda x: x[0])
+                best_cost, best_start, best_len, best_el, best_cop = candidate_windows[0]
                 planned_mode = "forced_on"
                 planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
                 sww_target_temp = 50.0
-                sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
-                # Tie-breaker logic: favor ~03:30 when flat prices
-                def night_cost(idx):
-                    p = slots[idx].price_all_in
-                    h_dist = abs(slots[idx].dt.hour + slots[idx].dt.minute / 60.0 - 3.5)
-                    return p + 0.001 * h_dist
-                best_night_start = min(night_cand, key=night_cost)
-                planned_dhw_slots = list(range(best_night_start, min(n_slots, best_night_start + 4)))
+                sww_power_kw = round((th_need_kwh / (best_len * step_hours)) / best_cop, 2)
+                planned_dhw_slots = list(range(best_start, best_start + best_len))
+            else:
+                planned_mode = "normal"
+                planned_mode_label = "Normaal (Standby — Wachten op middag/zon)"
+                planned_dhw_slots = []
+        else:
+            planned_mode = "normal"
+            planned_mode_label = "Normaal (Standby — Wachten op middag/zon)"
+            planned_dhw_slots = []
 
         # Avoid hard peak lockout for DHW runs
         final_dhw_slots = []
@@ -149,34 +254,6 @@ class CentralPlanner:
             peak = slot_lockout_map.get(s_idx)
             if not (peak and peak.get("is_hard_lockout")):
                 final_dhw_slots.append(s_idx)
-
-        # 3. Simulate Counterfactual (Unheated) DHW Tank Trajectory
-        sim_temp = current_dhw_temp
-        unheated_trajectory = []
-        dip_time = None
-        dip_temp = 99.0
-
-        for i, s in enumerate(slots):
-            # Standing loss
-            dT_loss = (cls.DHW_STANDBY_LOSS_KW * step_hours) / cls.DHW_THERMAL_CAPACITY_KWH_PER_K
-            # Shower draw assumption: 07:15 and 20:00 draws
-            draw_loss = 0.0
-            if s.dt.hour == 7 and s.dt.minute == 15:
-                draw_loss = 4.5  # ~50L hot water draw
-            elif s.dt.hour == 20 and s.dt.minute == 0:
-                draw_loss = 3.0
-
-            sim_temp = max(20.0, sim_temp - dT_loss - draw_loss)
-            if sim_temp < dip_temp:
-                dip_temp = sim_temp
-                dip_time = s.dt.strftime("%H:%M")
-
-            unheated_trajectory.append({
-                "time": s.label,
-                "temp_c": round(sim_temp, 1),
-                "lower_bound_p05": round(max(20.0, sim_temp - 1.8), 1),
-                "upper_bound_p95": round(sim_temp + 0.5, 1)
-            })
 
         # 4. Space Heating Optimization & Pre-Heat Floor Buffering (2R1C model)
         from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
