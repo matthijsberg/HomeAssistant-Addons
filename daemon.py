@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.31
+Version: 0.92.32
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1323,6 +1323,113 @@ def ensure_framework_defaults(cfg: dict):
         save_json(CONFIG_FILE, cfg)
 
 
+EPEX_CACHE_FILE = Path("/config/open_hems_epex_cache.json")
+_EPEX_CACHE_DATA: Dict[str, Any] = {}
+_LAST_EPEX_POLL_TS = 0.0
+
+def _load_epex_cache():
+    global _EPEX_CACHE_DATA
+    if not _EPEX_CACHE_DATA and EPEX_CACHE_FILE.exists():
+        try:
+            with open(EPEX_CACHE_FILE, "r", encoding="utf-8") as f:
+                _EPEX_CACHE_DATA = json.load(f)
+        except Exception:
+            _EPEX_CACHE_DATA = {}
+
+def _save_epex_cache():
+    try:
+        tmp = f"{EPEX_CACHE_FILE}.tmp.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_EPEX_CACHE_DATA, f, indent=2)
+        os.replace(tmp, EPEX_CACHE_FILE)
+    except Exception as e:
+        print(f"Warning saving EPEX cache: {e}")
+
+def get_epex_tariffs_cached(is_15m: bool = True) -> Tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, float]]:
+    """
+    Authoritative EPEX Day-Ahead price caching & polling manager:
+    - Today's prices are served instantly from disk/memory cache.
+    - Tomorrow's prices are polled strictly between 13:00 and 15:00 every 15 minutes.
+    - Once tomorrow's prices are retrieved, polling stops completely until tomorrow 13:00.
+    - Returns (raw_price_list, map_all_in, map_base).
+    """
+    global _LAST_EPEX_POLL_TS, _EPEX_CACHE_DATA
+    _load_epex_cache()
+    now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
+    today_key = now_ams.strftime("%Y-%m-%d")
+    tomorrow_key = (now_ams + timedelta(days=1)).strftime("%Y-%m-%d")
+    cache_type = "15m" if is_15m else "1h"
+    interval_str = "INTERVAL_QUARTER" if is_15m else "INTERVAL_HOUR"
+
+    # Purge keys older than yesterday to keep cache lean
+    yesterday_key = (now_ams - timedelta(days=1)).strftime("%Y-%m-%d")
+    _EPEX_CACHE_DATA = {k: v for k, v in _EPEX_CACHE_DATA.items() if k >= yesterday_key}
+
+    now_ts = time.time()
+    hour = now_ams.hour
+
+    need_today = (today_key not in _EPEX_CACHE_DATA or cache_type not in _EPEX_CACHE_DATA[today_key])
+    has_tomorrow = (tomorrow_key in _EPEX_CACHE_DATA and cache_type in _EPEX_CACHE_DATA[tomorrow_key] and len(_EPEX_CACHE_DATA[tomorrow_key][cache_type].get("all_in", [])) >= (96 if is_15m else 24))
+    need_tomorrow = False
+    if not has_tomorrow:
+        if 13 <= hour < 15:
+            if (now_ts - _LAST_EPEX_POLL_TS) >= 900.0:  # Every 15 min between 13:00 and 15:00
+                need_tomorrow = True
+        elif hour >= 15:
+            if (now_ts - _LAST_EPEX_POLL_TS) >= 3600.0: # Every 60 min after 15:00 until published
+                need_tomorrow = True
+
+    dates_to_fetch = []
+    if need_today:
+        dates_to_fetch.append((today_key, now_ams.strftime("%d-%m-%Y")))
+    if need_tomorrow:
+        dates_to_fetch.append((tomorrow_key, (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")))
+
+    if dates_to_fetch:
+        _LAST_EPEX_POLL_TS = now_ts
+        dirty = False
+        for date_key, d_str in dates_to_fetch:
+            try:
+                url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval={interval_str}"
+                req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
+                with urllib.request.urlopen(req_p, timeout=6) as r_p:
+                    res_p = json.loads(r_p.read().decode())
+                    all_in_items = res_p.get("all_in_with_vat", [])
+                    base_items = res_p.get("base", [])
+                    if len(all_in_items) >= (96 if is_15m else 24):
+                        _EPEX_CACHE_DATA.setdefault(date_key, {})[cache_type] = {
+                            "all_in": [{"start": it["start"], "val": float(it.get("price", {}).get("value", 0.25))} for it in all_in_items],
+                            "base": [{"start": it["start"], "val": float(it.get("price", {}).get("value", 0.12))} for it in base_items]
+                        }
+                        dirty = True
+                        if date_key == tomorrow_key:
+                            print(f"[Open HEMS] EPEX Day-Ahead prijzen voor morgen ({tomorrow_key}) binnengehaald ({len(all_in_items)} slots). Polling stopt tot morgen 13:00.")
+            except Exception as e:
+                print(f"[Open HEMS] Polling EPEX tarieven voor {d_str} gaf nog geen data: {e}")
+        if dirty:
+            _save_epex_cache()
+
+    raw_prices = []
+    map_all_in = {}
+    map_base = {}
+
+    for d_k in [today_key, tomorrow_key]:
+        if d_k in _EPEX_CACHE_DATA and cache_type in _EPEX_CACHE_DATA[d_k]:
+            blob = _EPEX_CACHE_DATA[d_k][cache_type]
+            for it in blob.get("all_in", []):
+                dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Amsterdam"))
+                k_dt = dt.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
+                p_val = round(it["val"], 4)
+                map_all_in[k_dt] = p_val
+                raw_prices.append({"dt": dt, "price": p_val})
+            for it in blob.get("base", []):
+                dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Amsterdam"))
+                k_dt = dt.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
+                map_base[k_dt] = round(it["val"], 4)
+
+    return raw_prices, map_all_in, map_base
+
+
 _LAST_CANONICAL_PLAN_TIME = None
 
 def ensure_active_canonical_plan(force_refresh=False):
@@ -1339,24 +1446,8 @@ def ensure_active_canonical_plan(force_refresh=False):
         if (now_ams - _LAST_CANONICAL_PLAN_TIME).total_seconds() < 60:
             return current_plan
 
-    # 1. Fetch EPEX prices for today & tomorrow
-    today_str = now_ams.strftime("%d-%m-%Y")
-    tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
-    raw_prices = []
-    for d_str in [today_str, tomorrow_str]:
-        try:
-            url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval=INTERVAL_QUARTER"
-            req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
-            with urllib.request.urlopen(req_p, timeout=5) as r_p:
-                res_p = json.loads(r_p.read().decode())
-                for it in res_p.get("all_in_with_vat", []):
-                    dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Amsterdam"))
-                    raw_prices.append({
-                        "dt": dt,
-                        "price": float(it.get("price", {}).get("value", 0.25))
-                    })
-        except Exception:
-            pass
+    # 1. Fetch EPEX prices from dedicated 24h Day-Ahead cache
+    raw_prices, _, _ = get_epex_tariffs_cached(is_15m=True)
 
     # 2. Fetch Solar & Weather Forecast for Culemborg
     cfg = load_json(CONFIG_FILE)
@@ -1552,25 +1643,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
                 base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
 
-                # 1. Fetch EPEX Spot Prices for Today & Tomorrow (Rolling 24h matching Verbruiksvoorspelling)
-                prices_map = {}
-                prices_base_map = {}
-                for d_str in [today_str, tomorrow_str]:
-                    try:
-                        url = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval={interval_api}"
-                        req = urllib.request.Request(url, headers={"User-Agent": "OpenHEMS/1.0"})
-                        with urllib.request.urlopen(req, timeout=6) as r:
-                            api_data = json.loads(r.read().decode())
-                            for it in api_data.get("all_in_with_vat", []):
-                                dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
-                                k_fmt = "%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00"
-                                prices_map[dt.strftime(k_fmt)] = round(float(it.get("price", {}).get("value", 0.0)), 4)
-                            for it in api_data.get("base", []):
-                                dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
-                                k_fmt = "%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00"
-                                prices_base_map[dt.strftime(k_fmt)] = round(float(it.get("price", {}).get("value", 0.0)), 4)
-                    except Exception as e_p:
-                        print(f"Warning fetching EPEX prices for {d_str}: {e_p}")
+                # 1. Fetch EPEX Spot Prices from dedicated Day-Ahead cache
+                _, prices_map, prices_base_map = get_epex_tariffs_cached(is_15m=is_15m)
 
                 labels = []
                 prices_all_in = []
@@ -2241,22 +2315,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             # Anchored weather forecast: Wittboy live weather station blended with Open-Meteo
             temp_map, solar_map, wind_map, rh_map = get_anchored_weather_forecast(base_dt)
 
-            # Fetch EPEX spot prices for next 24h
-            today_str = now_ams.strftime("%d-%m-%Y")
-            tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
-            prices_map = {}
-            for d_str in [today_str, tomorrow_str]:
-                try:
-                    url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval={'INTERVAL_QUARTER' if is_15m else 'INTERVAL_HOUR'}"
-                    req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
-                    with urllib.request.urlopen(req_p, timeout=5) as r_p:
-                        res_p = json.loads(r_p.read().decode())
-                        for it in res_p.get("all_in_with_vat", []):
-                            dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Amsterdam"))
-                            k_dt = dt.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
-                            prices_map[k_dt] = round(float(it.get("price", {}).get("value", 0.28)), 4)
-                except Exception:
-                    pass
+            # Fetch EPEX spot prices from dedicated Day-Ahead cache
+            _, prices_map, _ = get_epex_tariffs_cached(is_15m=is_15m)
 
             # Fetch live thermostat setpoint and active state from Home Assistant
             t_setpoint = 20.0
@@ -2885,7 +2945,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.31",
+                "version": "0.92.32",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3137,21 +3197,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             today_str = now_ams.strftime("%d-%m-%Y")
             tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
 
-            # 1. Fetch EPEX prices for today & tomorrow
-            prices_map = {}
-            interval_str = "INTERVAL_QUARTER" if is_15m else "INTERVAL_HOUR"
-            for d_str in [today_str, tomorrow_str]:
-                try:
-                    url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval={interval_str}"
-                    req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
-                    with urllib.request.urlopen(req_p, timeout=5) as r_p:
-                        res_p = json.loads(r_p.read().decode())
-                        for it in res_p.get("all_in_with_vat", []):
-                            dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(AMS_TZ)
-                            k_fmt = "%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00"
-                            prices_map[dt.strftime(k_fmt)] = round(float(it.get("price", {}).get("value", 0.25)), 4)
-                except Exception as e_p:
-                    pass
+            # 1. Fetch EPEX prices from dedicated Day-Ahead cache
+            _, prices_map, _ = get_epex_tariffs_cached(is_15m=is_15m)
 
             # 2. Fetch Calibrated Solar Forecast (Forecast.Solar) & Weather
             solar_map = {}
@@ -4719,7 +4766,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.31</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.32</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
