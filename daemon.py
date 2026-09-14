@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.29
+Version: 0.92.30
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -32,7 +32,7 @@ import base64
 import time
 import threading
 import math
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 try:
     sys.path.insert(0, str(Path(__file__).parent))
@@ -353,8 +353,66 @@ def get_ha_states_map():
     return {e["entity_id"]: e for e in fetch_ha_entities()}
 
 
-def call_ha_service(domain: str, service: str, service_data: dict) -> bool:
-    """Calls a Home Assistant Core REST API service."""
+def write_hems_annotation(event_type: str, title: str, description: str, state_code: str, power_kw: float = 0.0, target_temp_c: float = 0.0, savings_eur: float = 0.0, severity: str = "info"):
+    """Writes a native semantic event annotation to openhems InfluxDB for Grafana dashboards."""
+    try:
+        cfg = load_json(CONFIG_FILE)
+        sec = load_secrets()
+        active_conn = cfg.get("influxdb_connections", [{}])[0]
+        db_name = active_conn.get("database", "openhems")
+        db_user = active_conn.get("username", "openhems")
+        db_url = active_conn.get("url", "http://a0d7b954-influxdb:8086")
+        db_pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
+
+        now_ns = int(time.time() * 1e9)
+        safe_title = title.replace('"', '\\"').replace('\n', ' ')
+        safe_desc = description.replace('"', '\\"').replace('\n', ' ')
+
+        line = (
+            f'hems_annotations,event_type={event_type},severity={severity},state_code={state_code} '
+            f'title="{safe_title}",description="{safe_desc}",power_kw={power_kw:.2f},'
+            f'target_temp_c={target_temp_c:.1f},savings_eur={savings_eur:.2f} {now_ns}'
+        )
+
+        write_url = f"{db_url}/write?" + urllib.parse.urlencode({"u": db_user, "p": db_pwd, "db": db_name})
+        req = urllib.request.Request(write_url, data=line.encode("utf-8"), method="POST")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            pass
+    except Exception as e:
+        print(f"Warning writing Grafana annotation: {e}")
+
+
+def log_technical_error(domain: str, event_type: str, reason: str, explanation: str, inputs: Dict[str, Any], category: str = "ERROR"):
+    """Logs technical errors, failed actuations, and API issues to InfluxDB and the Audit Logger."""
+    try:
+        sev = "error" if category == "ERROR" else "warning"
+        write_hems_annotation(
+            event_type=event_type,
+            title=reason,
+            description=explanation,
+            state_code=sev,
+            power_kw=0.0,
+            target_temp_c=0.0,
+            savings_eur=0.0,
+            severity=sev
+        )
+        DecisionAuditLogger.log_decision(
+            domain=domain,
+            decision_type=event_type,
+            chosen_mode=sev,
+            target_temp_c=None,
+            inputs=inputs,
+            reason=reason,
+            explanation=explanation,
+            savings_estimate_eur=0.0,
+            category=category
+        )
+    except Exception as e_log:
+        print(f"Warning logging technical error: {e_log}")
+
+
+def call_ha_service_detailed(domain: str, service: str, service_data: dict) -> Tuple[bool, Optional[str]]:
+    """Calls a Home Assistant Core REST API service and returns success status plus error message."""
     sec = load_secrets()
     ha_cfg_tok = sec.get("homeassistant", {}).get("token")
     if ha_cfg_tok:
@@ -373,7 +431,7 @@ def call_ha_service(domain: str, service: str, service_data: dict) -> bool:
         ha_url = cfg.get("HASS_URL") or ha_url
 
     if not token:
-        return False
+        return False, "Geen Home Assistant token geconfigureerd in options.json of environment"
 
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     ctx = ssl.create_default_context()
@@ -384,10 +442,34 @@ def call_ha_service(domain: str, service: str, service_data: dict) -> bool:
     try:
         req = urllib.request.Request(url, data=json.dumps(service_data).encode("utf-8"), headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=5, context=ctx) as r:
-            return r.status in [200, 201]
+            if r.status in [200, 201]:
+                return True, None
+            return False, f"HTTP status {r.status}"
+    except urllib.error.HTTPError as he:
+        return False, f"HTTP Fout {he.code}: {he.reason}"
+    except urllib.error.URLError as ue:
+        return False, f"Verbindingsfout naar HA ({ha_url}): {ue.reason}"
     except Exception as e:
-        print(f"Warning calling HA service {domain}.{service}: {e}")
-        return False
+        return False, str(e)
+
+
+def call_ha_service(domain: str, service: str, service_data: dict) -> bool:
+    """Calls a Home Assistant Core REST API service and logs a technical error if the call fails."""
+    success, err_msg = call_ha_service_detailed(domain, service, service_data)
+    if not success:
+        print(f"Error calling HA service {domain}.{service}: {err_msg}")
+        try:
+            log_technical_error(
+                domain="hardware",
+                event_type="ha_service_error",
+                reason=f"❌ HA Schakelfout: {domain}.{service} Mislukt",
+                explanation=f"Aanroep naar Home Assistant service '{domain}.{service}' met data {json.dumps(service_data)} mislukt: {err_msg}",
+                inputs={"domain": domain, "service": service, "data": service_data, "error": err_msg},
+                category="ERROR"
+            )
+        except Exception:
+            pass
+    return success
 
 
 from layer3_scheduling.opportunistic_merger import OpportunisticDHWMerger, OpportunisticMergeResult
@@ -775,33 +857,6 @@ def evaluate_and_log_planner_decisions(plan: Any, frame: Any):
             )
 
 
-def write_hems_annotation(event_type: str, title: str, description: str, state_code: str, power_kw: float = 0.0, target_temp_c: float = 0.0, savings_eur: float = 0.0):
-    """Writes a native semantic event annotation to openhems InfluxDB for Grafana dashboards."""
-    try:
-        cfg = load_json(CONFIG_FILE)
-        sec = load_secrets()
-        active_conn = cfg.get("influxdb_connections", [{}])[0]
-        db_name = active_conn.get("database", "openhems")
-        db_user = active_conn.get("username", "openhems")
-        db_url = active_conn.get("url", "http://a0d7b954-influxdb:8086")
-        db_pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
-
-        now_ns = int(time.time() * 1e9)
-        safe_title = title.replace('"', '\\"').replace('\n', ' ')
-        safe_desc = description.replace('"', '\\"').replace('\n', ' ')
-
-        line = (
-            f'hems_annotations,event_type={event_type},severity=info,state_code={state_code} '
-            f'title="{safe_title}",description="{safe_desc}",power_kw={power_kw:.2f},'
-            f'target_temp_c={target_temp_c:.1f},savings_eur={savings_eur:.2f} {now_ns}'
-        )
-
-        write_url = f"{db_url}/write?" + urllib.parse.urlencode({"u": db_user, "p": db_pwd, "db": db_name})
-        req = urllib.request.Request(write_url, data=line.encode("utf-8"), method="POST")
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            pass
-    except Exception as e:
-        print(f"Warning writing Grafana annotation: {e}")
 
 
 def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
@@ -906,11 +961,15 @@ def make_daikin_ha_actuator() -> DaikinActuator:
         eid = entity_map.get(switch_name)
         if eid:
             service = "turn_on" if state else "turn_off"
-            call_ha_service("switch", service, {"entity_id": eid})
+            ok = call_ha_service("switch", service, {"entity_id": eid})
+            if not ok:
+                raise RuntimeError(f"Home Assistant service call mislukt voor {eid} -> {service}")
         return True
 
     def climate_caller(climate_name: str, temp: float):
-        call_ha_service("climate", "set_temperature", {"entity_id": "climate.hc_dhw_dhw_setpoint", "temperature": temp})
+        ok = call_ha_service("climate", "set_temperature", {"entity_id": "climate.hc_dhw_dhw_setpoint", "temperature": temp})
+        if not ok:
+            raise RuntimeError(f"Home Assistant service call mislukt voor climate.hc_dhw_dhw_setpoint -> {temp}°C")
         return True
 
     return DaikinActuator(switch_caller=switch_caller, climate_caller=climate_caller)
@@ -2795,7 +2854,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.29",
+                "version": "0.92.30",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4651,7 +4710,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.29</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.30</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5179,6 +5238,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <button type="button" onclick="filterDecisionAudit('all')" id="btn-filter-all" class="px-3 py-1 rounded-lg text-xs font-semibold bg-purple-600 text-white shadow">Alles</button>
                             <button type="button" onclick="filterDecisionAudit('ACTION')" id="btn-filter-ACTION" class="px-2.5 py-1 rounded-lg text-xs font-medium text-blue-300 hover:text-white bg-blue-950/40 border border-blue-800/60">⚡ Acties</button>
                             <button type="button" onclick="filterDecisionAudit('DECISION')" id="btn-filter-DECISION" class="px-2.5 py-1 rounded-lg text-xs font-medium text-purple-300 hover:text-white bg-purple-950/40 border border-purple-800/60">🧠 Besluiten</button>
+                            <button type="button" onclick="filterDecisionAudit('ERROR')" id="btn-filter-ERROR" class="px-2.5 py-1 rounded-lg text-xs font-medium text-red-300 hover:text-white bg-red-950/40 border border-red-800/60">❌ Fouten</button>
                             <span class="text-slate-700 hidden sm:inline">|</span>
                             <button type="button" onclick="filterDecisionAudit('dhw')" id="btn-filter-dhw" class="px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">🚰 DHW</button>
                             <button type="button" onclick="filterDecisionAudit('space_heating')" id="btn-filter-space_heating" class="px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">♨️ CV</button>
@@ -11387,9 +11447,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 let decisions = data.decisions || [];
 
                 if (activeDecisionFilter === 'ACTION') {
-                    decisions = decisions.filter(d => d.category === 'ACTION' || d.decision_type === 'live_actuation' || d.domain === 'hardware');
+                    decisions = decisions.filter(d => (d.category === 'ACTION' || d.decision_type === 'live_actuation' || d.domain === 'hardware') && d.category !== 'ERROR' && d.category !== 'WARNING');
                 } else if (activeDecisionFilter === 'DECISION') {
-                    decisions = decisions.filter(d => d.category !== 'ACTION' && d.decision_type !== 'live_actuation' && d.domain !== 'hardware');
+                    decisions = decisions.filter(d => d.category !== 'ACTION' && d.category !== 'ERROR' && d.category !== 'WARNING' && d.decision_type !== 'live_actuation' && d.domain !== 'hardware');
+                } else if (activeDecisionFilter === 'ERROR') {
+                    decisions = decisions.filter(d => d.category === 'ERROR' || d.category === 'WARNING' || d.chosen_mode === 'error' || d.chosen_mode === 'warning');
                 }
 
                 window.__allDecisions = decisions;
@@ -11444,19 +11506,37 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     const timeOld = dtOld.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     const dateStr = dtNew.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' });
 
+                    const isError = (d.category === 'ERROR' || d.chosen_mode === 'error');
+                    const isWarning = (d.category === 'WARNING' || d.chosen_mode === 'warning');
                     const isAction = (d.category === 'ACTION' || d.decision_type === 'live_actuation' || d.domain === 'hardware');
-                    const typePill = isAction
+                    const typePill = isError
+                        ? '<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-red-950/90 border border-red-500/60 text-red-300 whitespace-nowrap">❌ FOUT</span>'
+                        : isWarning
+                        ? '<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-950/90 border border-amber-500/60 text-amber-300 whitespace-nowrap">⚠️ WAARSCH.</span>'
+                        : isAction
                         ? '<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-950/90 border border-blue-500/60 text-blue-300 whitespace-nowrap">⚡ ACTIE</span>'
                         : '<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-950/90 border border-purple-500/60 text-purple-300 whitespace-nowrap">🧠 BESLUIT</span>';
 
-                    const domainLabel = (d.domain === 'dhw') ? '🚰 DHW' :
-                                        (d.domain === 'space_heating') ? '♨️ CV' :
-                                        (d.domain === 'grid_tariff') ? '🚫 Spits' :
-                                        (d.domain === 'hardware') ? '⚙️ Relais' : d.domain;
+                    const domainMap = {
+                        'dhw': '🚰 DHW',
+                        'space_heating': '♨️ CV',
+                        'grid_tariff': '🚫 Spits',
+                        'hardware': '⚙️ Relais',
+                        'database': '💾 DB',
+                        'weather': '🌤️ Weer',
+                        'solar': '☀️ Zon',
+                        'system': '🛠️ Systeem'
+                    };
+                    const domainLabel = domainMap[d.domain] || d.domain;
 
-                    const modeColor = (d.chosen_mode === 'max_on') ? 'bg-purple-950/80 border-purple-500/50 text-purple-300' :
+                    const modeColor = isError ? 'bg-red-950/80 border-red-500/60 text-red-300' :
+                                      isWarning ? 'bg-amber-950/80 border-amber-500/60 text-amber-300' :
+                                      (d.chosen_mode === 'max_on') ? 'bg-purple-950/80 border-purple-500/50 text-purple-300' :
                                       (d.chosen_mode === 'forced_on') ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300' :
                                       (d.chosen_mode === 'advised_on') ? 'bg-indigo-950/80 border-indigo-500/50 text-indigo-300' :
+                                      (d.chosen_mode === 'forced_off') ? 'bg-red-950/80 border-red-500/50 text-red-300' :
+                                      (d.chosen_mode === 'planned') ? 'bg-amber-950/80 border-amber-500/50 text-amber-300' :
+                                      'bg-slate-800/80 border-slate-700 text-slate-300';
                                       (d.chosen_mode === 'forced_off') ? 'bg-red-950/80 border-red-500/50 text-red-300' :
                                       (d.chosen_mode === 'planned') ? 'bg-amber-950/80 border-amber-500/50 text-amber-300' :
                                       'bg-slate-800/80 border-slate-700 text-slate-300';
@@ -11511,13 +11591,24 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const newest = g.entries[0];
             const oldest = g.entries[g.entries.length - 1];
 
+            const isError = (d.category === 'ERROR' || d.chosen_mode === 'error');
+            const isWarning = (d.category === 'WARNING' || d.chosen_mode === 'warning');
             const isAction = (d.category === 'ACTION' || d.decision_type === 'live_actuation' || d.domain === 'hardware');
             const typeBadge = document.getElementById('modal-type-badge');
             if (typeBadge) {
-                typeBadge.className = isAction 
-                    ? 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-950/80 border border-blue-500/50 text-blue-300'
-                    : 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-950/80 border border-purple-500/50 text-purple-300';
-                typeBadge.innerText = isAction ? '⚡ FYSIEKE ACTIE' : '🧠 PLAN-BESLUIT';
+                if (isError) {
+                    typeBadge.className = 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-red-950/80 border border-red-500/50 text-red-300';
+                    typeBadge.innerText = '❌ SYSTEEMFOUT';
+                } else if (isWarning) {
+                    typeBadge.className = 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-950/80 border border-amber-500/50 text-amber-300';
+                    typeBadge.innerText = '⚠️ WAARSCHUWING';
+                } else if (isAction) {
+                    typeBadge.className = 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-950/80 border border-blue-500/50 text-blue-300';
+                    typeBadge.innerText = '⚡ FYSIEKE ACTIE';
+                } else {
+                    typeBadge.className = 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-950/80 border border-purple-500/50 text-purple-300';
+                    typeBadge.innerText = '🧠 PLAN-BESLUIT';
+                }
             }
 
             document.getElementById('modal-title').innerText = d.reason + (count > 1 ? ` (${count}× geëvalueerd)` : '');
@@ -11534,6 +11625,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const modeEl = document.getElementById('modal-mode');
             if (modeEl) {
                 modeEl.className = 'px-2 py-0.5 rounded font-bold border ' + (
+                    (isError) ? 'bg-red-950/80 border-red-500/50 text-red-300' :
+                    (isWarning) ? 'bg-amber-950/80 border-amber-500/50 text-amber-300' :
                     (d.chosen_mode === 'max_on') ? 'bg-purple-950/80 border-purple-500/50 text-purple-300' :
                     (d.chosen_mode === 'forced_on') ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300' :
                     (d.chosen_mode === 'advised_on') ? 'bg-indigo-950/80 border-indigo-500/50 text-indigo-300' :
@@ -11596,15 +11689,21 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
         function filterDecisionAudit(domain) {
             activeDecisionFilter = domain;
-            ['all', 'ACTION', 'DECISION', 'dhw', 'space_heating', 'grid_tariff', 'hardware'].forEach(dom => {
+            ['all', 'ACTION', 'DECISION', 'ERROR', 'dhw', 'space_heating', 'grid_tariff', 'hardware'].forEach(dom => {
                 const btn = document.getElementById('btn-filter-' + dom);
                 if (btn) {
                     if (dom === domain) {
-                        btn.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-purple-600 text-white shadow';
+                        if (dom === 'ERROR') {
+                            btn.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-red-600 text-white shadow';
+                        } else {
+                            btn.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-purple-600 text-white shadow';
+                        }
                     } else if (dom === 'ACTION') {
                         btn.className = 'px-2.5 py-1 rounded-lg text-xs font-medium text-blue-300 hover:text-white bg-blue-950/40 border border-blue-800/60';
                     } else if (dom === 'DECISION') {
                         btn.className = 'px-2.5 py-1 rounded-lg text-xs font-medium text-purple-300 hover:text-white bg-purple-950/40 border border-purple-800/60';
+                    } else if (dom === 'ERROR') {
+                        btn.className = 'px-2.5 py-1 rounded-lg text-xs font-medium text-red-300 hover:text-white bg-red-950/40 border border-red-800/60';
                     } else {
                         btn.className = 'px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800';
                     }
@@ -12246,60 +12345,107 @@ class HemsBackgroundCollector(threading.Thread):
                 target_temp=target_t
             )
 
-            # 4. Audit Log Hardware Actuation ONLY if physical state actually changed!
-            curr_s10s = (states_map.get("switch.warmtepomp_smart_grid_1_s10s", {}).get("state") == "on")
-            curr_s11s = (states_map.get("switch.warmtepomp_smart_grid_2_s11s", {}).get("state") == "on")
-            curr_cv = (states_map.get("switch.hc_mode_altherma_on", {}).get("state") == "on")
-
-            has_switched = (
-                res.command.s10s_relay_on != curr_s10s or
-                res.command.s11s_relay_on != curr_s11s or
-                res.command.cv_master_switch_on != curr_cv
-            )
-
-            if has_switched:
-                mode_titles = {
-                    "normal": "⚙️ Smart Grid Relais: Terug naar Ruststand (SG2)",
-                    "max_on": "⚡ Smart Grid Relais: DHW Zonnebuffer 60°C (SG4)",
-                    "forced_on": "🚿 Smart Grid Relais: DHW Basislading 50°C (SG4)",
-                    "advised_on": "♨️ Smart Grid Relais: Pre-Heat Vloerbuffer (SG3)",
-                    "forced_off": "🚫 Smart Grid Relais: Spitsblokkade (SG1)",
-                    "advised_off": "⏸️ Smart Grid Relais: Gereduceerde Modulatie (SG1)"
-                }
-                act_title = mode_titles.get(res.effective_mode, f"⚙️ Smart Grid Relais: {res.effective_mode}")
-                act_desc = f"Smart Grid relais omgezet: S10S={'AAN' if res.command.s10s_relay_on else 'UIT'}, S11S={'AAN' if res.command.s11s_relay_on else 'UIT'}, CV Master={'AAN' if res.command.cv_master_switch_on else 'UIT'}."
-                if res.downgrade_reason:
-                    act_desc += f" (Veiligheidsinterlock: {res.downgrade_reason})"
-                elif target_t:
-                    act_desc += f" Tapwater setpoint: {target_t}°C."
-
-                write_hems_annotation(
-                    event_type="hardware_actuation",
-                    title=act_title,
-                    description=act_desc,
-                    state_code=res.effective_mode,
-                    power_kw=round(wp_power_val / 1000.0, 2),
-                    target_temp_c=target_t or 0.0,
-                    savings_eur=0.0
-                )
-                DecisionAuditLogger.log_decision(
+            # 4. Check if actuation succeeded or failed
+            if not res.success:
+                log_technical_error(
                     domain="hardware",
-                    decision_type="live_actuation",
-                    chosen_mode=res.effective_mode,
-                    target_temp_c=target_t,
+                    event_type="actuation_failed",
+                    reason=f"❌ Schakelfout: Actuatie {mode_to_execute} Mislukt",
+                    explanation=f"DaikinActuator kon de gewenste stand '{mode_to_execute}' niet doorvoeren naar Home Assistant: {res.error_message}",
                     inputs={
-                        "s10s": res.command.s10s_relay_on,
-                        "s11s": res.command.s11s_relay_on,
-                        "cv_master": res.command.cv_master_switch_on,
-                        "effective_mode": res.effective_mode,
-                        "tank_temp_c": round(t_live, 1),
-                        "downgrade_reason": res.downgrade_reason
+                        "mode_gevraagd": mode_to_execute,
+                        "foutmelding": res.error_message,
+                        "s10s_doel": res.command.s10s_relay_on,
+                        "s11s_doel": res.command.s11s_relay_on,
+                        "cv_doel": res.command.cv_master_switch_on
                     },
-                    reason=act_title,
-                    explanation=act_desc,
-                    savings_estimate_eur=0.0,
-                    category="ACTION"
+                    category="ERROR"
                 )
+            else:
+                # 5. Audit Log Hardware Actuation & verify HA state confirmation
+                curr_s10s = (states_map.get("switch.warmtepomp_smart_grid_1_s10s", {}).get("state") == "on")
+                curr_s11s = (states_map.get("switch.warmtepomp_smart_grid_2_s11s", {}).get("state") == "on")
+                curr_cv = (states_map.get("switch.hc_mode_altherma_on", {}).get("state") == "on")
+
+                has_switched = (
+                    res.command.s10s_relay_on != curr_s10s or
+                    res.command.s11s_relay_on != curr_s11s or
+                    res.command.cv_master_switch_on != curr_cv
+                )
+
+                if has_switched:
+                    time.sleep(0.5)
+                    fresh_states = get_ha_states_map()
+                    act_s10s = (fresh_states.get("switch.warmtepomp_smart_grid_1_s10s", {}).get("state") == "on")
+                    act_s11s = (fresh_states.get("switch.warmtepomp_smart_grid_2_s11s", {}).get("state") == "on")
+                    act_cv = (fresh_states.get("switch.hc_mode_altherma_on", {}).get("state") == "on")
+
+                    unconfirmed = []
+                    if res.command.s10s_relay_on != act_s10s:
+                        unconfirmed.append(f"S10S (doel {'AAN' if res.command.s10s_relay_on else 'UIT'}, is {'AAN' if act_s10s else 'UIT'})")
+                    if res.command.s11s_relay_on != act_s11s:
+                        unconfirmed.append(f"S11S (doel {'AAN' if res.command.s11s_relay_on else 'UIT'}, is {'AAN' if act_s11s else 'UIT'})")
+                    if res.command.cv_master_switch_on != act_cv:
+                        unconfirmed.append(f"CV Master (doel {'AAN' if res.command.cv_master_switch_on else 'UIT'}, is {'AAN' if act_cv else 'UIT'})")
+
+                    if unconfirmed:
+                        log_technical_error(
+                            domain="hardware",
+                            event_type="actuation_unconfirmed",
+                            reason="❌ Schakeling Niet Bevestigd door Home Assistant",
+                            explanation=f"Open HEMS heeft de relais omgezet voor {mode_to_execute}, maar Home Assistant bevestigt de toestand niet: {', '.join(unconfirmed)}.",
+                            inputs={
+                                "mode_gevraagd": mode_to_execute,
+                                "onbevestigd": unconfirmed,
+                                "s10s_werkelijk": act_s10s,
+                                "s11s_werkelijk": act_s11s,
+                                "cv_werkelijk": act_cv
+                            },
+                            category="ERROR"
+                        )
+                    else:
+                        mode_titles = {
+                            "normal": "⚙️ Smart Grid Relais: Terug naar Ruststand (SG2)",
+                            "max_on": "⚡ Smart Grid Relais: DHW Zonnebuffer 60°C (SG4)",
+                            "forced_on": "🚿 Smart Grid Relais: DHW Basislading 50°C (SG4)",
+                            "advised_on": "♨️ Smart Grid Relais: Pre-Heat Vloerbuffer (SG3)",
+                            "forced_off": "🚫 Smart Grid Relais: Spitsblokkade (SG1)",
+                            "advised_off": "⏸️ Smart Grid Relais: Gereduceerde Modulatie (SG1)"
+                        }
+                        act_title = mode_titles.get(res.effective_mode, f"⚙️ Smart Grid Relais: {res.effective_mode}")
+                        act_desc = f"Smart Grid relais omgezet: S10S={'AAN' if res.command.s10s_relay_on else 'UIT'}, S11S={'AAN' if res.command.s11s_relay_on else 'UIT'}, CV Master={'AAN' if res.command.cv_master_switch_on else 'UIT'}."
+                        if res.downgrade_reason:
+                            act_desc += f" (Veiligheidsinterlock: {res.downgrade_reason})"
+                        elif target_t:
+                            act_desc += f" Tapwater setpoint: {target_t}°C."
+
+                        write_hems_annotation(
+                            event_type="hardware_actuation",
+                            title=act_title,
+                            description=act_desc,
+                            state_code=res.effective_mode,
+                            power_kw=round(wp_power_val / 1000.0, 2),
+                            target_temp_c=target_t or 0.0,
+                            savings_eur=0.0
+                        )
+                        DecisionAuditLogger.log_decision(
+                            domain="hardware",
+                            decision_type="live_actuation",
+                            chosen_mode=res.effective_mode,
+                            target_temp_c=target_t,
+                            inputs={
+                                "s10s": res.command.s10s_relay_on,
+                                "s11s": res.command.s11s_relay_on,
+                                "cv_master": res.command.cv_master_switch_on,
+                                "effective_mode": res.effective_mode,
+                                "tank_temp_c": round(t_live, 1),
+                                "downgrade_reason": res.downgrade_reason
+                            },
+                            reason=act_title,
+                            explanation=act_desc,
+                            savings_estimate_eur=0.0,
+                            category="ACTION"
+                        )
 
             self.last_actuation = {
                 "timestamp": datetime.now(AMS_TZ).isoformat(),
@@ -12562,6 +12708,17 @@ class HemsBackgroundCollector(threading.Thread):
         except Exception as e:
             print(f"[Open HEMS Collector] Write error: {e}", flush=True)
             self.last_write_status = f"err_{str(e)[:30]}"
+            try:
+                log_technical_error(
+                    domain="database",
+                    event_type="influx_write_error",
+                    reason="❌ Database Fout: InfluxDB Write Mislukt",
+                    explanation=f"Wegschrijven van {len(lines)} telemetrie-punten naar InfluxDB '{db_name}' ({db_url}) mislukt: {e}",
+                    inputs={"database": db_name, "points_count": len(lines), "error": str(e)},
+                    category="ERROR"
+                )
+            except Exception:
+                pass
 
 GLOBAL_COLLECTOR = None
 

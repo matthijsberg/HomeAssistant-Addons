@@ -177,7 +177,15 @@ class DecisionAuditLogger:
                                 elif meas == "hems_annotations":
                                     evt = (d.get("event_type") or "").lower()
                                     tit = (d.get("title") or "").lower()
-                                    if "hardware" in evt or "relais" in tit or "actuatie" in evt:
+                                    sev = (d.get("severity") or "").lower()
+
+                                    if "error" in evt or "fout" in tit or "mislukt" in tit or "unconfirmed" in evt or "niet bevestigd" in tit or sev == "error":
+                                        category = "ERROR"
+                                        rec_dom = "hardware" if "schakel" in tit or "relais" in tit or "ha" in tit else ("grid_tariff" if "tarief" in tit or "energyzero" in tit else "system")
+                                    elif "warning" in evt or "waarschuwing" in tit or sev == "warning":
+                                        category = "WARNING"
+                                        rec_dom = "weather" if "meteo" in tit else ("solar" if "forecast" in tit else "system")
+                                    elif "hardware" in evt or "relais" in tit or "actuatie" in evt:
                                         rec_dom = "hardware"
                                         category = "ACTION"
                                     elif "peak" in evt or "spits" in tit:
