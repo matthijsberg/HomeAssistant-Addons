@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.41
+Version: 0.92.42
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2950,7 +2950,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.41",
+                "version": "0.92.42",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4776,7 +4776,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.41</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.42</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4863,14 +4863,14 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         </div>
                     </div>
 
-                    <!-- Chart 1.0: Kosten & Opbrengsten Voorspelling (Cost & Revenue Forecast) -->
+                    <!-- Chart 1.0: Kosten Forecast (Cost & EPEX Forecast) -->
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
                             <div class="flex items-center gap-2">
-                                <span class="text-base">📈</span>
+                                <span class="text-base">💶</span>
                                 <div>
-                                    <h3 class="text-sm font-bold text-white tracking-wide">Netto Verbruik, Kosten &amp; EPEX Tarieven (24h)</h3>
-                                    <p class="text-[11px] text-slate-400">Verwachte netto stromen, kosten/baten en dynamische inkoop- en verkoopmarkttarieven.</p>
+                                    <h3 class="text-sm font-bold text-white tracking-wide">Kosten Forecast (24h)</h3>
+                                    <p class="text-[11px] text-slate-400">Verwachte netto kosten/baten en dynamische inkoop- en verkoopmarkttarieven.</p>
                                 </div>
                             </div>
                             <div class="flex items-center gap-2 text-xs flex-wrap">
@@ -4886,8 +4886,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                         <!-- Legend Chips -->
                         <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-5 text-xs font-mono">
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-amber-400 font-bold">Netto Kosten (€)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500 rounded"></span> <span class="text-red-400 font-bold">Netto Verbruik (kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-amber-400 rounded"></span> <span class="text-amber-400 font-bold">Netto Kosten (€)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-blue-500 rounded"></span> <span class="text-blue-400 font-medium">EPEX Inkoop (€/kWh)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-cyan-400 rounded border-dashed"></span> <span class="text-cyan-400 font-medium">EPEX Teruglevering (€/kWh)</span></div>
                         </div>
@@ -5041,7 +5041,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV (+kW)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden (+kW)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-slate-300">Zon (-kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500"></span> <span class="text-red-400 font-bold">Verwacht Netto</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500 rounded"></span> <span class="text-red-400 font-bold">Netto Verbruik (kW)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400">Prijs (€/kWh)</span></div>
                         </div>
                     </div>
@@ -8209,27 +8209,27 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     </span>
                 </div>
                 <div class="space-y-2 text-xs">
-                    <!-- 1. Netto Verbruik (kW / kWh) -->
+                    <!-- 1. Netto Kosten (€) -->
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
-                            <span style="display:inline-block; width:14px; height:3px; background-color:#EF4444; border-radius:2px; margin-right:8px;"></span>
+                            <span style="display:inline-block; width:10px; height:10px; background-color:#F59E0B; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300 font-medium">Netto Kosten</span>
+                        </div>
+                        <span class="font-bold font-mono ${!isProfit ? 'text-amber-400' : 'text-emerald-400'}">
+                            ${!isProfit ? '+€' : '-€'}${Math.abs(netCostEur).toFixed(2)}
+                        </span>
+                    </div>
+
+                    <!-- 2. Netto Verbruik (kW / kWh) -->
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:14px; height:2px; background-color:#EF4444; border-radius:2px; margin-right:8px;"></span>
                             <span class="text-slate-300 font-medium">Netto Verbruik</span>
                         </div>
                         <div class="flex items-center gap-1.5 font-mono">
                             <span class="${netKwVal >= 0 ? 'text-red-400' : 'text-emerald-400'} font-bold">${netKwVal >= 0 ? '+' : ''}${netKwVal.toFixed(2)} kW</span>
                             <span class="text-slate-400 text-[10px]">(${netKwVal >= 0 ? '+' : ''}${netKwhVal.toFixed(2)} kWh)</span>
                         </div>
-                    </div>
-
-                    <!-- 2. Netto Kosten (€) -->
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:14px; height:3px; background-color:#F59E0B; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300 font-medium">Netto Kosten</span>
-                        </div>
-                        <span class="font-bold font-mono ${!isProfit ? 'text-amber-400' : 'text-emerald-400'}">
-                            ${!isProfit ? '+€' : '-€'}${Math.abs(netCostEur).toFixed(2)}
-                        </span>
                     </div>
 
                     <!-- 3. EPEX Inkoop (€/kWh) -->
@@ -8962,13 +8962,14 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     order: 0
                                 },
                                 {
-                                    label: 'Verwacht Netto (kW)',
+                                    label: 'Netto Verbruik (kW)',
                                     data: netKw,
                                     type: 'line',
                                     borderColor: '#EF4444',
                                     backgroundColor: 'transparent',
-                                    borderWidth: 2.5,
-                                    pointRadius: 2,
+                                    borderWidth: 1.5,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 4,
                                     pointBackgroundColor: '#EF4444',
                                     tension: 0.25,
                                     yAxisID: 'y',
@@ -9229,58 +9230,61 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     maxAbsPrice = Math.ceil(maxAbsPrice * 10) / 10;
 
                     const costConfig = {
-                        type: 'line',
+                        type: 'bar',
                         data: {
                             labels: labels,
                             datasets: [
                                 {
+                                    label: 'Netto Kosten (€)',
+                                    data: netCostEurArr,
+                                    type: 'bar',
+                                    backgroundColor: 'rgba(245, 158, 11, 0.75)', // Amber 500 bar
+                                    borderColor: '#D97706',
+                                    borderWidth: 1,
+                                    borderRadius: 3,
+                                    yAxisID: 'yCost',
+                                    order: 4
+                                },
+                                {
                                     label: 'Netto Verbruik (kW)',
                                     data: netKw,
+                                    type: 'line',
                                     borderColor: '#EF4444', // Red 500
-                                    backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                                    backgroundColor: 'transparent',
                                     fill: false,
-                                    borderWidth: 2.5,
-                                    pointRadius: 2,
-                                    pointBackgroundColor: '#EF4444',
+                                    borderWidth: 1.5,
+                                    pointRadius: 0,
+                                    pointHoverRadius: 4,
                                     tension: 0.25,
                                     yAxisID: 'y',
                                     order: 1
                                 },
                                 {
-                                    label: 'Netto Kosten (€)',
-                                    data: netCostEurArr,
-                                    borderColor: '#F59E0B', // Amber 500
-                                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
-                                    fill: false,
-                                    borderWidth: 2.5,
-                                    pointRadius: 2,
-                                    pointBackgroundColor: '#F59E0B',
-                                    tension: 0.25,
-                                    yAxisID: 'yCost',
-                                    order: 2
-                                },
-                                {
                                     label: 'EPEX Inkoop (€/kWh)',
                                     data: pricesArr,
+                                    type: 'line',
                                     borderColor: '#3B82F6', // Blue 500
                                     backgroundColor: 'transparent',
-                                    borderWidth: 2,
+                                    borderWidth: 1.5,
                                     pointRadius: 0,
+                                    pointHoverRadius: 4,
                                     tension: 0,
                                     yAxisID: 'yPrice',
-                                    order: 3
+                                    order: 2
                                 },
                                 {
                                     label: 'EPEX Teruglevering (€/kWh)',
                                     data: exportPricesArr,
+                                    type: 'line',
                                     borderColor: '#06B6D4', // Cyan 500
                                     borderDash: [4, 4],
                                     backgroundColor: 'transparent',
-                                    borderWidth: 2,
+                                    borderWidth: 1.5,
                                     pointRadius: 0,
+                                    pointHoverRadius: 4,
                                     tension: 0,
                                     yAxisID: 'yPrice',
-                                    order: 4
+                                    order: 3
                                 }
                             ]
                         },
