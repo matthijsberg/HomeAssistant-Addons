@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.35
+Version: 0.92.36
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2950,7 +2950,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.35",
+                "version": "0.92.36",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3800,6 +3800,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             surplus_peak_kw = 0.0
             surplus_peak_time = ""
             surplus_kw_list = []
+            step_h = 0.25 if is_15m else 1.0
 
             for it in timeline_items:
                 idx = it["idx"]
@@ -3808,7 +3809,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 surp = round(max(0.0, s_gen - sched_load), 2)
                 surplus_kw_list.append(surp)
                 if surp >= 0.15:
-                    surplus_kwh_tot += surp
+                    surplus_kwh_tot += surp * step_h
                     if surp > surplus_peak_kw:
                         surplus_peak_kw = surp
                         surplus_peak_time = it["label"]
@@ -4775,7 +4776,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.35</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.36</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -8442,7 +8443,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 const kwhVal = absVal;
                 const powerW = Math.round((absVal * 1000.0) / intervalH);
 
-                const energyStr = `${kwhVal >= 10.0 ? kwhVal.toFixed(1) : kwhVal.toFixed(2)} kWh`;
+                const unitLabel = (intervalH === 0.25) ? 'kWh/q' : 'kWh';
+                const energyStr = `${kwhVal >= 10.0 ? kwhVal.toFixed(1) : kwhVal.toFixed(2)} ${unitLabel} (${powerStr})`;
                 const powerStr = powerW >= 1000 ? `${(powerW / 1000.0).toFixed(2)} kW` : `${powerW} W`;
 
                 // Calculate monetary cost / revenue per dataset type
@@ -9006,7 +9008,12 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 stacked: !isLineMode,
                                 min: -maxAbsKwh,
                                 max: maxAbsKwh,
-                                title: { display: true, text: 'Opbrengst (-kWh) < 0 < Verbruik (+kWh)', color: '#94A3B8', font: { family: 'monospace', size: 10 } },
+                                title: { 
+                                    display: true, 
+                                    text: (predictionResolution === '15m') ? 'Opbrengst < 0 < Verbruik (kWh / kwartier)' : 'Opbrengst < 0 < Verbruik (kWh / uur)', 
+                                    color: '#94A3B8', 
+                                    font: { family: 'monospace', size: 10 } 
+                                },
                                 grid: {
                                     color: (ctx) => ctx.tick && ctx.tick.value === 0 ? '#CBD5E1' : 'rgba(30, 41, 59, 0.6)',
                                     lineWidth: (ctx) => ctx.tick && ctx.tick.value === 0 ? 2 : 1
@@ -9017,7 +9024,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     callback: function(val) {
                                         const absV = Math.abs(val);
                                         const prefix = val < 0 ? '-' : '';
-                                        return `${prefix}${absV.toFixed(2)} kWh`;
+                                        const unitStr = (predictionResolution === '15m') ? 'kWh/q' : 'kWh';
+                                        return `${prefix}${absV.toFixed(2)} ${unitStr}`;
                                     }
                                 }
                             },
@@ -10619,7 +10627,12 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             y: {
                                 min: -maxAbsKwh,
                                 max: maxAbsKwh,
-                                title: { display: true, text: 'Opbrengst (-kWh) < 0 < Verbruik (+kWh)', color: '#94A3B8', font: { family: 'monospace', size: 10 } },
+                                title: { 
+                                    display: true, 
+                                    text: (chart.data.labels.length > 50) ? 'Opbrengst < 0 < Verbruik (kWh / kwartier)' : 'Opbrengst < 0 < Verbruik (kWh / uur)', 
+                                    color: '#94A3B8', 
+                                    font: { family: 'monospace', size: 10 } 
+                                },
                                 grid: {
                                     color: (ctx) => ctx.tick && ctx.tick.value === 0 ? '#CBD5E1' : 'rgba(30, 41, 59, 0.6)',
                                     lineWidth: (ctx) => ctx.tick && ctx.tick.value === 0 ? 2 : 1
@@ -10630,7 +10643,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                     callback: function(val) {
                                         const absV = Math.abs(val);
                                         const prefix = val < 0 ? '-' : '';
-                                        return `${prefix}${absV.toFixed(2)} kWh`;
+                                        const unitStr = (chart.data.labels.length > 50) ? 'kWh/q' : 'kWh';
+                                        return `${prefix}${absV.toFixed(2)} ${unitStr}`;
                                     }
                                 }
                             },
