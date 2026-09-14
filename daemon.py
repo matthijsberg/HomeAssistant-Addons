@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.27
+Version: 0.92.28
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -695,23 +695,24 @@ _LAST_PLAN_LOGS: Dict[str, Any] = {
 def evaluate_and_log_planner_decisions(plan: Any, frame: Any):
     global _LAST_PLAN_LOGS
     now_ts = time.time()
+    now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
+    today_date = now_ams.strftime("%Y-%m-%d")
 
-    # 1. Dynamic Spitsblokkades (Peak Lockouts)
+    # 1. Dynamic Spitsblokkades (Peak Lockouts) - Evaluated 1x per calendar day when day-ahead prices arrive
     if hasattr(plan, "dynamic_peaks") and plan.dynamic_peaks:
-        p_names = [f"{p.get('name', 'Spits')} ({p.get('start_time')}–{p.get('end_time')}, max €{p.get('max_price', 0):.2f})" for p in plan.dynamic_peaks]
-        peaks_key = "; ".join(p_names)
-        if _LAST_PLAN_LOGS.get("peaks_key") != peaks_key or (now_ts - _LAST_PLAN_LOGS.get("last_ts", 0)) >= 14400.0:
-            _LAST_PLAN_LOGS["peaks_key"] = peaks_key
-            _LAST_PLAN_LOGS["last_ts"] = now_ts
+        if _LAST_PLAN_LOGS.get("peaks_date") != today_date:
+            _LAST_PLAN_LOGS["peaks_date"] = today_date
 
-            title = f"🚫 Dynamische Spitsblokkades Actief ({len(plan.dynamic_peaks)} pieken)"
-            desc = f"Prijspieken gedetecteerd in EPEX stroomtarieven: {peaks_key}. Warmtepomp wordt tijdens deze uren vergrendeld (SG1) om dure piekafname te vermijden."
+            p_names = [f"{p.get('name', 'Spits')} ({p.get('start_time')}–{p.get('end_time')}, max €{p.get('max_price', 0):.2f}/kWh)" for p in plan.dynamic_peaks]
+            peaks_desc = ", ".join(p_names)
+            title = f"📅 EPEX Spitsblokkades Vastgesteld voor Vandaag ({len(plan.dynamic_peaks)} pieken)"
+            desc = f"Beursnoteringen voor {now_ams.strftime('%d-%m-%Y')} verwerkt: {peaks_desc}. Warmtepomp zal tijdens deze uren automatisch worden vergrendeld (SG1) om dure piekafname te vermijden."
 
             write_hems_annotation(
-                event_type="peak_lockout",
+                event_type="peak_schedule",
                 title=title,
                 description=desc,
-                state_code="forced_off",
+                state_code="planned",
                 power_kw=0.0,
                 target_temp_c=0.0,
                 savings_eur=0.45
@@ -719,12 +720,13 @@ def evaluate_and_log_planner_decisions(plan: Any, frame: Any):
             DecisionAuditLogger.log_decision(
                 domain="grid_tariff",
                 decision_type="peak_detection",
-                chosen_mode="forced_off",
+                chosen_mode="planned",
                 target_temp_c=None,
-                inputs={"pieken": peaks_key, "aantal": len(plan.dynamic_peaks)},
+                inputs={"datum": today_date, "pieken": peaks_desc, "aantal": len(plan.dynamic_peaks)},
                 reason=title,
                 explanation=desc,
-                savings_estimate_eur=0.45
+                savings_estimate_eur=0.45,
+                category="DECISION"
             )
 
     # 2. CV Ruimteverwarming Policy (Space Heating)
@@ -2793,7 +2795,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.27",
+                "version": "0.92.28",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4649,7 +4651,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.27</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.28</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -12244,15 +12246,20 @@ class HemsBackgroundCollector(threading.Thread):
                 target_temp=target_t
             )
 
-            # 4. Audit Log Hardware Actuation & Dispatch State
-            now_ts = time.time()
-            actuation_key = f"{mode_to_execute}_{res.effective_mode}_{res.command.s10s_relay_on}_{res.command.s11s_relay_on}_{res.command.cv_master_switch_on}"
-            if _LAST_LOGGED_ACTUATION.get("state") != actuation_key or (now_ts - _LAST_LOGGED_ACTUATION.get("ts", 0)) >= 1800.0:
-                _LAST_LOGGED_ACTUATION["state"] = actuation_key
-                _LAST_LOGGED_ACTUATION["ts"] = now_ts
+            # 4. Audit Log Hardware Actuation ONLY if physical state actually changed!
+            curr_s10s = (states_map.get("switch.warmtepomp_smart_grid_1_s10s", {}).get("state") == "on")
+            curr_s11s = (states_map.get("switch.warmtepomp_smart_grid_2_s11s", {}).get("state") == "on")
+            curr_cv = (states_map.get("switch.hc_mode_altherma_on", {}).get("state") == "on")
 
+            has_switched = (
+                res.command.s10s_relay_on != curr_s10s or
+                res.command.s11s_relay_on != curr_s11s or
+                res.command.cv_master_switch_on != curr_cv
+            )
+
+            if has_switched:
                 mode_titles = {
-                    "normal": "⚙️ Smart Grid Relais: Ruststand / Automatisch (SG2)",
+                    "normal": "⚙️ Smart Grid Relais: Terug naar Ruststand (SG2)",
                     "max_on": "⚡ Smart Grid Relais: DHW Zonnebuffer 60°C (SG4)",
                     "forced_on": "🚿 Smart Grid Relais: DHW Basislading 50°C (SG4)",
                     "advised_on": "♨️ Smart Grid Relais: Pre-Heat Vloerbuffer (SG3)",
@@ -12260,7 +12267,7 @@ class HemsBackgroundCollector(threading.Thread):
                     "advised_off": "⏸️ Smart Grid Relais: Gereduceerde Modulatie (SG1)"
                 }
                 act_title = mode_titles.get(res.effective_mode, f"⚙️ Smart Grid Relais: {res.effective_mode}")
-                act_desc = f"Smart Grid relais aangestuurd: S10S={'AAN' if res.command.s10s_relay_on else 'UIT'}, S11S={'AAN' if res.command.s11s_relay_on else 'UIT'}, CV Master={'AAN' if res.command.cv_master_switch_on else 'UIT'}."
+                act_desc = f"Smart Grid relais omgezet: S10S={'AAN' if res.command.s10s_relay_on else 'UIT'}, S11S={'AAN' if res.command.s11s_relay_on else 'UIT'}, CV Master={'AAN' if res.command.cv_master_switch_on else 'UIT'}."
                 if res.downgrade_reason:
                     act_desc += f" (Veiligheidsinterlock: {res.downgrade_reason})"
                 elif target_t:
@@ -12290,7 +12297,8 @@ class HemsBackgroundCollector(threading.Thread):
                     },
                     reason=act_title,
                     explanation=act_desc,
-                    savings_estimate_eur=0.0
+                    savings_estimate_eur=0.0,
+                    category="ACTION"
                 )
 
             self.last_actuation = {

@@ -213,14 +213,65 @@ class DecisionAuditLogger:
             except Exception as e:
                 print(f"Warning querying InfluxDB decisions: {e}")
 
-        # Deduplicate records based on timestamp_iso + reason
-        seen = set()
-        deduped = []
+        # Deduplicate & normalize timestamps to local epoch
+        parsed = []
         for r in records:
-            key = (r.get("timestamp_iso"), r.get("reason"))
-            if key not in seen:
-                seen.add(key)
-                deduped.append(r)
+            ts_str = r.get("timestamp_iso") or ""
+            clean = ts_str.replace("Z", "+00:00")
+            if "." in clean:
+                parts = clean.split(".")
+                sub = parts[1]
+                tz_part = ""
+                if "+" in sub:
+                    sub, tz_part = sub.split("+")
+                    tz_part = "+" + tz_part
+                elif "-" in sub:
+                    sub, tz_part = sub.split("-")
+                    tz_part = "-" + tz_part
+                clean = f"{parts[0]}.{sub[:6]}{tz_part}"
+            try:
+                dt = datetime.fromisoformat(clean)
+                epoch = int(dt.timestamp())
+                iso_ams = dt.astimezone(AMS_TZ).isoformat()
+            except Exception:
+                epoch = 0
+                iso_ams = ts_str
 
-        deduped.sort(key=lambda x: x.get("timestamp_iso", ""), reverse=True)
-        return deduped[:limit]
+            parsed.append({
+                **r,
+                "_epoch": epoch,
+                "timestamp_iso": iso_ams
+            })
+
+        # Sort chronologically ascending to track state transitions
+        parsed.sort(key=lambda x: x["_epoch"])
+
+        deduped_chronological = []
+        last_action_state = None
+        last_decision_title = None
+
+        for r in parsed:
+            cat = r.get("category", "DECISION")
+            title = r.get("reason", "")
+            mode = r.get("chosen_mode", "")
+            domain_val = r.get("domain", "")
+
+            if cat == "ACTION":
+                # Only log genuine hardware state transitions
+                if last_action_state == (domain_val, mode):
+                    continue
+                last_action_state = (domain_val, mode)
+            else:
+                # Decisions: if identical decision was logged within 4 hours, skip duplicate
+                if last_decision_title and last_decision_title[0] == title and (r["_epoch"] - last_decision_title[1]) < 14400:
+                    continue
+                last_decision_title = (title, r["_epoch"])
+
+            deduped_chronological.append(r)
+
+        # Reverse to newest first and remove temporary _epoch
+        final_list = list(reversed(deduped_chronological))
+        for r in final_list:
+            r.pop("_epoch", None)
+
+        return final_list[:limit]
