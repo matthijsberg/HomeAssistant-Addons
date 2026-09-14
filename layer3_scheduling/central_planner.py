@@ -45,7 +45,9 @@ class CentralPlanner:
         current_dhw_temp: float = 48.0,
         model_parameters: Optional[Dict[str, Any]] = None,
         tariffs: Optional[TariffProvider] = None,
-        store: Optional[PlanStore] = None
+        store: Optional[PlanStore] = None,
+        past_continuous_lockout_mins: int = 0,
+        mins_since_last_lockout: int = 999
     ) -> CanonicalDispatchPlan:
         """
         Executes central optimization and returns the single authoritative CanonicalDispatchPlan.
@@ -55,6 +57,11 @@ class CentralPlanner:
         slots = frame.slots
         n_slots = len(slots)
         step_hours = step_mins / 60.0
+
+        if past_continuous_lockout_mins == 0 and frame.metadata:
+            past_continuous_lockout_mins = frame.metadata.get("past_continuous_lockout_mins", 0)
+        if mins_since_last_lockout == 999 and frame.metadata:
+            mins_since_last_lockout = frame.metadata.get("mins_since_last_lockout", 999)
 
         # Timeline items for canonical peak detector
         timeline_items = []
@@ -68,11 +75,13 @@ class CentralPlanner:
                 "unalloc": s.unallocated_kw
             })
 
-        # 1. Dynamic Spitsblokkades (Central Peak Detector with Winter Cap)
+        # 1. Dynamic Spitsblokkades (Central Peak Detector with Winter Cap & Past Awareness)
         dynamic_peaks, slot_lockout_map = detect_dynamic_price_peaks(
             timeline_items=timeline_items,
             step_mins=step_mins,
-            max_lockout_mins=150  # Hard 2.5 hour winter comfort cap
+            max_lockout_mins=150,  # Hard 2.5 hour winter comfort cap
+            past_continuous_lockout_mins=past_continuous_lockout_mins,
+            mins_since_last_lockout=mins_since_last_lockout
         )
 
         # 2. DHW Boiler 350L Dispatch Engine

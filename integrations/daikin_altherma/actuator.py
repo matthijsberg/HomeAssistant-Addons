@@ -37,7 +37,8 @@ class DaikinActuator:
         self,
         requested_mode: str,
         current_cv_switch_state: bool = True,
-        target_temp: Optional[float] = None
+        target_temp: Optional[float] = None,
+        current_continuous_lockout_mins: float = 0.0
     ) -> ActuationResult:
         """
         Resolves interlocks and dispatches to hardware.
@@ -45,7 +46,8 @@ class DaikinActuator:
         cmd = DaikinInterlock.resolve_command(
             requested_mode=requested_mode,
             current_cv_switch_state=current_cv_switch_state,
-            target_temp=target_temp
+            target_temp=target_temp,
+            current_continuous_lockout_mins=current_continuous_lockout_mins
         )
 
         success = True

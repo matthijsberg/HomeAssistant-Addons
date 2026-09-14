@@ -41,13 +41,23 @@ class DaikinInterlock:
         cls,
         requested_mode: str,
         current_cv_switch_state: bool = True,
-        target_temp: Optional[float] = None
+        target_temp: Optional[float] = None,
+        current_continuous_lockout_mins: float = 0.0
     ) -> DaikinHardwareCommand:
         """
         Resolves physical states and enforces hydraulic interlocks.
+        Includes hard circuit breaker: max 150m continuous forced lockout cap.
         """
         # 1. Forced Off (SG Stand 1: S10S=OFF, S11S=ON)
         if requested_mode == "forced_off":
+            if current_continuous_lockout_mins >= 150.0:
+                return DaikinHardwareCommand(
+                    s10s_relay_on=False,
+                    s11s_relay_on=False,
+                    cv_master_switch_on=True,
+                    effective_mode="normal",
+                    downgrade_reason=f"Maximale aaneengesloten spitsduur bereikt ({current_continuous_lockout_mins:.0f}m >= 150m); relais SG1 vrijgegeven naar SG2 normaal tegen afkoeling"
+                )
             return DaikinHardwareCommand(
                 s10s_relay_on=False,
                 s11s_relay_on=True,

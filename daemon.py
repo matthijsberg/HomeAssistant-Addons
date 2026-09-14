@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.43
+Version: 0.92.44
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -1536,8 +1536,36 @@ def ensure_active_canonical_plan(force_refresh=False):
         step_mins=15
     )
 
+    # 5.5. Determine past lockout duration and dwell time from live HA states
+    past_lockout_mins = 0
+    mins_since_last_lockout = 999
+    try:
+        states_map = get_ha_states_map()
+        s10_st = states_map.get("switch.warmtepomp_smart_grid_1_s10s", {})
+        s11_st = states_map.get("switch.warmtepomp_smart_grid_2_s11s", {})
+        s10_on = (s10_st.get("state") == "on")
+        s11_on = (s11_st.get("state") == "on")
+        lc_str = s11_st.get("last_changed")
+        if lc_str:
+            lc_dt = datetime.fromisoformat(lc_str.replace("Z", "+00:00"))
+            now_utc = datetime.now(timezone.utc)
+            diff_mins = max(0.0, (now_utc - lc_dt).total_seconds() / 60.0)
+            if not s10_on and s11_on:
+                past_lockout_mins = int(diff_mins)
+                mins_since_last_lockout = 0
+            else:
+                past_lockout_mins = 0
+                mins_since_last_lockout = int(diff_mins)
+    except Exception as e_lk:
+        print(f"Warning determining lockout history: {e_lk}")
+
     # 6. Plan & Publish
-    plan = CentralPlanner.plan(frame, current_dhw_temp=cur_dhw)
+    plan = CentralPlanner.plan(
+        frame,
+        current_dhw_temp=cur_dhw,
+        past_continuous_lockout_mins=past_lockout_mins,
+        mins_since_last_lockout=mins_since_last_lockout
+    )
     _LAST_CANONICAL_PLAN_TIME = now_ams
     try:
         evaluate_and_log_planner_decisions(plan, frame)
@@ -2950,7 +2978,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.43",
+                "version": "0.92.44",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4776,7 +4804,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.43</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.44</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -13071,13 +13099,29 @@ class HemsBackgroundCollector(threading.Thread):
             cur_slot = plan.slots[0]
             mode_to_execute = cur_slot.mode_code
 
+            # Determine continuous lockout duration from HA state
+            cur_lockout_mins = 0.0
+            s10_st = states_map.get("switch.warmtepomp_smart_grid_1_s10s", {})
+            s11_st = states_map.get("switch.warmtepomp_smart_grid_2_s11s", {})
+            s10_on = (s10_st.get("state") == "on")
+            s11_on = (s11_st.get("state") == "on")
+            if not s10_on and s11_on:
+                lc_str = s11_st.get("last_changed")
+                if lc_str:
+                    try:
+                        lc_dt = datetime.fromisoformat(lc_str.replace("Z", "+00:00"))
+                        cur_lockout_mins = max(0.0, (datetime.now(timezone.utc) - lc_dt).total_seconds() / 60.0)
+                    except Exception:
+                        pass
+
             # 3. Instantiate DaikinActuator and execute mode
             actuator = make_daikin_ha_actuator()
             target_t = 60.0 if mode_to_execute in ["max_on", "forced_solar_boost_60"] else (50.0 if mode_to_execute in ["forced_on", "forced_night_50"] else None)
             res = actuator.execute_mode(
                 requested_mode=mode_to_execute,
                 current_cv_switch_state=cv_active,
-                target_temp=target_t
+                target_temp=target_t,
+                current_continuous_lockout_mins=cur_lockout_mins
             )
 
             # 4. Check if actuation succeeded or failed
