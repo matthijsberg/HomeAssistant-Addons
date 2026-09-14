@@ -256,6 +256,17 @@ class DecisionAuditLogger:
             mode = r.get("chosen_mode", "")
             domain_val = r.get("domain", "")
 
+            # If an identical event occurred within 60s, keep ACTION over DECISION
+            is_dup = False
+            for prev in deduped_chronological:
+                if prev.get("reason") == title and abs(prev.get("_epoch", 0) - r["_epoch"]) < 60:
+                    if r.get("category") == "ACTION":
+                        prev["category"] = "ACTION"
+                    is_dup = True
+                    break
+            if is_dup:
+                continue
+
             if cat == "ACTION":
                 # Only log genuine hardware state transitions
                 if last_action_state == (domain_val, mode):
