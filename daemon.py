@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.33
+Version: 0.92.34
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2945,7 +2945,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.33",
+                "version": "0.92.34",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3198,7 +3198,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
 
             # 1. Fetch EPEX prices from dedicated Day-Ahead cache
-            _, prices_map, _ = get_epex_tariffs_cached(is_15m=is_15m)
+            _, prices_map, map_base = get_epex_tariffs_cached(is_15m=is_15m)
 
             # 2. Fetch Calibrated Solar Forecast (Forecast.Solar) & Weather
             solar_map = {}
@@ -3259,6 +3259,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
             labels = []
             prices = []
+            export_prices = []
             solar = []
             unallocated = []
             boiler = [0.0] * total_slots
@@ -3321,6 +3322,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                 labels.append(lbl)
                 prices.append(p_val)
+                base_spot = map_base.get(k_full, map_base.get(k_hour, (p_val / 1.21) - 0.11085 - 0.0121))
+                exp_p = round(base_spot - 0.00605, 4)
+                export_prices.append(exp_p)
                 solar.append(s_val)
                 unallocated.append(unalloc_kw)
                 timeline_items.append({"idx": i, "dt": dt_slot, "key": k_full, "label": lbl, "price": p_val, "solar": s_val, "temp": t_val, "wind": w_val, "rh": rh_val})
@@ -3897,9 +3901,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 }
             }
 
-            # Calculate dynamic export prices for forecast (kale spot min opslag)
-            export_prices = [max(0.0, round((p / 1.21) - 0.11085 - 0.0121 - 0.00605, 4)) for p in prices]
-
             # Prepend 1 hour of actual historical telemetry
             hist_pts = fetch_recent_telemetry_history(is_15m, base_dt)
             hist_labels = []
@@ -3910,11 +3911,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             hist_bat_charge = []
             hist_bat_discharge = []
             hist_prices = []
+            hist_export_prices = []
             hist_advices = []
             hist_dhw_timeline = []
 
             for hp in hist_pts:
                 p_val = prices_map.get(hp["key"], prices_map.get(hp["dt"].strftime("%Y-%m-%d %H:00"), 0.25))
+                b_val = map_base.get(hp["key"], map_base.get(hp["dt"].strftime("%Y-%m-%d %H:00"), (p_val / 1.21) - 0.11085 - 0.0121))
                 hist_labels.append(hp["label"])
                 hist_solar.append(hp["solar_kw"])
                 hist_unalloc.append(hp["unallocated_kw"])
@@ -3923,6 +3926,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 hist_bat_charge.append(0.0)
                 hist_bat_discharge.append(0.0)
                 hist_prices.append(p_val)
+                hist_export_prices.append(round(b_val - 0.00605, 4))
                 hist_advices.append("Actueel gemeten (Historie)")
                 hist_dhw_timeline.append({
                     "time": hp["label"],
@@ -3939,7 +3943,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             all_solar = hist_solar + solar
             all_bat_discharge = hist_bat_discharge + battery_discharge
             all_prices = hist_prices + prices
-            all_export_prices = [max(0.0, round((p / 1.21) - 0.11085 - 0.0121 - 0.00605, 4)) for p in all_prices]
+            all_export_prices = hist_export_prices + export_prices
 
             all_solar_neg = [-round(s, 2) for s in all_solar]
             all_bat_discharge_neg = [-round(d, 2) for d in all_bat_discharge]
@@ -4766,7 +4770,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.33</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.34</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
