@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.39
+Version: 0.92.40
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2950,7 +2950,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.39",
+                "version": "0.92.40",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4776,7 +4776,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.39</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.40</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -4886,14 +4886,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         </div>
 
                         <!-- Legend Chips -->
-                        <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-3 text-xs font-mono">
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-500"></span> <span class="text-slate-300">Ongedefinieerd (+€)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-pink-500"></span> <span class="text-slate-300">SWW (+€)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-indigo-500"></span> <span class="text-slate-300">CV (+€)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-slate-300">Accu Laden (+€)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-slate-300">Zon Opbrengst / Besparing (-€)</span></div>
+                        <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-4 text-xs font-mono">
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-orange-500"></span> <span class="text-slate-300 font-medium">Totaal Verbruik (+€)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-slate-300 font-medium">Zonnestroom Baten (-€)</span></div>
                             <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500"></span> <span class="text-red-400 font-bold">Netto Kosten</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400">Stroomtarief (€/kWh)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-1 bg-cyan-400 border-dashed"></span> <span class="text-cyan-400 font-medium">EPEX Stroomtarief (€/kWh)</span></div>
                         </div>
                     </div>
 
@@ -8181,11 +8178,30 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const intervalH = window.__lastPredictionIntervalH || 1.0;
             const intervalStr = (intervalH === 0.25) ? '15 min' : '1 uur';
 
-            const priceDataset = chart.data.datasets.find(ds => ds.label && ds.label.includes('Stroomprijs'));
-            const pVal = priceDataset ? Number(priceDataset.data[dataIndex] || 0.25) : 0.25;
+            const pd = window.__lastPredictionData;
+            const pVal = (pd && pd.datasets && pd.datasets.prices_eur) ? Number(pd.datasets.prices_eur[dataIndex] || 0.25) : 0.25;
 
-            const netDataset = chart.data.datasets.find(ds => ds.label && ds.label.includes('Netto'));
-            const netVal = netDataset ? Number(netDataset.data[dataIndex] || 0.0) : 0.0;
+            // Compute total consumption in kW & kWh & EUR
+            const uKw = (pd && pd.datasets && pd.datasets.unallocated_kw) ? Number(pd.datasets.unallocated_kw[dataIndex] || 0) : 0.35;
+            const bKw = (pd && pd.datasets && pd.datasets.boiler_kw) ? Number(pd.datasets.boiler_kw[dataIndex] || 0) : 0;
+            const hKw = (pd && pd.datasets && pd.datasets.heating_kw) ? Number(pd.datasets.heating_kw[dataIndex] || 0) : 0;
+            const cKw = (pd && pd.datasets && pd.datasets.battery_charge_kw) ? Number(pd.datasets.battery_charge_kw[dataIndex] || 0) : 0;
+            const totConsKw = uKw + bKw + hKw + cKw;
+            const totConsKwh = totConsKw * intervalH;
+            const totConsEur = totConsKwh * pVal;
+
+            // Compute solar in kW & kWh & EUR benefits
+            const sKw = (pd && pd.datasets && pd.datasets.solar_kw_neg) ? Math.abs(Number(pd.datasets.solar_kw_neg[dataIndex] || 0)) : 0;
+            const sKwh = sKw * intervalH;
+            const pExp = (pd && pd.export_prices_eur && pd.export_prices_eur[dataIndex] !== undefined)
+                ? Number(pd.export_prices_eur[dataIndex])
+                : Math.max(0.0, (pVal / 1.21) - 0.11085 - 0.0121 - 0.00605);
+            const selfKwh = Math.min(sKwh, totConsKwh);
+            const expKwh = Math.max(0.0, sKwh - totConsKwh);
+            const solarBenefitEur = (selfKwh * pVal) + (expKwh * pExp);
+
+            // Net cost
+            const netCostEur = totConsEur - solarBenefitEur;
 
             let html = `
                 <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
@@ -8194,52 +8210,56 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         <span class="font-bold text-white text-xs tracking-wide">${label}</span>
                         <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
                     </div>
-                    <span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded border ${netVal >= 0 ? 'bg-red-950/80 border-red-800 text-red-300' : 'bg-emerald-950/80 border-emerald-800 text-emerald-300'}">
-                        Netto: ${netVal >= 0 ? '+' : ''}€${netVal.toFixed(2)}
+                    <span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded border ${netCostEur >= 0 ? 'bg-red-950/80 border-red-800 text-red-300' : 'bg-emerald-950/80 border-emerald-800 text-emerald-300'}">
+                        Netto: ${netCostEur >= 0 ? '+' : ''}€${netCostEur.toFixed(2)}
                     </span>
                 </div>
-                <div class="space-y-1.5 text-xs">
-            `;
-
-            tooltip.dataPoints.forEach(dp => {
-                const ds = chart.data.datasets[dp.datasetIndex];
-                if (!ds) return;
-                const rawVal = Number(dp.raw || 0);
-                const dsLabel = (ds.label || '').replace(/\s*\(€\)|\s*\(€\/kWh\)/g, '').trim();
-                const color = ds.borderColor || ds.backgroundColor;
-
-                if (dsLabel.includes('Stroomprijs')) {
-                    html += `
-                        <div class="flex items-center justify-between gap-3">
-                            <div class="flex items-center">
-                                <span style="display:inline-block; width:18px; height:0; border-top:2px dashed ${color}; margin-right:8px;"></span>
-                                <span class="text-slate-300">${dsLabel}</span>
-                            </div>
-                            <span class="font-bold text-cyan-300 font-mono">€${rawVal.toFixed(4)}/kWh</span>
-                        </div>
-                    `;
-                    return;
-                }
-
-                const signStr = rawVal < 0 ? '-€' : '+€';
-                const absVal = Math.abs(rawVal);
-                const isLine = ds.type === 'line';
-                const indicator = isLine 
-                    ? `<span style="display:inline-block; width:18px; height:3px; background-color:${color}; border-radius:2px; margin-right:8px;"></span>`
-                    : `<span style="display:inline-block; width:10px; height:10px; background-color:${color}; border-radius:2px; margin-right:8px;"></span>`;
-
-                html += `
+                <div class="space-y-2 text-xs">
+                    <!-- 1. Totaal Verbruik (kW / kWh / €) -->
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
-                            ${indicator}
-                            <span class="text-slate-300">${dsLabel}</span>
+                            <span style="display:inline-block; width:10px; height:10px; background-color:#F97316; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300 font-medium">Totaal Verbruik</span>
                         </div>
-                        <span class="font-bold font-mono ${rawVal < 0 ? 'text-emerald-400' : (dsLabel.includes('Netto') ? 'text-red-400' : 'text-white')}">${signStr}${absVal.toFixed(2)}</span>
+                        <div class="flex items-center gap-1.5 font-mono">
+                            <span class="text-white font-bold">${totConsKw.toFixed(2)} kW</span>
+                            <span class="text-slate-400 text-[10px]">(${totConsKwh.toFixed(2)} kWh)</span>
+                            <span class="text-orange-400 font-bold ml-1">+€${totConsEur.toFixed(2)}</span>
+                        </div>
                     </div>
-                `;
-            });
 
-            html += `</div>`;
+                    <!-- 2. Zonnestroom (kW / kWh / -€) -->
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:10px; height:10px; background-color:#F59E0B; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300 font-medium">Zonnestroom Baten</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 font-mono">
+                            <span class="text-amber-400 font-bold">${sKw.toFixed(2)} kW</span>
+                            <span class="text-slate-400 text-[10px]">(${sKwh.toFixed(2)} kWh)</span>
+                            <span class="text-emerald-400 font-bold ml-1">-€${solarBenefitEur.toFixed(2)}</span>
+                        </div>
+                    </div>
+
+                    <!-- 3. Netto Kosten -->
+                    <div class="flex items-center justify-between gap-3 border-t border-slate-800/80 pt-1.5">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:3px; background-color:#EF4444; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-200 font-semibold">Netto Kosten</span>
+                        </div>
+                        <span class="font-bold font-mono ${netCostEur >= 0 ? 'text-red-400' : 'text-emerald-400'}">${netCostEur >= 0 ? '+€' : '-€'}${Math.abs(netCostEur).toFixed(2)}</span>
+                    </div>
+
+                    <!-- 4. EPEX Stroomtarief -->
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #06B6D4; margin-right:8px;"></span>
+                            <span class="text-slate-400">EPEX Stroomtarief</span>
+                        </div>
+                        <span class="font-bold text-cyan-300 font-mono">€${pVal.toFixed(4)}/kWh</span>
+                    </div>
+                </div>
+            `;
             tooltipEl.innerHTML = html;
             positionTooltipCustom(chart, tooltip, tooltipEl);
         }
@@ -9236,6 +9256,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     maxAbsCost = Math.ceil(maxAbsCost * 10) / 10;
                     if (maxAbsCost < 0.25) maxAbsCost = 0.25;
 
+                    const totVerbruikEur = unallocEur.map((u, i) => Number((u + boilerEur[i] + heatingEur[i] + batteryChargeEur[i]).toFixed(3)));
+
                     const costConfig = {
                         type: isLineMode ? 'line' : 'bar',
                         data: {
@@ -9271,104 +9293,49 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
                                 if (isLineMode) {
                                     cds.push({
-                                        label: 'Ongedefinieerd (€)',
-                                        data: unallocEur,
+                                        label: 'Totaal Verbruik Kosten (€)',
+                                        data: totVerbruikEur,
                                         type: 'line',
-                                        borderColor: '#3B82F6',
-                                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                                        borderColor: '#F97316',
+                                        backgroundColor: 'rgba(249, 115, 22, 0.2)',
                                         borderWidth: 2,
                                         pointRadius: 0,
                                         tension: 0.25,
+                                        fill: true,
                                         order: 2
                                     });
                                     cds.push({
-                                        label: 'SWW Tapwater (€)',
-                                        data: boilerEur,
-                                        type: 'line',
-                                        borderColor: '#EC4899',
-                                        backgroundColor: 'rgba(236, 72, 153, 0.2)',
-                                        borderWidth: 2,
-                                        pointRadius: 0,
-                                        tension: 0.25,
-                                        order: 3
-                                    });
-                                    cds.push({
-                                        label: 'CV Verwarming (€)',
-                                        data: heatingEur,
-                                        type: 'line',
-                                        borderColor: '#6366F1',
-                                        backgroundColor: 'rgba(99, 102, 241, 0.2)',
-                                        borderWidth: 2,
-                                        pointRadius: 0,
-                                        tension: 0.25,
-                                        order: 3
-                                    });
-                                    if (data.battery_enabled) {
-                                        cds.push({
-                                            label: 'Accu Laden (€)',
-                                            data: batteryChargeEur,
-                                            type: 'line',
-                                            borderColor: '#10B981',
-                                            backgroundColor: 'transparent',
-                                            borderWidth: 2,
-                                            pointRadius: 0,
-                                            tension: 0.25,
-                                            order: 4
-                                        });
-                                    }
-                                    cds.push({
-                                        label: 'Zon Opbrengst / Besparing (-€)',
+                                        label: 'Zonnestroom Baten (-€)',
                                         data: solarBenefitEur,
                                         type: 'line',
                                         borderColor: '#F59E0B',
-                                        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                                        backgroundColor: 'rgba(245, 158, 11, 0.25)',
                                         borderWidth: 2,
                                         pointRadius: 0,
                                         tension: 0.25,
-                                        order: 4
+                                        fill: true,
+                                        order: 3
                                     });
                                 } else {
                                     cds.push({
-                                        label: 'Ongedefinieerd (€)',
-                                        data: unallocEur,
-                                        backgroundColor: '#3B82F6',
+                                        label: 'Totaal Verbruik Kosten (€)',
+                                        data: totVerbruikEur,
+                                        backgroundColor: 'rgba(249, 115, 22, 0.85)',
+                                        borderColor: '#EA580C',
+                                        borderWidth: 1,
+                                        borderRadius: 3,
                                         stack: 'cost',
-                                        borderRadius: 2,
-                                        order: 3
+                                        order: 2
                                     });
                                     cds.push({
-                                        label: 'SWW Tapwater (€)',
-                                        data: boilerEur,
-                                        backgroundColor: '#EC4899',
-                                        stack: 'cost',
-                                        borderRadius: 2,
-                                        order: 3
-                                    });
-                                    cds.push({
-                                        label: 'CV Verwarming (€)',
-                                        data: heatingEur,
-                                        backgroundColor: '#6366F1',
-                                        stack: 'cost',
-                                        borderRadius: 2,
-                                        order: 3
-                                    });
-                                    if (data.battery_enabled) {
-                                        cds.push({
-                                            label: 'Accu Laden (€)',
-                                            data: batteryChargeEur,
-                                            backgroundColor: '#10B981',
-                                            stack: 'cost',
-                                            borderRadius: 2,
-                                            order: 3
-                                        });
-                                    }
-                                    cds.push({
-                                        label: 'Zon Opbrengst / Besparing (-€)',
+                                        label: 'Zonnestroom Baten (-€)',
                                         data: solarBenefitEur,
-                                        backgroundColor: '#F59E0B',
+                                        backgroundColor: 'rgba(245, 158, 11, 0.85)',
+                                        borderColor: '#D97706',
+                                        borderWidth: 1,
+                                        borderRadius: 3,
                                         stack: 'cost',
-                                        borderRadius: 2,
-                                        order: 4
+                                        order: 3
                                     });
                                 }
                                 return cds;
