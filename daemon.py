@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.45
+Version: 0.92.46
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2552,16 +2552,17 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 pass
 
             now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
+            plan = ensure_active_canonical_plan()
             if GLOBAL_DHW_MODEL:
-                # Retrieve planned slots & dispatch parameters from central dispatch cache (Single Source of Truth)
-                cached_slots = GLOBAL_CENTRAL_CACHE.get("planned_dhw_slots", [])
-                planned_mode = GLOBAL_CENTRAL_CACHE.get("planned_mode", "forced_standard_50")
-                planned_reason = GLOBAL_CENTRAL_CACHE.get("reason", "Centrale dispatch planning")
-                cached_dyn_peaks = GLOBAL_CENTRAL_CACHE.get("dynamic_peaks", [])
-                c_power = GLOBAL_CENTRAL_CACHE.get("sww_power_kw", 1.8)
-                c_target = GLOBAL_CENTRAL_CACHE.get("target_temp_c", 50.0)
+                # Retrieve planned slots & dispatch parameters directly from authoritative CanonicalDispatchPlan
+                cached_slots = [i for i, s in enumerate(plan.slots) if s.dhw_kw > 0]
+                planned_mode = plan.dhw_summary.planned_mode if plan.dhw_summary else "normal"
+                planned_reason = plan.dhw_summary.planned_mode_label if plan.dhw_summary else "Centrale dispatch planning"
+                cached_dyn_peaks = plan.dynamic_peaks
+                c_power = plan.dhw_summary.power_kw if plan.dhw_summary else 1.8
+                c_target = plan.dhw_summary.target_temp_c if plan.dhw_summary else 50.0
 
-                base_sim_dt = GLOBAL_CENTRAL_CACHE.get("base_dt", now_ams)
+                base_sim_dt = now_ams
                 traj = GLOBAL_DHW_MODEL.simulate_trajectory(
                     t_live,
                     base_sim_dt,
@@ -2978,7 +2979,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.45",
+                "version": "0.92.46",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3470,77 +3471,52 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 t_plan_fl = t_plan_fl + dt_fl
                 t_plan_in = max(15.0, min(26.0, t_plan_in + dt_in))
 
-            # 5. Plan Hot Water Generation (SWW Boiler 350L) with Thermal State Decision
-            # Query live tank temperature
+            # 5. Hot Water Generation (SWW Boiler 350L) from Authoritative Canonical Plan (Single Source of Truth)
+            sww_power_kw = plan.dhw_summary.power_kw if plan.dhw_summary else 1.8
+            sww_target_temp = plan.dhw_summary.target_temp_c if plan.dhw_summary else 50.0
+            planned_mode = plan.dhw_summary.planned_mode if plan.dhw_summary else "normal"
+            planned_mode_label = plan.dhw_summary.planned_mode_label if plan.dhw_summary else "Normaal (Standby)"
+
+            # Populate boiler power array directly from canonical plan slots
+            for i in range(min(total_slots, len(plan.slots))):
+                if is_15m:
+                    boiler[i] = plan.slots[i].dhw_kw
+                    if boiler[i] > 0:
+                        advices[i] = f"♨️ SWW Boiler 350L: {planned_mode_label}"
+                else:
+                    # 1h aggregation
+                    idx_15m = i * 4
+                    q_kw = sum(plan.slots[k].dhw_kw for k in range(idx_15m, min(len(plan.slots), idx_15m + 4))) / 4.0
+                    boiler[i] = round(q_kw, 2)
+                    if boiler[i] > 0:
+                        advices[i] = f"♨️ SWW Boiler 350L: {planned_mode_label}"
+
+            actual_15m_slots = [i for i, s in enumerate(plan.slots) if s.dhw_kw > 0]
+            sww_start_idx = actual_15m_slots[0] if actual_15m_slots else -1
+            slots_to_fill = len(actual_15m_slots)
+
+            GLOBAL_CENTRAL_CACHE["planned_dhw_slots"] = actual_15m_slots
+            GLOBAL_CENTRAL_CACHE["sww_start_idx"] = sww_start_idx
+            GLOBAL_CENTRAL_CACHE["slots_to_fill"] = slots_to_fill
+            GLOBAL_CENTRAL_CACHE["target_temp_c"] = sww_target_temp
+            GLOBAL_CENTRAL_CACHE["dynamic_peaks"] = plan.dynamic_peaks
+            GLOBAL_CENTRAL_CACHE["sww_power_kw"] = sww_power_kw
+            GLOBAL_CENTRAL_CACHE["is_15m"] = is_15m
+            GLOBAL_CENTRAL_CACHE["base_dt"] = base_dt
+            GLOBAL_CENTRAL_CACHE["planned_mode"] = planned_mode
+            GLOBAL_CENTRAL_CACHE["planned_mode_label"] = planned_mode_label
+            GLOBAL_CENTRAL_CACHE["reason"] = planned_mode_label
+
+            # Evaluate Live In-Flight DHW Heating & Run Merger
             t_dhw_live = 49.2
             try:
-                ha_url, ha_tok = get_ha_client_config()
-                if ha_tok and ha_url:
-                    req_t = urllib.request.Request(
-                        f"{ha_url}/api/states/sensor.hc_dhw_temperature_r5t_dhw_tank",
-                        headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
-                    )
-                    ctx = ssl.create_default_context()
-                    ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
-                    with urllib.request.urlopen(req_t, timeout=3, context=ctx) as r_t:
-                        st_t = json.loads(r_t.read().decode())
-                        val_t = float(st_t.get("state", 49.2))
-                        if 20.0 <= val_t <= 75.0:
-                            t_dhw_live = val_t
+                states_map_dhw = get_ha_states_map()
+                val_t = float(states_map_dhw.get("sensor.hc_dhw_temperature_r5t_dhw_tank", {}).get("state", 49.2))
+                if 20.0 <= val_t <= 75.0:
+                    t_dhw_live = val_t
             except Exception:
                 pass
 
-            # Unified Central Thermal Evaluation (Single Source of Truth):
-            # Check if the unheated tank drops below comfort (< 40°C) during a dynamic hard lockout peak before midday
-            unheated_sim = GLOBAL_DHW_MODEL.simulate_trajectory(t_dhw_live, now_ams, hours_ahead=24, heat_pump_schedule_slots=[]) if GLOBAL_DHW_MODEL else {}
-            unheated_temps = unheated_sim.get("temperatures_c", [])
-
-            morning_check_limit = 44 if is_15m else 11
-            dips_in_morning_hard_lockout = any(
-                unheated_temps[k] < 40.0 and slot_lockout_map.get(k, {}).get("is_hard_lockout")
-                for k in range(min(len(unheated_temps), morning_check_limit))
-            )
-            needs_night_charge = dips_in_morning_hard_lockout
-
-            # Dynamic Economic Arbitrage for DHW 60°C Solar Buffer Boost:
-            daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
-            today_daylight_slots = [it for it in daylight_slots if it["dt"].day == now_ams.day]
-            tot_net_surplus_kwh = sum(max(0.0, it["solar"] - unallocated[it["idx"]]) for it in today_daylight_slots) * (0.25 if is_15m else 1.0)
-            peak_net_surplus_kw = max((max(0.0, it["solar"] - unallocated[it["idx"]]) for it in today_daylight_slots), default=0.0)
-
-            # Electricity required to boost 350L from 50°C to 60°C (+4.07 kWh_th at COP 2.15)
-            el_boost_needed_kwh = 1.89
-            solar_used_kwh = min(el_boost_needed_kwh, tot_net_surplus_kwh)
-            grid_import_kwh = max(0.0, el_boost_needed_kwh - solar_used_kwh)
-
-            # Midday dynamic import & export pricing
-            midday_prices = [it["price"] for it in today_daylight_slots]
-            p_midday = (sum(midday_prices) / len(midday_prices)) if midday_prices else 0.28
-            p_export = max(0.0, (p_midday / 1.21) - 0.11085 - 0.0121)
-
-            # Future avoided electricity price (e.g. evening peak 18:00 - 22:00 or tomorrow)
-            evening_slots = [it for it in timeline_items if (18 <= it["dt"].hour <= 22)]
-            p_future_avoided = (sum(it["price"] for it in evening_slots) / len(evening_slots)) if evening_slots else 0.35
-
-            # Cost now: lost feed-in revenue of solar + actual grid import cost
-            cost_boost_now = (solar_used_kwh * p_export) + (grid_import_kwh * p_midday)
-            # Avoided future cost: 3.27 kWh_th carried over (after standby loss) heated at COP 2.85
-            cost_avoided_later = (3.27 / 2.85) * p_future_avoided
-            boost_net_saving_eur = round(cost_avoided_later - cost_boost_now, 3)
-
-            # DYNAMIC CRITERION: Boost to 60°C is ONLY activated if there is abundant free solar surplus (>= 3.0 kWh net)
-            # preventing costly grid imports at low COP (2.15) when the tank is already adequately heated to 50°C.
-            is_solar_boost_eligible = (tot_net_surplus_kwh >= 3.0 and boost_net_saving_eur > 0.05)
-
-            planned_mode = "standby_normal"
-            planned_mode_label = "Geen geforceerde run gepland"
-            sww_start_idx = -1
-            slots_to_fill = 0
-            sww_power_kw = 1.8
-            sww_target_temp = 60.0 if (is_solar_boost_eligible and today_daylight_slots) else 50.0
-
-            # Evaluate Live In-Flight DHW Heating & Run Merger
             merge_res = evaluate_and_apply_dhw_run_merger(plan, t_dhw_live)
             active_dhw_status = {
                 "is_active": merge_res.is_dhw_active,
@@ -3556,186 +3532,47 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "original_slot_time": merge_res.original_slot_time
             }
 
-            if merge_res.is_dhw_active:
-                # Active DHW heating takes priority over future schedule!
-                sww_start_idx = 0  # Starts immediately on slot 'Nu'
-                sww_power_kw = max(2.2 if merge_res.should_merge else 1.8, round(merge_res.current_power_kw, 2))
-                sww_target_temp = merge_res.active_target_temp_c
-                planned_mode = merge_res.promoted_mode
-                planned_mode_label = merge_res.active_mode_label
-                reason = merge_res.reason
-                tank_already_warm = False
-                slots_to_fill = 4 if is_15m else 1
-            else:
-                # LIVE THERMAL FEEDBACK: Is the tank ALREADY at or above target temperature?
-                # (e.g. the heat pump has already run autonomously or completed its heating cycle!)
-                tank_already_warm = (t_dhw_live >= (sww_target_temp - 0.8))
-
-                if tank_already_warm and not needs_night_charge:
-                    # Target already achieved! Standby in effect: cancel any redundant daytime runs!
-                    planned_mode = "normal"
-                    planned_mode_label = f"Normaal: Doeltemperatuur bereikt ({t_dhw_live:.1f}°C) — Standby"
-                    reason = f"Boilervat is met {t_dhw_live:.1f}°C reeds op gewenste temperatuur (≥ {sww_target_temp:.0f}°C). Warmtepomp staat in rust."
-                    sww_start_idx = -1
-                    slots_to_fill = 0
-                    sww_power_kw = 0.0
-                elif is_solar_boost_eligible and today_daylight_slots:
-                    # 1. Mode: Maximaal aan (60°C Zonnebuffer Boost) during today's solar peak!
-                    best_sww_slot = max(today_daylight_slots, key=lambda x: x["solar"])
-                    sww_start_idx = max(0, best_sww_slot["idx"] - (1 if is_15m else 0))
-                    sww_power_kw = 2.65
-                    sww_target_temp = 60.0
-                    planned_mode = "forced_solar_boost_60"
-                    planned_mode_label = "Maximaal aan (doorverwarming tot 60°C)"
-                    reason = f"Maximaal aan (60°C): {tot_net_surplus_kwh:.1f} kWh netto zonne-overschot buffert voordelig door naar 60°C"
-                elif today_daylight_slots:
-                    # 2. Mode: Geforceerd aan (50°C Dagrun) during today's best solar/tariff slot!
-                    best_sww_slot = max(today_daylight_slots, key=lambda x: (x["solar"] - x["price"] * 0.5))
-                    sww_start_idx = best_sww_slot["idx"]
-                    sww_power_kw = 1.8
-                    sww_target_temp = 50.0
-                    planned_mode = "forced_standard_50"
-                    planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
-                    reason = f"Geforceerd aan (50°C): Laadt vanaf {best_sww_slot['label']} op zonnestroom naar 50°C"
-                elif needs_night_charge:
-                    # 3. Mode: Geforceerd aan (Nachtlading tot 50°C) only when daylight has passed!
-                    night_slots = [it for it in timeline_items if (1 <= it["dt"].hour <= 5)]
-                    best_sww_slot = min(night_slots, key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5))) if night_slots else min(timeline_items[:24], key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5)))
-                    sww_start_idx = best_sww_slot["idx"]
-                    sww_power_kw = 1.8
-                    sww_target_temp = 50.0
-                    planned_mode = "forced_night_50"
-                    planned_mode_label = "Geforceerd aan (Nachtlading tot 50°C)"
-                    reason = f"Geforceerd aan (€{best_sww_slot['price']:.3f}/kWh) waarborgt ochtendcomfort vóór prijspiek"
-                else:
-                    # Fallback to cheapest price slot outside peaks
-                    valid_slots = [it for it in timeline_items if not ((it["idx"] in slot_lockout_map) and slot_lockout_map[it["idx"]].get("is_hard_lockout"))]
-                    best_sww_slot = min(valid_slots, key=lambda x: (x["price"], abs(x["dt"].hour + x["dt"].minute/60.0 - 3.5))) if valid_slots else timeline_items[0]
-                    sww_start_idx = best_sww_slot["idx"]
-                    sww_power_kw = 1.8
-                    sww_target_temp = 50.0
-                    planned_mode = "forced_standard_50"
-                    planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
-                    reason = f"Laagste beurstarief (€{best_sww_slot['price']:.3f}/kWh) om {best_sww_slot['label']}"
-
-            if not tank_already_warm and sww_start_idx >= 0 and slots_to_fill == 0:
-                # Calculate required slots dynamically based on thermal mass so the tank ACTUALLY reaches sww_target_temp (50°C of 60°C)
-                c_tank_kwh_per_c = 350.0 * 4.186 / 3600.0  # 0.407 kWh/K
-                step_h = 0.25 if is_15m else 1.0
-                t_run_start_est = max(34.0, t_dhw_live - (sww_start_idx * step_h * 0.28))
-                delta_t_run = max(2.0, sww_target_temp - t_run_start_est)
-                cop_run_est = 2.85 if sww_target_temp <= 52.0 else 2.15
-                p_th_run_est = sww_power_kw * cop_run_est
-                hours_run_needed = (delta_t_run * c_tank_kwh_per_c) / p_th_run_est
-                slots_to_fill = max(2, math.ceil(hours_run_needed / step_h) + (1 if is_15m else 0))
-
-            # Fill boiler dispatch while enforcing DYNAMIC PEAK LOCKOUTS
-            for k in range(slots_to_fill):
-                target_slot = sww_start_idx + k
-                if target_slot < total_slots:
-                    slot_peak = slot_lockout_map.get(target_slot)
-                    is_locked_slot = bool(slot_peak and slot_peak.get("is_hard_lockout"))
-                    if not is_locked_slot:
-                        boiler[target_slot] = sww_power_kw
-                        advices[target_slot] = f"♨️ SWW Boiler 350L: {reason}"
-
-            # Build 24h Mode Timeline for Horizontal Bar Diagram (Standardized 6 States)
+            # Build 24h Mode Timeline for Horizontal Bar Diagram directly from plan.slots
             dhw_mode_timeline = []
-            min_timeline_price = min([it.get("price", 0.30) for it in timeline_items] or [0.20])
             for it in timeline_items:
                 q_idx = it["idx"]
-                p_val = it.get("price", 0.30)
-                sol_val = it.get("solar", 0.0) if "solar" in it else (solar[q_idx] if q_idx < len(solar) else 0.0)
-                peak_info = slot_lockout_map.get(q_idx)
-
-                if peak_info and peak_info.get("is_hard_lockout"):
-                    # 1. Geforceerd uit (blok) - Rood (#EF4444)
-                    m_code = "forced_off"
-                    m_lbl = f"Geforceerd uit (blok) — {peak_info['name']}"
-                    m_col = "#EF4444"
-                    m_pwr = 0.0
-                    m_desc = f"Geforceerd uit ({it['label']}): Prijspiek max €{peak_info['max_price']:.3f}/kWh. Compressor SG4 vergrendeld tegen piektarieven."
-                elif peak_info and not peak_info.get("is_hard_lockout") and boiler[q_idx] == 0:
-                    # 2. Geadviseerd uit - Oranje (#F59E0B)
-                    m_code = "advised_off"
-                    m_lbl = f"Geadviseerd uit — {peak_info['name']}"
-                    m_col = "#F59E0B"
-                    m_pwr = 0.0
-                    m_desc = f"Geadviseerd uit ({it['label']}): Verhoogd tarief (€{p_val:.3f}/kWh). Uitstel van grote verbruikers aanbevolen; CV op lage modulatie."
-                elif boiler[q_idx] > 0:
-                    if planned_mode in ["forced_solar_boost_60", "max_on"]:
-                        # 6. Maximaal aan (60°C) - Paars (#A855F7)
-                        m_code = "max_on"
-                        m_lbl = "Maximaal aan (doorverwarming tot 60°C)"
-                        m_col = "#A855F7"
-                        m_desc = f"Maximaal aan om {it['label']}: Zonnebuffer doorverwarming naar 60°C · Vermogen {boiler[q_idx]} kW elektrisch."
-                    else:
-                        # 5. Geforceerd aan (50°C) - Groen (#10B981) (voor zowel dagrun als nachtbuffer!)
-                        m_code = "forced_on"
-                        m_lbl = "Geforceerd aan (verwarmen tot 50°C)"
-                        m_col = "#10B981"
-                        m_desc = f"Geforceerd aan om {it['label']}: Verwarmen naar setpoint 50°C · Vermogen {boiler[q_idx]} kW elektrisch."
-                    m_pwr = boiler[q_idx]
-                elif (sol_val >= 1.5 or p_val <= min_timeline_price + 0.030) and (10 <= it["dt"].hour <= 16):
-                    # 4. Geadviseerd aan - Gestreept lichtgroen (#4ADE80)
-                    m_code = "advised_on"
-                    m_lbl = "Geadviseerd aan (Doorverwarmen)"
-                    m_col = "#4ADE80"
-                    m_pwr = 0.0
-                    m_desc = f"Geadviseerd aan ({it['label']}): Voordelig venster (€{p_val:.3f}/kWh). Warmtepomp mag hoger doorverwarmen voor CV vloerbuffer."
+                if q_idx < len(plan.slots):
+                    ps = plan.slots[q_idx]
+                    dhw_mode_timeline.append({
+                        "slot": q_idx,
+                        "time": it["label"],
+                        "mode": ps.mode_code,
+                        "label": ps.mode_label,
+                        "color": ps.color_hex,
+                        "power_kw": ps.dhw_kw,
+                        "description": ps.description
+                    })
                 else:
-                    # 3. Normaal - Grijs (#1E293B)
-                    m_code = "normal"
-                    m_lbl = "Normaal (Standby)"
-                    m_col = "#1E293B"
-                    m_pwr = 0.0
-                    m_desc = f"Normaal ({it['label']}): Vrijloopvenster (€{p_val:.3f}/kWh). Warmtepomp en boiler in normale werking."
+                    dhw_mode_timeline.append({
+                        "slot": q_idx,
+                        "time": it["label"],
+                        "mode": "normal",
+                        "label": "Normaal (Standby)",
+                        "color": "#1E293B",
+                        "power_kw": 0.0,
+                        "description": f"Normaal ({it['label']})"
+                    })
 
-                dhw_mode_timeline.append({
-                    "slot": q_idx,
-                    "time": it["label"],
-                    "mode": m_code,
-                    "label": m_lbl,
-                    "color": m_col,
-                    "power_kw": m_pwr,
-                    "description": m_desc
-                })
-
-                        # Cache central dispatch with exact 15-minute slot indices
-            if is_15m:
-                actual_15m_slots = [sww_start_idx + k for k in range(slots_to_fill)]
-            else:
-                actual_15m_slots = [sww_start_idx * 4 + k for k in range(slots_to_fill * 4)]
-
-            GLOBAL_CENTRAL_CACHE["planned_dhw_slots"] = actual_15m_slots
-            GLOBAL_CENTRAL_CACHE["sww_start_idx"] = sww_start_idx
-            GLOBAL_CENTRAL_CACHE["slots_to_fill"] = slots_to_fill
-            GLOBAL_CENTRAL_CACHE["target_temp_c"] = sww_target_temp
-            GLOBAL_CENTRAL_CACHE["dynamic_peaks"] = dynamic_peaks
-            GLOBAL_CENTRAL_CACHE["sww_power_kw"] = sww_power_kw
-            GLOBAL_CENTRAL_CACHE["is_15m"] = is_15m
-            GLOBAL_CENTRAL_CACHE["base_dt"] = base_dt
-            GLOBAL_CENTRAL_CACHE["planned_mode"] = planned_mode
-            GLOBAL_CENTRAL_CACHE["planned_mode_label"] = planned_mode_label
-            GLOBAL_CENTRAL_CACHE["reason"] = reason
-
-            run_start_time = timeline_items[sww_start_idx]["label"] if 0 <= sww_start_idx < total_slots else "--:--"
-            run_end_time = timeline_items[min(total_slots - 1, sww_start_idx + slots_to_fill)]["label"] if 0 <= sww_start_idx < total_slots else "--:--"
             dhw_planning_summary = {
-                "planned_mode": planned_mode,
-                "planned_mode_label": planned_mode_label,
-                "target_temp_c": sww_target_temp,
-                "run_start": run_start_time,
-                "run_end": run_end_time,
-                "run_duration_min": slots_to_fill * (15 if is_15m else 60),
-                "power_kw": sww_power_kw,
-                "total_stroom_kwh": round(sww_power_kw * slots_to_fill * (0.25 if is_15m else 1.0), 2),
-                "spits_lockout_hours": round(len([s for s in slot_lockout_map.values() if s.get("is_hard_lockout")]) * (0.25 if is_15m else 1.0), 1),
-                "dynamic_peaks": dynamic_peaks,
-                "arbitrage_saving_eur": boost_net_saving_eur,
-                "arbitrage_p_midday": round(p_midday, 4),
-                "arbitrage_p_future": round(p_future_avoided, 4),
-                "arbitrage_surplus_kwh": round(tot_net_surplus_kwh, 2)
+                "planned_mode": plan.dhw_summary.planned_mode,
+                "planned_mode_label": plan.dhw_summary.planned_mode_label,
+                "target_temp_c": plan.dhw_summary.target_temp_c,
+                "run_start": plan.dhw_summary.run_start,
+                "run_end": plan.dhw_summary.run_end,
+                "run_duration_min": plan.dhw_summary.run_duration_min,
+                "power_kw": plan.dhw_summary.power_kw,
+                "total_stroom_kwh": plan.dhw_summary.total_stroom_kwh,
+                "spits_lockout_hours": plan.dhw_summary.spits_lockout_hours,
+                "dynamic_peaks": plan.dynamic_peaks,
+                "arbitrage_saving_eur": getattr(plan.dhw_summary, "arbitrage_saving_eur", 0.0),
+                "arbitrage_p_midday": getattr(plan.dhw_summary, "arbitrage_p_midday", 0.28),
+                "arbitrage_p_future": getattr(plan.dhw_summary, "arbitrage_p_future", 0.35),
+                "arbitrage_surplus_kwh": getattr(plan.dhw_summary, "arbitrage_surplus_kwh", 0.0)
             }
 
             
@@ -4804,7 +4641,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.45</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.46</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
