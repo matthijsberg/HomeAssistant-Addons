@@ -185,18 +185,20 @@ def check_live_api_contracts(base_url: str, errors: list):
         with urllib.request.urlopen(url_prices, timeout=6) as r:
             d_prices = json.loads(r.read().decode())
 
-        # Check total solar energy match (15m vs 1h)
-        s15_kwh = sum(-x * 0.25 for x in d_15m["datasets"]["solar_kw_neg"])
-        s1h_kwh = sum(-x * 1.0 for x in d_1h["datasets"]["solar_kw_neg"])
+        # Check total solar energy match across forecast horizon (15m vs 1h)
+        h15 = d_15m.get("history_count", 0)
+        h1 = d_1h.get("history_count", 0)
+        s15_kwh = sum(-x * 0.25 for x in d_15m["datasets"]["solar_kw_neg"][h15:])
+        s1h_kwh = sum(-x * 1.0 for x in d_1h["datasets"]["solar_kw_neg"][h1:])
         diff_solar = abs(s15_kwh - s1h_kwh)
         if diff_solar > 0.5:
             log_fail(f"Cross-resolution solar energy mismatch: 15m={s15_kwh:.2f} kWh, 1h={s1h_kwh:.2f} kWh (diff: {diff_solar:.2f} kWh)", errors)
         else:
             log_pass(f"Cross-resolution solar energy aligned: 15m={s15_kwh:.2f} kWh, 1h={s1h_kwh:.2f} kWh (diff: {diff_solar:.2f} kWh)")
 
-        # Check total unallocated energy match (15m vs 1h)
-        u15_kwh = sum(x * 0.25 for x in d_15m["datasets"]["unallocated_kw"])
-        u1h_kwh = sum(x * 1.0 for x in d_1h["datasets"]["unallocated_kw"])
+        # Check total unallocated energy match across forecast horizon (15m vs 1h)
+        u15_kwh = sum(x * 0.25 for x in d_15m["datasets"]["unallocated_kw"][h15:])
+        u1h_kwh = sum(x * 1.0 for x in d_1h["datasets"]["unallocated_kw"][h1:])
         diff_unalloc = abs(u15_kwh - u1h_kwh)
         if diff_unalloc > 0.5:
             log_fail(f"Cross-resolution unallocated energy mismatch: 15m={u15_kwh:.2f} kWh, 1h={u1h_kwh:.2f} kWh (diff: {diff_unalloc:.2f} kWh)", errors)
