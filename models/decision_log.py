@@ -22,13 +22,14 @@ class DecisionRecord:
     reason: str
     explanation: str
     savings_estimate_eur: float = 0.0
+    category: str = "DECISION"       # "ACTION" (Fysieke schakeling/relais) of "DECISION" (Optimalisatie/beleid)
 
     def to_influx_line(self, measurement: str = "hems_decisions") -> str:
         """Serializes decision record to InfluxDB Line Protocol."""
         now_ns = int(datetime.fromisoformat(self.timestamp_iso).timestamp() * 1e9)
         
         # Tags (low cardinality for fast Grafana filtering)
-        tags = f"domain={self.domain},decision_type={self.decision_type},chosen_mode={self.chosen_mode}"
+        tags = f"domain={self.domain},decision_type={self.decision_type},chosen_mode={self.chosen_mode},category={self.category}"
         
         # Fields
         safe_reason = self.reason.replace('"', '\\"').replace('\n', ' ')

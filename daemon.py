@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.26
+Version: 0.92.27
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2793,7 +2793,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.26",
+                "version": "0.92.27",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4649,7 +4649,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.26</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.27</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5173,21 +5173,84 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                     <!-- Filter & Controls -->
                     <div class="flex flex-wrap items-center justify-between gap-2.5 pt-1">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <button type="button" onclick="filterDecisionAudit('all')" id="btn-filter-all" class="px-3 py-1 rounded-full text-xs font-semibold bg-purple-600 text-white shadow">Alles</button>
-                            <button type="button" onclick="filterDecisionAudit('dhw')" id="btn-filter-dhw" class="px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">🚰 DHW Tapwater</button>
-                            <button type="button" onclick="filterDecisionAudit('space_heating')" id="btn-filter-space_heating" class="px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">♨️ CV Verwarming</button>
-                            <button type="button" onclick="filterDecisionAudit('grid_tariff')" id="btn-filter-grid_tariff" class="px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">🚫 Spitsblokkades</button>
-                            <button type="button" onclick="filterDecisionAudit('hardware')" id="btn-filter-hardware" class="px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">⚙️ Relais &amp; Actuatie</button>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <button type="button" onclick="filterDecisionAudit('all')" id="btn-filter-all" class="px-3 py-1 rounded-lg text-xs font-semibold bg-purple-600 text-white shadow">Alles</button>
+                            <button type="button" onclick="filterDecisionAudit('ACTION')" id="btn-filter-ACTION" class="px-2.5 py-1 rounded-lg text-xs font-medium text-blue-300 hover:text-white bg-blue-950/40 border border-blue-800/60">⚡ Acties</button>
+                            <button type="button" onclick="filterDecisionAudit('DECISION')" id="btn-filter-DECISION" class="px-2.5 py-1 rounded-lg text-xs font-medium text-purple-300 hover:text-white bg-purple-950/40 border border-purple-800/60">🧠 Besluiten</button>
+                            <span class="text-slate-700 hidden sm:inline">|</span>
+                            <button type="button" onclick="filterDecisionAudit('dhw')" id="btn-filter-dhw" class="px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">🚰 DHW</button>
+                            <button type="button" onclick="filterDecisionAudit('space_heating')" id="btn-filter-space_heating" class="px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">♨️ CV</button>
+                            <button type="button" onclick="filterDecisionAudit('grid_tariff')" id="btn-filter-grid_tariff" class="px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">🚫 Spits</button>
+                            <button type="button" onclick="filterDecisionAudit('hardware')" id="btn-filter-hardware" class="px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800">⚙️ Relais</button>
                         </div>
-                        <div class="text-xs text-slate-500 font-mono">
-                            Bron: <span class="text-slate-300">openhems.hems_annotations &amp; hems_decisions</span>
+                        <div class="text-[11px] text-slate-500 font-mono">
+                            Klik op een regel voor sensor-details
                         </div>
                     </div>
 
-                    <!-- Timeline List Container -->
-                    <div class="space-y-3 pt-2" id="decision-audit-list">
-                        <div class="text-xs text-slate-500 py-10 text-center">Beslis-logboek wordt geladen...</div>
+                    <!-- Compact Logbook Table (Home Assistant Style) -->
+                    <div class="border border-[#1E293B] rounded-xl bg-[#0B0F17]/90 overflow-hidden shadow-xl">
+                        <!-- Desktop Header -->
+                        <div class="hidden sm:grid sm:grid-cols-12 gap-2 px-3.5 py-2 bg-slate-900/90 text-[10px] font-mono uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                            <div class="col-span-2">Tijdstip</div>
+                            <div class="col-span-2">Type</div>
+                            <div class="col-span-2">Domein</div>
+                            <div class="col-span-5">Gebeurtenis &amp; Modus</div>
+                            <div class="col-span-1 text-right">Details</div>
+                        </div>
+
+                        <!-- Rows Container -->
+                        <div id="decision-audit-list" class="divide-y divide-slate-800/60 font-sans">
+                            <div class="text-xs text-slate-500 py-8 text-center">Logboek wordt geladen...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Decision Detail Modal (Home Assistant Style Popup) -->
+                <div id="decision-detail-modal" class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm hidden" onclick="handleDecisionModalBackdrop(event)">
+                    <div class="bg-[#0e1422] border border-slate-700 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-150" onclick="event.stopPropagation()">
+                        <!-- Modal Header -->
+                        <div class="p-4 sm:p-5 border-b border-slate-800 flex items-start justify-between gap-3 bg-slate-900/80">
+                            <div class="flex items-center gap-2.5">
+                                <span id="modal-type-badge" class="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wide"></span>
+                                <h3 id="modal-title" class="text-sm sm:text-base font-bold text-white leading-snug"></h3>
+                            </div>
+                            <button type="button" onclick="closeDecisionModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+
+                        <!-- Modal Body (Scrollable) -->
+                        <div class="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs">
+                            <!-- Timestamp & Mode Bar -->
+                            <div class="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 font-mono text-[11px]">
+                                <div class="text-slate-400">Tijdstip: <strong id="modal-time" class="text-white"></strong></div>
+                                <div class="text-slate-400">Status: <span id="modal-mode" class="px-2 py-0.5 rounded font-bold border"></span></div>
+                            </div>
+
+                            <!-- Full Explanation / Reason -->
+                            <div class="space-y-1.5">
+                                <label class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Toelichting &amp; Reden</label>
+                                <div id="modal-explanation" class="p-3 rounded-xl bg-[#0B0F17] border border-slate-800 text-slate-200 leading-relaxed font-sans text-xs"></div>
+                            </div>
+
+                            <!-- Sensor Inputs & Telemetry Snapshot Table -->
+                            <div class="space-y-1.5">
+                                <label class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Geregistreerde Sensor-Inputs &amp; Marges</label>
+                                <div id="modal-inputs-table" class="rounded-xl bg-[#0B0F17] border border-slate-800 overflow-hidden divide-y divide-slate-800/60 font-mono text-[11px]"></div>
+                            </div>
+
+                            <!-- Savings / Financial Impact (if applicable) -->
+                            <div id="modal-savings-box" class="p-3 rounded-xl bg-emerald-950/30 border border-emerald-800/40 text-emerald-300 flex items-center justify-between hidden">
+                                <span class="font-medium">Geschatte Besparing:</span>
+                                <span id="modal-savings-val" class="font-mono font-bold text-sm text-emerald-400"></span>
+                            </div>
+                        </div>
+
+                        <!-- Modal Footer -->
+                        <div class="p-3 sm:p-4 border-t border-slate-800 bg-slate-900/60 flex justify-end">
+                            <button type="button" onclick="closeDecisionModal()" class="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-white transition">Sluiten</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -11306,15 +11369,28 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         }
 
         let activeDecisionFilter = 'all';
+        window.__allDecisions = [];
+        window.__foldedGroups = [];
+
         async function loadDecisionAuditLog() {
             const listEl = document.getElementById('decision-audit-list');
             if (!listEl) return;
             try {
-                const domainParam = (activeDecisionFilter !== 'all') ? `&domain=${encodeURIComponent(activeDecisionFilter)}` : '';
-                const res = await fetch(`./api/analytics/decisions?limit=30${domainParam}`);
+                const isCatFilter = (activeDecisionFilter === 'ACTION' || activeDecisionFilter === 'DECISION');
+                const isDomainFilter = (activeDecisionFilter !== 'all' && !isCatFilter);
+                const domainParam = isDomainFilter ? `&domain=${encodeURIComponent(activeDecisionFilter)}` : '';
+                const res = await fetch(`./api/analytics/decisions?limit=60${domainParam}`);
                 if (!res.ok) return;
                 const data = await res.json();
-                const decisions = data.decisions || [];
+                let decisions = data.decisions || [];
+
+                if (activeDecisionFilter === 'ACTION') {
+                    decisions = decisions.filter(d => d.category === 'ACTION' || d.decision_type === 'live_actuation' || d.domain === 'hardware');
+                } else if (activeDecisionFilter === 'DECISION') {
+                    decisions = decisions.filter(d => d.category !== 'ACTION' && d.decision_type !== 'live_actuation' && d.domain !== 'hardware');
+                }
+
+                window.__allDecisions = decisions;
 
                 // Update summary badges & KPIs
                 const totalEl = document.getElementById('stat-total-decisions');
@@ -11334,11 +11410,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 if (savEl) savEl.innerText = '€' + totalSav.toFixed(2).replace('.', ',');
 
                 if (decisions.length === 0) {
-                    listEl.innerHTML = '<div class="text-xs text-slate-500 py-12 text-center bg-[#0B0F17]/40 rounded-xl border border-dashed border-slate-800">Geen beslissingen geregistreerd in dit venster.</div>';
+                    listEl.innerHTML = '<div class="text-xs text-slate-500 py-10 text-center bg-[#0B0F17]/40">Geen gebeurtenissen gevonden voor dit filter.</div>';
                     return;
                 }
 
-                // Group consecutive identical decisions (domain, decision_type, chosen_mode, reason)
+                // Group consecutive identical events
                 const foldedGroups = [];
                 decisions.forEach(d => {
                     const key = `${d.domain}|${d.decision_type}|${d.chosen_mode}|${d.reason}`;
@@ -11352,6 +11428,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         });
                     }
                 });
+                window.__foldedGroups = foldedGroups;
 
                 listEl.innerHTML = foldedGroups.map((g, gIdx) => {
                     const d = g.representative;
@@ -11365,68 +11442,57 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     const timeOld = dtOld.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                     const dateStr = dtNew.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' });
 
+                    const isAction = (d.category === 'ACTION' || d.decision_type === 'live_actuation' || d.domain === 'hardware');
+                    const typePill = isAction
+                        ? '<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-950/90 border border-blue-500/60 text-blue-300 whitespace-nowrap">⚡ ACTIE</span>'
+                        : '<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-950/90 border border-purple-500/60 text-purple-300 whitespace-nowrap">🧠 BESLUIT</span>';
+
+                    const domainLabel = (d.domain === 'dhw') ? '🚰 DHW' :
+                                        (d.domain === 'space_heating') ? '♨️ CV' :
+                                        (d.domain === 'grid_tariff') ? '🚫 Spits' :
+                                        (d.domain === 'hardware') ? '⚙️ Relais' : d.domain;
+
                     const modeColor = (d.chosen_mode === 'max_on') ? 'bg-purple-950/80 border-purple-500/50 text-purple-300' :
                                       (d.chosen_mode === 'forced_on') ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300' :
                                       (d.chosen_mode === 'advised_on') ? 'bg-indigo-950/80 border-indigo-500/50 text-indigo-300' :
                                       (d.chosen_mode === 'forced_off') ? 'bg-red-950/80 border-red-500/50 text-red-300' :
+                                      (d.chosen_mode === 'planned') ? 'bg-amber-950/80 border-amber-500/50 text-amber-300' :
                                       'bg-slate-800/80 border-slate-700 text-slate-300';
-                    
-                    const domainBadge = (d.domain === 'dhw') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-pink-950/80 border border-pink-700/50 text-pink-300">🚰 DHW</span>' :
-                                        (d.domain === 'space_heating') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-950/80 border border-indigo-700/50 text-indigo-300">♨️ CV</span>' :
-                                        (d.domain === 'grid_tariff') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950/80 border border-amber-700/50 text-amber-300">🚫 Tarief &amp; Spits</span>' :
-                                        (d.domain === 'hardware') ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-950/80 border border-cyan-700/50 text-cyan-300">⚙️ Relais</span>' :
-                                        `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400">${d.domain}</span>`;
 
-                    const inputsHtml = Object.entries(newest.inputs || {}).filter(([_, v]) => v !== null && v !== undefined).map(([k, v]) => {
-                        return `<span class="px-2 py-0.5 rounded bg-black/40 border border-slate-800 text-[10px] font-mono text-slate-400">${k}: <strong class="text-white">${v}</strong></span>`;
-                    }).join(' ');
+                    const countTag = (count > 1) 
+                        ? `<span class="ml-1.5 px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-purple-900/60 text-purple-300 border border-purple-700/60">${count}× (${timeOld}–${timeNew})</span>` 
+                        : '';
 
-                    const savingsHtml = (d.savings_estimate_eur > 0) ? `<span class="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-700/40 text-[10px] font-mono font-bold text-emerald-300">+€${Number(d.savings_estimate_eur).toFixed(2)} bespaard</span>` : '';
-
-                    const timeRangeBadge = (count > 1) 
-                        ? `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-900/40 text-purple-300 border border-purple-800/60 flex items-center gap-1"><span>🔄 ${count}× herhaald</span> <span class="text-slate-400 font-normal">(${timeOld} – ${timeNew})</span></span>`
-                        : `<span class="text-[10px] font-mono text-slate-400 bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800">${dateStr} ${timeNew}</span>`;
-
-                    const subEntriesHtml = (count > 1) ? g.entries.map((sub) => {
-                        const subDt = new Date(sub.timestamp_iso);
-                        const subTime = subDt.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                        const subInputs = Object.entries(sub.inputs || {}).filter(([_, v]) => v !== null && v !== undefined).map(([k, v]) => `${k}: ${v}`).join(' · ');
-                        return `
-                            <div class="flex items-center justify-between text-[11px] py-1 px-2.5 rounded bg-black/40 border border-slate-800/80 font-mono text-slate-400">
-                                <span class="text-slate-300 font-bold">${subTime}</span>
-                                <span class="truncate ml-2 text-slate-400">${subInputs || 'Status actief'}</span>
-                            </div>
-                        `;
-                    }).join('') : '';
-
-                    const toggleBtn = (count > 1) ? `
-                        <div class="pt-2 border-t border-slate-800/70 flex items-center justify-between">
-                            <button type="button" onclick="toggleDecisionGroup(${gIdx})" id="btn-group-${gIdx}" class="text-[11px] font-medium text-purple-400 hover:text-purple-300 flex items-center gap-1.5 transition">
-                                <span>▼</span> <span>Toon alle ${count} evaluaties &amp; temperatuurmetingen</span>
-                            </button>
-                            <span class="text-[10px] font-mono text-slate-500">Duur: ${Math.max(1, Math.round((dtNew - dtOld) / 60000))} min</span>
-                        </div>
-                        <div id="group-entries-${gIdx}" class="hidden space-y-1 pt-2 max-h-52 overflow-y-auto pr-1">
-                            ${subEntriesHtml}
-                        </div>
-                    ` : '';
+                    const savingsPill = (d.savings_estimate_eur > 0) 
+                        ? `<span class="hidden md:inline-flex px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-950/80 border border-emerald-700/40 text-emerald-300">+€${Number(d.savings_estimate_eur).toFixed(2)}</span>` 
+                        : '';
 
                     return `
-                        <div class="bg-[#0B0F17]/90 border border-slate-800 hover:border-slate-700 p-4 rounded-xl transition space-y-2.5 shadow-lg">
-                            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/60 pb-2">
-                                <div class="flex items-center gap-2">
-                                    ${domainBadge}
-                                    <span class="text-xs font-bold text-white tracking-wide">${d.reason}</span>
+                        <div onclick="openDecisionGroupModal(${gIdx})" class="p-2.5 sm:px-3.5 sm:py-2.5 hover:bg-slate-800/60 cursor-pointer transition flex items-center justify-between gap-2.5 sm:gap-3 group">
+                            <div class="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                                <div class="flex flex-col sm:flex-row sm:items-center sm:gap-1.5 font-mono text-[11px] text-slate-400 whitespace-nowrap">
+                                    <span class="text-slate-500 text-[10px] hidden sm:inline">${dateStr}</span>
+                                    <strong class="text-slate-200">${timeNew}</strong>
                                 </div>
-                                <div class="flex items-center gap-2">
-                                    ${savingsHtml}
-                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${modeColor}">${d.chosen_mode}</span>
-                                    ${timeRangeBadge}
+                                <div class="flex-shrink-0">${typePill}</div>
+                                <div class="hidden sm:block flex-shrink-0 text-[11px] font-bold text-slate-400 w-16 truncate">${domainLabel}</div>
+                                <div class="min-w-0 flex-1 truncate">
+                                    <div class="flex items-center gap-1 truncate">
+                                        <span class="text-xs font-semibold text-white group-hover:text-cyan-300 transition truncate">${d.reason}</span>
+                                        ${countTag}
+                                    </div>
+                                    <span class="text-[11px] text-slate-400 truncate block sm:hidden">${d.explanation}</span>
                                 </div>
                             </div>
-                            <p class="text-xs text-slate-300 leading-relaxed">${d.explanation}</p>
-                            ${inputsHtml ? `<div class="flex flex-wrap gap-1.5 pt-0.5">${inputsHtml}</div>` : ''}
-                            ${toggleBtn}
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                                ${savingsPill}
+                                <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${modeColor}">
+                                    ${d.chosen_mode}
+                                </span>
+                                <span class="text-slate-500 group-hover:text-white transition p-0.5">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path></svg>
+                                </span>
+                            </div>
                         </div>
                     `;
                 }).join('');
@@ -11435,29 +11501,110 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             }
         }
 
-        function toggleDecisionGroup(idx) {
-            const container = document.getElementById('group-entries-' + idx);
-            const btn = document.getElementById('btn-group-' + idx);
-            if (!container || !btn) return;
-            const isHidden = container.classList.contains('hidden');
-            if (isHidden) {
-                container.classList.remove('hidden');
-                btn.innerHTML = '<span>▲</span> <span>Verberg evaluaties</span>';
-            } else {
-                container.classList.add('hidden');
-                btn.innerHTML = '<span>▼</span> <span>Toon alle evaluaties &amp; temperatuurmetingen</span>';
+        function openDecisionGroupModal(gIdx) {
+            const g = (window.__foldedGroups || [])[gIdx];
+            if (!g) return;
+            const d = g.representative;
+            const count = g.entries.length;
+            const newest = g.entries[0];
+            const oldest = g.entries[g.entries.length - 1];
+
+            const isAction = (d.category === 'ACTION' || d.decision_type === 'live_actuation' || d.domain === 'hardware');
+            const typeBadge = document.getElementById('modal-type-badge');
+            if (typeBadge) {
+                typeBadge.className = isAction 
+                    ? 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-950/80 border border-blue-500/50 text-blue-300'
+                    : 'px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-purple-950/80 border border-purple-500/50 text-purple-300';
+                typeBadge.innerText = isAction ? '⚡ FYSIEKE ACTIE' : '🧠 PLAN-BESLUIT';
+            }
+
+            document.getElementById('modal-title').innerText = d.reason + (count > 1 ? ` (${count}× geëvalueerd)` : '');
+            
+            const dtNew = new Date(newest.timestamp_iso);
+            const dtOld = new Date(oldest.timestamp_iso);
+            const timeNew = dtNew.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const timeOld = dtOld.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const dateStr = dtNew.toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            document.getElementById('modal-time').innerText = (count > 1) 
+                ? `${dateStr} ${timeOld} ➔ ${timeNew} (${Math.max(1, Math.round((dtNew - dtOld)/60000))} min)`
+                : `${dateStr} ${timeNew}`;
+
+            const modeEl = document.getElementById('modal-mode');
+            if (modeEl) {
+                modeEl.className = 'px-2 py-0.5 rounded font-bold border ' + (
+                    (d.chosen_mode === 'max_on') ? 'bg-purple-950/80 border-purple-500/50 text-purple-300' :
+                    (d.chosen_mode === 'forced_on') ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300' :
+                    (d.chosen_mode === 'advised_on') ? 'bg-indigo-950/80 border-indigo-500/50 text-indigo-300' :
+                    (d.chosen_mode === 'forced_off') ? 'bg-red-950/80 border-red-500/50 text-red-300' :
+                    (d.chosen_mode === 'planned') ? 'bg-amber-950/80 border-amber-500/50 text-amber-300' :
+                    'bg-slate-800/80 border-slate-700 text-slate-300'
+                );
+                modeEl.innerText = d.chosen_mode;
+            }
+
+            document.getElementById('modal-explanation').innerText = d.explanation;
+
+            // Inputs table
+            const inputsTable = document.getElementById('modal-inputs-table');
+            if (inputsTable) {
+                const combinedInputs = Object.assign({}, ...g.entries.map(e => e.inputs || {}));
+                const entries = Object.entries(combinedInputs).filter(([_, v]) => v !== null && v !== undefined);
+                if (entries.length > 0) {
+                    inputsTable.innerHTML = entries.map(([k, v]) => `
+                        <div class="flex items-center justify-between p-2.5 hover:bg-slate-900/50">
+                            <span class="text-slate-400">${k}</span>
+                            <span class="text-white font-bold">${typeof v === 'boolean' ? (v ? 'WAAR (AAN)' : 'ONWAAR (UIT)') : v}</span>
+                        </div>
+                    `).join('');
+                } else {
+                    inputsTable.innerHTML = '<div class="p-3 text-slate-500 text-center">Geen aanvullende sensor-inputs geregistreerd.</div>';
+                }
+            }
+
+            // Savings
+            const savBox = document.getElementById('modal-savings-box');
+            const savVal = document.getElementById('modal-savings-val');
+            if (savBox && savVal) {
+                if (d.savings_estimate_eur > 0) {
+                    savBox.classList.remove('hidden');
+                    savVal.innerText = `+€${Number(d.savings_estimate_eur).toFixed(2)}`;
+                } else {
+                    savBox.classList.add('hidden');
+                }
+            }
+
+            const modal = document.getElementById('decision-detail-modal');
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function closeDecisionModal() {
+            const modal = document.getElementById('decision-detail-modal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function handleDecisionModalBackdrop(event) {
+            if (event.target.id === 'decision-detail-modal') {
+                closeDecisionModal();
             }
         }
 
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeDecisionModal();
+        });
+
         function filterDecisionAudit(domain) {
             activeDecisionFilter = domain;
-            ['all', 'dhw', 'space_heating', 'grid_tariff', 'hardware'].forEach(dom => {
+            ['all', 'ACTION', 'DECISION', 'dhw', 'space_heating', 'grid_tariff', 'hardware'].forEach(dom => {
                 const btn = document.getElementById('btn-filter-' + dom);
                 if (btn) {
                     if (dom === domain) {
-                        btn.className = 'px-3 py-1 rounded-full text-xs font-semibold bg-purple-600 text-white shadow';
+                        btn.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-purple-600 text-white shadow';
+                    } else if (dom === 'ACTION') {
+                        btn.className = 'px-2.5 py-1 rounded-lg text-xs font-medium text-blue-300 hover:text-white bg-blue-950/40 border border-blue-800/60';
+                    } else if (dom === 'DECISION') {
+                        btn.className = 'px-2.5 py-1 rounded-lg text-xs font-medium text-purple-300 hover:text-white bg-purple-950/40 border border-purple-800/60';
                     } else {
-                        btn.className = 'px-3 py-1 rounded-full text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800';
+                        btn.className = 'px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white bg-slate-900 border border-slate-800';
                     }
                 }
             });

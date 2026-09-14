@@ -32,6 +32,7 @@ class DecisionAuditLogger:
         reason: str,
         explanation: str,
         savings_estimate_eur: float = 0.0,
+        category: str = "DECISION",
         influx_cfg: Optional[Dict[str, Any]] = None,
         influx_pwd: str = ""
     ) -> DecisionRecord:
@@ -48,7 +49,8 @@ class DecisionAuditLogger:
             inputs=inputs,
             reason=reason,
             explanation=explanation,
-            savings_estimate_eur=savings_estimate_eur
+            savings_estimate_eur=savings_estimate_eur,
+            category=category
         )
 
         # 1. Append to local JSONL
@@ -157,6 +159,7 @@ class DecisionAuditLogger:
                                         continue
                                     records.append({
                                         "timestamp_iso": d.get("time"),
+                                        "category": d.get("category", "DECISION"),
                                         "domain": rec_dom,
                                         "decision_type": d.get("decision_type", "dispatch"),
                                         "chosen_mode": d.get("chosen_mode", "normal"),
@@ -174,21 +177,27 @@ class DecisionAuditLogger:
                                 elif meas == "hems_annotations":
                                     evt = (d.get("event_type") or "").lower()
                                     tit = (d.get("title") or "").lower()
-                                    if "hardware" in evt or "relais" in tit:
+                                    if "hardware" in evt or "relais" in tit or "actuatie" in evt:
                                         rec_dom = "hardware"
+                                        category = "ACTION"
                                     elif "peak" in evt or "spits" in tit:
                                         rec_dom = "grid_tariff"
+                                        category = "DECISION"
                                     elif "space_heating" in evt or "cv" in tit or "ruimteverwarming" in tit:
                                         rec_dom = "space_heating"
+                                        category = "DECISION"
                                     elif "dhw" in evt or "dhw" in tit or "boiler" in tit or "zonnebuffer" in tit or "nacht" in tit:
                                         rec_dom = "dhw"
+                                        category = "ACTION" if any(w in tit for w in ["bereikt", "vrijgegeven", "relais"]) else "DECISION"
                                     else:
                                         rec_dom = "general"
+                                        category = "DECISION"
 
                                     if domain and rec_dom != domain:
                                         continue
                                     records.append({
                                         "timestamp_iso": d.get("time"),
+                                        "category": category,
                                         "domain": rec_dom,
                                         "decision_type": d.get("event_type", "annotation"),
                                         "chosen_mode": d.get("state_code", "normal"),
