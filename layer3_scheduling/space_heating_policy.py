@@ -58,7 +58,7 @@ class SpaceHeatingPolicy:
         # Defrost penalty near freezing (-2°C to +4°C)
         if -2.0 <= outdoor_temp_c <= 4.0:
             cop *= 0.85
-        return round(max(2.2, min(5.4, cop)), 2)
+        return round(max(2.2, min(6.8, cop)), 2)
 
     @classmethod
     def calculate_thermal_cost(
@@ -105,45 +105,6 @@ class SpaceHeatingPolicy:
         # Check summer lockout
         is_heating_season = (mean_outdoor < cls.SUMMER_LOCKOUT_OUTDOOR_C)
 
-        if not is_heating_season:
-            # Summer mode: Heating completely disabled
-            empty_slots = []
-            for i in range(n_slots):
-                t_out = outdoor_temps_c[i]
-                c = cls.calculate_carnot_cop(t_out, cls.FLOW_TEMP_CV_C)
-                empty_slots.append(
-                    SpaceHeatingSlotResult(
-                        slot_idx=i,
-                        heating_kw_el=0.0,
-                        heating_kw_th=0.0,
-                        cop=c,
-                        room_temp_c=current_room_temp_c or target_room,
-                        floor_temp_c=current_floor_temp_c or (target_room + 0.5),
-                        heat_loss_kw=0.0,
-                        mode_code="normal",
-                        is_preheat_active=False,
-                        is_lockout_active=False,
-                        cost_th_eur_per_kwh=0.0,
-                        outdoor_temp_c=round(t_out, 1)
-                    )
-                )
-            return SpaceHeatingPlanSummary(
-                is_heating_season=False,
-                season_status_label="Zomersluiting (CV Vergrendeld)",
-                total_heating_kwh_el=0.0,
-                total_heating_kwh_th=0.0,
-                average_cop=cls.calculate_carnot_cop(mean_outdoor),
-                preheat_hours=0.0,
-                lockout_hours=0.0,
-                min_projected_room_temp_c=current_room_temp_c or target_room,
-                max_projected_room_temp_c=current_room_temp_c or target_room,
-                slots=empty_slots,
-                target_room_temp_c=target_room,
-                min_comfort_room_c=min_comfort_room,
-                max_preheat_room_c=max_preheat_room,
-                max_floor_temp_c=cls.MAX_FLOOR_TEMP_C
-            )
-
         # 1. Map dynamic peak lockouts
         lockout_slot_map = {}
         for peak in dynamic_peaks:
@@ -161,33 +122,34 @@ class SpaceHeatingPolicy:
 
         # 3. Identify strategic buffer / pre-heat windows
         preheat_candidate_slots = set()
-        for peak in dynamic_peaks:
-            p_start = peak.get("start_idx", 0)
-            # Ensure the 2.5 - 3.0 hours immediately preceding the peak are buffered
-            runway_slots = int(3.0 / step_hours)
-            for idx in range(max(0, p_start - runway_slots), p_start):
-                if idx not in active_dhw_slots and idx not in lockout_slot_map:
-                    preheat_candidate_slots.add(idx)
-
-            # In addition, include daytime solar surplus slots before the peak
-            earlier_lookback = int(6.0 / step_hours)
-            window_start = max(0, p_start - earlier_lookback)
-            for idx in range(window_start, max(0, p_start - runway_slots)):
-                if idx not in active_dhw_slots and idx not in lockout_slot_map:
-                    if solar_kw[idx] >= 1.0 or thermal_costs[idx] <= 0.05:
+        if is_heating_season:
+            for peak in dynamic_peaks:
+                p_start = peak.get("start_idx", 0)
+                # Ensure the 2.5 - 3.0 hours immediately preceding the peak are buffered
+                runway_slots = int(3.0 / step_hours)
+                for idx in range(max(0, p_start - runway_slots), p_start):
+                    if idx not in active_dhw_slots and idx not in lockout_slot_map:
                         preheat_candidate_slots.add(idx)
 
-        # Also evaluate cheap night valley slots (02:00 - 05:30) before morning wake-up
-        min_night_cost = min([thermal_costs[idx] for idx in range(min(n_slots, 24))] or [0.06])
-        for idx in range(min(n_slots, 24)):
-            slot_in_day = idx % 96
-            if 8 <= slot_in_day <= 22:  # 02:00 to 05:30
-                if thermal_costs[idx] <= min_night_cost + 0.015:
-                    preheat_candidate_slots.add(idx)
+                # In addition, include daytime solar surplus slots before the peak
+                earlier_lookback = int(6.0 / step_hours)
+                window_start = max(0, p_start - earlier_lookback)
+                for idx in range(window_start, max(0, p_start - runway_slots)):
+                    if idx not in active_dhw_slots and idx not in lockout_slot_map:
+                        if solar_kw[idx] >= 1.0 or thermal_costs[idx] <= 0.05:
+                            preheat_candidate_slots.add(idx)
+
+            # Also evaluate cheap night valley slots (02:00 - 05:30) before morning wake-up
+            min_night_cost = min([thermal_costs[idx] for idx in range(min(n_slots, 24))] or [0.06])
+            for idx in range(min(n_slots, 24)):
+                slot_in_day = idx % 96
+                if 8 <= slot_in_day <= 22:  # 02:00 to 05:30
+                    if thermal_costs[idx] <= min_night_cost + 0.015:
+                        preheat_candidate_slots.add(idx)
 
         # 4. Simulate 2R1C thermal model slot by slot
         t_room = current_room_temp_c if current_room_temp_c is not None else target_room
-        t_floor = current_floor_temp_c if current_floor_temp_c is not None else (t_room + 1.2)
+        t_floor = current_floor_temp_c if current_floor_temp_c is not None else (t_room - 0.2 if not is_heating_season else t_room + 1.2)
 
         slot_results: List[SpaceHeatingSlotResult] = []
         total_kwh_el = 0.0
@@ -215,7 +177,11 @@ class SpaceHeatingPolicy:
             is_preheat = False
             is_lockout = False
 
-            if is_dhw_running:
+            if not is_heating_season:
+                # Summer mode: CV heating strictly locked out, temperatures drift freely
+                heating_el = 0.0
+                mode_code = "normal"
+            elif is_dhw_running:
                 # Hydraulic interlock: CV completely paused during DHW heating
                 heating_el = 0.0
                 mode_code = "forced_on"  # DHW has precedence
@@ -293,9 +259,10 @@ class SpaceHeatingPolicy:
             )
 
         all_r_temps = [s.room_temp_c for s in slot_results]
+        season_label = "Stookseizoen Actief (Slimme Vloerbuffer)" if is_heating_season else "Zomersluiting (CV Vergrendeld)"
         return SpaceHeatingPlanSummary(
-            is_heating_season=True,
-            season_status_label="Stookseizoen Actief (Slimme Vloerbuffer)",
+            is_heating_season=is_heating_season,
+            season_status_label=season_label,
             total_heating_kwh_el=round(total_kwh_el, 2),
             total_heating_kwh_th=round(total_kwh_th, 2),
             average_cop=round(sum(slot_cops) / len(slot_cops), 2) if slot_cops else 4.2,

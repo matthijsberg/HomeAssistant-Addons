@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.59
+Version: 0.92.60
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -969,11 +969,19 @@ def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
 
     # Read live tank temperature from HA to avoid artificial 50°C cliff
     cur_tank_default = 42.8
+    cur_room_default = 24.5
     try:
         sm = get_ha_states_map()
         v = float(sm.get("sensor.hc_dhw_temperature_r5t_dhw_tank", {}).get("state", 42.8))
         if 20.0 <= v <= 75.0:
             cur_tank_default = v
+        cl_t = sm.get("climate.woonkamer_climate_daikin", {}).get("attributes", {}).get("current_temperature")
+        if cl_t is not None and 15.0 <= float(cl_t) <= 35.0:
+            cur_room_default = float(cl_t)
+        else:
+            r_t = float(sm.get("sensor.hc_sensors_temperature_room", {}).get("state", 24.5))
+            if 15.0 <= r_t <= 35.0:
+                cur_room_default = r_t
     except Exception:
         pass
 
@@ -1017,7 +1025,7 @@ def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
             "heating_kw": cv_kw,
             "tank_temp_c": tank_t,
             "outdoor_temp_c": out_t,
-            "indoor_temp_c": 22.0
+            "indoor_temp_c": cur_room_default
         })
 
     return history_pts
@@ -1541,6 +1549,7 @@ def ensure_active_canonical_plan(force_refresh=False):
     # 3. Read current tank and room temperature
     cur_dhw = 48.0
     cur_room = 20.0
+    cur_target_room = 20.0
     last_hw_time = None
     try:
         states_map = get_ha_states_map()
@@ -1548,9 +1557,37 @@ def ensure_active_canonical_plan(force_refresh=False):
         if 20.0 <= t_tank <= 75.0:
             cur_dhw = t_tank
             last_hw_time = datetime.now(ZoneInfo("Europe/Amsterdam"))
-        t_room = float(states_map.get("sensor.woonkamer_temperatuur", {}).get("state", 0.0))
-        if 15.0 <= t_room <= 30.0:
-            cur_room = t_room
+        
+        # Read live room temperature and target setpoint from Daikin climate entity
+        daikin_cl = states_map.get("climate.woonkamer_climate_daikin", {})
+        if daikin_cl:
+            c_temp = daikin_cl.get("attributes", {}).get("current_temperature")
+            if c_temp is not None:
+                try:
+                    v_t = float(c_temp)
+                    if 15.0 <= v_t <= 35.0:
+                        cur_room = v_t
+                except (ValueError, TypeError):
+                    pass
+            sp_temp = daikin_cl.get("attributes", {}).get("temperature") or daikin_cl.get("attributes", {}).get("target_temp_low")
+            if sp_temp is not None:
+                try:
+                    v_sp = float(sp_temp)
+                    if 15.0 <= v_sp <= 25.0:
+                        cur_target_room = v_sp
+                except (ValueError, TypeError):
+                    pass
+        if cur_room == 20.0:
+            for s_id in ["sensor.hc_sensors_temperature_room", "sensor.sco2_staging_01_woonkamer_co2_temperature", "sensor.woonkamer_temperatuur"]:
+                s_val = states_map.get(s_id, {}).get("state")
+                if s_val is not None:
+                    try:
+                        v_s = float(s_val)
+                        if 15.0 <= v_s <= 35.0:
+                            cur_room = v_s
+                            break
+                    except (ValueError, TypeError):
+                        pass
     except Exception as e_st:
         print(f"Warning reading HA states in ensure_active_canonical_plan: {e_st}")
 
@@ -1584,6 +1621,7 @@ def ensure_active_canonical_plan(force_refresh=False):
         raw_unallocated_matrix=grid_96,
         current_dhw_temp=cur_dhw,
         current_room_temp=cur_room,
+        target_room_temp=cur_target_room,
         last_hardware_reading_time=last_hw_time,
         horizon_slots=96,
         step_mins=15
@@ -2549,7 +2587,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             hist_outdoor = [hp["outdoor_temp_c"] for hp in hist_pts]
             hist_indoor = [hp["indoor_temp_c"] for hp in hist_pts]
             hist_floor = [hp["indoor_temp_c"] for hp in hist_pts]
-            hist_cops = [5.2 for _ in hist_pts]
+            from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
+            hist_cops = [SpaceHeatingPolicy.calculate_carnot_cop(hp["outdoor_temp_c"]) for hp in hist_pts]
             hist_th_loss = [round((321.1 / 1000.0) * max(0.0, hp["indoor_temp_c"] - hp["outdoor_temp_c"]), 2) for hp in hist_pts]
             hist_el_kw = [hp["heating_kw"] for hp in hist_pts]
             hist_costs = [round(hp["heating_kw"] * interval_h * 0.25, 3) for hp in hist_pts]
@@ -3078,7 +3117,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.59",
+                "version": "0.92.60",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4800,7 +4839,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.59</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.60</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -6700,7 +6739,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div class="space-y-1.5">
                             <div class="flex items-center gap-2.5">
-                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.59</span>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.60</span>
                                 <span class="text-xs text-slate-400 font-mono">OpenAPI 3.1.0 Compliant</span>
                             </div>
                             <h2 class="text-xl font-bold text-white tracking-wide">Open HEMS Systeemdocumentatie &amp; API Gids</h2>

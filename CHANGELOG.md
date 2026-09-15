@@ -10,7 +10,14 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.92.59] — 2026-09-15 (DHW 60°C Buffer Saturation Lockout & Decision Audit Logging)
+## [0.92.60] — 2026-09-15 (Dynamic 2R1C Thermal Free-Drift & Live Daikin Temperature Wiring)
+
+### Fixed
+- **Live Room & Target Sensor Wiring:** Mapped live room temperature and target setpoint in `daemon.py` directly from `climate.woonkamer_climate_daikin` and `sensor.hc_sensors_temperature_room`, replacing nonexistent `sensor.woonkamer_temperatuur`.
+- **Dynamic 2R1C Free-Drift in Summer Mode:** Replaced static dummy 20°C flatline in `SpaceHeatingPolicy` with genuine 2R1C thermal forward simulation. The building's room and floor temperatures now drift dynamically based on passive window solar gains and outdoor thermal envelope loss even when CV compressor is 0 kW.
+- **Dynamic Carnot COP Curve:** Expanded Carnot upper clamp to 6.8 and enabled dynamic outdoor-temperature-dependent COP calculation across both history and forecast horizons.
+
+---
 
 ### Added
 - Implemented saturation lockout (`DHW_BUFFER_60_MAX_TANK_TEMP_C = 53.0°C`, `DHW_BUFFER_60_MIN_HEADROOM_C = 7.0°C`) in `layer3_scheduling/dhw_daytime_arbiter.py`: strictly suppresses 60°C buffering when tank is already >= 53.0°C, preventing unprofitable micro-runs for small temperature lifts.
