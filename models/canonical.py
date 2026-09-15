@@ -367,7 +367,7 @@ def detect_dynamic_price_peaks(
                 bridged[i] = True
 
     # 3. Cluster aaneengesloten pieken
-    events = []
+    raw_events = []
     in_event = False
     start_idx = 0
     for i in range(n):
@@ -376,13 +376,39 @@ def detect_dynamic_price_peaks(
             start_idx = i
         elif not bridged[i] and in_event:
             in_event = False
-            events.append((start_idx, i - 1))
+            raw_events.append((start_idx, i - 1))
     if in_event:
-        events.append((start_idx, n - 1))
+        raw_events.append((start_idx, n - 1))
+
+    # 3b. Macro-clustering: overbrug korte rimpels/gaten (gap <= 4 slots / 60 min) binnen hetzelfde spitsvenster
+    # Voorkomt gefragmenteerde "uit / aan / uit" cycli en garandeert één coherente spitsblokkade per dagdeel.
+    events = []
+    for ev in raw_events:
+        if not events:
+            events.append(ev)
+        else:
+            prev_start, prev_end = events[-1]
+            cur_start, cur_end = ev
+            gap = cur_start - prev_end - 1
+            h_prev = timeline_items[prev_start]["dt"].hour
+            h_cur = timeline_items[cur_start]["dt"].hour
+            same_window = (
+                ((6 <= h_prev < 11) and (6 <= h_cur < 11)) or
+                ((16 <= h_prev < 22) and (16 <= h_cur < 22))
+            )
+            if gap <= 4 and same_window:
+                events[-1] = (prev_start, cur_end)
+            else:
+                events.append(ev)
 
     # 4. Formuleer Peak Events met Duur-Cap en Crest Focus
     peak_objects = []
     slot_lockout_map = {}
+    last_hard_end_slot = -999
+    if past_continuous_lockout_mins > 0:
+        last_hard_end_slot = -1
+    elif mins_since_last_lockout < 120:
+        last_hard_end_slot = -int(mins_since_last_lockout / step_mins)
 
     for s_idx, e_idx in events:
         cluster_len = e_idx - s_idx + 1
@@ -436,6 +462,15 @@ def detect_dynamic_price_peaks(
         else:
             hard_start_idx = s_idx if (is_hard_cluster and max_slots_cap > 0) else -1
             hard_end_idx = e_idx if (is_hard_cluster and max_slots_cap > 0) else -1
+
+        # Inter-event dwell time safeguard: dwing minimaal 120 min hersteltijd af tussen harde blokkades
+        if is_hard_cluster and hard_start_idx >= 0:
+            if (hard_start_idx - last_hard_end_slot) * step_mins < 120:
+                is_hard_cluster = False
+                hard_start_idx = -1
+                hard_end_idx = -1
+            else:
+                last_hard_end_slot = hard_end_idx
 
         h_start_lbl = timeline_items[hard_start_idx]["dt"].strftime("%H:%M") if hard_start_idx >= 0 else None
         h_end_lbl = (timeline_items[hard_end_idx]["dt"] + timedelta(minutes=step_mins)).strftime("%H:%M") if hard_end_idx >= 0 else None

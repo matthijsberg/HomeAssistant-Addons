@@ -10,7 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.92.60] — 2026-09-15 (Dynamic 2R1C Thermal Free-Drift & Live Daikin Temperature Wiring)
+## [0.92.61] — 2026-09-15 (Peak Lockout Macro-Clustering & Anti-Cycling Dwell Protection)
+
+### Fixed
+- **Macro-Clustering of Split Peak Rungs:** Overcame fragmented peak detection where temporary 30-45 min price ripples split an evening peak into multiple small lockouts. Adjacent candidate slots within the same spits window (gap $\le 60$ min) are now merged into one unified macroscopic peak.
+- **Continuous 150m Hard Crest Focus:** The unified peak designates its single highest-priced continuous $\le 150$ min window as `FORCED_OFF` (Red), while flanking shoulder slots are safely designated as `ADVISED_OFF` (Orange).
+- **Anti-Cycling Dwell Time Guard:** Strictly enforces $\ge 120$ minutes of continuous recovery spacing between any two hard lockouts, eliminating erratic "uit $\to$ aan $\to$ uit" switching cycles on the Daikin heat pump compressor.
+- **Unit Test:** Added `test_dynamic_peaks_macro_clustering_and_anti_cycling`.
+
+---
 
 ### Fixed
 - **Live Room & Target Sensor Wiring:** Mapped live room temperature and target setpoint in `daemon.py` directly from `climate.woonkamer_climate_daikin` and `sensor.hc_sensors_temperature_room`, replacing nonexistent `sensor.woonkamer_temperatuur`.

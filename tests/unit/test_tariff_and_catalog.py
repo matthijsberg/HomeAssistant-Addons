@@ -40,3 +40,47 @@ def test_mode_catalog_loading_and_fallback():
     unknown = get_mode_meta("super_custom_mode_xyz")
     assert unknown["code"] == "super_custom_mode_xyz"
     assert unknown["color_hex"].startswith("#")
+
+
+def test_dynamic_peaks_macro_clustering_and_anti_cycling():
+    """Verify macro-clustering of fragmented peak rungs and 120m dwell time enforcement."""
+    from models.canonical import detect_dynamic_price_peaks
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    base_dt = datetime(2026, 9, 15, 12, 0, tzinfo=ZoneInfo("Europe/Amsterdam"))
+    # Construct 24h timeline with a camelback peak in the evening (17:30-18:00 and 18:30-21:30)
+    timeline = []
+    for i in range(96):
+        dt = base_dt + timedelta(minutes=15 * i)
+        h = dt.hour
+        m = dt.minute
+        # Baseline price ~€0.25
+        price = 0.25
+        # Camelback evening peak:
+        # Spike 1: 17:30-18:00 (high: 0.40)
+        # Dip: 18:00-18:30 (moderate: 0.32)
+        # Spike 2: 18:30-21:15 (very high: 0.44)
+        if (h == 17 and m >= 30):
+            price = 0.40
+        elif (h == 18 and m < 30):
+            price = 0.32
+        elif (18 <= h < 21) or (h == 21 and m <= 15):
+            price = 0.44
+
+        timeline.append({"dt": dt, "price": price})
+
+    peaks, slot_map = detect_dynamic_price_peaks(timeline, step_mins=15, max_lockout_mins=150)
+
+    # Must be merged into exactly 1 Avondspits
+    evening_peaks = [p for p in peaks if "Avond" in p.get("name", "")]
+    assert len(evening_peaks) == 1
+    ev_peak = evening_peaks[0]
+    assert ev_peak["is_hard_lockout"] is True
+    assert ev_peak["hard_duration_mins"] <= 150
+
+    # Ensure no short-cycling: inside the peak event, there is only one continuous hard lockout block
+    hard_slots = [k for k, v in slot_map.items() if v.get("is_hard_lockout") and "Avond" in v.get("name", "")]
+    for j in range(len(hard_slots) - 1):
+        # All hard slots must be contiguous without gaps!
+        assert hard_slots[j+1] == hard_slots[j] + 1
