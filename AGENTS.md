@@ -12,6 +12,7 @@ Before presenting any code changes or committing:
 - [ ] **3. Absolute Ban on Mock Data in Production:** Never invent synthetic values or mock responses in production runtime. Mocks are strictly confined to `tests/`. Production telemetry missing data must be handled via `Quality.STALE` or `Quality.INTERPOLATED` flags. Offline development and CI verification rely strictly on the **Replay Harness with Golden Plan Snapshots** (`tests/fixtures/golden/`).
 - [ ] **4. Test Suite Green:** All tests (including architecture guardrails and golden replay tests) must pass before pushing (`pytest tests/`).
 - [ ] **5. API & MCP Lockstep Parity:** Any change, addition, or retirement of a REST API endpoint MUST be declared in `docs/openapi.json` and simultaneously exposed in `mcp_server.py`. Architectural guardrail `tests/architecture/test_api_mcp_lockstep.py` enforces 100% parity.
+- [ ] **6. GUI & Frontend Verification via Headless Browser:** When modifying the WebUI, HTML, CSS, JavaScript, or dashboard charts, the QA agent must use the headless browser (via `browser_exec` with `capture_screenshot()` and DOM/console error inspection) to perform visual and live data verification before marking work complete.
 
 ---
 
