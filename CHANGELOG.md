@@ -10,7 +10,14 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.92.61] — 2026-09-15 (Peak Lockout Macro-Clustering & Anti-Cycling Dwell Protection)
+## [0.92.62] — 2026-09-15 (Model Recommendations Live Sync & Action Button State Transition)
+
+### Fixed
+- **Recommendation Status & Action Button State:** Swapped out inactive "Afwijzen" and "Accepteren & Toepassen" buttons when parameters are already accepted, replacing them with a confirmed badge (`Geaccepteerd & Actief (hh:mm)`) and a `🔄 Nieuwe Kalibratie` button.
+- **Live Active Value Synchronization:** Synchronized `current_value` in `/api/model/recommendations` with the actual operating parameters from `heatpump_model_parameters.json` and reset drift to 0% once accepted.
+- **Immediate Button Feedback:** Added active spinner states (`⏳ Bezig...`) on click and auto-refreshed the card immediately.
+
+---
 
 ### Fixed
 - **Macro-Clustering of Split Peak Rungs:** Overcame fragmented peak detection where temporary 30-45 min price ripples split an evening peak into multiple small lockouts. Adjacent candidate slots within the same spits window (gap $\le 60$ min) are now merged into one unified macroscopic peak.

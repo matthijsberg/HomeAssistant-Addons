@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.61
+Version: 0.92.62
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2971,7 +2971,28 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         if path == "/api/model/recommendations":
             recs_file = Path("/config/model_recommendations.json")
             if recs_file.exists():
-                self._send_json(load_json(recs_file))
+                recs_dict = load_json(recs_file)
+                # Synchronize live parameters from PARAMS_FILE if accepted
+                if recs_dict.get("status") == "accepted" and PARAMS_FILE.exists():
+                    p_active = load_json(PARAMS_FILE)
+                    for r in recs_dict.get("recommendations", []):
+                        pid = r.get("id")
+                        if pid == "building_ua":
+                            act = p_active.get("building", {}).get("ua_base_w_per_k")
+                            if act is not None:
+                                r["current_value"] = act
+                                r["drift_pct"] = 0.0
+                        elif pid == "night_baseload":
+                            act = p_active.get("unallocated", {}).get("night_baseload_floor_w")
+                            if act is not None:
+                                r["current_value"] = act
+                                r["drift_pct"] = 0.0
+                        elif pid == "dhw_standby":
+                            act = p_active.get("dhw_tank", {}).get("standby_loss_w_per_k")
+                            if act is not None:
+                                r["current_value"] = act
+                                r["drift_pct"] = 0.0
+                self._send_json(recs_dict)
             else:
                 self._send_json({"status": "empty", "recommendations": []})
             return
@@ -3117,7 +3138,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.61",
+                "version": "0.92.62",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4114,15 +4135,24 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     if p_id == "building_ua":
                         old_v = float(params.get("building", {}).get("ua_base_w_per_k", 321.1))
                         prop_v = float(r.get("proposed_value", old_v))
-                        params.setdefault("building", {})["ua_base_w_per_k"] = round((1.0 - ewma) * old_v + ewma * prop_v, 1)
+                        new_v = round((1.0 - ewma) * old_v + ewma * prop_v, 1)
+                        params.setdefault("building", {})["ua_base_w_per_k"] = new_v
+                        r["current_value"] = new_v
+                        r["drift_pct"] = 0.0
                     elif p_id == "night_baseload":
                         old_v = float(params.get("unallocated", {}).get("night_baseload_floor_w", 265.0))
                         prop_v = float(r.get("proposed_value", old_v))
-                        params.setdefault("unallocated", {})["night_baseload_floor_w"] = round((1.0 - ewma) * old_v + ewma * prop_v, 1)
+                        new_v = round((1.0 - ewma) * old_v + ewma * prop_v, 1)
+                        params.setdefault("unallocated", {})["night_baseload_floor_w"] = new_v
+                        r["current_value"] = new_v
+                        r["drift_pct"] = 0.0
                     elif p_id == "dhw_standby":
                         old_v = float(params.get("dhw_tank", {}).get("standby_loss_w_per_k", 2.50))
                         prop_v = float(r.get("proposed_value", old_v))
-                        params.setdefault("dhw_tank", {})["standby_loss_w_per_k"] = round((1.0 - ewma) * old_v + ewma * prop_v, 2)
+                        new_v = round((1.0 - ewma) * old_v + ewma * prop_v, 2)
+                        params.setdefault("dhw_tank", {})["standby_loss_w_per_k"] = new_v
+                        r["current_value"] = new_v
+                        r["drift_pct"] = 0.0
 
                 recs_data["status"] = "accepted"
                 recs_data["accepted_at"] = datetime.now(AMS_TZ).isoformat()
@@ -4839,7 +4869,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.61</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.62</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -6459,7 +6489,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span class="text-[11px] text-slate-300 font-sans font-medium">💡 <strong>Wat betekent Automatisch?</strong> Wijzigingen binnen de drempel (&plusmn;3%) worden geruisloos via de leersnelheid (EWMA) toegepast.</span>
                                 <span class="text-[10px] text-slate-400 font-sans">Grotere afwijkingen (zoals een sprong in nachtverbruik) komen op 'Ter Beoordeling' te staan totdat je op 'Accepteren &amp; Toepassen' klikt.</span>
                             </div>
-                            <div class="flex items-center gap-2">
+                            <div class="flex items-center gap-2" id="recs-actions-container">
                                 <button onclick="rejectRecommendations()" id="btn-recs-reject" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-xl font-medium border border-slate-700 transition">
                                     Afwijzen
                                 </button>
@@ -6739,7 +6769,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div class="space-y-1.5">
                             <div class="flex items-center gap-2.5">
-                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.61</span>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.62</span>
                                 <span class="text-xs text-slate-400 font-mono">OpenAPI 3.1.0 Compliant</span>
                             </div>
                             <h2 class="text-xl font-bold text-white tracking-wide">Open HEMS Systeemdocumentatie &amp; API Gids</h2>
@@ -13689,6 +13719,34 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         </tr>
                     `;
                 }).join('');
+
+                const actionsContainer = document.getElementById('recs-actions-container');
+                if (actionsContainer) {
+                    if (isPending) {
+                        actionsContainer.innerHTML = `
+                            <button onclick="rejectRecommendations()" id="btn-recs-reject" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-xl font-medium border border-slate-700 transition">
+                                Afwijzen
+                            </button>
+                            <button onclick="acceptRecommendations()" id="btn-recs-accept" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-xl shadow-lg transition flex items-center gap-1.5">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                                <span>Accepteren &amp; Toepassen</span>
+                            </button>
+                        `;
+                    } else {
+                        const accAt = d.accepted_at ? new Date(d.accepted_at).toLocaleTimeString('nl-NL', {hour: '2-digit', minute: '2-digit'}) : '';
+                        actionsContainer.innerHTML = `
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 shadow-sm">
+                                    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                                    <span>Geaccepteerd &amp; Actief ${accAt ? '(' + accAt + ')' : ''}</span>
+                                </span>
+                                <button onclick="retrainModelNow()" id="btn-recs-retrain" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-xl font-medium border border-slate-700 transition flex items-center gap-1.5">
+                                    <span>🔄 Nieuwe Kalibratie</span>
+                                </button>
+                            </div>
+                        `;
+                    }
+                }
             } catch (e) {
                 console.warn('Error loading recommendations:', e);
             }
@@ -13696,12 +13754,15 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
         async function acceptRecommendations() {
             const btn = document.getElementById('btn-recs-accept');
-            if (btn) btn.disabled = true;
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="animate-spin inline-block mr-1">⏳</span> Bezig...';
+            }
             try {
                 const res = await fetch('./api/model/recommendations/accept', { method: 'POST' });
                 if (res.ok) {
-                    showToast('Aanbevelingen geaccepteerd en geactiveerd!', 'success');
-                    loadModelRecommendations();
+                    showToast('Aanbevelingen geaccepteerd en geactiveerd in model!', 'success');
+                    await loadModelRecommendations();
                     loadAnalytics();
                 } else {
                     showToast('Fout bij accepteren van aanbevelingen', 'error');
@@ -13715,12 +13776,15 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
         async function rejectRecommendations() {
             const btn = document.getElementById('btn-recs-reject');
-            if (btn) btn.disabled = true;
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="animate-spin inline-block mr-1">⏳</span> Bezig...';
+            }
             try {
                 const res = await fetch('./api/model/recommendations/reject', { method: 'POST' });
                 if (res.ok) {
                     showToast('Aanbevelingen afgewezen; actieve parameters behouden.', 'info');
-                    loadModelRecommendations();
+                    await loadModelRecommendations();
                 } else {
                     showToast('Fout bij afwijzen van aanbevelingen', 'error');
                 }
