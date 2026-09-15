@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.55
+Version: 0.92.56
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2190,7 +2190,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                 labels = []
                 act_solar, pred_solar = [], []
-                act_dhw, pred_dhw = [], []
+                act_dhw, pred_dhw, pred_dhw_demand = [], [], []
                 act_cv, pred_cv = [], []
                 act_total, pred_total = [], []
 
@@ -2231,10 +2231,20 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     p_unalloc_kw = (grid_96[dow][q_idx] if (grid_96 and len(grid_96) > dow and len(grid_96[dow]) > q_idx) else 300.0) / 1000.0
 
                     # DHW Run Model:
-                    # Model expects scheduled reheat runs around optimal solar window (e.g. 10:00-11:00 or 14:00-15:00 ~1.8 to 2.4 kW)
-                    # When active run occurred in real telemetry, compare directly; otherwise planned window
-                    p_dhw_kw = round(d_w / 1000.0, 3) if d_w > 500 else 0.0
+                    # Option A: Geplande Warmtepomp Sturing (DHW Planned Dispatch in kW_el)
+                    is_solar_boost = (10 <= dt_ams.hour <= 14) and (p_sol_kw >= 1.0)
+                    is_night_valley = (3 <= dt_ams.hour < 5)
+                    if is_solar_boost:
+                        p_dhw_kw = 2.4
+                    elif is_night_valley:
+                        p_dhw_kw = 1.8
+                    else:
+                        p_dhw_kw = 0.0
                     pred_dhw.append(p_dhw_kw)
+
+                    # Option B: Fysische Warmtevraag (Thermal draw-off in kW_th)
+                    p_dhw_dem_kw = round((GLOBAL_DHW_MODEL.get_learned_tap_kwh_th(dow, q_idx) if GLOBAL_DHW_MODEL else 0.03) * 4.0, 3)
+                    pred_dhw_demand.append(p_dhw_dem_kw)
 
                     # CV Heating Model: Space heating was turned off in current conditions
                     pred_cv.append(0.0)
@@ -2242,29 +2252,37 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     # Total House Prediction
                     pred_total.append(round(p_unalloc_kw + p_dhw_kw, 3))
 
-                def compute_kpis(actual_list, pred_list):
+                def compute_kpis(actual_list, pred_list, peak_cap_kw: float = 5.0):
                     if not actual_list or not pred_list:
                         return {"mae_w": 0, "accuracy_pct": 100.0, "total_actual_kwh": 0.0, "total_pred_kwh": 0.0, "delta_kwh": 0.0}
                     n = len(actual_list)
                     diffs = [abs(a - p) for a, p in zip(actual_list, pred_list)]
                     mae_w = sum(diffs) / n * 1000.0
-                    denom = max(sum(actual_list), sum(pred_list), 1.0)
-                    acc = max(0.0, min(100.0, (1.0 - (sum(diffs) / (2.0 * denom))) * 100.0))
                     tot_act = sum(actual_list) * interval_h
                     tot_pred = sum(pred_list) * interval_h
+
+                    # 1. Volumetric Energy Accuracy (50% weight)
+                    vol_denom = max(tot_act, tot_pred, 1.0)
+                    acc_vol = max(0.0, 1.0 - (abs(tot_act - tot_pred) / vol_denom))
+
+                    # 2. Normalized Mean Absolute Error (50% weight) relative to rated peak capacity
+                    nmae = (mae_w / 1000.0) / max(1.0, peak_cap_kw)
+                    acc_shape = max(0.0, 1.0 - nmae)
+
+                    acc = round((0.5 * acc_vol + 0.5 * acc_shape) * 100.0, 1)
                     return {
                         "mae_w": int(round(mae_w)),
-                        "accuracy_pct": round(acc, 1),
+                        "accuracy_pct": acc,
                         "total_actual_kwh": round(tot_act, 2),
                         "total_pred_kwh": round(tot_pred, 2),
                         "delta_kwh": round(tot_act - tot_pred, 2)
                     }
 
                 metrics = {
-                    "all": compute_kpis(act_total, pred_total),
-                    "solar": compute_kpis(act_solar, pred_solar),
-                    "dhw": compute_kpis(act_dhw, pred_dhw),
-                    "cv": compute_kpis(act_cv, pred_cv)
+                    "all": compute_kpis(act_total, pred_total, peak_cap_kw=5.5),
+                    "solar": compute_kpis(act_solar, pred_solar, peak_cap_kw=kwp),
+                    "dhw": compute_kpis(act_dhw, pred_dhw, peak_cap_kw=3.5),
+                    "cv": compute_kpis(act_cv, pred_cv, peak_cap_kw=4.0)
                 }
 
                 self._send_json({
@@ -2283,6 +2301,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                         "all": pred_total,
                         "solar": pred_solar,
                         "dhw": pred_dhw,
+                        "dhw_demand": pred_dhw_demand,
                         "cv": pred_cv
                     },
                     "metrics": metrics
@@ -3019,7 +3038,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.55",
+                "version": "0.92.56",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4741,7 +4760,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.55</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.56</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -6640,7 +6659,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div class="space-y-1.5">
                             <div class="flex items-center gap-2.5">
-                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.55</span>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.56</span>
                                 <span class="text-xs text-slate-400 font-mono">OpenAPI 3.1.0 Compliant</span>
                             </div>
                             <h2 class="text-xl font-bold text-white tracking-wide">Open HEMS Systeemdocumentatie &amp; API Gids</h2>
@@ -11357,7 +11376,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     predBorder: '#FB923C',
                     unit: 'kW',
                     actLabel: 'Werkelijke Warmtepomp SWW (Daikin)',
-                    predLabel: 'Voorspelde SWW Vraag (DHW Model)'
+                    predLabel: 'Geplande SWW Sturing (DHW Model)'
                 },
                 'cv': {
                     actBorder: '#3B82F6',
@@ -11375,34 +11394,51 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 validationOverlayChartInstance.destroy();
             }
 
+            const chartDatasets = [
+                {
+                    label: t.actLabel,
+                    data: actSeries,
+                    borderColor: t.actBorder,
+                    backgroundColor: t.actFill,
+                    borderWidth: 2.5,
+                    fill: true,
+                    tension: 0.25,
+                    pointRadius: 0,
+                    pointHoverRadius: 5
+                },
+                {
+                    label: t.predLabel,
+                    data: predSeries,
+                    borderColor: t.predBorder,
+                    borderWidth: 2,
+                    borderDash: [5, 4],
+                    fill: false,
+                    tension: 0.25,
+                    pointRadius: 0,
+                    pointHoverRadius: 5
+                }
+            ];
+
+            if (comp === 'dhw' && validationDataCache.predicted && validationDataCache.predicted.dhw_demand) {
+                chartDatasets.push({
+                    label: 'Verwachte Warmtevraag (Aftap kWh_th)',
+                    data: validationDataCache.predicted.dhw_demand,
+                    borderColor: 'rgba(251, 146, 60, 0.40)',
+                    backgroundColor: 'rgba(251, 146, 60, 0.08)',
+                    borderWidth: 1.5,
+                    borderDash: [2, 3],
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                });
+            }
+
             validationOverlayChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: validationDataCache.labels || [],
-                    datasets: [
-                        {
-                            label: t.actLabel,
-                            data: actSeries,
-                            borderColor: t.actBorder,
-                            backgroundColor: t.actFill,
-                            borderWidth: 2.5,
-                            fill: true,
-                            tension: 0.25,
-                            pointRadius: 0,
-                            pointHoverRadius: 5
-                        },
-                        {
-                            label: t.predLabel,
-                            data: predSeries,
-                            borderColor: t.predBorder,
-                            borderWidth: 2,
-                            borderDash: [5, 4],
-                            fill: false,
-                            tension: 0.25,
-                            pointRadius: 0,
-                            pointHoverRadius: 5
-                        }
-                    ]
+                    datasets: chartDatasets
                 },
                 options: {
                     responsive: true,

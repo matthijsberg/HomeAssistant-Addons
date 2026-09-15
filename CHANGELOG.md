@@ -10,7 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.92.55] — 2026-09-15 (Full-Year Seasonal Replay Benchmark Suite)
+## [0.92.56] — 2026-09-15 (Dual-Line DHW Validation Overlay & IEA PVPS Composite Quality Metric)
+
+### Added
+- Dual-line DHW validation overlay in `daemon.py`: displays planned heat pump dispatch runs (Option A, primary dashed line) alongside physical household tapping demand (Option B, translucent soft amber curve).
+
+### Fixed
+- Replaced naive L1 point-by-point quality metric with IEA PVPS composite accuracy (50% Volumetric Energy Accuracy + 50% NMAE normalized to rated peak capacity), eliminating the transient cloud double-penalty on solar forecasting.
+
+---
 
 ### Added
 - 5 seasonal archetype fixtures in `tests/fixtures/golden/`:
