@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.50
+Version: 0.92.51
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -3038,7 +3038,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.50",
+                "version": "0.92.51",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4750,7 +4750,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.50</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.51</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5122,7 +5122,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span class="w-3 h-3 rounded-full bg-amber-500 animate-pulse"></span>
                                 <div>
                                     <h3 class="text-sm font-bold text-white tracking-wide">Boilervat Temperatuurtraject &amp; Verwachte Warmwatervraag (24 Uur Vooruit)</h3>
-                                    <p class="text-[11px] text-slate-400">Verloop in graden Celsius (°C) vanaf de actuele 350L tanksensor en de verwachte getapte liters per kwartier.</p>
+                                    <p class="text-[11px] text-slate-400">Verloop in graden Celsius (°C) vanaf de actuele 350L tanksensor en de verwachte thermische warmtevraag (kWh thermisch / V₄₀ mengwater).</p>
                                 </div>
                             </div>
                             <div class="flex items-center gap-3 text-xs font-mono flex-wrap">
@@ -5132,7 +5132,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span class="flex items-center gap-1.5 text-slate-400/80"><span class="w-3 h-2 bg-slate-500/20 border border-slate-500/40 rounded-sm"></span> Marge Onverwarmd</span>
                                 <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-0.5 border-b border-red-500 border-dashed"></span> Comfort 40°C</span>
                                 <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-0.5 border-b border-emerald-500 border-dashed"></span> Doel 50°C</span>
-                                <span class="flex items-center gap-1.5 text-sky-300"><span class="w-2.5 h-2.5 bg-sky-500/50 rounded-sm"></span> Vraag (Liter)</span>
+                                <span class="flex items-center gap-1.5 text-sky-300"><span class="w-2.5 h-2.5 bg-sky-500/50 rounded-sm"></span> Warmtevraag (kWh)</span>
                             </div>
                         </div>
 
@@ -8446,9 +8446,9 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
                         <div class="flex items-center">
                             <span style="display:inline-block; width:10px; height:10px; background-color:rgba(56, 189, 248, 0.6); border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Verwachte Tapvraag</span>
+                            <span class="text-slate-300">Warmtevraag</span>
                         </div>
-                        <span class="font-bold text-sky-400 font-mono">${liters} L (${(liters * 4.186 * (50-12) / 3600).toFixed(2)} kWh_th)</span>
+                        <span class="font-bold text-sky-400 font-mono">${(liters * 4.186 * (50-12) / 3600).toFixed(2)} kWh (≈ ${liters} L V₄₀)</span>
                     </div>
                 </div>
             `;
@@ -11865,9 +11865,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 const tempsP05 = traj.temperatures_p05_c || temps;
                 const tempsP95 = traj.temperatures_p95_c || temps;
                 const demandsKwh = traj.demand_kwh_th || [];
-                
-                // Convert kWh_th demand to liters of 50C water: liters = kwh * 3600 / (4.186 * 38)
-                const litersArr = demandsKwh.map(k => Math.round(k * 3600 / (4.186 * 38)));
+                const kwhThArr = demandsKwh.map(k => Number(k || 0).toFixed(2));
+                const litersArr = demandsKwh.map(k => Math.round(k * 3600 / (4.186 * 30))); // V40: mengwater 40°C
                 const comfortLine = Array(labels.length).fill(40.0);
                 const targetLine = Array(labels.length).fill(50.0);
                 
@@ -12069,11 +12068,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 }
 
                 chartDatasets.push({
-                    label: 'Verwachte Tapvraag (Liters)',
-                    data: litersArr,
+                    label: 'Warmtevraag (kWh)',
+                    data: kwhThArr,
                     type: 'bar',
                     yAxisID: 'y1',
-                    backgroundColor: 'rgba(56, 189, 248, 0.5)',
+                    backgroundColor: 'rgba(56, 189, 248, 0.45)',
                     hoverBackgroundColor: '#38BDF8',
                     borderRadius: 2,
                     order: 7
@@ -12121,15 +12120,15 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             y1: {
                                 position: 'right',
                                 min: 0,
-                                max: 40,
+                                suggestedMax: (predictionResolution === '15m') ? 1.5 : 4.0,
                                 grid: { drawOnChartArea: false },
                                 title: {
                                     display: true,
-                                    text: 'Tapvraag (Liters / 15 min)',
+                                    text: 'Warmtevraag (kWh)',
                                     color: '#38BDF8',
                                     font: { size: 10, weight: 'bold' }
                                 },
-                                ticks: { color: '#38BDF8', font: { size: 10 }, callback: v => `${v} L` }
+                                ticks: { color: '#38BDF8', font: { size: 10 }, callback: v => `${Number(v).toFixed(1)} kWh` }
                             }
                         }
                     }
