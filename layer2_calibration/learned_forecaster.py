@@ -363,19 +363,24 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
             cv_days = {v[0]: v[1] for v in results[1]["series"][0].get("values", []) if v[1] is not None}
             tout_days = {v[0]: v[1] for v in results[2]["series"][0].get("values", []) if v[1] is not None}
             common = sorted(set(cv_days.keys()) & set(tout_days.keys()))
-            x_dt, y_kwh = [], []
+            x_dt, y_th_kwh = [], []
+            from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
+
             for ts in common:
-                dt_k = 19.5 - tout_days[ts]
-                kwh = cv_days[ts]
-                if dt_k > 1.0 and kwh > 1.5:
+                t_out = tout_days[ts]
+                dt_k = 19.5 - t_out
+                kwh_el = cv_days[ts]
+                if dt_k > 1.0 and kwh_el > 1.5:
+                    cop_day = SpaceHeatingPolicy.calculate_carnot_cop(t_out)
+                    kwh_th = kwh_el * cop_day
                     x_dt.append(dt_k)
-                    y_kwh.append(kwh)
+                    y_th_kwh.append(kwh_th)
             if len(x_dt) >= 14:
-                slope, intercept = statistics.linear_regression(x_dt, y_kwh)
-                r_val = statistics.correlation(x_dt, y_kwh)
+                slope_th, intercept = statistics.linear_regression(x_dt, y_th_kwh)
+                r_val = statistics.correlation(x_dt, y_th_kwh)
                 r_squared = round(float(r_val ** 2), 3)
-                # Convert kWh/day per degree to W/K: (slope * 1000 / 24) * average COP (approx 3.8)
-                calibrated_ua = round((slope * 1000.0 / 24.0) * 3.8, 1)
+                # Convert kWh_th/day per degree directly to W/K: (slope_th * 1000 / 24)
+                calibrated_ua = round((slope_th * 1000.0 / 24.0), 1)
                 if not (180.0 <= calibrated_ua <= 450.0):
                     calibrated_ua = 318.5
 

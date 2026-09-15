@@ -10,7 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.92.62] — 2026-09-15 (Model Recommendations Live Sync & Action Button State Transition)
+## [0.92.63] — 2026-09-15 (Thermal-Grounded OLS Building Heat Loss Regression)
+
+### Fixed
+- **Direct Thermal OLS Regression:** Replaced the post-hoc static COP multiplier (`slope * 3.8`) in `retrain_from_openhems` with direct day-by-day thermal heat regression ($Q_{th,day} = E_{el,day} \times \text{COP}(T_{out,day})$) against temperature lift $\Delta T = (19.5 - T_{out})$.
+- Mathematically eliminates distortion between cold days (low COP, high kWh) and mild days (high COP, low kWh), recovering building insulation ($UA_{base}$ in W/K) directly from physical heat transfer principles.
+
+---
 
 ### Fixed
 - **Recommendation Status & Action Button State:** Swapped out inactive "Afwijzen" and "Accepteren & Toepassen" buttons when parameters are already accepted, replacing them with a confirmed badge (`Geaccepteerd & Actief (hh:mm)`) and a `🔄 Nieuwe Kalibratie` button.
