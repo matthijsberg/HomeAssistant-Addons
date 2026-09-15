@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.51
+Version: 0.92.52
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2292,6 +2292,93 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "error", "message": f"Fout bij berekenen validatie overlay: {str(e)}"}, 500)
                 return
 
+        # =========================================================================
+        # API: HISTORICAL DHW TEMPERATURE & THERMAL DEMAND (kWh_th & V40)
+        # =========================================================================
+        if path.startswith("/api/analytics/dhw_history"):
+            try:
+                parsed_url = urllib.parse.urlparse(self.path)
+                qp = urllib.parse.parse_qs(parsed_url.query)
+                tf = qp.get("range", ["24h"])[0]
+                user_res = qp.get("resolution", ["15m"])[0]
+
+                days = 1 if tf == "24h" else (2 if tf == "48h" else 7)
+                bucket_sz = "1h" if user_res == "1h" else "15m"
+                interval_h = 1.0 if bucket_sz == "1h" else 0.25
+
+                now = datetime.now(timezone.utc)
+                t_start = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:00:00Z")
+                t_end = now.strftime("%Y-%m-%dT%H:00:00Z")
+
+                sec = load_secrets()
+                pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influx_password", "")
+
+                q = f"""
+                SELECT mean("temperature_c") as tank_temp
+                FROM "energy_telemetry"
+                WHERE "device_id" = 'dhw_tank' AND time >= '{t_start}' AND time <= '{t_end}'
+                GROUP BY time({bucket_sz}) fill(linear);
+                SELECT sum("power_w")/1000.0 * {interval_h} as kwh_el
+                FROM "energy_telemetry"
+                WHERE "mode" = 'dhw' AND time >= '{t_start}' AND time <= '{t_end}'
+                GROUP BY time({bucket_sz}) fill(0);
+                """
+                url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
+                with urllib.request.urlopen(url, timeout=5) as r:
+                    res = json.loads(r.read().decode())
+
+                temp_series = res["results"][0].get("series", [{}])[0].get("values", []) if len(res.get("results", [])) > 0 else []
+                dhw_series = res["results"][1].get("series", [{}])[0].get("values", []) if len(res.get("results", [])) > 1 else []
+
+                t_map = {row[0]: row[1] for row in temp_series}
+                d_map = {row[0]: row[1] for row in dhw_series}
+
+                sorted_ts = sorted(list(set(list(t_map.keys()) + list(d_map.keys()))))
+                labels = []
+                temps = []
+                demands_kwh_th = []
+
+                prev_dt = None
+                last_t = 50.0
+                try:
+                    sm = get_ha_states_map()
+                    v = float(sm.get("sensor.hc_dhw_temperature_r5t_dhw_tank", {}).get("state", 50.0))
+                    if 20.0 <= v <= 75.0:
+                        last_t = v
+                except Exception:
+                    pass
+
+                for ts_str in sorted_ts:
+                    dt_ams = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
+                    if prev_dt is not None and dt_ams.day != prev_dt.day:
+                        day_str = DUTCH_DAYS_SHORT[dt_ams.weekday()]
+                        lbl = f"{day_str} {dt_ams.strftime('%H:%M' if bucket_sz == '15m' else '%H:00')}"
+                    else:
+                        lbl = dt_ams.strftime("%H:%M" if bucket_sz == "15m" else "%H:00")
+                    prev_dt = dt_ams
+                    labels.append(lbl)
+
+                    t_val = t_map.get(ts_str)
+                    if t_val is not None:
+                        last_t = round(float(t_val), 1)
+                    temps.append(last_t)
+
+                    kwh_el = float(d_map.get(ts_str) or 0.0)
+                    kwh_th = round(kwh_el * 2.6, 2) if kwh_el > 0 else 0.0
+                    demands_kwh_th.append(kwh_th)
+
+                self._send_json({
+                    "status": "success",
+                    "labels": labels,
+                    "temperatures_c": temps,
+                    "demand_kwh_th": demands_kwh_th,
+                    "interval_h": interval_h
+                })
+                return
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)}, status=500)
+                return
+
         if path == "/api/config/solar":
             cfg = load_json(CONFIG_FILE)
             sol = cfg.get("solar", {})
@@ -3032,13 +3119,27 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             self._send_json(prof_data)
             return
 
+        if path == "/api/openapi.json":
+            try:
+                openapi_path = os.path.join(os.path.dirname(__file__), "docs", "openapi.json")
+                if os.path.exists(openapi_path):
+                    with open(openapi_path, "r", encoding="utf-8") as f:
+                        spec = json.load(f)
+                    self._send_json(spec)
+                else:
+                    self._send_json({"error": "openapi.json not found"}, 404)
+                return
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+                return
+
         if path == "/api/status":
             cfg = load_json(CONFIG_FILE)
             params = load_json(PARAMS_FILE)
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.51",
+                "version": "0.92.52",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4746,11 +4847,21 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                     <span>Beslis-Logboek</span>
                     <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-purple-900/40 text-purple-300 font-medium rounded border border-purple-800" id="badge-dec-count">--</span>
+                </a>
+
+                <!-- KENNISBANK / DOCUMENTATIE -->
+                <div class="px-3 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    <span>Kennisbank</span>
+                </div>
+                <a href="#docs" onclick="showTab('docs')" id="nav-docs" class="nav-link flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800/40 transition-colors">
+                    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+                    <span>Documentatie</span>
+                    <span class="ml-auto text-[10px] px-1.5 py-0.5 bg-emerald-950/60 text-emerald-300 font-medium rounded border border-emerald-800">Gids</span>
                 </a></nav>
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.51</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.52</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5602,6 +5713,28 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </div>
                 </div>
 
+                <!-- ========================================================================= -->
+                <!-- BOILERVAT HISTORIE: TEMPERATUUR & WARMTEVRAAG (kWh_th & V40)              -->
+                <!-- ========================================================================= -->
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5" id="dhw-history-card">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-base">♨️</span>
+                            <div>
+                                <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">Boilervat Historie: Temperatuur &amp; Warmtevraag</h3>
+                                <p class="text-[11px] text-slate-400">Gerealiseerde tanksensortemperatuur (°C) en warmtevraag (kWh thermisch / V₄₀ mengwater) over de geselecteerde periode.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 text-xs font-mono flex-wrap">
+                            <span class="flex items-center gap-1.5 text-amber-300"><span class="w-3 h-1 bg-amber-400 rounded"></span> Boilertemperatuur (°C)</span>
+                            <span class="flex items-center gap-1.5 text-sky-300"><span class="w-2.5 h-2.5 bg-sky-500/50 rounded-sm"></span> Warmtevraag (kWh)</span>
+                        </div>
+                    </div>
+
+                    <div class="relative w-full h-[280px] sm:h-[320px]">
+                        <canvas id="dhwHistoryChart"></canvas>
+                    </div>
+                </div>
 
                 <!-- ========================================================================= -->
                 <!-- MODEL VALIDATIE: VOORSPELLING VS. WERKELIJKHEID OVERLAY                  -->
@@ -6618,6 +6751,587 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 </div>
             </div>
 
+            <!-- ========================================================================= -->
+            <!-- TAB 10: GEBRUIKERSDOCUMENTATIE & OPENAPI REFERENTIE                       -->
+            <!-- ========================================================================= -->
+            <div id="view-docs" class="tab-content space-y-6">
+                <!-- HERO / HEADER -->
+                <div class="bg-gradient-to-r from-slate-900 via-[#0e1422] to-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
+                    <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div class="space-y-1.5">
+                            <div class="flex items-center gap-2.5">
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.52</span>
+                                <span class="text-xs text-slate-400 font-mono">OpenAPI 3.1.0 Compliant</span>
+                            </div>
+                            <h2 class="text-xl font-bold text-white tracking-wide">Open HEMS Systeemdocumentatie &amp; API Gids</h2>
+                            <p class="text-xs text-slate-300 max-w-3xl leading-relaxed">
+                                Volledige architectuurreferentie, beslisbomen voor dynamische spitsblokkades en warmtepomp-sturing, stappenplannen voor nieuwe apparaten en providers, en de gestandaardiseerde REST API.
+                            </p>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <a href="./api/openapi.json" target="_blank" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold flex items-center gap-2 shadow-lg transition">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                <span>OpenAPI 3.1 JSON</span>
+                            </a>
+                            <a href="#docs-api" onclick="document.getElementById('docs-api').scrollIntoView({behavior: 'smooth'})" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-2 transition">
+                                <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+                                <span>API Explorer</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SUB-NAV / QUICK JUMPS -->
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
+                    <a href="#docs-arch" onclick="document.getElementById('docs-arch').scrollIntoView({behavior: 'smooth'})" class="bg-[#0e1422] hover:bg-slate-800/60 border border-slate-800 p-3 rounded-xl flex items-center gap-2.5 transition text-slate-300 hover:text-white">
+                        <span class="text-base">🏛️</span>
+                        <div class="truncate">
+                            <div class="font-bold">Architectuur</div>
+                            <div class="text-[10px] text-slate-500">5-lagen model</div>
+                        </div>
+                    </a>
+                    <a href="#docs-logic" onclick="document.getElementById('docs-logic').scrollIntoView({behavior: 'smooth'})" class="bg-[#0e1422] hover:bg-slate-800/60 border border-slate-800 p-3 rounded-xl flex items-center gap-2.5 transition text-slate-300 hover:text-white">
+                        <span class="text-base">⚡</span>
+                        <div class="truncate">
+                            <div class="font-bold">Sturingslogica</div>
+                            <div class="text-[10px] text-slate-500">Spits &amp; DHW</div>
+                        </div>
+                    </a>
+                    <a href="#docs-devices" onclick="document.getElementById('docs-devices').scrollIntoView({behavior: 'smooth'})" class="bg-[#0e1422] hover:bg-slate-800/60 border border-slate-800 p-3 rounded-xl flex items-center gap-2.5 transition text-slate-300 hover:text-white">
+                        <span class="text-base">🔌</span>
+                        <div class="truncate">
+                            <div class="font-bold">Apparaten</div>
+                            <div class="text-[10px] text-slate-500">Capabilities</div>
+                        </div>
+                    </a>
+                    <a href="#docs-providers" onclick="document.getElementById('docs-providers').scrollIntoView({behavior: 'smooth'})" class="bg-[#0e1422] hover:bg-slate-800/60 border border-slate-800 p-3 rounded-xl flex items-center gap-2.5 transition text-slate-300 hover:text-white">
+                        <span class="text-base">🌐</span>
+                        <div class="truncate">
+                            <div class="font-bold">Providers</div>
+                            <div class="text-[10px] text-slate-500">HA, EPEX, Influx</div>
+                        </div>
+                    </a>
+                    <a href="#docs-api" onclick="document.getElementById('docs-api').scrollIntoView({behavior: 'smooth'})" class="bg-[#0e1422] hover:bg-slate-800/60 border border-slate-800 p-3 rounded-xl flex items-center gap-2.5 transition text-slate-300 hover:text-white">
+                        <span class="text-base">📖</span>
+                        <div class="truncate">
+                            <div class="font-bold">REST API</div>
+                            <div class="text-[10px] text-slate-500">Endpoints &amp; Data</div>
+                        </div>
+                    </a>
+                    <a href="#docs-states" onclick="document.getElementById('docs-states').scrollIntoView({behavior: 'smooth'})" class="bg-[#0e1422] hover:bg-slate-800/60 border border-slate-800 p-3 rounded-xl flex items-center gap-2.5 transition text-slate-300 hover:text-white">
+                        <span class="text-base">🎨</span>
+                        <div class="truncate">
+                            <div class="font-bold">Taxonomie</div>
+                            <div class="text-[10px] text-slate-500">6 Modus codes</div>
+                        </div>
+                    </a>
+                </div>
+
+                <!-- SECTIE 1: SYSTEEMARCHITECTUUR (5-LAGEN) -->
+                <div id="docs-arch" class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">🏛️</span>
+                            <div>
+                                <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">1. Systeemarchitectuur (Clean Architecture / 5 Lagen)</h3>
+                                <p class="text-xs text-slate-400">Strikte scheiding van dataverzameling, fysische modellen, centrale besluitvorming, hardware aansturing en presentatie.</p>
+                            </div>
+                        </div>
+                        <span class="px-2.5 py-0.5 text-[10px] font-mono bg-blue-950 text-blue-300 rounded border border-blue-800 font-semibold">Core Invariants</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800/80 space-y-2">
+                            <div class="font-bold text-sky-400 flex items-center gap-1.5"><span>Laag 1</span> · Data Ingestion</div>
+                            <p class="text-[11px] text-slate-400 leading-relaxed">
+                                <code class="text-slate-200">TelemetrySanitizer</code> valideert ruwe data uit P1, zonne-omvormer en sensoren. Fysische bounds checks, 15m grid-alignment en TTL-waakhonden. Geen vuile data naar boven.
+                            </p>
+                        </div>
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800/80 space-y-2">
+                            <div class="font-bold text-indigo-400 flex items-center gap-1.5"><span>Laag 2</span> · Kalibratie &amp; Fysica</div>
+                            <p class="text-[11px] text-slate-400 leading-relaxed">
+                                <code class="text-slate-200">DhwThermalModel</code> (350L tank, 0.407 kWh/K, 59W stilstandsverlies) en 2R1C gebouwmodel voor vloerverwarming. Voorspelt afkoeling en warmtevraag.
+                            </p>
+                        </div>
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800/80 space-y-2">
+                            <div class="font-bold text-emerald-400 flex items-center gap-1.5"><span>Laag 3</span> · Centrale Dispatch</div>
+                            <p class="text-[11px] text-slate-400 leading-relaxed">
+                                <code class="text-slate-200">CentralPlanner</code> &amp; <code class="text-slate-200">PlanStore</code>. Single Source of Truth. Berekent 24h kwartierschema, marktarbitrage en dynamische spitsblokkades.
+                            </p>
+                        </div>
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800/80 space-y-2">
+                            <div class="font-bold text-amber-400 flex items-center gap-1.5"><span>Laag 4</span> · Actuators &amp; Interlocks</div>
+                            <p class="text-[11px] text-slate-400 leading-relaxed">
+                                Apparaatspecifieke adapters (<code class="text-slate-200">DaikinAlthermaActuator</code>). Beheert relais, hardware dwell-times (120m herstel), noodvergrendelingen en rapporteert <code class="text-slate-200">effective_mode</code> terug.
+                            </p>
+                        </div>
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800/80 space-y-2">
+                            <div class="font-bold text-purple-400 flex items-center gap-1.5"><span>Laag 5</span> · Presentatielaag</div>
+                            <p class="text-[11px] text-slate-400 leading-relaxed">
+                                <em>Domme Views</em>. Geen berekeningen of thermodynamica in de GUI. Leest en schrijft uitsluitend via de gestandaardiseerde REST API.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- 4 ONVERANDERLIJKE REGELS -->
+                    <div class="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
+                        <div class="font-bold text-white flex items-center gap-2">
+                            <span class="text-emerald-400">🛡️</span>
+                            <span>De 4 Onschendbare Architectuurin行為 (Architectural Invariants)</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-300">
+                            <div><strong class="text-emerald-400">1. Single Source of Truth:</strong> Alle grafieken en actuatoren lezen hetzelfde plan uit de PlanStore. Nooit afzonderlijke berekeningen in views.</div>
+                            <div><strong class="text-emerald-400">2. Core Entity Isolation:</strong> Geen Home Assistant entiteitsstrings of merknamen in de rekenkern. Alles configureerbaar via adapters en site config.</div>
+                            <div><strong class="text-emerald-400">3. Strikte No-Mock Directive:</strong> Geen gefabriceerde data in productie. Reële metingen uit InfluxDB/HA of replay-snapshots in tests.</div>
+                            <div><strong class="text-emerald-400">4. Hardware Circuit Breakers:</strong> Spitsblokkade (max 150m) en dwell-times (min 120m) worden op relaisniveau hardwarematig afgedwongen.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTIE 2: DE STURINGSLOGICA & BESLISBOMEN -->
+                <div id="docs-logic" class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">⚡</span>
+                            <div>
+                                <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">2. Sturingslogica &amp; Beslisbomen</h3>
+                                <p class="text-xs text-slate-400">Hoe Open HEMS beslist over spitsblokkades, nachtelijk boiler laden, dagelijkse zonne-arbitrage en vloerverwarming.</p>
+                            </div>
+                        </div>
+                        <span class="px-2.5 py-0.5 text-[10px] font-mono bg-amber-950 text-amber-300 rounded border border-amber-800 font-semibold">Decision Engine</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                        <!-- LOGICA 1: SPITSBLOKKADE -->
+                        <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800 space-y-2.5">
+                            <div class="flex items-center justify-between">
+                                <span class="font-bold text-red-400 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-red-500"></span> A. Dynamische Spitsblokkade (forced_off / SG1)</span>
+                                <span class="text-[10px] font-mono text-slate-400">Prioriteit 1 (Harde Regel)</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300 leading-relaxed">
+                                Schakelt de warmtepomp volledig uit tijdens extreme beursprijzen via Smart Grid contact 1 (SG1).
+                            </p>
+                            <ul class="list-disc list-inside text-[11px] text-slate-400 space-y-1">
+                                <li><strong>Marktvensters:</strong> Uitsluitend actief in Ochtendspits (06:00–10:00) en Avondspits (17:00–21:00).</li>
+                                <li><strong>Drempel:</strong> Kwartierprijs &ge; P75/P85 van de dag &eacute;n minimaal &euro;0,035/kWh boven daggemiddelde.</li>
+                                <li><strong>Harde Cap:</strong> Maximaal 150 minuten (2,5 uur) aaneengesloten per spitsblok.</li>
+                                <li><strong>Dwell-Time:</strong> Minimaal 120 minuten normale werking na afloop van een blokkade.</li>
+                                <li><strong>Onbreekbaar:</strong> Kan onder geen beding worden overschreven door warmtevraag of zonne-adviezen.</li>
+                            </ul>
+                        </div>
+
+                        <!-- LOGICA 2: NACHTBOILER -->
+                        <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800 space-y-2.5">
+                            <div class="flex items-center justify-between">
+                                <span class="font-bold text-emerald-400 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> B. Nachtelijk Boiler Laden (forced_on / SG2)</span>
+                                <span class="text-[10px] font-mono text-slate-400">Prioriteit 3</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300 leading-relaxed">
+                                Zorgt dat het 350L vat op 50&deg;C is v&oacute;&oacute;r de ochtendspits begint (venster 20:00–06:00).
+                            </p>
+                            <ul class="list-disc list-inside text-[11px] text-slate-400 space-y-1">
+                                <li><strong>Comfort-Trigger:</strong> Alleen actief als de gesimuleerde ochtenddip &lt; 40&deg;C zakt (comfortrisico). Blijft de dip &ge; 40&deg;C, dan zijn de nachtkosten exact &euro;0,00.</li>
+                                <li><strong>Dynamische Runduur:</strong> N = Math.ceil(0.407 &times; (50 - T_tank) / 1.63) kwartieren (bij 6,5 kWth compressorvermogen).</li>
+                                <li><strong>Stilstandsverlies:</strong> 59W continu verlies (&sim;0,059 kWh/h) wordt meegewogen: vroeg laden krijgt een kostenboete voor de verloren uren.</li>
+                                <li><strong>COP-optimalisatie:</strong> COP = 2.55 + 0.075 &times; T_buiten. Laagste all-in netstroomvenster wint.</li>
+                            </ul>
+                        </div>
+
+                        <!-- LOGICA 3: DAGPLANNING ARBITRAGE -->
+                        <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800 space-y-2.5">
+                            <div class="flex items-center justify-between">
+                                <span class="font-bold text-purple-400 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-purple-500"></span> C. 24u Dagplanning &amp; Zonnebuffer (max_on / SG4)</span>
+                                <span class="text-[10px] font-mono text-slate-400">DhwDaytimeArbiter</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300 leading-relaxed">
+                                Zuivere economische vergelijking over 24 uur tussen 50&deg;C basislading en 60&deg;C zonnebuffer. Geen arbitraire drempels.
+                            </p>
+                            <ul class="list-disc list-inside text-[11px] text-slate-400 space-y-1">
+                                <li><strong>Situatie 1 (Avondcomfort in gevaar):</strong> Pad A1 (overdag 50&deg;C + gesimuleerde nachtrun) vs Pad A2 (overdag direct door naar 60&deg;C). Goedkoopste totale 24-uurs pad wint.</li>
+                                <li><strong>Situatie 2 (Avondcomfort veilig):</strong> Pad B1 (Standby) vs Pad B2 (Economisch bufferen naar 60&deg;C als zonne/beursstroom goedkoper is dan de vermeden nachtrun).</li>
+                                <li><strong>Exclusiviteit:</strong> <code class="text-purple-300">max_on</code> (60&deg;C) mag uitsluitend door DHW worden ingezet. Ruimteverwarming kan nooit naar max_on.</li>
+                            </ul>
+                        </div>
+
+                        <!-- LOGICA 4: CV RUIMTEVERWARMING -->
+                        <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800 space-y-2.5">
+                            <div class="flex items-center justify-between">
+                                <span class="font-bold text-amber-400 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-500"></span> D. Vloerverwarming Pre-Heat (advised_on / SG3)</span>
+                                <span class="text-[10px] font-mono text-slate-400">2R1C Thermal Model</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300 leading-relaxed">
+                                Benut de 3 tot 4 uur thermische traagheid van de dekvloer om dure spitsblokkades comfortabel te overbruggen.
+                            </p>
+                            <ul class="list-disc list-inside text-[11px] text-slate-400 space-y-1">
+                                <li><strong>Pre-Heat Nachtdal:</strong> Laadt de dekvloer licht voor tijdens de goedkoopste nachturen v&oacute;&oacute;r de ochtendspits (04:00–06:00).</li>
+                                <li><strong>Zomerstop:</strong> Automatisch uitgeschakeld zodra de buitentemperatuur &ge; 16&deg;C bereikt.</li>
+                                <li><strong>Interlock:</strong> CV schakelt fysiek uit wanneer DHW tapwater opwarmt (Daikin 3-wegklep prioriteit).</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTIE 3: APPARATEN TOEVOEGEN -->
+                <div id="docs-devices" class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">🔌</span>
+                            <div>
+                                <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">3. Apparaten Toevoegen (Capabilities &amp; Topology)</h3>
+                                <p class="text-xs text-slate-400">Stappenplan om nieuwe apparaten (warmtepompen, omvormers, batterijen, laadpalen) toe te voegen via de UI of site config.</p>
+                            </div>
+                        </div>
+                        <span class="px-2.5 py-0.5 text-[10px] font-mono bg-indigo-950 text-indigo-300 rounded border border-indigo-800 font-semibold">Recipe 1</span>
+                    </div>
+
+                    <div class="space-y-3 text-xs">
+                        <p class="text-slate-300 leading-relaxed">
+                            Apparaten worden in Open HEMS gemodelleerd op basis van hun <strong>fysische mogelijkheden (Capabilities)</strong> in plaats van hun merknaam. Hierdoor weet de centrale planner generiek hoe een apparaat kan worden ingezet.
+                        </p>
+
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 text-center text-[11px]">
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800"><code class="text-sky-400 font-bold block">can_delay</code><span class="text-slate-400 text-[10px]">Kan uitgesteld worden</span></div>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800"><code class="text-emerald-400 font-bold block">can_modulate</code><span class="text-slate-400 text-[10px]">Vermogen regelbaar</span></div>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800"><code class="text-purple-400 font-bold block">can_store</code><span class="text-slate-400 text-[10px]">Thermisch of accu</span></div>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800"><code class="text-amber-400 font-bold block">can_export</code><span class="text-slate-400 text-[10px]">Teruglevering aan net</span></div>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800"><code class="text-red-400 font-bold block">has_deadline</code><span class="text-slate-400 text-[10px]">Hard eindtijdstip</span></div>
+                            <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800"><code class="text-orange-400 font-bold block">is_thermal</code><span class="text-slate-400 text-[10px]">Thermische buffer</span></div>
+                        </div>
+
+                        <!-- CODE SAMPLE JSON -->
+                        <div class="space-y-1.5">
+                            <div class="flex items-center justify-between text-[11px] text-slate-400">
+                                <span>Voorbeeld apparaatconfiguratie (<code class="text-slate-300">config/site_config.json</code>):</span>
+                                <span class="font-mono">JSON</span>
+                            </div>
+                            <pre class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800/80 font-mono text-[11px] text-emerald-300 overflow-x-auto"><code>{
+  "id": "thuisbatterij_10kwh",
+  "name": "Deye 10kWh LFP Thuisaccu",
+  "adapter": "deye_modbus_tcp",
+  "capabilities": ["can_store", "can_export", "can_modulate"],
+  "parameters": {
+    "capacity_kwh": 10.0,
+    "max_charge_kw": 5.0,
+    "max_discharge_kw": 5.0,
+    "roundtrip_efficiency": 0.88
+  },
+  "bindings": {
+    "state_soc_entity": "sensor.battery_state_of_charge",
+    "power_entity": "sensor.battery_power_w"
+  }
+}</code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTIE 4: INFO PROVIDERS & VERBINDINGEN -->
+                <div id="docs-providers" class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">🌐</span>
+                            <div>
+                                <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">4. Verbindingen &amp; Info Providers Toevoegen</h3>
+                                <p class="text-xs text-slate-400">Externe integraties voor dynamische beursprijzen, telemetrieopslag, smart home en weersvoorspelling.</p>
+                            </div>
+                        </div>
+                        <span class="px-2.5 py-0.5 text-[10px] font-mono bg-teal-950 text-teal-300 rounded border border-teal-800 font-semibold">Integraties</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800 space-y-2">
+                            <div class="font-bold text-blue-400 flex items-center gap-2">
+                                <span>🏠</span>
+                                <span>Home Assistant Core</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Biedt bi-directionele controle. Open HEMS leest entiteitstatussen uit via de REST/WebSocket API en schakelt actuators via HA services.
+                            </p>
+                            <div class="text-[10px] text-slate-400 font-mono bg-slate-900/80 p-2 rounded border border-slate-800">
+                                Intern: https://172.30.32.1:8123 (via Supervisor token)<br>
+                                Extern: https://hass.b3rg.nl:8123 (Long-Lived Access Token)
+                            </div>
+                        </div>
+
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800 space-y-2">
+                            <div class="font-bold text-emerald-400 flex items-center gap-2">
+                                <span>⚡</span>
+                                <span>EPEX Spot / Powerpeers Tarieven</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Haalt dag-ahead elektriciteitsprijzen op. Berekent all-in inkooptarief inclusief wettelijke heffingen en leveranciersopslag.
+                            </p>
+                            <div class="text-[10px] text-slate-400 font-mono bg-slate-900/80 p-2 rounded border border-slate-800">
+                                Inkoop = (EPEX + 0.0121 inkoopopslag + 0.11085 EB) &times; 1.21 BTW<br>
+                                Teruglevering = EPEX - 0.00605 vergoeding (€0.005 ex BTW)
+                            </div>
+                        </div>
+
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800 space-y-2">
+                            <div class="font-bold text-cyan-400 flex items-center gap-2">
+                                <span>📈</span>
+                                <span>InfluxDB (Tijdreeksdatabase)</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Slaat 60s gesaneerde telemetrie op in de dedicated <code class="text-cyan-300">openhems</code> database. Volledige scheiding van de HA legacy db.
+                            </p>
+                            <div class="text-[10px] text-slate-400 font-mono bg-slate-900/80 p-2 rounded border border-slate-800">
+                                Endpoint: http://a0d7b954-influxdb:8086<br>
+                                Metingen: energy_telemetry, daikin_heat_pump, model_forecast
+                            </div>
+                        </div>
+
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800 space-y-2">
+                            <div class="font-bold text-amber-400 flex items-center gap-2">
+                                <span>☀️</span>
+                                <span>Zon- &amp; Weersvoorspelling</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Open-Meteo &amp; Forecast.Solar koppeling op basis van dakgeometrie (34&deg; helling, 225&deg; ZW, 5.76 kWp, 5.5 kW omvormer).
+                            </p>
+                            <div class="text-[10px] text-slate-400 font-mono bg-slate-900/80 p-2 rounded border border-slate-800">
+                                Updatecyclus: Elk uur ververst met kwartierresolutie.<br>
+                                Wordt gebruikt door DHW arbiter en CV stooklijn.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTIE 5: GESTANDAARDISEERDE REST API REFERENTIE -->
+                <div id="docs-api" class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 sm:p-6 shadow-2xl space-y-5">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">📖</span>
+                            <div>
+                                <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">5. Gestandaardiseerde REST API Referentie (OpenAPI 3.1.0)</h3>
+                                <p class="text-xs text-slate-400">Industriestandaard specificatie. Alle endpoints zijn ontkoppeld, stateless en JSON-geserialiseerd.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="api-filter-input" onkeyup="filterApiEndpoints()" placeholder="Filter endpoints..." class="bg-[#0B0F17] border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 font-mono focus:outline-none focus:border-blue-500">
+                            <a href="./api/openapi.json" target="_blank" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-mono text-cyan-300 transition">schema</a>
+                        </div>
+                    </div>
+
+                    <!-- API ENDPOINT LIST -->
+                    <div class="space-y-3" id="api-endpoints-container">
+                        <!-- 1. SCHEDULE CHART-DATA -->
+                        <div class="api-endpoint-card bg-[#0B0F17] border border-slate-800 rounded-xl p-3.5 space-y-2">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="px-2 py-0.5 bg-blue-950 text-blue-300 font-mono font-bold text-[10px] rounded border border-blue-800">GET</span>
+                                    <code class="text-xs font-bold text-white">/api/schedule/chart-data</code>
+                                </div>
+                                <span class="text-[10px] text-slate-400 font-mono">Tag: Schedule &amp; Dispatch</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Haalt de centrale 24-uurs kwartier-dispatch tijdlijn op. Bevat de geplande werkmodi (<code class="text-slate-200">forced_off</code>, <code class="text-slate-200">normal</code>, <code class="text-slate-200">forced_on</code>, <code class="text-slate-200">max_on</code>), marktprijzen, zonnevoorspelling en stroomkosten per kwartier.
+                            </p>
+                            <div class="flex items-center gap-4 text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900">
+                                <span>Query Params: <code class="text-amber-300">resolution=15m|1h</code></span>
+                                <span>Response: <code class="text-emerald-400">200 OK (application/json)</code></span>
+                            </div>
+                        </div>
+
+                        <!-- 2. DHW STATUS -->
+                        <div class="api-endpoint-card bg-[#0B0F17] border border-slate-800 rounded-xl p-3.5 space-y-2">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="px-2 py-0.5 bg-blue-950 text-blue-300 font-mono font-bold text-[10px] rounded border border-blue-800">GET</span>
+                                    <code class="text-xs font-bold text-white">/api/model/dhw-status</code>
+                                </div>
+                                <span class="text-[10px] text-slate-400 font-mono">Tag: Models &amp; Thermodynamics</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Geeft de actuele 350L tanksensortemperatuur (&deg;C), het gesimuleerde temperatuurtraject (verwarmd vs onverwarmd referentieprofiel), de verwachte thermische warmtevraag in <code class="text-sky-300">kWh_th</code> en <code class="text-sky-300">V40</code> liters mengwater, en de 24u dagplanning-arbitrage.
+                            </p>
+                            <div class="flex items-center gap-4 text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900">
+                                <span>Query Params: <code class="text-amber-300">resolution=15m|1h</code></span>
+                                <span>Response: <code class="text-emerald-400">200 OK (application/json)</code></span>
+                            </div>
+                        </div>
+
+                        <!-- 3. DHW HISTORY -->
+                        <div class="api-endpoint-card bg-[#0B0F17] border border-slate-800 rounded-xl p-3.5 space-y-2">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="px-2 py-0.5 bg-blue-950 text-blue-300 font-mono font-bold text-[10px] rounded border border-blue-800">GET</span>
+                                    <code class="text-xs font-bold text-white">/api/analytics/dhw_history</code>
+                                </div>
+                                <span class="text-[10px] text-slate-400 font-mono">Tag: Analytics &amp; History</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Haalt gerealiseerde historische tanksensortemperaturen (&deg;C) en geleverde thermische warmte (<code class="text-sky-300">kWh_th</code>) op uit de <code class="text-slate-200">openhems</code> InfluxDB database over een configureerbaar tijdvenster.
+                            </p>
+                            <div class="flex items-center gap-4 text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900">
+                                <span>Query Params: <code class="text-amber-300">range=24h|48h|7d</code>, <code class="text-amber-300">resolution=15m|1h</code></span>
+                                <span>Response: <code class="text-emerald-400">200 OK (application/json)</code></span>
+                            </div>
+                        </div>
+
+                        <!-- 4. POWER PRODUCERS HISTORY -->
+                        <div class="api-endpoint-card bg-[#0B0F17] border border-slate-800 rounded-xl p-3.5 space-y-2">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="px-2 py-0.5 bg-blue-950 text-blue-300 font-mono font-bold text-[10px] rounded border border-blue-800">GET</span>
+                                    <code class="text-xs font-bold text-white">/api/analytics/power_producers</code>
+                                </div>
+                                <span class="text-[10px] text-slate-400 font-mono">Tag: Analytics &amp; History</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Tijdreeks van elektrisch vermogen (kW) en energie (kWh) voor zonnepanelen, warmtepomp, P1 afname/teruglevering en direct eigenverbruik.
+                            </p>
+                            <div class="flex items-center gap-4 text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900">
+                                <span>Query Params: <code class="text-amber-300">range=1h|6h|24h|48h|7d</code>, <code class="text-amber-300">resolution=15m|1h</code></span>
+                                <span>Response: <code class="text-emerald-400">200 OK (application/json)</code></span>
+                            </div>
+                        </div>
+
+                        <!-- 5. DECISION AUDIT LOG -->
+                        <div class="api-endpoint-card bg-[#0B0F17] border border-slate-800 rounded-xl p-3.5 space-y-2">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="px-2 py-0.5 bg-blue-950 text-blue-300 font-mono font-bold text-[10px] rounded border border-blue-800">GET</span>
+                                    <code class="text-xs font-bold text-white">/api/analytics/decisions</code>
+                                </div>
+                                <span class="text-[10px] text-slate-400 font-mono">Tag: Audit &amp; Observability</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Volledig chronologisch beslis-logboek. Geeft inzicht in de exacte fysische sensortoestanden, EPEX-tarieven en de wiskundige/financi&euml;le motivatie waarom een bepaalde modus is gekozen.
+                            </p>
+                            <div class="flex items-center gap-4 text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900">
+                                <span>Query Params: <code class="text-amber-300">limit=50</code>, <code class="text-amber-300">offset=0</code></span>
+                                <span>Response: <code class="text-emerald-400">200 OK (application/json)</code></span>
+                            </div>
+                        </div>
+
+                        <!-- 6. DEVICES CRUD -->
+                        <div class="api-endpoint-card bg-[#0B0F17] border border-slate-800 rounded-xl p-3.5 space-y-2">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="px-2 py-0.5 bg-blue-950 text-blue-300 font-mono font-bold text-[10px] rounded border border-blue-800">GET</span>
+                                    <span class="px-2 py-0.5 bg-emerald-950 text-emerald-300 font-mono font-bold text-[10px] rounded border border-emerald-800">POST</span>
+                                    <code class="text-xs font-bold text-white">/api/devices</code>
+                                </div>
+                                <span class="text-[10px] text-slate-400 font-mono">Tag: Devices &amp; Actuators</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Beheer van alle geregistreerde apparaten. GET leest de actieve hardwarecatalogus en hun status. POST registreert of wijzigt een apparaat en diens capabilities.
+                            </p>
+                            <div class="flex items-center gap-4 text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900">
+                                <span>Payload: <code class="text-amber-300">{device_id, name, capabilities, ...}</code></span>
+                                <span>Response: <code class="text-emerald-400">200 OK / 201 Created</code></span>
+                            </div>
+                        </div>
+
+                        <!-- 7. REPLAN -->
+                        <div class="api-endpoint-card bg-[#0B0F17] border border-slate-800 rounded-xl p-3.5 space-y-2">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="px-2 py-0.5 bg-emerald-950 text-emerald-300 font-mono font-bold text-[10px] rounded border border-emerald-800">POST</span>
+                                    <code class="text-xs font-bold text-white">/api/schedule/recalculate</code>
+                                </div>
+                                <span class="text-[10px] text-slate-400 font-mono">Tag: Schedule &amp; Dispatch</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Dwingt een onmiddellijke herberekeningscyclus af in Laag 3 (CentralPlanner) en publiceert een ge&uuml;pdatet dispatch plan naar de PlanStore.
+                            </p>
+                            <div class="flex items-center gap-4 text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900">
+                                <span>Payload: <em>Geen (lege POST)</em></span>
+                                <span>Response: <code class="text-emerald-400">200 OK {"status": "recalculated"}</code></span>
+                            </div>
+                        </div>
+
+                        <!-- 8. OPENAPI JSON -->
+                        <div class="api-endpoint-card bg-[#0B0F17] border border-slate-800 rounded-xl p-3.5 space-y-2">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="px-2 py-0.5 bg-blue-950 text-blue-300 font-mono font-bold text-[10px] rounded border border-blue-800">GET</span>
+                                    <code class="text-xs font-bold text-white">/api/openapi.json</code>
+                                </div>
+                                <span class="text-[10px] text-slate-400 font-mono">Tag: System &amp; Schema</span>
+                            </div>
+                            <p class="text-[11px] text-slate-300">
+                                Serveert de volledige machine-leesbare OpenAPI 3.1.0 JSON-specificatie voor geautomatiseerde client-generatie, validatie of integratie in Swagger/Postman.
+                            </p>
+                            <div class="flex items-center gap-4 text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-900">
+                                <span>Download: <a href="./api/openapi.json" target="_blank" class="text-cyan-400 underline">openapi.json</a></span>
+                                <span>Response: <code class="text-emerald-400">200 OK (application/json)</code></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTIE 6: STATUS TAXONOMIE & KLEURENCATALOGUS -->
+                <div id="docs-states" class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">🎨</span>
+                            <div>
+                                <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">6. Gestandaardiseerde 6-Status Taxonomie</h3>
+                                <p class="text-xs text-slate-400">Eenduidige kleurcodering en prioriteitsvolgorde voor alle apparaten en views conform config/mode_catalog.json.</p>
+                            </div>
+                        </div>
+                        <span class="px-2.5 py-0.5 text-[10px] font-mono bg-purple-950 text-purple-300 rounded border border-purple-800 font-semibold">Mode Catalog</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-red-900/60 space-y-1.5">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded bg-red-500"></span>
+                                <strong class="text-red-400">forced_off</strong>
+                            </div>
+                            <div class="text-[10px] font-mono text-slate-400">SG1 · Prioriteit 1</div>
+                            <p class="text-[11px] text-slate-400">Spitsblokkade bij beurspiek. Max 150m cap. Niet te overschrijven.</p>
+                        </div>
+
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-amber-900/60 space-y-1.5">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded bg-amber-500"></span>
+                                <strong class="text-amber-400">advised_off</strong>
+                            </div>
+                            <div class="text-[10px] font-mono text-slate-400">Advies · Prioriteit 5</div>
+                            <p class="text-[11px] text-slate-400">Geen harde blokkade, maar vermijden wegens hogere kosten.</p>
+                        </div>
+
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800 space-y-1.5">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded bg-slate-700"></span>
+                                <strong class="text-slate-300">normal</strong>
+                            </div>
+                            <div class="text-[10px] font-mono text-slate-400">SG2 · Prioriteit 6</div>
+                            <p class="text-[11px] text-slate-400">Standaard operatie. Interne thermostaat / stooklijn regelt.</p>
+                        </div>
+
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-emerald-900/60 space-y-1.5">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded bg-emerald-400"></span>
+                                <strong class="text-emerald-400">advised_on</strong>
+                            </div>
+                            <div class="text-[10px] font-mono text-slate-400">SG3 · Prioriteit 4</div>
+                            <p class="text-[11px] text-slate-400">Pre-heat advies vloerverwarming in goedkoop nachtdal.</p>
+                        </div>
+
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-green-800 space-y-1.5">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded bg-green-500"></span>
+                                <strong class="text-green-400">forced_on</strong>
+                            </div>
+                            <div class="text-[10px] font-mono text-slate-400">SG2 Boost · Prioriteit 3</div>
+                            <p class="text-[11px] text-slate-400">Geforceerd opwarmen DHW naar 50&deg;C (nacht of dag basislading).</p>
+                        </div>
+
+                        <div class="bg-[#0B0F17] p-3 rounded-xl border border-purple-900/60 space-y-1.5">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded bg-purple-500"></span>
+                                <strong class="text-purple-400">max_on</strong>
+                            </div>
+                            <div class="text-[10px] font-mono text-slate-400">SG4 · Prioriteit 2</div>
+                            <p class="text-[11px] text-slate-400">Zonnebuffer naar 60&deg;C. Uitsluitend toegewezen aan DHW arbiter.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- TAB 7: INSTANCE CONFIGURATION MODALS & TEMPLATES -->
 
             <!-- MODAL: ADD / EDIT INFLUXDB CONNECTION PROFILE -->
@@ -7321,6 +8035,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             }
             updatePowerProducersResButtons(powerProducersResolution);
             loadPowerProducersChart();
+            loadDhwHistoryChart();
         }
 
         window.__simulateBattery = false;
@@ -7387,7 +8102,8 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 'devices': ['Apparaten', 'Beheer fysieke apparaten, meters en actuatoren gekoppeld via Home Assistant of MQTT.'],
                 'infrastructure': ['Verbindingen', 'Beheer externe verbindingen naar Home Assistant, MQTT brokers en externe APIs.'],
                 'tariffs': ['Energieleveranciers & Tarieven', 'Beheer contracten (Powerpeers dynamisch) en energiebelasting.'],
-                'data': ['Data & Pipelines', 'Beheer InfluxDB tijdreeksdatabases, dataretentie en live 60s data pipelines.']
+                'data': ['Data & Pipelines', 'Beheer InfluxDB tijdreeksdatabases, dataretentie en live 60s data pipelines.'],
+                'docs': ['Systeemdocumentatie & Gebruikersgids', 'Uitgebreide naslag over de sturingslogica, Clean Architecture, apparaten toevoegen en datakoppelingen.']
             };
             const t = titles[tabId] || ['Open HEMS', ''];
             document.getElementById('header-title').innerText = t[0];
@@ -7404,6 +8120,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 loadAnalytics();
                 loadPowerProducersChart();
                 loadValidationOverlayChart();
+                loadDhwHistoryChart();
             }
             if (tabId === 'decisions') {
                 loadDecisionAuditLog();
@@ -8357,7 +9074,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             const label = tooltip.title[0] || '';
             const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
 
-            let tempC = 0.0, comfort = 40.0, target = 50.0, liters = 0, p05 = 0.0, p95 = 0.0, unheatedC = 0.0;
+            let tempC = 0.0, comfort = 40.0, target = 50.0, liters = 0, kwhVal = 0.0, p05 = 0.0, p95 = 0.0, unheatedC = 0.0;
             chart.data.datasets.forEach(ds => {
                 const v = ds.data[dataIndex];
                 if (!ds.label) return;
@@ -8379,8 +9096,14 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 else if (ds.label.includes('Doel')) {
                     target = Number(v) || 0.0;
                 }
-                else if (ds.label.includes('Tapvraag') || ds.label.includes('Liters') || ds.label.includes('Waterverbruik')) {
+                else if (ds.label.includes('Warmtevraag (kWh)')) {
+                    kwhVal = Number(v) || 0.0;
+                    // V40 norm: V40 = (kwh * 3600) / (4.186 * (40 - 10)) = kwh * 28.66
+                    liters = Math.round(kwhVal * 28.66);
+                }
+                else if (ds.label.includes('Tapvraag') || ds.label.includes('Liters') || ds.label.includes('Waterverbruik') || ds.label.includes('Warmtevraag')) {
                     liters = Math.round(Number(v) || 0);
+                    kwhVal = (liters * 4.186 * (40 - 10)) / 3600;
                 }
             });
 
@@ -8448,7 +9171,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                             <span style="display:inline-block; width:10px; height:10px; background-color:rgba(56, 189, 248, 0.6); border-radius:2px; margin-right:8px;"></span>
                             <span class="text-slate-300">Warmtevraag</span>
                         </div>
-                        <span class="font-bold text-sky-400 font-mono">${(liters * 4.186 * (50-12) / 3600).toFixed(2)} kWh (≈ ${liters} L V₄₀)</span>
+                        <span class="font-bold text-sky-400 font-mono">${kwhVal.toFixed(2)} kWh (≈ ${liters} L V₄₀)</span>
                     </div>
                 </div>
             `;
@@ -11300,6 +12023,112 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
             }
         }
 
+        let dhwHistoryChartInstance = null;
+        async function loadDhwHistoryChart() {
+            const canvas = document.getElementById('dhwHistoryChart');
+            if (!canvas) return;
+
+            try {
+                const rangeSelect = document.getElementById('pp-range-select');
+                const rangeVal = rangeSelect ? rangeSelect.value : '24h';
+                const res = await fetch('./api/analytics/dhw_history?range=' + encodeURIComponent(rangeVal) + '&resolution=15m');
+                const data = await res.json();
+                if (data.status !== 'success') {
+                    console.error('DHW history error:', data.message);
+                    return;
+                }
+
+                if (dhwHistoryChartInstance) {
+                    dhwHistoryChartInstance.destroy();
+                    dhwHistoryChartInstance = null;
+                }
+
+                const ctx = canvas.getContext('2d');
+                dhwHistoryChartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.labels,
+                        datasets: [
+                            {
+                                label: 'Boilertemperatuur (°C)',
+                                data: data.temperatures_c,
+                                borderColor: '#F59E0B',
+                                backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                                borderWidth: 2.5,
+                                pointRadius: data.labels.length > 50 ? 0 : 2,
+                                pointHoverRadius: 5,
+                                fill: true,
+                                tension: 0.3,
+                                yAxisID: 'y'
+                            },
+                            {
+                                label: 'Warmtevraag (kWh)',
+                                data: data.demand_kwh_th,
+                                type: 'bar',
+                                backgroundColor: 'rgba(56, 189, 248, 0.45)',
+                                borderColor: '#38BDF8',
+                                borderWidth: 1,
+                                borderRadius: 3,
+                                yAxisID: 'y1'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                enabled: false,
+                                external: function(context) {
+                                    if (typeof customDhwTooltipHandler === 'function') {
+                                        customDhwTooltipHandler(context);
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                                ticks: {
+                                    color: '#94a3b8',
+                                    font: { size: 10, family: 'monospace' },
+                                    maxTicksLimit: 14
+                                }
+                            },
+                            y: {
+                                position: 'left',
+                                title: { display: true, text: 'Temperatuur (°C)', color: '#F59E0B', font: { size: 10, weight: 'bold' } },
+                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                                ticks: {
+                                    color: '#F59E0B',
+                                    font: { size: 10, family: 'monospace' },
+                                    callback: function(v) { return v + '°C'; }
+                                },
+                                min: 30,
+                                max: 65
+                            },
+                            y1: {
+                                position: 'right',
+                                title: { display: true, text: 'Warmtevraag (kWh)', color: '#38BDF8', font: { size: 10, weight: 'bold' } },
+                                grid: { drawOnChartArea: false },
+                                ticks: {
+                                    color: '#38BDF8',
+                                    font: { size: 10, family: 'monospace' },
+                                    callback: function(v) { return v.toFixed(1) + ' kWh'; }
+                                },
+                                min: 0,
+                                suggestedMax: 2.0
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.error('Failed to load DHW history chart:', e);
+            }
+        }
+
         async function loadAnalytics() {
             try {
                 const res = await fetch('./api/analytics');
@@ -12861,6 +13690,16 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
         async function recalculateUnallocatedProfile() {
             await retrainModelNow();
         }
+
+        function filterApiEndpoints() {
+            const q = (document.getElementById('api-filter-input').value || '').toLowerCase();
+            const cards = document.querySelectorAll('.api-endpoint-card');
+            cards.forEach(card => {
+                const txt = card.innerText.toLowerCase();
+                card.style.display = txt.includes(q) ? 'block' : 'none';
+            });
+        }
+
     </script>
 </body>
 </html>"""
