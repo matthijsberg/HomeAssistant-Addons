@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.48
+Version: 0.92.49
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -890,6 +890,36 @@ def evaluate_and_log_planner_decisions(plan: Any, frame: Any):
                 explanation=desc,
                 savings_estimate_eur=0.35 if sh.preheat_hours > 0 else 0.0
             )
+
+    # 3. DHW Daytime Arbitration Logging (Full 24h Traceability)
+    if hasattr(plan, "metadata") and isinstance(plan.metadata, dict) and "daytime_arbitrage_audit" in plan.metadata:
+        audit = plan.metadata["daytime_arbitrage_audit"]
+        if audit:
+            last_mode = _LAST_PLAN_LOGS.get("dhw_day_mode")
+            cur_mode = audit.get("planned_mode")
+            if last_mode != cur_mode or (now_ts - _LAST_PLAN_LOGS.get("last_dhw_day_ts", 0)) >= 3600.0:
+                _LAST_PLAN_LOGS["dhw_day_mode"] = cur_mode
+                _LAST_PLAN_LOGS["last_dhw_day_ts"] = now_ts
+
+                title = f"♨️ DHW Dagplanning Arbitrage: {audit.get('planned_mode_label')}"
+                explanation = audit.get("explanation", "")
+                DecisionAuditLogger.log_decision(
+                    domain="dhw_boiler",
+                    decision_type="daytime_arbitrage",
+                    chosen_mode=cur_mode,
+                    target_temp_c=audit.get("target_temp_c"),
+                    inputs={
+                        "situation": audit.get("situation"),
+                        "evening_dip_c": audit.get("unheated_evening_dip_c"),
+                        "evening_dip_time": audit.get("evening_dip_time"),
+                        "selected_path": audit.get("selected_path_id"),
+                        "evaluated_paths": audit.get("evaluated_paths")
+                    },
+                    reason=title,
+                    explanation=explanation,
+                    savings_estimate_eur=audit.get("savings_eur", 0.0),
+                    category="DECISION"
+                )
 
 
 
@@ -3008,7 +3038,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.48",
+                "version": "0.92.49",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4670,7 +4700,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.48</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.49</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>

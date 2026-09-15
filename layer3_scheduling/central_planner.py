@@ -144,6 +144,7 @@ class CentralPlanner:
         planned_mode_label = "Normaal (Standby)"
         sww_target_temp = 50.0
         sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
+        daytime_arbitrage_audit = None
 
         # Priority 1: Morning comfort risk (<40°C) during night/evening -> Nachtverwarming (20:00 - 06:00)
         # Comfortzekerheid vóór 10:00u weegt zwaarder dan wachten op zon.
@@ -227,27 +228,24 @@ class CentralPlanner:
                 planned_mode_label = "Normaal (Standby — Geen nachtvenster)"
                 planned_dhw_slots = []
 
-        # Priority 2: Strategy A: Solar Boost (60°C) if surplus >= 2.5 kWh during daytime
-        elif has_daytime_ahead and day_solar_surplus >= 2.5 and len(day_solar_slots) >= 4:
-            planned_mode = "forced_solar_boost_60"
-            planned_mode_label = "Maximaal aan (doorverwarming tot 60°C)"
-            sww_target_temp = 60.0
-            sww_power_kw = cls.DHW_SOLAR_BOOST_ELECTRIC_KW
-            # Choose best 6 contiguous solar slots (1.5 hours)
-            best_solar_start = day_solar_slots[0]
-            planned_dhw_slots = list(range(best_solar_start, min(n_slots, best_solar_start + 6)))
-
-        # Priority 3: Strategy B: Standard Daytime Run (50°C) if daytime remains and tank drops
-        elif has_daytime_ahead and current_dhw_temp <= 49.0:
-            planned_mode = "forced_on"
-            planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
-            sww_target_temp = 50.0
-            sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
-            # Pick lowest price window between 11:00 and 16:00
-            day_cand = [i for i, s in enumerate(slots) if 11 <= s.dt.hour <= 15]
-            if day_cand:
-                best_day_start = min(day_cand, key=lambda idx: slots[idx].price_all_in)
-                planned_dhw_slots = list(range(best_day_start, min(n_slots, best_day_start + 4)))
+        # Priority 2: Daytime Economic Arbitration (DhwDaytimeArbiter)
+        # Evaluates 24-hour all-in electricity cost comparing 50°C vs 60°C and simulated night run
+        elif has_daytime_ahead:
+            from layer3_scheduling.dhw_daytime_arbiter import DhwDaytimeArbiter
+            arbiter_res = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+                slots=slots,
+                current_dhw_temp=current_dhw_temp,
+                dynamic_peaks=dynamic_peaks,
+                dhw_model=dhw_model,
+                now_dt=now,
+                step_hours=step_hours
+            )
+            planned_mode = arbiter_res.planned_mode
+            planned_mode_label = arbiter_res.planned_mode_label
+            sww_target_temp = arbiter_res.target_temp_c
+            sww_power_kw = arbiter_res.power_kw
+            planned_dhw_slots = arbiter_res.planned_slots
+            daytime_arbitrage_audit = arbiter_res.to_audit_dict()
         else:
             planned_mode = "normal"
             planned_mode_label = "Normaal (Standby — Wachten op middag/zon)"
@@ -405,6 +403,7 @@ class CentralPlanner:
             metadata={
                 "aligned_grid_start": frame.metadata.get("aligned_grid_start"),
                 "dhw_tank_liters": cls.DHW_TANK_LITERS,
+                "daytime_arbitrage_audit": daytime_arbitrage_audit,
                 "solar_surplus_day_kwh": round(day_solar_surplus, 2),
                 "is_heating_season": heating_plan.is_heating_season,
                 "season_status_label": heating_plan.season_status_label,

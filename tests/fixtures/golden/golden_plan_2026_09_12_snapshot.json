@@ -3,10 +3,10 @@
   "horizon_hours": 24.0,
   "dhw_planned_mode": "max_on",
   "dhw_target_temp_c": 60.0,
-  "dhw_run_start": "11:00",
-  "dhw_run_end": "12:30",
+  "dhw_run_start": "12:00",
+  "dhw_run_end": "13:15",
   "dhw_power_kw": 2.4,
   "spits_lockout_hours": 0.0,
   "dynamic_peaks_count": 1,
-  "total_active_dhw_slots": 6
+  "total_active_dhw_slots": 5
 }
