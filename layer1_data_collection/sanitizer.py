@@ -58,6 +58,18 @@ class CleanTelemetryFrame:
     def unallocated_kw(self) -> List[float]:
         return [s.unallocated_kw for s in self.slots]
 
+    @property
+    def current_room_temp(self) -> Optional[float]:
+        return self.slots[0].room_temp_c if self.slots else None
+
+    @property
+    def current_floor_temp(self) -> Optional[float]:
+        return self.slots[0].floor_temp_c if self.slots else None
+
+    @property
+    def target_room_temp(self) -> float:
+        return float(self.metadata.get("target_room_temp_c", 20.0))
+
 
 class TelemetrySanitizer:
     """
@@ -77,6 +89,7 @@ class TelemetrySanitizer:
         current_dhw_temp: Optional[float] = None,
         current_room_temp: Optional[float] = None,
         current_floor_temp: Optional[float] = None,
+        target_room_temp: Optional[float] = None,
         last_hardware_reading_time: Optional[datetime] = None,
         horizon_slots: int = 96,
         step_mins: int = 15
@@ -271,7 +284,8 @@ class TelemetrySanitizer:
             metadata={
                 "aligned_grid_start": grid_start.isoformat(),
                 "slot_count": len(slots),
-                "horizon_hours": (horizon_slots * step_mins) / 60.0
+                "horizon_hours": (horizon_slots * step_mins) / 60.0,
+                "target_room_temp_c": round(max(15.0, min(25.0, target_room_temp)), 1) if target_room_temp is not None else 20.0
             },
             validation_errors=validation_errors + issues
         )

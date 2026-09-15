@@ -267,6 +267,9 @@ class CentralPlanner:
             solar_kw=[s.solar_kw for s in slots],
             active_dhw_slots=final_dhw_slots,
             dynamic_peaks=dynamic_peaks,
+            current_room_temp_c=frame.current_room_temp,
+            current_floor_temp_c=frame.current_floor_temp,
+            target_room_temp_c=frame.target_room_temp,
             step_hours=step_hours
         )
 
@@ -399,6 +402,7 @@ class CentralPlanner:
             slots=dispatch_slots,
             dhw_summary=dhw_summary,
             dynamic_peaks=dynamic_peaks,
+            heating_summary=heating_plan,
             validation_issues=frame.validation_errors,
             metadata={
                 "aligned_grid_start": frame.metadata.get("aligned_grid_start"),

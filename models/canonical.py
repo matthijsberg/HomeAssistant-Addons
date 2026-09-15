@@ -571,6 +571,42 @@ class DHWPlanSummary:
 
 
 @dataclass
+class SpaceHeatingSlotResult:
+    """A single quarter-hour simulation slot for 2R1C space heating dispatch."""
+    slot_idx: int
+    heating_kw_el: float
+    heating_kw_th: float
+    cop: float
+    room_temp_c: float
+    floor_temp_c: float
+    heat_loss_kw: float
+    mode_code: str
+    is_preheat_active: bool
+    is_lockout_active: bool
+    cost_th_eur_per_kwh: float = 0.0
+    outdoor_temp_c: float = 10.0
+
+
+@dataclass
+class SpaceHeatingPlanSummary:
+    """Canonical summary of space heating and underfloor buffer dispatch."""
+    is_heating_season: bool
+    season_status_label: str
+    total_heating_kwh_el: float
+    total_heating_kwh_th: float
+    average_cop: float
+    preheat_hours: float
+    lockout_hours: float
+    min_projected_room_temp_c: float
+    max_projected_room_temp_c: float
+    slots: List[SpaceHeatingSlotResult]
+    target_room_temp_c: float = 20.0
+    min_comfort_room_c: float = 19.6
+    max_preheat_room_c: float = 21.2
+    max_floor_temp_c: float = 28.0
+
+
+@dataclass
 class CanonicalDispatchPlan:
     """The central immutable published dispatch plan for the entire HEMS system."""
     generated_at: str
@@ -581,6 +617,7 @@ class CanonicalDispatchPlan:
     slots: List[DispatchPlanSlot]
     dhw_summary: DHWPlanSummary
     dynamic_peaks: List[Dict[str, Any]]
+    heating_summary: Optional[SpaceHeatingPlanSummary] = None
     validation_issues: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 

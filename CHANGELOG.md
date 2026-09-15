@@ -10,7 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.25.1] — 2026-09-08 (Fix Solar Absolute Sign in Live Pipeline Power Balance)
+## [0.92.54] — 2026-09-15 (Space Heating 2R1C Thermal Floor Buffering & Dumb View Sanitation)
+
+### Added
+- 2R1C underfloor buffer optimization in `layer3_scheduling/space_heating_policy.py`: evaluates thermal energy cost (€/kWh_th = Price / COP), schedules strategic pre-heat runways before dynamic peak lockouts, and allows daytime solar overshoot (up to setpoint + 1.2°C) so the concrete screed remains saturated to coast through evening peaks.
+- Canonically typed `SpaceHeatingSlotResult` and `SpaceHeatingPlanSummary` in `models/canonical.py`, attached directly to `CanonicalDispatchPlan.heating_summary`.
+- `CleanTelemetryFrame` support for `target_room_temp`, `current_room_temp`, and `current_floor_temp` in Layer 1.
+
+### Fixed
+- Sanitized `/api/model/heating-forecast` in `daemon.py` into a 100% Dumb View reading purely from `PlanStore.get_plan().heating_summary`, eliminating direct HA queries and ad-hoc simulation logic in the view handler.
+
+---
 
 ### Fixed
 - Enforced `abs(sol_raw)` for solar inverter readings in `HemsBackgroundCollector` live power balance, correctly calculating direct solar self-consumption and unallocated load during daytime export.

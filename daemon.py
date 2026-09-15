@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.53
+Version: 0.92.54
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2478,163 +2478,11 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             res_mode = qp.get("resolution", ["15m"])[0]
             is_15m = (res_mode == "15m")
             step_mins = 15 if is_15m else 60
-            total_slots = 96 if is_15m else 24
-            interval_h = 0.25 if is_15m else 1.0
+            interval_h = step_mins / 60.0
 
             now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
             start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
             base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
-
-            # Anchored weather forecast: Wittboy live weather station blended with Open-Meteo
-            temp_map, solar_map, wind_map, rh_map = get_anchored_weather_forecast(base_dt)
-
-            # Fetch EPEX spot prices from dedicated Day-Ahead cache
-            _, prices_map, _ = get_epex_tariffs_cached(is_15m=is_15m)
-
-            # Fetch live thermostat setpoint and active state from Home Assistant
-            t_setpoint = 20.0
-            t_indoor_sim = 22.0
-            thermostat_active = True
-            thermostat_status_msg = "Actief (CV Verwarming Standby)"
-            try:
-                ha_url, ha_tok = get_ha_client_config()
-                if ha_tok and ha_url:
-                    ctx_ssl = ssl.create_default_context()
-                    ctx_ssl.check_hostname = False
-                    ctx_ssl.verify_mode = ssl.CERT_NONE
-
-                    # 1. Query climate.woonkamer_climate_daikin for setpoint & indoor temp
-                    try:
-                        req_cl = urllib.request.Request(
-                            f"{ha_url}/api/states/climate.woonkamer_climate_daikin",
-                            headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
-                        )
-                        with urllib.request.urlopen(req_cl, timeout=2, context=ctx_ssl) as r_cl:
-                            st_cl = json.loads(r_cl.read().decode())
-                            attrs = st_cl.get("attributes", {})
-                            t_setpoint = float(attrs.get("target_temp_low", attrs.get("temperature", 20.0)))
-                            cur_t = float(attrs.get("current_temperature", t_indoor_sim))
-                            if 15.0 <= cur_t <= 30.0:
-                                t_indoor_sim = cur_t
-                            if st_cl.get("state") == "off" or attrs.get("hvac_action") == "off":
-                                thermostat_active = False
-                                thermostat_status_msg = "Woonkamerthermostaat staat Uit"
-                    except Exception:
-                        pass
-
-                    # 2. Query Daikin room heating circuit: climate.hc_room_room_heating
-                    try:
-                        req_hc = urllib.request.Request(
-                            f"{ha_url}/api/states/climate.hc_room_room_heating",
-                            headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
-                        )
-                        with urllib.request.urlopen(req_hc, timeout=2, context=ctx_ssl) as r_hc:
-                            st_hc = json.loads(r_hc.read().decode())
-                            if st_hc.get("state") == "off":
-                                thermostat_active = False
-                                thermostat_status_msg = "Ruimteverwarming staat Uit (climate.hc_room_room_heating is Uit)"
-                    except Exception:
-                        pass
-
-                    # 3. Query Daikin master climate switch: switch.hc_mode_altherma_on
-                    try:
-                        req_sw = urllib.request.Request(
-                            f"{ha_url}/api/states/switch.hc_mode_altherma_on",
-                            headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
-                        )
-                        with urllib.request.urlopen(req_sw, timeout=2, context=ctx_ssl) as r_sw:
-                            st_sw = json.loads(r_sw.read().decode())
-                            if st_sw.get("state") == "off":
-                                thermostat_active = False
-                                thermostat_status_msg = "Warmtepomp CV staat Uit (switch.hc_mode_altherma_on is Uit)"
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            # 2-Mass Floor Heating Dynamic Simulation:
-            # - C_floor: ~16 ton concrete screed = 4.5 kWh/K
-            # - C_air: Indoor air & interior furniture = 6.0 kWh/K (total building ~10.5 kWh/K)
-            # - U_floor_to_air: 1.2 kW/K heat transfer from underfloor heating to living room
-            # - Hysteresis: Heat pump turns ON when T_indoor <= T_setpoint - 0.5°C; OFF when T_indoor >= T_setpoint
-            # - Modulation: Empirical formula fitted on 230 real winter runs in InfluxDB:
-            #   P_el(T_out) = max(950, min(4200, 2885.6 - 95.2 * T_out)) W
-            c_floor_kwh_per_k = 4.5
-            c_air_kwh_per_k = 6.0
-            u_floor_to_air_kw = 1.2
-            t_start_threshold = t_setpoint - 0.5
-            t_stop_threshold = t_setpoint
-
-            t_indoor = t_indoor_sim
-            t_floor = t_indoor_sim + 0.2
-            hp_running = False
-
-            labels, out_temps, in_temps, floor_temps, cops, th_loss_kw, el_power_kw, costs_eur = [], [], [], [], [], [], [], []
-            tot_th_kwh, tot_el_kwh, tot_cost = 0.0, 0.0, 0.0
-
-            prev_hf_dt = None
-            for i in range(total_slots):
-                slot_dt = base_dt + timedelta(minutes=step_mins * i)
-                lbl = format_slot_label(slot_dt, prev_hf_dt, i == 0, is_15m)
-                prev_hf_dt = slot_dt
-                k_full = slot_dt.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
-                k_hour = slot_dt.strftime("%Y-%m-%d %H:00")
-                t_out = temp_map.get(k_hour, 14.0)
-                sol = solar_map.get(k_hour, 0.0)
-                wnd = wind_map.get(k_hour, 3.0)
-                price = prices_map.get(k_full, prices_map.get(k_hour, 0.29))
-
-                # Hard peak lockouts (07:00-09:30 & 17:00-20:00) unless comfort emergency (< 18.5°C)
-                hour_frac = slot_dt.hour + slot_dt.minute / 60.0
-                in_peak_lockout = ((7.0 <= hour_frac < 9.5) or (17.0 <= hour_frac < 20.0))
-                emergency_guard = (t_indoor < 18.5)
-
-                # Thermostat hysteresis logic
-                if thermostat_active and not hp_running and (t_indoor <= t_start_threshold):
-                    if not in_peak_lockout or emergency_guard:
-                        hp_running = True
-                elif hp_running and (not thermostat_active or t_indoor >= t_stop_threshold or (in_peak_lockout and not emergency_guard)):
-                    hp_running = False
-
-                if hp_running:
-                    # Inverter modulation formula from real telemetry
-                    p_el_w = max(950.0, min(4200.0, 2885.6 - 95.2 * t_out))
-                    if t_floor < 22.0:
-                        p_el_w = min(4200.0, p_el_w * 1.25)  # Start-up surge
-                    cop_val = max(2.5, min(5.5, 5.2 - 0.08 * (35.0 - t_out)))
-                    th_kw = round((p_el_w * cop_val) / 1000.0, 2)
-                    el_kw = round(p_el_w / 1000.0, 2)
-                else:
-                    cop_val = round(max(2.5, min(5.5, 5.2 - 0.08 * (35.0 - t_out))), 2)
-                    th_kw = 0.0
-                    el_kw = 0.0
-
-                # Building envelope heat loss (transmission + infiltration + wind)
-                ua_eff = (321.1 + 15.0 * max(0.0, wnd - 2.0)) / 1000.0  # kW/K
-                q_loss_kw = ua_eff * max(0.0, t_indoor - t_out)
-                q_solar_kw = (0.12 * sol * 25.0) / 1000.0
-                q_floor_to_air_kw = u_floor_to_air_kw * (t_floor - t_indoor)
-
-                # Dynamic state integration over interval
-                dt_floor = ((th_kw - q_floor_to_air_kw) * interval_h) / c_floor_kwh_per_k
-                dt_indoor = ((q_floor_to_air_kw + q_solar_kw - q_loss_kw) * interval_h) / c_air_kwh_per_k
-
-                t_floor = round(t_floor + dt_floor, 2)
-                t_indoor = round(max(15.0, min(26.0, t_indoor + dt_indoor)), 2)
-
-                slot_cost = round(el_kw * interval_h * price, 3)
-                tot_th_kwh += th_kw * interval_h
-                tot_el_kwh += el_kw * interval_h
-                tot_cost += slot_cost
-
-                labels.append(lbl)
-                out_temps.append(round(t_out, 1))
-                in_temps.append(round(t_indoor, 1))
-                floor_temps.append(round(t_floor, 1))
-                cops.append(round(cop_val, 2))
-                th_loss_kw.append(round(q_loss_kw, 2))
-                el_power_kw.append(el_kw)
-                costs_eur.append(slot_cost)
 
             # Prepend 1 hour of actual historical telemetry
             hist_pts = fetch_recent_telemetry_history(is_15m, base_dt)
@@ -2645,7 +2493,39 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             hist_cops = [5.2 for _ in hist_pts]
             hist_th_loss = [round((321.1 / 1000.0) * max(0.0, hp["indoor_temp_c"] - hp["outdoor_temp_c"]), 2) for hp in hist_pts]
             hist_el_kw = [hp["heating_kw"] for hp in hist_pts]
-            hist_costs = [round(hp["heating_kw"] * (0.25 if is_15m else 1.0) * 0.25, 3) for hp in hist_pts]
+            hist_costs = [round(hp["heating_kw"] * interval_h * 0.25, 3) for hp in hist_pts]
+
+            # Read purely from authoritative PlanStore (Dumb View invariant)
+            plan = ensure_active_canonical_plan()
+            h_summary = plan.heating_summary
+
+            if h_summary and h_summary.slots:
+                n_sim = len(h_summary.slots)
+                labels = [plan.slots[i].time_label for i in range(n_sim)] if plan.slots else [f"T+{i}" for i in range(n_sim)]
+                out_temps = [round(s.outdoor_temp_c, 1) for s in h_summary.slots]
+                in_temps = [round(s.room_temp_c, 1) for s in h_summary.slots]
+                floor_temps = [round(s.floor_temp_c, 1) for s in h_summary.slots]
+                cops = [round(s.cop, 2) for s in h_summary.slots]
+                th_loss_kw = [round(s.heat_loss_kw, 2) for s in h_summary.slots]
+                el_power_kw = [round(s.heating_kw_el, 2) for s in h_summary.slots]
+                costs_eur = [
+                    round(s.heating_kw_el * interval_h * (plan.slots[i].price_eur if i < len(plan.slots) else 0.25), 3)
+                    for i, s in enumerate(h_summary.slots)
+                ]
+                tot_th = h_summary.total_heating_kwh_th
+                tot_el = h_summary.total_heating_kwh_el
+                tot_cost = round(sum(costs_eur), 2)
+                t_setpoint = h_summary.target_room_temp_c
+                t_start_threshold = h_summary.min_comfort_room_c
+                t_active = h_summary.is_heating_season
+                t_status = h_summary.season_status_label
+            else:
+                labels, out_temps, in_temps, floor_temps, cops, th_loss_kw, el_power_kw, costs_eur = [], [], [], [], [], [], [], []
+                tot_th, tot_el, tot_cost = 0.0, 0.0, 0.0
+                t_setpoint = 20.0
+                t_start_threshold = 19.6
+                t_active = True
+                t_status = "Stookseizoen Actief (Centrale PlanStore)"
 
             self._send_json({
                 "resolution": res_mode,
@@ -2658,13 +2538,13 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 "electrical_kw": hist_el_kw + el_power_kw,
                 "costs_eur": hist_costs + costs_eur,
                 "history_count": len(hist_pts),
-                "total_thermal_kwh": round(tot_th_kwh, 2),
-                "total_electrical_kwh": round(tot_el_kwh, 2),
-                "total_cost_eur": round(tot_cost, 2),
+                "total_thermal_kwh": tot_th,
+                "total_electrical_kwh": tot_el,
+                "total_cost_eur": tot_cost,
                 "thermostat_setpoint_c": t_setpoint,
-                "thermostat_start_threshold_c": round(t_start_threshold, 1),
-                "thermostat_active": thermostat_active,
-                "thermostat_status_label": thermostat_status_msg
+                "thermostat_start_threshold_c": t_start_threshold,
+                "thermostat_active": t_active,
+                "thermostat_status_label": t_status
             })
             return
 
@@ -3139,7 +3019,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.53",
+                "version": "0.92.54",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4861,7 +4741,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.53</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.54</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -6760,7 +6640,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div class="space-y-1.5">
                             <div class="flex items-center gap-2.5">
-                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.53</span>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.54</span>
                                 <span class="text-xs text-slate-400 font-mono">OpenAPI 3.1.0 Compliant</span>
                             </div>
                             <h2 class="text-xl font-bold text-white tracking-wide">Open HEMS Systeemdocumentatie &amp; API Gids</h2>
