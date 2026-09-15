@@ -4,13 +4,14 @@ Welcome to Open HEMS. This document is the authoritative onboarding and developm
 
 ---
 
-## 🏛️ The 4 Invariant Rules (Checklist Before Every Commit)
+## 🏛️ The 5 Invariant Rules (Checklist Before Every Commit)
 
 Before presenting any code changes or committing:
 - [ ] **1. Single Source of Truth & Dumb Views:** Never add math, aggregation, or state-color calculations inside UI views or HTTP GET handlers in `daemon.py`. All presentation consumers read exclusively from `PlanStore.get_plan()`. Styling, translations, and HEX colors belong in `config/mode_catalog.json`.
 - [ ] **2. Core Entity Isolation:** Core packages (`layer1_data_collection/sanitizer.py`, `layer2_calibration/`, `layer3_scheduling/`, `models/canonical.py`) must contain **zero** Home Assistant entity strings (e.g. `sensor.`, `climate.`, `switch.`) and zero brand names. Hardware entities and device-specific interlocks belong strictly in `integrations/<device_or_protocol>/` or `config/site_config.json`.
 - [ ] **3. Absolute Ban on Mock Data in Production:** Never invent synthetic values or mock responses in production runtime. Mocks are strictly confined to `tests/`. Production telemetry missing data must be handled via `Quality.STALE` or `Quality.INTERPOLATED` flags. Offline development and CI verification rely strictly on the **Replay Harness with Golden Plan Snapshots** (`tests/fixtures/golden/`).
 - [ ] **4. Test Suite Green:** All tests (including architecture guardrails and golden replay tests) must pass before pushing (`pytest tests/`).
+- [ ] **5. API & MCP Lockstep Parity:** Any change, addition, or retirement of a REST API endpoint MUST be declared in `docs/openapi.json` and simultaneously exposed in `mcp_server.py`. Architectural guardrail `tests/architecture/test_api_mcp_lockstep.py` enforces 100% parity.
 
 ---
 

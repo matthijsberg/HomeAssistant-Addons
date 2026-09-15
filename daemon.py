@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.52
+Version: 0.92.53
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -3139,7 +3139,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.52",
+                "version": "0.92.53",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4861,7 +4861,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.52</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.53</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -6760,7 +6760,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div class="space-y-1.5">
                             <div class="flex items-center gap-2.5">
-                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.52</span>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.53</span>
                                 <span class="text-xs text-slate-400 font-mono">OpenAPI 3.1.0 Compliant</span>
                             </div>
                             <h2 class="text-xl font-bold text-white tracking-wide">Open HEMS Systeemdocumentatie &amp; API Gids</h2>
@@ -6782,7 +6782,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 </div>
 
                 <!-- SUB-NAV / QUICK JUMPS -->
-                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5 text-xs">
                     <a href="#docs-arch" onclick="document.getElementById('docs-arch').scrollIntoView({behavior: 'smooth'})" class="bg-[#0e1422] hover:bg-slate-800/60 border border-slate-800 p-3 rounded-xl flex items-center gap-2.5 transition text-slate-300 hover:text-white">
                         <span class="text-base">🏛️</span>
                         <div class="truncate">
@@ -6816,6 +6816,13 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         <div class="truncate">
                             <div class="font-bold">REST API</div>
                             <div class="text-[10px] text-slate-500">Endpoints &amp; Data</div>
+                        </div>
+                    </a>
+                    <a href="#docs-mcp" onclick="document.getElementById('docs-mcp').scrollIntoView({behavior: 'smooth'})" class="bg-[#0e1422] hover:bg-slate-800/60 border border-slate-800 p-3 rounded-xl flex items-center gap-2.5 transition text-slate-300 hover:text-white">
+                        <span class="text-base">🤖</span>
+                        <div class="truncate">
+                            <div class="font-bold">MCP Server</div>
+                            <div class="text-[10px] text-slate-500">AI Tooling</div>
                         </div>
                     </a>
                     <a href="#docs-states" onclick="document.getElementById('docs-states').scrollIntoView({behavior: 'smooth'})" class="bg-[#0e1422] hover:bg-slate-800/60 border border-slate-800 p-3 rounded-xl flex items-center gap-2.5 transition text-slate-300 hover:text-white">
@@ -6873,17 +6880,18 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         </div>
                     </div>
 
-                    <!-- 4 ONVERANDERLIJKE REGELS -->
+                    <!-- 5 ONVERANDERLIJKE REGELS -->
                     <div class="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
                         <div class="font-bold text-white flex items-center gap-2">
                             <span class="text-emerald-400">🛡️</span>
-                            <span>De 4 Onschendbare Architectuurin行為 (Architectural Invariants)</span>
+                            <span>De 5 Onschendbare Architectuurinvariants (Core Invariants)</span>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-300">
                             <div><strong class="text-emerald-400">1. Single Source of Truth:</strong> Alle grafieken en actuatoren lezen hetzelfde plan uit de PlanStore. Nooit afzonderlijke berekeningen in views.</div>
                             <div><strong class="text-emerald-400">2. Core Entity Isolation:</strong> Geen Home Assistant entiteitsstrings of merknamen in de rekenkern. Alles configureerbaar via adapters en site config.</div>
                             <div><strong class="text-emerald-400">3. Strikte No-Mock Directive:</strong> Geen gefabriceerde data in productie. Reële metingen uit InfluxDB/HA of replay-snapshots in tests.</div>
                             <div><strong class="text-emerald-400">4. Hardware Circuit Breakers:</strong> Spitsblokkade (max 150m) en dwell-times (min 120m) worden op relaisniveau hardwarematig afgedwongen.</div>
+                            <div class="sm:col-span-2"><strong class="text-emerald-400">5. API &amp; MCP Lockstep Parity:</strong> Elke toevoeging of wijziging in de REST API wordt direct vastgelegd in <code class="text-slate-200">docs/openapi.json</code> en gelijktijdig ontsloten via de MCP Server (<code class="text-slate-200">mcp_server.py</code>). De geautomatiseerde test <code class="text-emerald-300">test_api_mcp_lockstep.py</code> bewaakt 100% pariteit.</div>
                         </div>
                     </div>
                 </div>
@@ -7257,6 +7265,95 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                                 <span>Download: <a href="./api/openapi.json" target="_blank" class="text-cyan-400 underline">openapi.json</a></span>
                                 <span>Response: <code class="text-emerald-400">200 OK (application/json)</code></span>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTIE 5B: MODEL CONTEXT PROTOCOL (MCP) SERVER -->
+                <div id="docs-mcp" class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xl">🤖</span>
+                            <div>
+                                <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">5B. Model Context Protocol (MCP) Server &amp; AI Integratie</h3>
+                                <p class="text-xs text-slate-400">Directe koppeling voor AI-assistenten (Hermes Agent, Claude Desktop, Cursor) met strikte lockstep API-pariteit.</p>
+                            </div>
+                        </div>
+                        <span class="px-2.5 py-0.5 text-[10px] font-mono bg-purple-950 text-purple-300 rounded border border-purple-800 font-semibold">stdio &amp; SSE Transports</span>
+                    </div>
+
+                    <div class="space-y-3 text-xs">
+                        <p class="text-slate-300 leading-relaxed">
+                            De Open HEMS MCP Server (<code class="text-slate-200">mcp_server.py</code>) bouwt direct voort op de gestandaardiseerde OpenAPI 3.1.0 laag. Hierdoor kan elk AI-model autonoom energiestromen inspecteren, beslissingen verifi&euml;ren en herberekeningen triggeren zonder dat de architectuur divergeert.
+                        </p>
+
+                        <!-- ARCHITECTURE & LOCKSTEP BADGE -->
+                        <div class="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800 space-y-2">
+                            <div class="font-bold text-emerald-400 flex items-center gap-2">
+                                <span>🔒</span>
+                                <span>Het Lockstep Architectuurprincipe (100% API &harr; MCP Pariteit)</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 leading-relaxed">
+                                Om drifting te voorkomen, bewaakt de geautomatiseerde test <code class="text-emerald-300 font-mono">tests/architecture/test_api_mcp_lockstep.py</code> dat elk endpoint in <code class="text-slate-300 font-mono">docs/openapi.json</code> direct beschikbaar is in MCP. Bovendien bevat de server het gereedschap <code class="text-sky-300 font-mono">openhems_call_api_endpoint</code>, waarmee ook toekomstige endpoints onmiddellijk kunnen worden aangeroepen.
+                            </p>
+                        </div>
+
+                        <!-- AVAILABLE TOOLS GRID -->
+                        <div class="space-y-1.5 pt-2">
+                            <h4 class="text-xs font-bold text-white uppercase tracking-wider text-slate-400">Beschikbare MCP Gereedschappen (Tools)</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                                <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800/80">
+                                    <code class="text-sky-400 font-bold">openhems_get_schedule(resolution)</code>
+                                    <p class="text-slate-400 text-[10px] mt-0.5">24-uurs dispatch plan, toegekende SG-modi, beurstarieven en stroomkosten.</p>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800/80">
+                                    <code class="text-sky-400 font-bold">openhems_get_dhw_status(resolution)</code>
+                                    <p class="text-slate-400 text-[10px] mt-0.5">350L tanksensortemperatuur, thermische warmtevraag (kWh_th &amp; V40) en dagplanning.</p>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800/80">
+                                    <code class="text-sky-400 font-bold">openhems_recalculate_schedule()</code>
+                                    <p class="text-slate-400 text-[10px] mt-0.5">Dwingt onmiddellijke herberekening af in Laag 3 (CentralPlanner).</p>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800/80">
+                                    <code class="text-sky-400 font-bold">openhems_get_heating_forecast(resolution)</code>
+                                    <p class="text-slate-400 text-[10px] mt-0.5">CV 2R1C gebouwmodel vooruitblik, warmteverlies en pre-heat adviezen.</p>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800/80">
+                                    <code class="text-sky-400 font-bold">openhems_get_analytics_power(range, res)</code>
+                                    <p class="text-slate-400 text-[10px] mt-0.5">Historische vermogensstromen (zon, warmtepomp, P1 afname/teruglevering).</p>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800/80">
+                                    <code class="text-sky-400 font-bold">openhems_get_analytics_dhw(range, res)</code>
+                                    <p class="text-slate-400 text-[10px] mt-0.5">Historische tanksensortemperatuur (&deg;C) en geleverde warmte (kWh_th).</p>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800/80">
+                                    <code class="text-sky-400 font-bold">openhems_get_decisions(limit, offset)</code>
+                                    <p class="text-slate-400 text-[10px] mt-0.5">Volledige audit-trail van beslissingen met fysische en financi&euml;le motivatie.</p>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-lg border border-slate-800/80">
+                                    <code class="text-sky-400 font-bold">openhems_get_system_health()</code>
+                                    <p class="text-slate-400 text-[10px] mt-0.5">Verifieert Single Source of Truth status en pipeline accumulator gezondheid.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- CLIENT CONFIGURATION SNIPPET -->
+                        <div class="space-y-1.5 pt-2">
+                            <div class="flex items-center justify-between text-[11px] text-slate-400">
+                                <span>Configuratie voor AI Clients (Hermes Agent / Claude Desktop / Cursor):</span>
+                                <span class="font-mono">JSON</span>
+                            </div>
+                            <pre class="bg-[#0B0F17] p-3 rounded-xl border border-slate-800/80 font-mono text-[11px] text-purple-300 overflow-x-auto"><code>{
+  "mcpServers": {
+    "openhems": {
+      "command": "python3",
+      "args": ["/config/addons/open-hems/mcp_server.py", "--transport", "stdio"],
+      "env": {
+        "OPENHEMS_BASE_URL": "http://172.30.33.10:8099"
+      }
+    }
+  }
+}</code></pre>
                         </div>
                     </div>
                 </div>
