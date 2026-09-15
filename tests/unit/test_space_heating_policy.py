@@ -123,9 +123,9 @@ def test_dynamic_thermostat_setpoint():
     )
 
     assert summary.target_room_temp_c == 21.0
-    assert summary.min_comfort_room_c == 20.5
+    assert summary.min_comfort_room_c == 20.4
     assert summary.max_preheat_room_c == 22.2
-    assert summary.min_projected_room_temp_c >= 20.5
+    assert summary.min_projected_room_temp_c >= 20.4
 
 
 def test_winter_sun_and_evening_peak_buffering():

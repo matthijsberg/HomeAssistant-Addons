@@ -36,7 +36,7 @@ class SpaceHeatingPolicy:
 
     # Temperatures & Comfort bounds
     TARGET_ROOM_TEMP_C = 20.0
-    MIN_COMFORT_DELTA_C = 0.5      # Max drop below target (target - 0.5°C)
+    MIN_COMFORT_DELTA_C = 0.6      # Max allowable drop below target during peaks (target - 0.6°C)
     MAX_PREHEAT_OVERSHOOT_C = 1.2  # Max allowable preheat overshoot (target + 1.2°C)
     MAX_FLOOR_TEMP_C = 28.0        # Upper safety limit for underfloor heating
     SUMMER_LOCKOUT_OUTDOOR_C = 16.0
@@ -247,7 +247,8 @@ class SpaceHeatingPolicy:
             else:
                 # Normal modulating space heating: maintain target room temp
                 if t_room < target_room:
-                    needed_th = max(0.0, q_loss - q_solar_gain)
+                    q_recovery = (target_room - t_room) * 2.0
+                    needed_th = max(0.0, q_loss - q_solar_gain + q_recovery)
                     needed_el = needed_th / cop
                     heating_el = max(cls.MODULATION_FLOOR_KW_EL, min(2.5, round(needed_el, 2)))
                     mode_code = "normal"

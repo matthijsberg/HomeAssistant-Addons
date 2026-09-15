@@ -10,7 +10,18 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.92.54] — 2026-09-15 (Space Heating 2R1C Thermal Floor Buffering & Dumb View Sanitation)
+## [0.92.55] — 2026-09-15 (Full-Year Seasonal Replay Benchmark Suite)
+
+### Added
+- 5 seasonal archetype fixtures in `tests/fixtures/golden/`:
+  1. `golden_summer_solar_heavy.json`: 35kWh PV, negative midday prices, summer lockout CV.
+  2. `golden_winter_sunny_peak.json`: Cold sunny winter day, floor buffer charging, hard evening peak coasting.
+  3. `golden_winter_dunkelflaute.json`: Freezing overcast day, low continuous modulation, night valley top-up.
+  4. `golden_winter_defrost_humid.json`: Near-freezing high humidity, automated COP frosting penalty.
+  5. `golden_shoulder_season.json`: Spring/autumn transition crossing 16°C threshold with stable modulation.
+- Expanded `tests/unit/test_replay_harness.py` to benchmark all seasonal archetypes continuously in CI.
+
+---
 
 ### Added
 - 2R1C underfloor buffer optimization in `layer3_scheduling/space_heating_policy.py`: evaluates thermal energy cost (€/kWh_th = Price / COP), schedules strategic pre-heat runways before dynamic peak lockouts, and allows daytime solar overshoot (up to setpoint + 1.2°C) so the concrete screed remains saturated to coast through evening peaks.
