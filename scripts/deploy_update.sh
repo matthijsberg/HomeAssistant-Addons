@@ -66,12 +66,12 @@ git push origin main --tags || true
 echo "Step 4: Synchronizing files to host /addons/open-hems/..."
 cp -r "${ADDON_DIR}"/* /share/addons/open-hems/
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "${SSH_KEY}" -p "${SSH_PORT}" "root@${SSH_HOST}" \
-    "cp -r /share/addons/open-hems/* /addons/open-hems/ && ha store reload"
+    "cp -r /share/addons/open-hems/* /addons/open-hems/ && (ha store reload || true)"
 
 # 5. Trigger live update / rebuild in Home Assistant with Health Check
 echo "Step 5: Upgrading running app in Home Assistant..."
 if ! ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "${SSH_KEY}" -p "${SSH_PORT}" "root@${SSH_HOST}" \
-    "ha apps update local_open_hems || (ha apps rebuild local_open_hems && ha apps restart local_open_hems)"; then
+    "ha apps restart local_open_hems || ha apps update local_open_hems || ha apps rebuild local_open_hems"; then
     echo "❌ Upgrade/rebuild failed on host! Diagnostic information follows:"
     ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i "${SSH_KEY}" -p "${SSH_PORT}" "root@${SSH_HOST}" \
         "ha apps logs local_open_hems | tail -n 40" || true

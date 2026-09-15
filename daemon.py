@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.49
+Version: 0.92.50
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -3038,7 +3038,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.49",
+                "version": "0.92.50",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -3595,27 +3595,77 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             dhw_mode_timeline = []
             for it in timeline_items:
                 q_idx = it["idx"]
-                if q_idx < len(plan.slots):
-                    ps = plan.slots[q_idx]
-                    dhw_mode_timeline.append({
-                        "slot": q_idx,
-                        "time": it["label"],
-                        "mode": ps.mode_code,
-                        "label": ps.mode_label,
-                        "color": ps.color_hex,
-                        "power_kw": ps.dhw_kw,
-                        "description": ps.description
-                    })
+                if is_15m:
+                    if q_idx < len(plan.slots):
+                        ps = plan.slots[q_idx]
+                        dhw_mode_timeline.append({
+                            "slot": q_idx,
+                            "time": it["label"],
+                            "mode": ps.mode_code,
+                            "label": ps.mode_label,
+                            "color": ps.color_hex,
+                            "power_kw": ps.dhw_kw,
+                            "description": ps.description
+                        })
+                    else:
+                        dhw_mode_timeline.append({
+                            "slot": q_idx,
+                            "time": it["label"],
+                            "mode": "normal",
+                            "label": "Normaal (Standby)",
+                            "color": "#1E293B",
+                            "power_kw": 0.0,
+                            "description": f"Normaal ({it['label']})"
+                        })
                 else:
-                    dhw_mode_timeline.append({
-                        "slot": q_idx,
-                        "time": it["label"],
-                        "mode": "normal",
-                        "label": "Normaal (Standby)",
-                        "color": "#1E293B",
-                        "power_kw": 0.0,
-                        "description": f"Normaal ({it['label']})"
-                    })
+                    # 1-Hour Aggregation: correctly sample the 4 quarters corresponding to this hour!
+                    start_q = q_idx * 4
+                    end_q = min(len(plan.slots), (q_idx + 1) * 4)
+                    q_slots = plan.slots[start_q:end_q] if plan else []
+
+                    if q_slots:
+                        # Hierarchical state taxonomy selection:
+                        # 1. FORCED_OFF (Spitsblokkade) has top priority — cannot be overwritten
+                        # 2. MAX_ON (DHW 60°C Boost) — strictly from DHW
+                        # 3. FORCED_ON (DHW 50°C)
+                        # 4. ADVISED_OFF (Piek advies)
+                        # 5. ADVISED_ON (Doorverwarmen / Pre-heat)
+                        # 6. NORMAL (Standby)
+                        active_modes = [s.mode_code for s in q_slots]
+                        mean_dhw = round(sum(s.dhw_kw for s in q_slots) / len(q_slots), 2)
+
+                        if "forced_off" in active_modes:
+                            target_ps = next(s for s in q_slots if s.mode_code == "forced_off")
+                        elif "max_on" in active_modes:
+                            target_ps = next(s for s in q_slots if s.mode_code == "max_on")
+                        elif "forced_on" in active_modes:
+                            target_ps = next(s for s in q_slots if s.mode_code == "forced_on")
+                        elif "advised_off" in active_modes:
+                            target_ps = next(s for s in q_slots if s.mode_code == "advised_off")
+                        elif "advised_on" in active_modes:
+                            target_ps = next(s for s in q_slots if s.mode_code == "advised_on")
+                        else:
+                            target_ps = q_slots[0]
+
+                        dhw_mode_timeline.append({
+                            "slot": q_idx,
+                            "time": it["label"],
+                            "mode": target_ps.mode_code,
+                            "label": target_ps.mode_label,
+                            "color": target_ps.color_hex,
+                            "power_kw": mean_dhw,
+                            "description": target_ps.description
+                        })
+                    else:
+                        dhw_mode_timeline.append({
+                            "slot": q_idx,
+                            "time": it["label"],
+                            "mode": "normal",
+                            "label": "Normaal (Standby)",
+                            "color": "#1E293B",
+                            "power_kw": 0.0,
+                            "description": f"Normaal ({it['label']})"
+                        })
 
             dhw_planning_summary = {
                 "planned_mode": plan.dhw_summary.planned_mode,
@@ -4700,7 +4750,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.49</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.50</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
