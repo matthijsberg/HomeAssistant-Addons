@@ -10,7 +10,14 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.92.58] — 2026-09-15 (Realistic Pulse-Based DHW Planned Dispatch & Volume Alignment)
+## [0.92.59] — 2026-09-15 (DHW 60°C Buffer Saturation Lockout & Decision Audit Logging)
+
+### Added
+- Implemented saturation lockout (`DHW_BUFFER_60_MAX_TANK_TEMP_C = 53.0°C`, `DHW_BUFFER_60_MIN_HEADROOM_C = 7.0°C`) in `layer3_scheduling/dhw_daytime_arbiter.py`: strictly suppresses 60°C buffering when tank is already >= 53.0°C, preventing unprofitable micro-runs for small temperature lifts.
+- Full decision audit logging: logs counterfactual reason and clear explanation to `decision_log` and UI cards when buffer runs are suppressed due to saturation.
+- Unit test `test_daytime_arbitrage_saturation_lockout_at_59c` to continuously guard against regression.
+
+---
 
 ### Fixed
 - Replaced wide 5-hour continuous DHW dispatch window in validation overlay with realistic finite-pulse scheduling (45m night top-up @ 1.8kW, 60-75m solar boost @ 2.4kW), reducing predicted DHW energy from an inflated 15.6 kWh down to ~4.5 kWh (aligning with actual ~4.68 kWh).

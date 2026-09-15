@@ -108,6 +108,8 @@ class DhwDaytimeArbiter:
     DHW_HEAT_PUMP_ELECTRIC_KW = 1.8          # Nominal electric compressor power
     DHW_SOLAR_BOOST_ELECTRIC_KW = 2.4        # Boost compressor power
     DHW_COMFORT_MIN_TEMP_C = 40.0            # Minimum comfort temperature
+    DHW_BUFFER_60_MAX_TANK_TEMP_C = 53.0     # Max tank temp to allow 60°C buffer (>=53°C is saturated)
+    DHW_BUFFER_60_MIN_HEADROOM_C = 7.0      # Min temperature headroom required to justify 60°C run
 
     @classmethod
     def calculate_slot_financials(
@@ -463,7 +465,7 @@ class DhwDaytimeArbiter:
             evaluated_paths.append(path_a1)
 
             # PAD A2: In één ruk doorwarmen naar 60°C (Buffer)
-            th_need_60 = (max(1.0, 50.0 - current_dhw_temp) + 10.0) * cls.DHW_THERMAL_CAPACITY_KWH_PER_K
+            th_need_60 = max(2.0, 60.0 - current_dhw_temp) * cls.DHW_THERMAL_CAPACITY_KWH_PER_K
             n_slots_60 = max(3, min(8, math.ceil(th_need_60 / (6.5 * step_hours))))
             opt_day_60 = cls.find_optimal_heating_window(
                 slots=slots,
@@ -555,68 +557,103 @@ class DhwDaytimeArbiter:
             evaluated_paths.append(path_b1)
 
             # PAD B2: Overdag preventief bufferen naar 60°C
-            th_need_60 = (max(1.0, 50.0 - current_dhw_temp) + 10.0) * cls.DHW_THERMAL_CAPACITY_KWH_PER_K
-            n_slots_60 = max(3, min(8, math.ceil(th_need_60 / (6.5 * step_hours))))
-            opt_day_60 = cls.find_optimal_heating_window(
-                slots=slots,
-                search_start_idx=day_start_idx,
-                search_end_idx=day_end_idx,
-                n_req_slots=n_slots_60,
-                th_need_kwh=th_need_60,
-                slot_lockout_map=slot_lockout_map,
-                is_boost_60=True,
-                step_hours=step_hours
-            )
+            headroom_60 = round(max(0.0, 60.0 - current_dhw_temp), 1)
+            is_tank_saturated = (current_dhw_temp >= cls.DHW_BUFFER_60_MAX_TANK_TEMP_C)
 
-            res_b2 = cls.simulate_path_and_evaluate_night(
-                slots, current_dhw_temp, 60.0, opt_day_60, dynamic_peaks, slot_lockout_map, dhw_model, now_dt, step_hours
-            )
-
-            s_lbl_b2 = getattr(slots[opt_day_60["start_idx"]], "label", getattr(slots[opt_day_60["start_idx"]], "time_label", "")) if opt_day_60 else "--:--"
-            e_lbl_b2 = getattr(slots[min(n_slots - 1, opt_day_60["end_idx"])], "label", getattr(slots[min(n_slots - 1, opt_day_60["end_idx"])], "time_label", "")) if opt_day_60 else "--:--"
-
-            path_b2 = EvaluatedPath(
-                path_id="PAD_B2_BUFFER_60",
-                name="Pad B2: Overdag Preventief Bufferen naar 60°C",
-                description="Overdag economisch doorwarmen naar 60°C op goedkope/negatieve stroom of zonne-overschot.",
-                day_target_temp_c=60.0,
-                day_slots=res_b2["day_slots"],
-                day_window_label=f"{s_lbl_b2}–{e_lbl_b2}",
-                day_cost_eur=res_b2["day_cost_eur"],
-                day_power_kw=cls.DHW_SOLAR_BOOST_ELECTRIC_KW,
-                day_el_kwh=res_b2["day_el_kwh"],
-                simulated_morning_dip_c=res_b2["morning_dip_c"],
-                simulated_morning_dip_time=res_b2["morning_dip_time"],
-                night_run_required=res_b2["night_run_required"],
-                night_slots=res_b2["night_slots"],
-                night_window_label=res_b2["night_window_label"],
-                night_cost_eur=res_b2["night_cost_eur"],
-                night_el_kwh=res_b2["night_el_kwh"],
-                total_24h_cost_eur=res_b2["total_24h_cost_eur"]
-            )
-            evaluated_paths.append(path_b2)
-
-            # Decision Situatie 2: Kies B2 alleen als Kosten B2 < Kosten B1 - €0,05 drempel
-            b2_savings = path_b1.total_24h_cost_eur - path_b2.total_24h_cost_eur
-            if b2_savings >= 0.05:
-                selected_path = path_b2
-                savings = b2_savings
-                planned_mode = "forced_solar_boost_60"
-                planned_mode_label = "Maximaal aan (doorverwarming tot 60°C)"
-                explanation = (
-                    f"Overdag preventief bufferen naar 60°C om {path_b2.day_window_label} levert een netto besparing op van €{savings:.2f} "
-                    f"t.o.v. afwachten tot de nacht (gunstige dagstroom compenseert stilstand en lagere COP ruimschoots)."
+            if is_tank_saturated:
+                path_b2 = EvaluatedPath(
+                    path_id="PAD_B2_BUFFER_60",
+                    name="Pad B2: Overdag Preventief Bufferen naar 60°C",
+                    description=f"Vergrendeld: vat staat al op {current_dhw_temp:.1f}°C (marge naar 60°C is slechts {headroom_60}°C < {cls.DHW_BUFFER_60_MIN_HEADROOM_C}°C drempel).",
+                    day_target_temp_c=60.0,
+                    day_slots=[],
+                    day_window_label="Vergrendeld (Vat Al Verzadigd)",
+                    day_cost_eur=999.0,
+                    day_power_kw=0.0,
+                    day_el_kwh=0.0,
+                    simulated_morning_dip_c=res_b1["morning_dip_c"],
+                    simulated_morning_dip_time=res_b1["morning_dip_time"],
+                    night_run_required=res_b1["night_run_required"],
+                    night_slots=res_b1["night_slots"],
+                    night_window_label=res_b1["night_window_label"],
+                    night_cost_eur=res_b1["night_cost_eur"],
+                    night_el_kwh=res_b1["night_el_kwh"],
+                    total_24h_cost_eur=999.0
                 )
-            else:
+                evaluated_paths.append(path_b2)
                 selected_path = path_b1
-                diff = path_b2.total_24h_cost_eur - path_b1.total_24h_cost_eur
                 savings = 0.0
                 planned_mode = "normal"
-                planned_mode_label = "Normaal (Standby — Wachten op nacht)"
+                planned_mode_label = "Normaal (Standby — Vat Al Verzadigd)"
                 explanation = (
-                    f"Overdag niets doen (Standby). Het vat blijft vanavond ruim op comfort ({unheated_evening_dip}°C). "
-                    f"Vannacht laden op daltarief is €{diff:.2f} voordeliger dan overdag forceren naar 60°C."
+                    f"Bufferen naar 60°C vergrendeld: het vat staat al op {current_dhw_temp:.1f}°C "
+                    f"(laadruimte naar 60°C is slechts {headroom_60}°C < {cls.DHW_BUFFER_60_MIN_HEADROOM_C}°C drempel). "
+                    f"Een extra zonnebuffer-run voor <7°C temperatuurstijging is energetisch onrendabel wegens lage COP (2,05) en "
+                    f"compressor-startverliezen. Standby behouden tot natuurlijk warmwaterverbruik optreedt."
                 )
+            else:
+                th_need_60 = max(2.5, 60.0 - current_dhw_temp) * cls.DHW_THERMAL_CAPACITY_KWH_PER_K
+                n_slots_60 = max(3, min(8, math.ceil(th_need_60 / (6.5 * step_hours))))
+                opt_day_60 = cls.find_optimal_heating_window(
+                    slots=slots,
+                    search_start_idx=day_start_idx,
+                    search_end_idx=day_end_idx,
+                    n_req_slots=n_slots_60,
+                    th_need_kwh=th_need_60,
+                    slot_lockout_map=slot_lockout_map,
+                    is_boost_60=True,
+                    step_hours=step_hours
+                )
+
+                res_b2 = cls.simulate_path_and_evaluate_night(
+                    slots, current_dhw_temp, 60.0, opt_day_60, dynamic_peaks, slot_lockout_map, dhw_model, now_dt, step_hours
+                )
+
+                s_lbl_b2 = getattr(slots[opt_day_60["start_idx"]], "label", getattr(slots[opt_day_60["start_idx"]], "time_label", "")) if opt_day_60 else "--:--"
+                e_lbl_b2 = getattr(slots[min(n_slots - 1, opt_day_60["end_idx"])], "label", getattr(slots[min(n_slots - 1, opt_day_60["end_idx"])], "time_label", "")) if opt_day_60 else "--:--"
+
+                path_b2 = EvaluatedPath(
+                    path_id="PAD_B2_BUFFER_60",
+                    name="Pad B2: Overdag Preventief Bufferen naar 60°C",
+                    description="Overdag economisch doorwarmen naar 60°C op goedkope/negatieve stroom of zonne-overschot.",
+                    day_target_temp_c=60.0,
+                    day_slots=res_b2["day_slots"],
+                    day_window_label=f"{s_lbl_b2}–{e_lbl_b2}",
+                    day_cost_eur=res_b2["day_cost_eur"],
+                    day_power_kw=cls.DHW_SOLAR_BOOST_ELECTRIC_KW,
+                    day_el_kwh=res_b2["day_el_kwh"],
+                    simulated_morning_dip_c=res_b2["morning_dip_c"],
+                    simulated_morning_dip_time=res_b2["morning_dip_time"],
+                    night_run_required=res_b2["night_run_required"],
+                    night_slots=res_b2["night_slots"],
+                    night_window_label=res_b2["night_window_label"],
+                    night_cost_eur=res_b2["night_cost_eur"],
+                    night_el_kwh=res_b2["night_el_kwh"],
+                    total_24h_cost_eur=res_b2["total_24h_cost_eur"]
+                )
+                evaluated_paths.append(path_b2)
+
+                # Decision Situatie 2: Kies B2 alleen als Kosten B2 < Kosten B1 - €0,05 drempel
+                b2_savings = path_b1.total_24h_cost_eur - path_b2.total_24h_cost_eur
+                if b2_savings >= 0.05:
+                    selected_path = path_b2
+                    savings = b2_savings
+                    planned_mode = "forced_solar_boost_60"
+                    planned_mode_label = "Maximaal aan (doorverwarming tot 60°C)"
+                    explanation = (
+                        f"Overdag preventief bufferen naar 60°C om {path_b2.day_window_label} levert een netto besparing op van €{savings:.2f} "
+                        f"t.o.v. afwachten tot de nacht (gunstige dagstroom compenseert stilstand en lagere COP ruimschoots)."
+                    )
+                else:
+                    selected_path = path_b1
+                    diff = path_b2.total_24h_cost_eur - path_b1.total_24h_cost_eur
+                    savings = 0.0
+                    planned_mode = "normal"
+                    planned_mode_label = "Normaal (Standby — Wachten op nacht)"
+                    explanation = (
+                        f"Overdag niets doen (Standby). Het vat blijft vanavond ruim op comfort ({unheated_evening_dip}°C). "
+                        f"Vannacht laden op daltarief is €{diff:.2f} voordeliger dan overdag forceren naar 60°C."
+                    )
 
         return DaytimeArbitrationResult(
             situation=situation,

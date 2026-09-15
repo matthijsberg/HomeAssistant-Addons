@@ -227,3 +227,26 @@ def test_daytime_arbitrage_situation_2_comfort_safe():
     # When solar is zero and night is cheaper, Pad B1 (Standby) must win
     assert arb_res.selected_path.path_id == "PAD_B1_STANDBY"
     assert arb_res.planned_mode == "normal"
+
+
+def test_daytime_arbitrage_saturation_lockout_at_59c():
+    """Verify that when tank is at 59C (or >=53C), 60C buffering is strictly locked out with clear explanation."""
+    now_dt = datetime(2026, 9, 15, 12, 0, tzinfo=AMS_TZ)
+    # Even with abundant solar surplus (5.0 kW) and cheap prices:
+    slots = make_test_slots(now_dt, hours=24, base_price=0.20, solar_peak=5.0)
+    model = DhwThermalModel()
+
+    arb_res = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+        slots=slots,
+        current_dhw_temp=59.0,
+        dynamic_peaks=[],
+        dhw_model=model,
+        now_dt=now_dt
+    )
+
+    assert arb_res.situation == "SITUATION_2_COMFORT_SAFE"
+    assert arb_res.planned_mode == "normal"
+    assert len(arb_res.planned_slots) == 0
+    assert "Vat Al Verzadigd" in arb_res.planned_mode_label
+    assert "drempel" in arb_res.explanation
+    assert "59.0°C" in arb_res.explanation
