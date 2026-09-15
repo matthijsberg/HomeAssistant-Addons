@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.57
+Version: 0.92.58
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2194,8 +2194,55 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 act_cv, pred_cv = [], []
                 act_total, pred_total = [], []
 
+                # Pre-calculate realistic DHW planned dispatch schedule
+                # A 350L tank requires only ~45-75 min to recharge (3 slots @ 1.8kW night, 4-5 slots @ 2.4kW day).
+                dhw_planned_map = {}
+                date_slot_map = {}
+                for idx, p in enumerate(gen_pts):
+                    ts_str = p[0]
+                    dt_ams = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
+                    d_key = dt_ams.date()
+                    if d_key not in date_slot_map:
+                        date_slot_map[d_key] = []
+                    date_slot_map[d_key].append((idx, dt_ams))
+
+                for d_key, day_indices in date_slot_map.items():
+                    # 1. Daytime solar run: 4-5 contiguous slots (60-75 min @ 2.4 kW) around peak sun
+                    solar_candidates = [
+                        (idx, dt_ams) for (idx, dt_ams) in day_indices
+                        if 10 <= dt_ams.hour <= 14
+                    ]
+                    if len(solar_candidates) >= 4:
+                        best_s_sum = -1.0
+                        best_s_start = 0
+                        n_solar_slots = 4
+                        for s_i in range(len(solar_candidates) - (n_solar_slots - 1)):
+                            cur_sum = sum(
+                                calculate_poa_solar_kw(
+                                    solar_candidates[s_i + k][1],
+                                    rad_map.get(solar_candidates[s_i + k][1].strftime("%Y-%m-%dT%H:00"), 0.0),
+                                    kwp=kwp, tilt_deg=tilt, azimuth_deg=azimuth, inverter_limit_kw=inv_max_w/1000.0, eff=eff
+                                ) for k in range(n_solar_slots)
+                            )
+                            if cur_sum > best_s_sum:
+                                best_s_sum = cur_sum
+                                best_s_start = s_i
+                        if best_s_sum >= 3.0:
+                            for k in range(n_solar_slots):
+                                dhw_planned_map[solar_candidates[best_s_start + k][0]] = 2.4
+
+                    # 2. Night valley top-up: 3 contiguous slots (45 min @ 1.8 kW) around 04:00 - 05:00
+                    night_candidates = [
+                        (idx, dt_ams) for (idx, dt_ams) in day_indices
+                        if (3 <= dt_ams.hour <= 4) or (dt_ams.hour == 5 and dt_ams.minute <= 15)
+                    ]
+                    if len(night_candidates) >= 3:
+                        n_start = max(0, len(night_candidates) - 4)
+                        for k in range(min(3, len(night_candidates) - n_start)):
+                            dhw_planned_map[night_candidates[n_start + k][0]] = 1.8
+
                 prev_dt = None
-                for p in gen_pts:
+                for i, p in enumerate(gen_pts):
                     ts_str = p[0]
                     dt_ams = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
                     h_str = dt_ams.strftime("%Y-%m-%dT%H:00")
@@ -2232,14 +2279,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
 
                     # DHW Run Model:
                     # Option A: Geplande Warmtepomp Sturing (DHW Planned Dispatch in kW_el)
-                    is_solar_boost = (10 <= dt_ams.hour <= 14) and (p_sol_kw >= 1.0)
-                    is_night_valley = (3 <= dt_ams.hour < 5)
-                    if is_solar_boost:
-                        p_dhw_kw = 2.4
-                    elif is_night_valley:
-                        p_dhw_kw = 1.8
-                    else:
-                        p_dhw_kw = 0.0
+                    p_dhw_kw = dhw_planned_map.get(i, 0.0)
                     pred_dhw.append(p_dhw_kw)
 
                     # Option B: Fysische Warmtevraag (Thermal draw-off in kW_th)
@@ -3038,7 +3078,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.57",
+                "version": "0.92.58",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4760,7 +4800,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.57</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.58</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -6660,7 +6700,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div class="space-y-1.5">
                             <div class="flex items-center gap-2.5">
-                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.57</span>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.58</span>
                                 <span class="text-xs text-slate-400 font-mono">OpenAPI 3.1.0 Compliant</span>
                             </div>
                             <h2 class="text-xl font-bold text-white tracking-wide">Open HEMS Systeemdocumentatie &amp; API Gids</h2>

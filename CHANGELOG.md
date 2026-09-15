@@ -10,7 +10,12 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.92.57] — 2026-09-15 (Relocate Model Validation Overlay to Zelflerend Model Tab)
+## [0.92.58] — 2026-09-15 (Realistic Pulse-Based DHW Planned Dispatch & Volume Alignment)
+
+### Fixed
+- Replaced wide 5-hour continuous DHW dispatch window in validation overlay with realistic finite-pulse scheduling (45m night top-up @ 1.8kW, 60-75m solar boost @ 2.4kW), reducing predicted DHW energy from an inflated 15.6 kWh down to ~4.5 kWh (aligning with actual ~4.68 kWh).
+
+---
 
 ### Changed
 - Relocated 'Model Validatie: Voorspelling vs. Werkelijkheid' card from Historie to the Zelflerend Model (`#calibration`) tab directly beneath the 4 model KPI cards.
