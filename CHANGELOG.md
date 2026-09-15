@@ -10,7 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.92.56] — 2026-09-15 (Dual-Line DHW Validation Overlay & IEA PVPS Composite Quality Metric)
+## [0.92.57] — 2026-09-15 (Relocate Model Validation Overlay to Zelflerend Model Tab)
+
+### Changed
+- Relocated 'Model Validatie: Voorspelling vs. Werkelijkheid' card from Historie to the Zelflerend Model (`#calibration`) tab directly beneath the 4 model KPI cards.
+- Wired `loadValidationOverlayChart()` to trigger automatically upon navigating to the Zelflerend Model tab.
+
+---
 
 ### Added
 - Dual-line DHW validation overlay in `daemon.py`: displays planned heat pump dispatch runs (Option A, primary dashed line) alongside physical household tapping demand (Option B, translucent soft amber curve).

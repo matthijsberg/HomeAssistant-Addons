@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.56
+Version: 0.92.57
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -3038,7 +3038,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.56",
+                "version": "0.92.57",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4760,7 +4760,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.56</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.57</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5635,62 +5635,6 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </div>
                 </div>
 
-                <!-- ========================================================================= -->
-                <!-- MODEL VALIDATIE: VOORSPELLING VS. WERKELIJKHEID OVERLAY                  -->
-                <!-- ========================================================================= -->
-                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-2xl space-y-4" id="validation-overlay-card">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
-                        <div class="flex items-center gap-2.5">
-                            <span class="w-3 h-3 rounded-full bg-cyan-500 animate-pulse"></span>
-                            <div>
-                                <div class="flex items-center gap-2">
-                                    <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">Model Validatie: Voorspelling vs. Werkelijkheid</h3>
-                                    <button type="button" onclick="toggleInfoPopover(event, 'val_overlay_info')" class="text-slate-500 hover:text-cyan-400 transition p-0.5 focus:outline-none" aria-label="Info">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
-                                    </button>
-                                </div>
-                                <p class="text-[11px] text-slate-400">Vergelijk het historische voorspelde profiel (<span class="text-slate-300 font-mono">gestreept - -</span>) met de werkelijk gemeten telemetrie (<span class="text-white font-mono">massief —</span>).</p>
-                            </div>
-                        </div>
-
-                        <!-- 4-Way Component Selector Buttons -->
-                        <div class="flex items-center gap-1.5 bg-[#0B0F17] p-1 rounded-xl border border-slate-800 text-xs font-mono flex-wrap">
-                            <button onclick="setValidationComponent('all')" id="btn-val-all" class="px-2.5 py-1 rounded-lg bg-cyan-600 text-white font-bold transition shadow">⚡ Totaal</button>
-                            <button onclick="setValidationComponent('solar')" id="btn-val-solar" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white transition">☀️ Zon</button>
-                            <button onclick="setValidationComponent('dhw')" id="btn-val-dhw" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white transition">♨️ Tapwater</button>
-                            <button onclick="setValidationComponent('cv')" id="btn-val-cv" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white transition">🌡️ CV</button>
-                        </div>
-                    </div>
-
-                    <!-- Top KPI Badges Bar & Timeframe Toggles -->
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 font-mono text-xs">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span class="px-2.5 py-1 rounded-lg border bg-emerald-950/60 border-emerald-500/40 text-emerald-300 font-bold" id="val-kpi-accuracy">Kwaliteit: --%</span>
-                            <span class="px-2.5 py-1 rounded-lg border bg-slate-900 border-slate-700 text-slate-300 font-bold" id="val-kpi-mae">Gem. Afwijking: -- W</span>
-                            <span class="px-2.5 py-1 rounded-lg border bg-blue-950/60 border-blue-500/40 text-blue-300 font-bold" id="val-kpi-totals">Werkelijk: -- kWh | Voorspeld: -- kWh</span>
-                        </div>
-
-                        <!-- Range & Resolution Selectors -->
-                        <div class="flex items-center gap-2">
-                            <!-- Resolution -->
-                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button onclick="setValidationResolution('15m')" id="val-res-15m" class="px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow">15 Min</button>
-                                <button onclick="setValidationResolution('1h')" id="val-res-1h" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">1 Uur</button>
-                            </div>
-                            <!-- Timeframe -->
-                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button onclick="setValidationPeriod('24h')" id="val-tf-24h" class="px-2 py-0.5 rounded transition font-medium bg-cyan-600 text-white shadow">24 Uur</button>
-                                <button onclick="setValidationPeriod('48h')" id="val-tf-48h" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">48 Uur</button>
-                                <button onclick="setValidationPeriod('7d')" id="val-tf-7d" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">7 Dagen</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Chart Container -->
-                    <div class="relative w-full h-72 sm:h-80 bg-[#0B0F17]/80 rounded-xl p-3 border border-slate-800/80">
-                        <canvas id="chart-validation-overlay"></canvas>
-                    </div>
-                </div>
 
 
                 <!-- DIGEST & REPORT CARD -->
@@ -6230,6 +6174,63 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     </div>
                 </div>
 
+                <!-- ========================================================================= -->
+                <!-- MODEL VALIDATIE: VOORSPELLING VS. WERKELIJKHEID OVERLAY                  -->
+                <!-- ========================================================================= -->
+                <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-5 shadow-2xl space-y-4" id="validation-overlay-card">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                        <div class="flex items-center gap-2.5">
+                            <span class="w-3 h-3 rounded-full bg-cyan-500 animate-pulse"></span>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">Model Validatie: Voorspelling vs. Werkelijkheid</h3>
+                                    <button type="button" onclick="toggleInfoPopover(event, 'val_overlay_info')" class="text-slate-500 hover:text-cyan-400 transition p-0.5 focus:outline-none" aria-label="Info">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
+                                    </button>
+                                </div>
+                                <p class="text-[11px] text-slate-400">Vergelijk het historische voorspelde profiel (<span class="text-slate-300 font-mono">gestreept - -</span>) met de werkelijk gemeten telemetrie (<span class="text-white font-mono">massief —</span>).</p>
+                            </div>
+                        </div>
+
+                        <!-- 4-Way Component Selector Buttons -->
+                        <div class="flex items-center gap-1.5 bg-[#0B0F17] p-1 rounded-xl border border-slate-800 text-xs font-mono flex-wrap">
+                            <button onclick="setValidationComponent('all')" id="btn-val-all" class="px-2.5 py-1 rounded-lg bg-cyan-600 text-white font-bold transition shadow">⚡ Totaal</button>
+                            <button onclick="setValidationComponent('solar')" id="btn-val-solar" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white transition">☀️ Zon</button>
+                            <button onclick="setValidationComponent('dhw')" id="btn-val-dhw" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white transition">♨️ Tapwater</button>
+                            <button onclick="setValidationComponent('cv')" id="btn-val-cv" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white transition">🌡️ CV</button>
+                        </div>
+                    </div>
+
+                    <!-- Top KPI Badges Bar & Timeframe Toggles -->
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 font-mono text-xs">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="px-2.5 py-1 rounded-lg border bg-emerald-950/60 border-emerald-500/40 text-emerald-300 font-bold" id="val-kpi-accuracy">Kwaliteit: --%</span>
+                            <span class="px-2.5 py-1 rounded-lg border bg-slate-900 border-slate-700 text-slate-300 font-bold" id="val-kpi-mae">Gem. Afwijking: -- W</span>
+                            <span class="px-2.5 py-1 rounded-lg border bg-blue-950/60 border-blue-500/40 text-blue-300 font-bold" id="val-kpi-totals">Werkelijk: -- kWh | Voorspeld: -- kWh</span>
+                        </div>
+
+                        <!-- Range & Resolution Selectors -->
+                        <div class="flex items-center gap-2">
+                            <!-- Resolution -->
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
+                                <button onclick="setValidationResolution('15m')" id="val-res-15m" class="px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow">15 Min</button>
+                                <button onclick="setValidationResolution('1h')" id="val-res-1h" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">1 Uur</button>
+                            </div>
+                            <!-- Timeframe -->
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
+                                <button onclick="setValidationPeriod('24h')" id="val-tf-24h" class="px-2 py-0.5 rounded transition font-medium bg-cyan-600 text-white shadow">24 Uur</button>
+                                <button onclick="setValidationPeriod('48h')" id="val-tf-48h" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">48 Uur</button>
+                                <button onclick="setValidationPeriod('7d')" id="val-tf-7d" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">7 Dagen</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Chart Container -->
+                    <div class="relative w-full h-72 sm:h-80 bg-[#0B0F17]/80 rounded-xl p-3 border border-slate-800/80">
+                        <canvas id="chart-validation-overlay"></canvas>
+                    </div>
+                </div>
+
                                 <!-- ========================================================================= -->
                 <!-- HYPERPARAMETER STEERING & MODEL GOVERNANCE CARDS                          -->
                 <!-- ========================================================================= -->
@@ -6659,7 +6660,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div class="space-y-1.5">
                             <div class="flex items-center gap-2.5">
-                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.56</span>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.57</span>
                                 <span class="text-xs text-slate-400 font-mono">OpenAPI 3.1.0 Compliant</span>
                             </div>
                             <h2 class="text-xl font-bold text-white tracking-wide">Open HEMS Systeemdocumentatie &amp; API Gids</h2>
@@ -8134,6 +8135,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 loadModelRecommendations();
                 renderDhwTemperatureChart();
                 renderModelDecompositionChart();
+                loadValidationOverlayChart();
             }
             if (tabId === 'devices') loadDevices();
             if (tabId === 'tariffs') loadTariffs();
