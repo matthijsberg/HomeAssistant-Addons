@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.96.3
+Version: 0.97.0
 Generic Energy Management Platform:
   - Multi-Vector Telemetry & Optimization Daemon
   - Domain Router Dispatch to api/routes_*.py
@@ -111,7 +111,15 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         if routes_system.handle_get(self, path, query_params):
             return
 
-        # 2. Static file serving from web/
+        # 2. Static file serving from web/ and locales/
+        if path.startswith("/locales/"):
+            from api.i18n import LOCALES_DIR
+            clean_rel = path.replace("/locales/", "", 1)
+            file_path = (LOCALES_DIR / clean_rel).resolve()
+            if file_path.is_relative_to(LOCALES_DIR.resolve()) and file_path.is_file():
+                self._serve_static_file(file_path)
+                return
+
         if path.startswith("/static/") or path.startswith("/web/") or path.startswith("/js/") or path.endswith(".js") or path.endswith(".css"):
             clean_rel = path.lstrip("/")
             if clean_rel.startswith("web/"):

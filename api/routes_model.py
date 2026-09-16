@@ -10,8 +10,8 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+from api.i18n import localize_dhw_decision
 from api.context import (
-    AMS_TZ, SECRETS_FILE, PARAMS_FILE, CONFIG_FILE,
     load_json, save_json, load_secrets, get_ha_client_config,
     get_ha_states_map, calculate_poa_solar_kw, format_slot_label,
     fetch_recent_telemetry_history, ensure_active_canonical_plan,
@@ -228,7 +228,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             # Unheated temperature during evening peak (18:00 - 22:30)
             raw_unh = raw_unh_temps if raw_unh_temps else []
             # Decision details are derived directly from the authoritative CentralPlanner plan
+            lang = qp.get("lang", ["nl"])[0]
             decision = getattr(plan.dhw_summary, "decision_details", None) if (plan and plan.dhw_summary) else None
+            if decision:
+                decision = localize_dhw_decision(decision, lang=lang)
             if not decision:
                 decision = {
                     "status": "STANDBY",

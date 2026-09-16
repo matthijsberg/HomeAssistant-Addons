@@ -458,6 +458,7 @@ class CentralPlanner:
         finance_card_title = ""
         finance_text = ""
 
+        is_night_run = False
         if final_dhw_slots:
             is_night_run = any(slots[s_idx].dt.hour < 7 or slots[s_idx].dt.hour >= 21 for s_idx in final_dhw_slots)
             if is_night_run:
@@ -488,6 +489,20 @@ class CentralPlanner:
             bullet_2 = f"Geplande actie: Standby (0 kWh verbruik, wachten op volgend venster)"
             badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-700"><span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Afwachten (Vat dekt horizon)</span>'
 
+        decision_type = "night_run" if (final_dhw_slots and is_night_run) else ("day_run" if final_dhw_slots else "standby")
+        template_params = {
+            "decision_type": decision_type,
+            "current_temp": f"{current_dhw_temp:.1f}",
+            "evening_dip": f"{unh_spits:.1f}",
+            "morning_dip": f"{morning_dip_c:.1f}",
+            "target_temp": f"{sww_target_temp:.1f}",
+            "start": run_start,
+            "end": run_end,
+            "cost": f"{cost_now_run:.2f}",
+            "blend": blend_str,
+            "savings": f"{calc_savings:.2f}"
+        }
+
         decision_details = {
             "status": "SCHEDULE_NIGHT_CHARGE" if (not is_daytime and morning_comfort_risk) else ("DAYTIME_BUFFER_60" if planned_mode in ["forced_solar_boost_60", "max_on"] else "STANDBY"),
             "planned_mode": summary_meta["code"],
@@ -504,7 +519,8 @@ class CentralPlanner:
             "dynamic_peaks": dynamic_peaks,
             "savings_eur": calc_savings,
             "cost_now_eur": cost_now_run,
-            "cost_later_eur": cost_later
+            "cost_later_eur": cost_later,
+            "template_params": template_params
         }
 
         dhw_summary = DHWPlanSummary(

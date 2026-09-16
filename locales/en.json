@@ -1,0 +1,64 @@
+{
+  "app": {
+    "title": "Open HEMS",
+    "subtitle": "Home Energy Management System",
+    "tagline": "Self-learning, physically calibrated residential energy management"
+  },
+  "nav": {
+    "forecast": "Forecast",
+    "history": "History",
+    "models": "Models & Calibration",
+    "system": "System Status"
+  },
+  "common": {
+    "refresh": "Refresh",
+    "bars": "Bars",
+    "line": "Line",
+    "resolution_15m": "15 Min",
+    "resolution_1h": "1 Hour",
+    "cost": "Cost",
+    "consumption": "Consumption",
+    "solar": "Solar",
+    "battery": "Battery",
+    "spits_block": "Peak Lockout",
+    "status": "Status",
+    "temperature": "Temperature",
+    "heating": "Heating",
+    "hot_water": "Hot Water",
+    "standby": "Standby",
+    "active": "Active",
+    "savings": "Savings"
+  },
+  "dhw": {
+    "box_title": "Buffer Efficiency: Optimal Water Temperature & Horizon Coverage",
+    "reasoning_title": "Dispatch Reasoning: Why & To What Temperature?",
+    "badge_night_planned": "Night Charge Scheduled ({start}–{end} up to {temp}°C)",
+    "badge_optimal_planned": "Optimal Charge ({temp}°C)",
+    "badge_solar_boost": "Solar Buffer ({temp}°C)",
+    "badge_standby": "Standby (Tank covers horizon)",
+    "night_reasoning_text": "The tank is currently <strong>{current_temp}°C</strong>. Without heating (<span class='text-slate-400 font-mono'>grey line</span>), the tank cools to <strong>{evening_dip}°C</strong> during the evening peak (comfort safely maintained), but drops to <strong class='text-amber-300'>{morning_dip}°C</strong> by morning due to standing loss and morning showers (below the 40°C comfort floor).<br><br><strong>Decision &amp; Target Temperature:</strong> To guarantee morning comfort, a night charge to <strong>{target_temp}°C</strong> is scheduled for <strong>{start}–{end}</strong> during the cheapest night valley (~€{cost} at off-peak rates, COP ~3.30). Daytime forced heating to 60°C is avoided, saving electricity through much higher COP and 55% less standing loss.",
+    "day_reasoning_text": "The tank is currently <strong>{current_temp}°C</strong>. Without heating (<span class='text-slate-400 font-mono'>grey line</span>), the tank cools to <strong>{evening_dip}°C</strong> during the evening peak (approaching comfort threshold).<br><br><strong>Decision &amp; Target Temperature:</strong> A targeted charge to <strong>{target_temp}°C</strong> is scheduled for <strong>{start}–{end}</strong> ({blend}). This optimal target temperature covers hot water demand and heat loss until the next charging window without requiring a night run. Boosting to 60°C is avoided due to lower COP (2.05) and extra heat loss (savings: ~€{savings}).",
+    "standby_reasoning_text": "The tank is currently <strong>{current_temp}°C</strong>. Without heating (<span class='text-slate-400 font-mono'>grey line</span>), the tank remains well above the 40°C comfort threshold both during the evening peak ({evening_dip}°C) and tomorrow morning ({morning_dip}°C).<br><br><strong>Decision &amp; Target Temperature:</strong> Standby maintained (no heating required). The tank covers the entire horizon until the next cheap charging window on its own buffer.",
+    "bullet_vat_spits_night": "Tank trajectory: Evening peak dip {evening_dip}°C (safe), morning dip without heating {morning_dip}°C (comfort risk)",
+    "bullet_action_night": "Scheduled action: Night charge to {target_temp}°C at {start}–{end} (~€{cost} on off-peak tariff)",
+    "bullet_vat_spits_risk": "Tank trajectory: Without heating, tank drops to {evening_dip}°C during evening peak",
+    "bullet_action_day": "Scheduled action: Charge to {target_temp}°C at {start}–{end} (saves ~€{savings} vs. 60°C)",
+    "bullet_vat_safe": "Tank trajectory: Evening peak {evening_dip}°C, morning dip {morning_dip}°C (comfort guaranteed)",
+    "bullet_action_standby": "Scheduled action: Standby (0 kWh consumption, waiting for next window)"
+  },
+  "charts": {
+    "expected_temp": "Expected (°C)",
+    "margin_p05_p95": "Margin (P05–P95)",
+    "unheated_temp": "Without Heating (°C)",
+    "comfort_threshold": "Comfort 40°C",
+    "target_temp": "Target 50°C",
+    "heat_demand": "Heat Demand (kWh)",
+    "unallocated_kw": "Unallocated Baseload (kW)",
+    "boiler_kw": "DHW Hot Water (kW)",
+    "heating_kw": "Space Heating (kW)",
+    "solar_kw": "Solar Generation (kW)",
+    "net_power_kw": "Net Power (kW)",
+    "price_eur": "EPEX Buy (€/kWh)",
+    "export_price_eur": "EPEX Feed-In (€/kWh)"
+  }
+}

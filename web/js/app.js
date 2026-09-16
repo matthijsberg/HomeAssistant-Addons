@@ -4515,7 +4515,8 @@
             if (!banner) return;
             banner.classList.remove('hidden');
             try {
-                const res = await fetch('./api/model/dhw-status');
+                const lang = window.OpenHEMSi18n ? window.OpenHEMSi18n.getLang() : 'nl';
+                const res = await fetch('./api/model/dhw-status?lang=' + encodeURIComponent(lang));
                 if (res.ok) {
                     const data = await res.json();
                     const d = data.decision || {};
@@ -4951,7 +4952,8 @@
             const canvas = document.getElementById('chart-dhw-temperature');
             if (!canvas) return;
             try {
-                const res = await fetch('./api/model/dhw-status?resolution=' + encodeURIComponent(predictionResolution));
+                const lang = window.OpenHEMSi18n ? window.OpenHEMSi18n.getLang() : 'nl';
+                const res = await fetch('./api/model/dhw-status?resolution=' + encodeURIComponent(predictionResolution) + '&lang=' + encodeURIComponent(lang));
                 if (!res.ok) return;
                 const data = await res.json();
                 const traj = data.trajectory || {};
@@ -6063,4 +6065,14 @@
                 card.style.display = txt.includes(q) ? 'block' : 'none';
             });
         }
+
+        // Language change event listener
+        window.addEventListener('openhems:languageChanged', () => {
+            if (typeof renderDhwTemperatureChart === 'function') {
+                renderDhwTemperatureChart();
+            }
+            if (typeof renderPredictionChart === 'function') {
+                renderPredictionChart();
+            }
+        });
 
