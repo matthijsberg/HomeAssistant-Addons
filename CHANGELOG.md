@@ -10,7 +10,18 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.94.0] — 2026-09-15 (Architectural Decoupling: Phase 2 Modular Domain API Routers)
+## [0.95.0] — 2026-09-15 (Architectural Decoupling: Domain Centralization & Frontend Modularization)
+
+### Architectural Refactor & Single Source of Truth (Invariant 1)
+- **Centralized Decision Contracts:** Moved all financial and trajectory decision evaluation out of HTTP router handlers into `CentralPlanner.plan()` and `DHWPlanSummary.decision_details`. Zero ad-hoc financial calculations or tariff multiplications in routers.
+- **DHW Physical Draw-Off Engine:** Extracted First Law thermodynamic water draw-off calculations ($Q_{tap} = Q_{in} - Q_{standby} - \Delta E_{tank}$) to `layer2_calibration/dhw_thermal_model.py`.
+- **Dedicated Model Validator:** Created `layer2_calibration/model_validator.py` encapsulating normalized MAE and volumetric energy accuracy scoring.
+- **Daemon.py Decoupling:** Stripped 1,600+ lines of duplicate helper methods from `daemon.py`, reducing it to a clean ~790-line HTTP server and background thread orchestrator.
+- **Frontend Modularization:** Extracted 6,000+ lines of JavaScript from `web/index.html` into `web/js/app.js`, reducing `web/index.html` to a clean 3,100-line layout template.
+
+### Bug Fixes & Tariff Alignment
+- Fixed DHW decision box calculation to use real-time solar surplus blend (€0.065-€0.094 export value) and actual night dal tariffs (€0.300) rather than comparison against forbidden hard-lockout peak prices.
+- Fixed historical DHW draw-off telemetry display in `dhwHistoryChart` so tapping events are rendered as light blue bars.
 
 ### Architecture & Modularization
 - **Modular Domain Routers:** Decoupled 3,000+ lines of monolithic `if path == ...` routing in `daemon.py` into 4 dedicated domain routers under `api/`:

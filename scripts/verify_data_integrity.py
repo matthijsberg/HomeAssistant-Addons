@@ -116,8 +116,12 @@ def check_canonical_plan_invariants(errors: list):
 def check_frontend_tokens_and_scripts(daemon_path: Path, errors: list):
     """Verify frontend JavaScript syntax, design tokens, and absence of conflicting controls."""
     html_path = daemon_path.parent / "web" / "index.html"
+    content = ""
     if html_path.exists():
-        content = html_path.read_text(encoding="utf-8")
+        content += html_path.read_text(encoding="utf-8") + "\n"
+        js_file = daemon_path.parent / "web" / "js" / "app.js"
+        if js_file.exists():
+            content += js_file.read_text(encoding="utf-8") + "\n"
     elif daemon_path.exists():
         content = daemon_path.read_text(encoding="utf-8")
     else:

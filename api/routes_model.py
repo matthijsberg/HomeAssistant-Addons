@@ -227,167 +227,43 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
             # Unheated temperature during evening peak (18:00 - 22:30)
             raw_unh = raw_unh_temps if raw_unh_temps else []
-            spits_temps = []
-            for s_i, u_t in enumerate(raw_unh):
-                s_dt = base_sim_dt + timedelta(minutes=15 * s_i)
-                if 18 <= s_dt.hour <= 22 and s_dt.date() == now_ams.date():
-                    spits_temps.append(u_t)
-            unh_spits_temp = min(spits_temps) if spits_temps else max(38.0, round(t_live - 4.5, 1))
-
-            # Physics & Tariffs (350L vat = 0.407 kWh_th / K)
-            c_tank = 0.407
-            cop_50 = 2.85
-            cop_60 = 2.15
-
-            # Read current prices & solar directly from active plan slot 0
-            s0 = plan.slots[0] if (plan and plan.slots) else None
-            cur_price = round(s0.price_eur, 4) if s0 else 0.235
-            solar_kw_now = round(s0.solar_kw, 2) if s0 else 0.0
-            unalloc_kw_now = round(s0.unallocated_kw, 2) if s0 else 0.35
-            net_surplus_now = max(0.0, solar_kw_now - unalloc_kw_now)
-            is_solar_surplus = (net_surplus_now >= 0.8)
-
-            # Export tariff (avoided feed-in tariff / opportunity cost: spot minus fee)
-            spot_now = max(0.0, (cur_price / 1.21) - 0.11085 - 0.0121)
-            export_price_now = max(0.0, spot_now - 0.00605)
-
-            # Electricity needed to buffer to 50C and 60C
-            delta_t_50 = max(0.0, 50.0 - t_live)
-            kwh_e_50 = round((delta_t_50 * c_tank) / cop_50, 2)
-
-            delta_t_60 = max(0.0, 60.0 - t_live)
-            kwh_e_60 = round((delta_t_60 * c_tank) / cop_60, 2)
-
-            # Effective electricity cost now (weighted mix of solar surplus and grid import)
-            run_kw = 2.4
-            solar_kw_used = min(run_kw, net_surplus_now)
-            solar_share = (solar_kw_used / run_kw) if run_kw > 0 else 0.0
-            effective_price_now = round((solar_share * export_price_now) + ((1.0 - solar_share) * cur_price), 4)
-
-            cost_now_50 = round(kwh_e_50 * effective_price_now, 2)
-            cost_now_60 = round(kwh_e_60 * effective_price_now, 2)
-
-            # Later run comparison: outside solar hours in cheapest non-peak slot (night/evening)
-            # NEVER compare against forbidden hard-lockout peak price!
-            night_slots = [
-                s for s in (plan.slots if plan else [])
-                if (21 <= datetime.fromisoformat(s.dt_iso).hour <= 23 or 0 <= datetime.fromisoformat(s.dt_iso).hour <= 6)
-                and s.mode_code != "forced_off"
-            ]
-            later_price = min((s.price_eur for s in night_slots), default=0.26)
-            cost_later_run = round(max(1.3, kwh_e_60 if kwh_e_60 > 0 else 1.5) * later_price, 2)
-            savings_60 = round(max(0.0, cost_later_run - cost_now_60), 2)
-
-            if is_daytime:
-                box_title = "Buffer Efficiëntie: Wel of Niet Bufferen (50°C vs. 60°C)?"
-                comfort_card_title = "1️⃣ Basislading 50°C Nodig voor Avondspits?"
-                finance_card_title = "2️⃣ Afweging: Doorbuffereen naar 60°C (24h Dekking)?"
-
-                # Stap 1: Moeten we nu überhaupt verwarmen naar 50°C voor de avondspits?
-                is_50_needed = (t_live < 48.0 or unh_spits_temp < 43.0)
-                if not is_50_needed:
-                    comfort_text = (
-                        f"Het vat is nu <strong>{t_live:.1f}°C</strong> en al op basistemperatuur (doel: 50°C). "
-                        f"Zonder enige verwarming (<span class='text-slate-400 font-mono'>grijze lijn</span>) blijft het vat tijdens de avondspits (18:45–22:15) ruim op comforttemperatuur "
-                        f"(~{unh_spits_temp:.1f}°C). Een basislading naar 50°C is vóór de spits dus <strong>niet nodig</strong>."
-                    )
-                    bullet_1 = f"Basislading 50°C: Niet nodig (vat op peil, daalt naar ~{unh_spits_temp:.1f}°C in spits)"
-                else:
-                    comfort_text = (
-                        f"Het vat is nu <strong>{t_live:.1f}°C</strong>. Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat tijdens de avondspits "
-                        f"naar <strong>{unh_spits_temp:.1f}°C</strong> (richting de 40°C comfortdrempel). "
-                        f"Een basislading naar 50°C is vóór de avondspits <strong>noodzakelijk</strong> om koude douches te voorkomen."
-                    )
-                    bullet_1 = f"Basislading 50°C: Noodzakelijk vóór 18:45 (spitsdip {unh_spits_temp:.1f}°C dreigt)"
-
-                # Stap 2: Wel of niet doorwarmen naar 60°C?
-                if is_solar_surplus:
-                    solar_pct = int(round(solar_share * 100))
-                    blend_str = f"~€{cost_now_60:.2f} ({solar_pct}% zon @ €{export_price_now:.3f} + {100-solar_pct}% net @ €{cur_price:.3f})"
-                else:
-                    blend_str = f"~€{cost_now_60:.2f} tegen actueel tarief (€{cur_price:.3f}/kWh)"
-
-                finance_text = (
-                    f"Doorwarmen naar 60°C vraagt ~{kwh_e_60} kWh stroom. "
-                    f"Met 60°C dekken we niet alleen de avondspits, maar overbruggen we ook de complete nacht én ochtendspits (een <strong>volledige dag vooruit</strong> zonder tussentijdse runs!). "
-                    f"Ondanks het lichte extra stilstandsverlies (~0,5 kWh over 20u) is nu laden met zon/dalstroom "
-                    f"({blend_str}) veel voordeliger dan later bijwarmen tijdens het nachtdal (~€{cost_later_run:.2f} tegen €{later_price:.3f}/kWh)."
-                )
-                bullet_2 = f"Bufferen naar 60°C: ~€{savings_60:.2f} voordeel + 24h rust voor warmtepomp"
-
-                if planned_mode in ["forced_solar_boost_60", "max_on"]:
-                    badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-950/80 text-purple-300 border border-purple-800/80"><span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span> Zonnebuffer Geadviseerd (tot 60°C)</span>'
-                elif planned_mode in ["forced_standard_50", "forced_on", "advised_on"]:
-                    badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Comfortlading Geadviseerd (tot 50°C)</span>'
-                else:
-                    badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-700"><span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Afwachten (Vat op temperatuur)</span>'
-            else:
-                box_title = "Buffer Efficiëntie: Nachtlading vs. Afwachten tot Middagzon?"
-                comfort_card_title = "1️⃣ Basislading 50°C Nodig voor Ochtendspits?"
-                finance_card_title = "2️⃣ Afweging: Nu Laden vs. Wachten op Morgenmiddag?"
-
-                heated_morning_dip = traj.get("morning_dip_temp_c", 45.4) if traj else 45.4
-                # Stap 1 Nacht: Is 50C nodig voor ochtendcomfort?
-                if not comfort_guaranteed:
-                    comfort_text = (
-                        f"Zonder nachtlading (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat door nachtelijke stilstand en ochtenddouches naar "
-                        f"<strong class='text-amber-300'>{unh_morning_dip}°C</strong> (bij piekverbruik zelfs <strong class='text-red-400'>{unh_morning_p95}°C</strong>) vóór 10:00 uur. "
-                        f"Comfortrisico: een lading naar 50°C vannacht is <strong>noodzakelijk voor ochtendcomfort</strong>. "
-                        f"Met de geplande nachtlading (<span class='text-amber-400 font-mono'>gele lijn</span>) blijft het vat tijdens de ochtendspits comfortabel op minimaal <strong>{heated_morning_dip}°C</strong>."
-                    )
-                    bullet_1 = f"Basislading 50°C: Noodzakelijk (zonder lading dip naar {unh_morning_dip}°C; met lading {heated_morning_dip}°C)"
-                else:
-                    comfort_text = (
-                        f"Het vat daalt vannacht zonder lading (<span class='text-slate-400 font-mono'>grijze lijn</span>) naar {unh_morning_dip}°C. "
-                        f"Ochtendcomfort blijft ruim boven 40°C gewaarborgd. Een nachtlading is voor comfort <strong>niet strikt verplicht</strong>."
-                    )
-                    bullet_1 = f"Basislading 50°C: Niet verplicht (ochtenddip blijft {unh_morning_dip}°C)"
-
-                finance_text = (
-                    f"Nachtstroom kost vannacht ~€0,26/kWh (~€0,38 per run). Morgenmiddag rond 12:00–14:00 is stroom goedkoper met zonne-energie (~€0,15 per run). "
-                    + (f"Comfortzekerheid vóór 10:00u weegt zwaarder dan wachten op zon (garandeert {heated_morning_dip}°C)." if not comfort_guaranteed else "Wachten tot middagzon bespaart ~€0,23.")
-                )
-                bullet_2 = f"Nachtlading gepland voor gegarandeerd ochtendcomfort ({heated_morning_dip}°C)" if not comfort_guaranteed else "Afwachten tot middagzon bespaart ~€0,23"
-
-                if planned_mode in ["forced_night_50", "forced_on"]:
-                    badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Nachtlading Gepland (Comfortzekerheid)</span>'
-                else:
-                    badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Wachten op Middagzon (Besparing)</span>'
+            # Decision details are derived directly from the authoritative CentralPlanner plan
+            decision = getattr(plan.dhw_summary, "decision_details", None) if (plan and plan.dhw_summary) else None
+            if not decision:
+                decision = {
+                    "status": "STANDBY",
+                    "planned_mode": planned_mode,
+                    "box_title": "Buffer Efficiëntie: Wel of Niet Bufferen (50°C vs. 60°C)?",
+                    "badge_html": '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-700"><span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Afwachten (Vat op temperatuur)</span>',
+                    "comfort_card_title": "1️⃣ Basislading 50°C Nodig voor Avondspits?",
+                    "comfort_text": f"Het vat is nu {t_live:.1f}°C. Standby bewaakt.",
+                    "finance_card_title": "2️⃣ Afweging: Doorbuffereen naar 60°C (24h Dekking)?",
+                    "finance_text": "Evaluatie loopt via CentralPlanner.",
+                    "bullet_1": "Basislading 50°C: Standby",
+                    "bullet_2": "Bufferen naar 60°C: Standby",
+                    "morning_dip_c": 45.0,
+                    "morning_dip_time": "09:30",
+                    "dynamic_peaks": cached_dyn_peaks,
+                    "savings_eur": 0.0
+                }
 
             # Evaluate Opportunistic Run Merger
-            merge_outcome = None
             try:
                 plan_for_merger = ensure_active_canonical_plan()
                 merge_outcome = evaluate_and_apply_dhw_run_merger(plan_for_merger, t_live)
-                if merge_outcome and merge_outcome.should_merge:
-                    badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-950/80 text-purple-300 border border-purple-800/80"><span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span> ⚡ Opportunistische Zonnebuffer Actief (tot 60°C)</span>'
+                if merge_outcome:
+                    decision["opportunistic_merge"] = {
+                        "should_merge": merge_outcome.should_merge,
+                        "reason": merge_outcome.reason,
+                        "promoted_mode": merge_outcome.promoted_mode,
+                        "target_temp_c": merge_outcome.target_temp_c,
+                        "original_slot_time": merge_outcome.original_slot_time,
+                        "savings_estimate_eur": merge_outcome.savings_estimate_eur
+                    }
+                    if merge_outcome.should_merge:
+                        decision["badge_html"] = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-950/80 text-purple-300 border border-purple-800/80"><span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span> ⚡ Opportunistische Zonnebuffer Actief (tot 60°C)</span>'
             except Exception as e_mrg:
                 print(f"Warning in evaluate_and_apply_dhw_run_merger: {e_mrg}")
-
-            decision = {
-                "status": "SCHEDULE_NIGHT_CHARGE" if (planned_mode in ["forced_night_50", "forced_on"] and not comfort_guaranteed) else "SKIP_NIGHT_CHARGE",
-                "planned_mode": planned_mode,
-                "box_title": box_title,
-                "badge_html": badge_html,
-                "comfort_card_title": comfort_card_title,
-                "comfort_text": comfort_text,
-                "finance_card_title": finance_card_title,
-                "finance_text": finance_text,
-                "bullet_1": bullet_1,
-                "bullet_2": bullet_2,
-                "morning_dip_c": unh_morning_dip,
-                "morning_dip_time": unh_morning_dip_time,
-                "morning_dip_p95_c": unh_morning_p95,
-                "dynamic_peaks": cached_dyn_peaks,
-                "opportunistic_merge": {
-                    "should_merge": merge_outcome.should_merge,
-                    "reason": merge_outcome.reason,
-                    "promoted_mode": merge_outcome.promoted_mode,
-                    "target_temp_c": merge_outcome.target_temp_c,
-                    "original_slot_time": merge_outcome.original_slot_time,
-                    "savings_estimate_eur": merge_outcome.savings_estimate_eur
-                } if merge_outcome else None
-            }
 
             # Prepend 1 hour of actual historical telemetry
             hist_pts = fetch_recent_telemetry_history(is_15m, base_sim_dt)

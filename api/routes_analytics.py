@@ -602,37 +602,12 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 # Total House Prediction (in exact lockstep with DHW and CV models)
                 pred_total.append(round(p_unalloc_kw + p_dhw_kw + p_cv_kw, 3))
 
-            def compute_kpis(actual_list, pred_list, peak_cap_kw: float = 5.0):
-                if not actual_list or not pred_list:
-                    return {"mae_w": 0, "accuracy_pct": 100.0, "total_actual_kwh": 0.0, "total_pred_kwh": 0.0, "delta_kwh": 0.0}
-                n = len(actual_list)
-                diffs = [abs(a - p) for a, p in zip(actual_list, pred_list)]
-                mae_w = sum(diffs) / n * 1000.0
-                tot_act = sum(actual_list) * interval_h
-                tot_pred = sum(pred_list) * interval_h
-
-                # 1. Volumetric Energy Accuracy (50% weight)
-                vol_denom = max(tot_act, tot_pred, 1.0)
-                acc_vol = max(0.0, 1.0 - (abs(tot_act - tot_pred) / vol_denom))
-
-                # 2. Normalized Mean Absolute Error (50% weight) relative to rated peak capacity
-                nmae = (mae_w / 1000.0) / max(1.0, peak_cap_kw)
-                acc_shape = max(0.0, 1.0 - nmae)
-
-                acc = round((0.5 * acc_vol + 0.5 * acc_shape) * 100.0, 1)
-                return {
-                    "mae_w": int(round(mae_w)),
-                    "accuracy_pct": acc,
-                    "total_actual_kwh": round(tot_act, 2),
-                    "total_pred_kwh": round(tot_pred, 2),
-                    "delta_kwh": round(tot_act - tot_pred, 2)
-                }
-
+            from layer2_calibration.model_validator import ModelValidator
             metrics = {
-                "all": compute_kpis(act_total, pred_total, peak_cap_kw=5.5),
-                "solar": compute_kpis(act_solar, pred_solar, peak_cap_kw=kwp),
-                "dhw": compute_kpis(act_dhw, pred_dhw, peak_cap_kw=3.5),
-                "cv": compute_kpis(act_cv, pred_cv, peak_cap_kw=4.0)
+                "all": ModelValidator.compute_kpis(act_total, pred_total, interval_h=interval_h, peak_cap_kw=5.5),
+                "solar": ModelValidator.compute_kpis(act_solar, pred_solar, interval_h=interval_h, peak_cap_kw=kwp),
+                "dhw": ModelValidator.compute_kpis(act_dhw, pred_dhw, interval_h=interval_h, peak_cap_kw=3.5),
+                "cv": ModelValidator.compute_kpis(act_cv, pred_cv, interval_h=interval_h, peak_cap_kw=4.0)
             }
 
             handler._send_json({
@@ -717,9 +692,13 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             except Exception:
                 pass
 
-            prev_t_raw = None
-            c_vat_kwh_per_k = 0.407  # 350L * 4.184 kJ/(kg*K) / 3600
-            q_standby_kw = 0.055     # ~55W standby thermal loss
+            from layer2_calibration.dhw_thermal_model import DhwThermalModel
+            demands_kwh_th = DhwThermalModel.compute_historical_draw_offs(
+                sorted_timestamps=sorted_ts,
+                temperature_map=t_map,
+                heatpump_el_kwh_map=d_map,
+                interval_h=interval_h
+            )
 
             for ts_str in sorted_ts:
                 dt_ams = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
@@ -734,27 +713,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 t_val = t_map.get(ts_str)
                 if t_val is not None:
                     last_t = round(float(t_val), 1)
-                    cur_t_raw = float(t_val)
-                else:
-                    cur_t_raw = last_t
                 temps.append(last_t)
-
-                kwh_el = float(d_map.get(ts_str) or 0.0)
-                th_in = kwh_el * 2.6
-                q_standby = q_standby_kw * interval_h
-
-                if prev_t_raw is not None and cur_t_raw is not None:
-                    delta_e = c_vat_kwh_per_k * (cur_t_raw - prev_t_raw)
-                    # First Law of Thermodynamics: Q_tap = Q_in - Q_standby - Delta E_tank
-                    q_tap = th_in - q_standby - delta_e
-                    q_tap = max(0.0, round(q_tap, 2))
-                    if q_tap < 0.05:
-                        q_tap = 0.0
-                else:
-                    q_tap = 0.0
-
-                prev_t_raw = cur_t_raw
-                demands_kwh_th.append(q_tap)
 
             handler._send_json({
                 "status": "success",

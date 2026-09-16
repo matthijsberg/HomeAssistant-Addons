@@ -603,6 +603,7 @@ class DHWPlanSummary:
     unheated_trajectory: List[Dict[str, Any]]
     counterfactual_reason: str
     arbitrage_saving_eur: float
+    decision_details: Optional[Dict[str, Any]] = None
 
 
 @dataclass
