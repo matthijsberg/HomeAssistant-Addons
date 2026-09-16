@@ -1,8 +1,11 @@
 # Open HEMS: System, Infrastructure & CRUD Router
+import urllib
+import base64
 import json
 import os
 import re
 import ssl
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -12,7 +15,7 @@ from typing import Dict, Any, List, Optional
 
 from api.context import (
     AMS_TZ, SECRETS_FILE, PARAMS_FILE, CONFIG_FILE,
-    load_json, save_json, load_secrets, get_ha_client_config,
+    load_json, save_json, load_secrets, get_secret, save_secret, get_ha_client_config,
     get_ha_states_map, calculate_poa_solar_kw, format_slot_label,
     fetch_recent_telemetry_history, ensure_active_canonical_plan,
     ensure_framework_defaults, test_influxdb_connection, test_mqtt_connection,
@@ -311,7 +314,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "version": ha_version,
                 "location": ha_location,
                 "latency_ms": ha_latency_ms,
-                "has_token": bool(ha_cfg_tok or os.environ.get("SUPERVISOR_TOKEN")),
+                "has_token": bool(ha_token or os.environ.get("SUPERVISOR_TOKEN")),
                 "verify_ssl": cfg.get("homeassistant", {}).get("verify_ssl", False),
                 "timeout_seconds": cfg.get("homeassistant", {}).get("timeout_seconds", 5),
                 "total_devices": total_ha_devs,

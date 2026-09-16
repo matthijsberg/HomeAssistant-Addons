@@ -1,9 +1,12 @@
 # Open HEMS: 24h Dispatch Schedule & Optimization Router
+import urllib
 import json
 import math
 import os
 import re
+import ssl
 import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -14,9 +17,11 @@ from api.context import (
     load_json, save_json, load_secrets, get_ha_client_config,
     get_ha_states_map, calculate_poa_solar_kw, format_slot_label,
     fetch_recent_telemetry_history, ensure_active_canonical_plan,
-    ensure_framework_defaults, GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
+    ensure_framework_defaults, DUTCH_DAYS_SHORT, GLOBAL_CENTRAL_CACHE,
+    evaluate_and_apply_dhw_run_merger, get_epex_tariffs_cached,
+    GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
 )
-from models.canonical import StandardizedState, STATE_METADATA
+from models.canonical import StandardizedState, STATE_METADATA, detect_dynamic_price_peaks
 
 def handle_get(handler, path: str, qp: dict) -> bool:
     if path == "/api/control/status":
@@ -479,6 +484,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             price_delta = max_item["price"] - min_item["price"]
             deadband = float(cfg.get("battery_deadband_eur_kwh", 0.115))
             bat_slots = 4 if is_15m else 1
+            daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
 
             # Check if there is significant solar surplus available tomorrow
             if peak_solar_it["solar"] >= 1.5:

@@ -1,4 +1,5 @@
 # Open HEMS: Physical Modeling & Calibration Router
+import urllib
 import json
 import math
 import ssl
@@ -14,7 +15,7 @@ from api.context import (
     load_json, save_json, load_secrets, get_ha_client_config,
     get_ha_states_map, calculate_poa_solar_kw, format_slot_label,
     fetch_recent_telemetry_history, ensure_active_canonical_plan,
-    GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR,
+    GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR, GLOBAL_CENTRAL_CACHE,
     evaluate_and_apply_dhw_run_merger
 )
 from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
