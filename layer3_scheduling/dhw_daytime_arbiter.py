@@ -18,6 +18,8 @@ from typing import List, Dict, Any, Optional, Tuple
 import math
 
 from layer2_calibration.dhw_thermal_model import DhwThermalModel
+from layer3_scheduling.tariff_provider import TariffProvider
+from layer3_scheduling.dhw_specs import DhwTankSpec
 
 
 @dataclass
@@ -118,11 +120,12 @@ class DhwDaytimeArbiter:
         unalloc_kw: float,
         el_demand_kw: float,
         price_all_in: float,
-        step_hours: float = 0.25
+        step_hours: float = 0.25,
+        tariff_provider: Optional[TariffProvider] = None
     ) -> Tuple[float, float, float, float]:
         """
         Pure function: Calculates electricity costs for a single quarter-hour slot.
-        - Solar/battery self-consumption is valued at avoided feed-in price (EPEX spot minus opslag).
+        - Solar/battery self-consumption is valued at avoided feed-in price (derived via TariffProvider).
         - Grid import is valued at all-in consumer price (EPEX spot + energy tax + opslag + VAT).
 
         Returns: (cost_eur, self_kwh, grid_kwh, p_effective)
@@ -137,8 +140,9 @@ class DhwDaytimeArbiter:
         self_kwh = min(demand_kwh, surplus_kwh)
         grid_kwh = max(0.0, demand_kwh - self_kwh)
 
-        # Net feed-in tariff: (Spot / 1.21) - 0.11085 - 0.01210 - 0.00605
-        p_export = max(0.0, (price_all_in / 1.21) - 0.11085 - 0.01210 - 0.00605)
+        # Net feed-in tariff derived dynamically via TariffProvider
+        tp = tariff_provider or TariffProvider()
+        p_export = tp.calculate_export_value_from_import(price_all_in)
         cost_eur = (grid_kwh * price_all_in) + (self_kwh * p_export)
         p_effective = cost_eur / demand_kwh if demand_kwh > 0 else price_all_in
 
@@ -153,7 +157,9 @@ class DhwDaytimeArbiter:
         th_need_kwh: float,
         is_boost_60: bool = False,
         hours_until_target: float = 0.0,
-        step_hours: float = 0.25
+        step_hours: float = 0.25,
+        tariff_provider: Optional[TariffProvider] = None,
+        tank_spec: Optional[DhwTankSpec] = None
     ) -> Tuple[float, float, float]:
         """
         Pure function: Evaluates the total electricity cost and standing losses of a candidate window.
@@ -161,6 +167,7 @@ class DhwDaytimeArbiter:
 
         Returns: (total_window_cost_eur, total_el_kwh, mean_cop)
         """
+        spec = tank_spec or DhwTankSpec()
         end_idx = start_idx + n_req_slots
         window_slots = slots[start_idx:end_idx]
         if not window_slots:
@@ -187,14 +194,14 @@ class DhwDaytimeArbiter:
             unalloc_kw = getattr(s, "unallocated_kw", 0.35)
             price_all_in = getattr(s, "price_all_in", getattr(s, "price_eur", 0.30))
 
-            cost, _, _, _ = cls.calculate_slot_financials(solar_kw, unalloc_kw, el_kw, price_all_in, step_hours)
+            cost, _, _, _ = cls.calculate_slot_financials(solar_kw, unalloc_kw, el_kw, price_all_in, step_hours, tariff_provider=tariff_provider)
             total_cost += cost
 
         mean_cop = sum(cops) / len(cops) if cops else 2.8
 
         # Add standing loss penalty from end of window until target horizon
         if hours_until_target > 0.0:
-            loss_kw = cls.DHW_STANDBY_LOSS_60_KW if is_boost_60 else cls.DHW_STANDBY_LOSS_50_KW
+            loss_kw = spec.standby_loss_60_kw if is_boost_60 else spec.standby_loss_50_kw
             extra_th_loss = hours_until_target * loss_kw
             extra_el_loss = extra_th_loss / mean_cop
             mean_price = sum(getattr(s, "price_all_in", getattr(s, "price_eur", 0.30)) for s in window_slots) / len(window_slots)
@@ -213,7 +220,9 @@ class DhwDaytimeArbiter:
         slot_lockout_map: Dict[int, Any],
         is_boost_60: bool = False,
         target_anchor_idx: Optional[int] = None,
-        step_hours: float = 0.25
+        step_hours: float = 0.25,
+        tariff_provider: Optional[TariffProvider] = None,
+        tank_spec: Optional[DhwTankSpec] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Pure function: Searches for the cheapest contiguous window of N slots outside peak lockouts.
@@ -234,7 +243,8 @@ class DhwDaytimeArbiter:
                 hours_until = (target_anchor_idx - end_idx) * step_hours
 
             cost, el_kwh, cop = cls.evaluate_window_cost(
-                slots, start_idx, n_req_slots, th_need_kwh, is_boost_60, hours_until, step_hours
+                slots, start_idx, n_req_slots, th_need_kwh, is_boost_60, hours_until, step_hours,
+                tariff_provider=tariff_provider, tank_spec=tank_spec
             )
             candidate_windows.append({
                 "start_idx": start_idx,
@@ -261,13 +271,16 @@ class DhwDaytimeArbiter:
         slot_lockout_map: Dict[int, Any],
         dhw_model: DhwThermalModel,
         now_dt: datetime,
-        step_hours: float = 0.25
+        step_hours: float = 0.25,
+        tariff_provider: Optional[TariffProvider] = None,
+        tank_spec: Optional[DhwTankSpec] = None
     ) -> Dict[str, Any]:
         """
         Pure function: Simulates post-dayrun trajectory with DhwThermalModel and determines
         whether a night run is genuinely required (< 40°C morning dip) and what it costs.
         Eliminates premature assumptions: if the morning dip stays >= 40°C, night cost is strictly €0.00.
         """
+        spec = tank_spec or DhwTankSpec()
         n_slots = len(slots)
         day_slots = list(range(day_window["start_idx"], day_window["end_idx"])) if day_window else []
 
@@ -278,7 +291,7 @@ class DhwDaytimeArbiter:
             hours_ahead=24,
             heat_pump_schedule_slots=day_slots,
             target_temp_c=day_target_c,
-            heat_pump_power_kw=cls.DHW_SOLAR_BOOST_ELECTRIC_KW if day_target_c > 52.0 else cls.DHW_HEAT_PUMP_ELECTRIC_KW
+            heat_pump_power_kw=spec.solar_boost_electric_kw if day_target_c > 52.0 else spec.heat_pump_electric_kw
         )
         sim_temps = sim.get("temperatures_c", [])
         sim_labels = sim.get("labels", [])
@@ -296,7 +309,7 @@ class DhwDaytimeArbiter:
             morn_dip_c = round(min(sim_temps[:36]), 1) if sim_temps else current_dhw_temp
             morn_dip_time = "08:30"
 
-        night_required = (morn_dip_c < cls.DHW_COMFORT_MIN_TEMP_C)
+        night_required = (morn_dip_c < spec.comfort_min_temp_c)
         night_cost = 0.0
         night_el = 0.0
         night_slots = []
@@ -319,8 +332,8 @@ class DhwDaytimeArbiter:
 
             # Temperature before night run (estimate from simulation around 03:00)
             t_night_est = max(34.0, morn_dip_c - 1.5)
-            th_need_night = max(1.0, 50.0 - t_night_est) * cls.DHW_THERMAL_CAPACITY_KWH_PER_K
-            n_night_slots = max(2, min(6, math.ceil(th_need_night / (6.5 * step_hours))))
+            th_need_night = max(1.0, spec.target_setpoint_c - t_night_est) * spec.thermal_capacity_kwh_per_k
+            n_night_slots = max(2, min(6, math.ceil(th_need_night / (spec.thermal_output_kw * step_hours))))
 
             opt_night = cls.find_optimal_heating_window(
                 slots=slots,
@@ -331,7 +344,9 @@ class DhwDaytimeArbiter:
                 slot_lockout_map=slot_lockout_map,
                 is_boost_60=False,
                 target_anchor_idx=morn_start_idx,
-                step_hours=step_hours
+                step_hours=step_hours,
+                tariff_provider=tariff_provider,
+                tank_spec=spec
             )
 
             if opt_night:
@@ -368,11 +383,15 @@ class DhwDaytimeArbiter:
         dynamic_peaks: List[Dict[str, Any]],
         dhw_model: DhwThermalModel,
         now_dt: datetime,
-        step_hours: float = 0.25
+        step_hours: float = 0.25,
+        tariff_provider: Optional[TariffProvider] = None,
+        tank_spec: Optional[DhwTankSpec] = None
     ) -> DaytimeArbitrationResult:
         """
         Executes complete 24-hour economic arbitration comparing Situation 1 and Situation 2.
         """
+        spec = tank_spec or DhwTankSpec()
+        tp = tariff_provider or TariffProvider()
         n_slots = len(slots)
         slot_lockout_map = {idx: p for p in dynamic_peaks for idx in range(p.get("start_idx", 0), p.get("end_idx", 0))}
 
@@ -401,20 +420,61 @@ class DhwDaytimeArbiter:
             unheated_evening_dip = round(current_dhw_temp - 3.5, 1)
             evening_dip_time = "19:30"
 
-        # Determine situation
-        evening_comfort_risk = (unheated_evening_dip < cls.DHW_COMFORT_MIN_TEMP_C or current_dhw_temp <= 43.5)
+        # Determine situation: evening comfort at risk if unheated tank dips below comfort threshold before/during evening peak
+        evening_comfort_risk = (unheated_evening_dip < spec.comfort_min_temp_c or current_dhw_temp <= 43.5)
 
-        # Daytime search window (between 10:00 and 16:30 today)
-        day_start_idx = 0
-        day_end_idx = min(n_slots, 32)  # up to ~8 hours ahead
-        for idx, s in enumerate(slots):
-            dt_val = getattr(s, "dt", now_dt)
-            lbl = getattr(s, "label", getattr(s, "time_label", ""))
-            h = int(lbl.split(":")[0]) if ":" in lbl and not lbl.startswith("Nu") else dt_val.hour
-            if 10 <= h <= 16 and dt_val.date() == now_dt.date():
-                if day_start_idx == 0:
-                    day_start_idx = idx
-                day_end_idx = max(day_end_idx, idx + 1)
+        # Daytime & Pre-Spits Search Window:
+        # Find start of evening hard peak lockout (if today)
+        eve_lockout_start_idx = n_slots
+        for p in dynamic_peaks:
+            if p.get("is_hard_lockout"):
+                p_start_time = p.get("hard_start_time") or p.get("start_time")
+                for s_i, sl in enumerate(slots):
+                    sl_dt = getattr(sl, "dt", None)
+                    if sl_dt is None:
+                        sl_iso = getattr(sl, "dt_iso", "")
+                        sl_dt = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * s_i))
+                    sl_lbl = getattr(sl, "label", getattr(sl, "time_label", ""))
+                    if sl_dt.date() == now_dt.date() and 17 <= sl_dt.hour <= 22:
+                        if p_start_time and (p_start_time in sl_lbl or sl_lbl.endswith(p_start_time)):
+                            eve_lockout_start_idx = min(eve_lockout_start_idx, s_i)
+                            break
+                        elif slot_lockout_map.get(s_i, {}).get("is_hard_lockout"):
+                            eve_lockout_start_idx = min(eve_lockout_start_idx, s_i)
+                            break
+
+        # Daytime & Pre-Spits Search Window:
+        if evening_comfort_risk:
+            # SITUATION 1: Comfort risk before evening peak -> window is from slot 0 until evening peak lockout
+            if now_dt.hour >= 10:
+                day_start_idx = 0
+                day_end_idx = min(n_slots, eve_lockout_start_idx)
+            else:
+                day_start_idx = 0
+                day_end_idx = min(n_slots, eve_lockout_start_idx)
+                for idx, s in enumerate(slots):
+                    dt_val = getattr(s, "dt", None)
+                    if dt_val is None:
+                        sl_iso = getattr(s, "dt_iso", "")
+                        dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
+                    if dt_val.hour >= 10 and dt_val.date() == now_dt.date():
+                        day_start_idx = idx
+                        break
+        else:
+            # SITUATION 2: Comfort safe -> Solar buffer search window (10:00 to 16:30 today)
+            day_start_idx = 0
+            day_end_idx = min(n_slots, 32)
+            for idx, s in enumerate(slots):
+                dt_val = getattr(s, "dt", None)
+                if dt_val is None:
+                    sl_iso = getattr(s, "dt_iso", "")
+                    dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
+                lbl = getattr(s, "label", getattr(s, "time_label", ""))
+                h = int(lbl.split(":")[0]) if ":" in lbl and not lbl.startswith("Nu") else dt_val.hour
+                if 10 <= h <= 16 and dt_val.date() == now_dt.date():
+                    if day_start_idx == 0:
+                        day_start_idx = idx
+                    day_end_idx = max(day_end_idx, idx + 1)
 
         evaluated_paths: List[EvaluatedPath] = []
 
@@ -423,8 +483,8 @@ class DhwDaytimeArbiter:
             situation = "SITUATION_1_EVENING_COMFORT_RISK"
 
             # PAD A1: Overdag naar 50°C + Natraject Simulatie
-            th_need_50 = max(1.0, 50.0 - current_dhw_temp) * cls.DHW_THERMAL_CAPACITY_KWH_PER_K
-            n_slots_50 = max(2, min(6, math.ceil(th_need_50 / (6.5 * step_hours))))
+            th_need_50 = max(1.0, spec.target_setpoint_c - current_dhw_temp) * spec.thermal_capacity_kwh_per_k
+            n_slots_50 = max(2, min(6, math.ceil(th_need_50 / (spec.thermal_output_kw * step_hours))))
             opt_day_50 = cls.find_optimal_heating_window(
                 slots=slots,
                 search_start_idx=day_start_idx,
@@ -433,11 +493,14 @@ class DhwDaytimeArbiter:
                 th_need_kwh=th_need_50,
                 slot_lockout_map=slot_lockout_map,
                 is_boost_60=False,
-                step_hours=step_hours
+                step_hours=step_hours,
+                tariff_provider=tp,
+                tank_spec=spec
             )
 
             res_a1 = cls.simulate_path_and_evaluate_night(
-                slots, current_dhw_temp, 50.0, opt_day_50, dynamic_peaks, slot_lockout_map, dhw_model, now_dt, step_hours
+                slots, current_dhw_temp, spec.target_setpoint_c, opt_day_50, dynamic_peaks, slot_lockout_map, dhw_model, now_dt, step_hours,
+                tariff_provider=tp, tank_spec=spec
             )
 
             s_lbl_a1 = getattr(slots[opt_day_50["start_idx"]], "label", getattr(slots[opt_day_50["start_idx"]], "time_label", "")) if opt_day_50 else "--:--"
@@ -445,13 +508,13 @@ class DhwDaytimeArbiter:
 
             path_a1 = EvaluatedPath(
                 path_id="PAD_A1_DAY_50",
-                name="Pad A1: Overdag 50°C + Dynamische Nachtcheck",
-                description="Overdag verwarmen tot 50°C. Simulator berekent of nachtrun wel of niet nodig is.",
-                day_target_temp_c=50.0,
+                name=f"Pad A1: Overdag {spec.target_setpoint_c:.0f}°C + Dynamische Nachtcheck",
+                description=f"Overdag verwarmen tot {spec.target_setpoint_c:.0f}°C. Simulator berekent of nachtrun wel of niet nodig is.",
+                day_target_temp_c=spec.target_setpoint_c,
                 day_slots=res_a1["day_slots"],
                 day_window_label=f"{s_lbl_a1}–{e_lbl_a1}",
                 day_cost_eur=res_a1["day_cost_eur"],
-                day_power_kw=cls.DHW_HEAT_PUMP_ELECTRIC_KW,
+                day_power_kw=spec.heat_pump_electric_kw,
                 day_el_kwh=res_a1["day_el_kwh"],
                 simulated_morning_dip_c=res_a1["morning_dip_c"],
                 simulated_morning_dip_time=res_a1["morning_dip_time"],
@@ -465,8 +528,8 @@ class DhwDaytimeArbiter:
             evaluated_paths.append(path_a1)
 
             # PAD A2: In één ruk doorwarmen naar 60°C (Buffer)
-            th_need_60 = max(2.0, 60.0 - current_dhw_temp) * cls.DHW_THERMAL_CAPACITY_KWH_PER_K
-            n_slots_60 = max(3, min(8, math.ceil(th_need_60 / (6.5 * step_hours))))
+            th_need_60 = max(2.0, spec.boost_setpoint_c - current_dhw_temp) * spec.thermal_capacity_kwh_per_k
+            n_slots_60 = max(3, min(8, math.ceil(th_need_60 / (spec.thermal_output_kw * step_hours))))
             opt_day_60 = cls.find_optimal_heating_window(
                 slots=slots,
                 search_start_idx=day_start_idx,
@@ -475,11 +538,14 @@ class DhwDaytimeArbiter:
                 th_need_kwh=th_need_60,
                 slot_lockout_map=slot_lockout_map,
                 is_boost_60=True,
-                step_hours=step_hours
+                step_hours=step_hours,
+                tariff_provider=tp,
+                tank_spec=spec
             )
 
             res_a2 = cls.simulate_path_and_evaluate_night(
-                slots, current_dhw_temp, 60.0, opt_day_60, dynamic_peaks, slot_lockout_map, dhw_model, now_dt, step_hours
+                slots, current_dhw_temp, spec.boost_setpoint_c, opt_day_60, dynamic_peaks, slot_lockout_map, dhw_model, now_dt, step_hours,
+                tariff_provider=tp, tank_spec=spec
             )
 
             s_lbl_a2 = getattr(slots[opt_day_60["start_idx"]], "label", getattr(slots[opt_day_60["start_idx"]], "time_label", "")) if opt_day_60 else "--:--"
@@ -487,13 +553,13 @@ class DhwDaytimeArbiter:
 
             path_a2 = EvaluatedPath(
                 path_id="PAD_A2_DAY_60",
-                name="Pad A2: Overdag Doortrekken naar 60°C (Buffer)",
-                description="In 1 run doorwarmen naar 60°C. Voorkomt extra compressorstart en overbrugt nacht.",
-                day_target_temp_c=60.0,
+                name=f"Pad A2: Overdag Doortrekken naar {spec.boost_setpoint_c:.0f}°C (Buffer)",
+                description=f"In 1 run doorwarmen naar {spec.boost_setpoint_c:.0f}°C. Voorkomt extra compressorstart en overbrugt nacht.",
+                day_target_temp_c=spec.boost_setpoint_c,
                 day_slots=res_a2["day_slots"],
                 day_window_label=f"{s_lbl_a2}–{e_lbl_a2}",
                 day_cost_eur=res_a2["day_cost_eur"],
-                day_power_kw=cls.DHW_SOLAR_BOOST_ELECTRIC_KW,
+                day_power_kw=spec.solar_boost_electric_kw,
                 day_el_kwh=res_a2["day_el_kwh"],
                 simulated_morning_dip_c=res_a2["morning_dip_c"],
                 simulated_morning_dip_time=res_a2["morning_dip_time"],
@@ -511,20 +577,20 @@ class DhwDaytimeArbiter:
                 selected_path = path_a2
                 savings = path_a1.total_24h_cost_eur - path_a2.total_24h_cost_eur
                 planned_mode = "forced_solar_boost_60"
-                planned_mode_label = "Maximaal aan (doorverwarming tot 60°C)"
+                planned_mode_label = f"Maximaal aan (doorverwarming tot {spec.boost_setpoint_c:.0f}°C)"
                 explanation = (
-                    f"In 1 run doorwarmen naar 60°C om {path_a2.day_window_label} is de voordeligste keuze. "
-                    f"Dit overbrugt de hele nacht en bespaart €{savings:.2f} t.o.v. stoppen bij 50°C en nachtelijk bijladen."
+                    f"In 1 run doorwarmen naar {spec.boost_setpoint_c:.0f}°C om {path_a2.day_window_label} is de voordeligste keuze. "
+                    f"Dit overbrugt de hele nacht en bespaart €{savings:.2f} t.o.v. stoppen bij {spec.target_setpoint_c:.0f}°C en nachtelijk bijladen."
                 )
             else:
                 selected_path = path_a1
                 diff = path_a2.total_24h_cost_eur - path_a1.total_24h_cost_eur
                 savings = round(diff, 2)
                 planned_mode = "forced_on"
-                planned_mode_label = "Geforceerd aan (verwarmen tot 50°C)"
+                planned_mode_label = f"Geforceerd aan (verwarmen tot {spec.target_setpoint_c:.0f}°C)"
                 explanation = (
-                    f"Basislading naar 50°C om {path_a1.day_window_label} is optimaal (€{path_a1.total_24h_cost_eur:.2f} totaal). "
-                    f"Doortrekken naar 60°C kost €{diff:.2f} méér door het lagere COP-rendement (2,15) en stilstandsverlies."
+                    f"Basislading naar {spec.target_setpoint_c:.0f}°C om {path_a1.day_window_label} is optimaal (€{path_a1.total_24h_cost_eur:.2f} totaal). "
+                    f"Doortrekken naar {spec.boost_setpoint_c:.0f}°C kost €{diff:.2f} méér door het lagere COP-rendement (2,15) en stilstandsverlies."
                 )
 
         else:
@@ -533,13 +599,14 @@ class DhwDaytimeArbiter:
 
             # PAD B1: Niets doen overdag (Wachten op de nachtrun)
             res_b1 = cls.simulate_path_and_evaluate_night(
-                slots, current_dhw_temp, 50.0, None, dynamic_peaks, slot_lockout_map, dhw_model, now_dt, step_hours
+                slots, current_dhw_temp, spec.target_setpoint_c, None, dynamic_peaks, slot_lockout_map, dhw_model, now_dt, step_hours,
+                tariff_provider=tp, tank_spec=spec
             )
             path_b1 = EvaluatedPath(
                 path_id="PAD_B1_STANDBY",
                 name="Pad B1: Niets doen overdag (Wachten op nacht)",
                 description="Overdag standby. Het vat koelt langzaam af en het nachtscript laadt vannacht efficiënt bij.",
-                day_target_temp_c=50.0,
+                day_target_temp_c=spec.target_setpoint_c,
                 day_slots=[],
                 day_window_label="Geen dagrun (Standby)",
                 day_cost_eur=0.0,
@@ -557,15 +624,15 @@ class DhwDaytimeArbiter:
             evaluated_paths.append(path_b1)
 
             # PAD B2: Overdag preventief bufferen naar 60°C
-            headroom_60 = round(max(0.0, 60.0 - current_dhw_temp), 1)
+            headroom_60 = round(max(0.0, spec.boost_setpoint_c - current_dhw_temp), 1)
             is_tank_saturated = (current_dhw_temp >= cls.DHW_BUFFER_60_MAX_TANK_TEMP_C)
 
             if is_tank_saturated:
                 path_b2 = EvaluatedPath(
                     path_id="PAD_B2_BUFFER_60",
-                    name="Pad B2: Overdag Preventief Bufferen naar 60°C",
-                    description=f"Vergrendeld: vat staat al op {current_dhw_temp:.1f}°C (marge naar 60°C is slechts {headroom_60}°C < {cls.DHW_BUFFER_60_MIN_HEADROOM_C}°C drempel).",
-                    day_target_temp_c=60.0,
+                    name=f"Pad B2: Overdag Preventief Bufferen naar {spec.boost_setpoint_c:.0f}°C",
+                    description=f"Vergrendeld: vat staat al op {current_dhw_temp:.1f}°C (marge naar {spec.boost_setpoint_c:.0f}°C is slechts {headroom_60}°C < {cls.DHW_BUFFER_60_MIN_HEADROOM_C}°C drempel).",
+                    day_target_temp_c=spec.boost_setpoint_c,
                     day_slots=[],
                     day_window_label="Vergrendeld (Vat Al Verzadigd)",
                     day_cost_eur=999.0,
@@ -586,14 +653,14 @@ class DhwDaytimeArbiter:
                 planned_mode = "normal"
                 planned_mode_label = "Normaal (Standby — Vat Al Verzadigd)"
                 explanation = (
-                    f"Bufferen naar 60°C vergrendeld: het vat staat al op {current_dhw_temp:.1f}°C "
-                    f"(laadruimte naar 60°C is slechts {headroom_60}°C < {cls.DHW_BUFFER_60_MIN_HEADROOM_C}°C drempel). "
+                    f"Bufferen naar {spec.boost_setpoint_c:.0f}°C vergrendeld: het vat staat al op {current_dhw_temp:.1f}°C "
+                    f"(laadruimte naar {spec.boost_setpoint_c:.0f}°C is slechts {headroom_60}°C < {cls.DHW_BUFFER_60_MIN_HEADROOM_C}°C drempel). "
                     f"Een extra zonnebuffer-run voor <7°C temperatuurstijging is energetisch onrendabel wegens lage COP (2,05) en "
                     f"compressor-startverliezen. Standby behouden tot natuurlijk warmwaterverbruik optreedt."
                 )
             else:
-                th_need_60 = max(2.5, 60.0 - current_dhw_temp) * cls.DHW_THERMAL_CAPACITY_KWH_PER_K
-                n_slots_60 = max(3, min(8, math.ceil(th_need_60 / (6.5 * step_hours))))
+                th_need_60 = max(2.5, spec.boost_setpoint_c - current_dhw_temp) * spec.thermal_capacity_kwh_per_k
+                n_slots_60 = max(3, min(8, math.ceil(th_need_60 / (spec.thermal_output_kw * step_hours))))
                 opt_day_60 = cls.find_optimal_heating_window(
                     slots=slots,
                     search_start_idx=day_start_idx,
@@ -602,11 +669,14 @@ class DhwDaytimeArbiter:
                     th_need_kwh=th_need_60,
                     slot_lockout_map=slot_lockout_map,
                     is_boost_60=True,
-                    step_hours=step_hours
+                    step_hours=step_hours,
+                    tariff_provider=tp,
+                    tank_spec=spec
                 )
 
                 res_b2 = cls.simulate_path_and_evaluate_night(
-                    slots, current_dhw_temp, 60.0, opt_day_60, dynamic_peaks, slot_lockout_map, dhw_model, now_dt, step_hours
+                    slots, current_dhw_temp, spec.boost_setpoint_c, opt_day_60, dynamic_peaks, slot_lockout_map, dhw_model, now_dt, step_hours,
+                    tariff_provider=tp, tank_spec=spec
                 )
 
                 s_lbl_b2 = getattr(slots[opt_day_60["start_idx"]], "label", getattr(slots[opt_day_60["start_idx"]], "time_label", "")) if opt_day_60 else "--:--"
@@ -614,13 +684,13 @@ class DhwDaytimeArbiter:
 
                 path_b2 = EvaluatedPath(
                     path_id="PAD_B2_BUFFER_60",
-                    name="Pad B2: Overdag Preventief Bufferen naar 60°C",
-                    description="Overdag economisch doorwarmen naar 60°C op goedkope/negatieve stroom of zonne-overschot.",
-                    day_target_temp_c=60.0,
+                    name=f"Pad B2: Overdag Preventief Bufferen naar {spec.boost_setpoint_c:.0f}°C",
+                    description=f"Overdag economisch doorwarmen naar {spec.boost_setpoint_c:.0f}°C op goedkope/negatieve stroom of zonne-overschot.",
+                    day_target_temp_c=spec.boost_setpoint_c,
                     day_slots=res_b2["day_slots"],
                     day_window_label=f"{s_lbl_b2}–{e_lbl_b2}",
                     day_cost_eur=res_b2["day_cost_eur"],
-                    day_power_kw=cls.DHW_SOLAR_BOOST_ELECTRIC_KW,
+                    day_power_kw=spec.solar_boost_electric_kw,
                     day_el_kwh=res_b2["day_el_kwh"],
                     simulated_morning_dip_c=res_b2["morning_dip_c"],
                     simulated_morning_dip_time=res_b2["morning_dip_time"],
@@ -639,9 +709,9 @@ class DhwDaytimeArbiter:
                     selected_path = path_b2
                     savings = b2_savings
                     planned_mode = "forced_solar_boost_60"
-                    planned_mode_label = "Maximaal aan (doorverwarming tot 60°C)"
+                    planned_mode_label = f"Maximaal aan (doorverwarming tot {spec.boost_setpoint_c:.0f}°C)"
                     explanation = (
-                        f"Overdag preventief bufferen naar 60°C om {path_b2.day_window_label} levert een netto besparing op van €{savings:.2f} "
+                        f"Overdag preventief bufferen naar {spec.boost_setpoint_c:.0f}°C om {path_b2.day_window_label} levert een netto besparing op van €{savings:.2f} "
                         f"t.o.v. afwachten tot de nacht (gunstige dagstroom compenseert stilstand en lagere COP ruimschoots)."
                     )
                 else:
@@ -652,7 +722,7 @@ class DhwDaytimeArbiter:
                     planned_mode_label = "Normaal (Standby — Wachten op nacht)"
                     explanation = (
                         f"Overdag niets doen (Standby). Het vat blijft vanavond ruim op comfort ({unheated_evening_dip}°C). "
-                        f"Vannacht laden op daltarief is €{diff:.2f} voordeliger dan overdag forceren naar 60°C."
+                        f"Vannacht laden op daltarief is €{diff:.2f} voordeliger dan overdag forceren naar {spec.boost_setpoint_c:.0f}°C."
                     )
 
         return DaytimeArbitrationResult(

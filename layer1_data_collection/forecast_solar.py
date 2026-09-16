@@ -27,8 +27,8 @@ class ForecastSolarProvider:
 
     def __init__(
         self,
-        lat: float = 51.9537,
-        lon: float = 5.2320,
+        lat: Optional[float] = None,
+        lon: Optional[float] = None,
         tilt: float = 34.0,
         azimuth_deg_south: float = 45.0,  # 225 deg NOAA SW = 45 deg West of South in Forecast.Solar
         kwp: float = 5.76,
@@ -36,6 +36,11 @@ class ForecastSolarProvider:
         calibration_factor: float = 1.18,
         cache_ttl_seconds: int = 1800  # 30 min cache
     ):
+        if lat is None or lon is None:
+            from layer1_data_collection.geo_location import get_geo_coordinates
+            def_lat, def_lon = get_geo_coordinates()
+            lat = lat if lat is not None else def_lat
+            lon = lon if lon is not None else def_lon
         self.lat = lat
         self.lon = lon
         self.tilt = tilt

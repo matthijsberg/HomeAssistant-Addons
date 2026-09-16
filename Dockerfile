@@ -24,4 +24,7 @@ RUN chmod +x /run.sh
 
 EXPOSE 8099
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -f http://127.0.0.1:8099/healthz || exit 1
+
 CMD [ "/run.sh" ]

@@ -76,6 +76,8 @@ GLOBAL_CENTRAL_CACHE = {
     "1h": None
 }
 
+from layer1_data_collection.geo_location import get_geo_coordinates
+
 def calculate_poa_solar_kw(
     dt_ams: datetime,
     ghi_w_m2: float,
@@ -84,10 +86,12 @@ def calculate_poa_solar_kw(
     azimuth_deg: float = 225.0,
     inverter_limit_kw: float = 5.5,
     eff: float = 0.88,
-    lat: float = 51.9537,
-    lon: float = 5.232
+    lat: Optional[float] = None,
+    lon: Optional[float] = None
 ) -> float:
     """Calculates Plane-of-Array (POA) solar generation in AC kW based on NOAA solar geometry."""
+    if lat is None or lon is None:
+        lat, lon = get_geo_coordinates()
     if ghi_w_m2 <= 1.0:
         return 0.0
     doy = dt_ams.timetuple().tm_yday
@@ -218,6 +222,8 @@ def get_ha_client_config() -> Tuple[str, str]:
     return default_url, token
 
 
+_GLOBAL_WEATHER_FORECAST_CACHE: Dict[str, Any] = {}
+
 def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
     """
     Fetches Open-Meteo weather forecast for Culemborg (51.9537, 5.2320),
@@ -232,6 +238,7 @@ def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
     wb_wind = None
     wb_solar = None
     wb_rh = None
+    ha_url, ha_tok = None, None
     try:
         ha_url, ha_tok = get_ha_client_config()
         if ha_tok and ha_url:
@@ -267,11 +274,24 @@ def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
     except Exception:
         pass
 
+    global _GLOBAL_WEATHER_FORECAST_CACHE
+    m_data = None
     try:
-        url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
+        geo_lat, geo_lon = get_geo_coordinates(load_json(CONFIG_FILE), ha_url, ha_tok)
+        url_m = f"https://api.open-meteo.com/v1/forecast?latitude={geo_lat}&longitude={geo_lon}&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
         req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
         with urllib.request.urlopen(req_m, timeout=5) as r_m:
             m_data = json.loads(r_m.read().decode())
+            _GLOBAL_WEATHER_FORECAST_CACHE = {"m_data": m_data, "ts": time.time()}
+    except Exception as e:
+        if _GLOBAL_WEATHER_FORECAST_CACHE.get("m_data"):
+            m_data = _GLOBAL_WEATHER_FORECAST_CACHE["m_data"]
+            print(f"[Open HEMS Weather] Externe weer-API niet bereikbaar ({e}); hergebruikt gecachte voorspelling.")
+        else:
+            print(f"Warning fetching anchored weather forecast: {e}")
+
+    if m_data and "hourly" in m_data:
+        try:
             h_times = m_data["hourly"]["time"]
             h_temps = m_data["hourly"]["temperature_2m"]
             h_rads = m_data["hourly"]["shortwave_radiation"]
@@ -307,8 +327,8 @@ def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
                 solar_map[k_t] = nudged_solar
                 wind_map[k_t] = nudged_wind
                 rh_map[k_t] = nudged_rh
-    except Exception as e:
-        print(f"Warning fetching anchored weather forecast: {e}")
+        except Exception as e_proc:
+            print(f"Warning processing cached/fresh weather forecast: {e_proc}")
 
     return temp_map, solar_map, wind_map, rh_map
 
@@ -1466,11 +1486,12 @@ def get_epex_tariffs_cached(is_15m: bool = True) -> Tuple[List[Dict[str, Any]], 
 
 
 _LAST_CANONICAL_PLAN_TIME = None
+_PLAN_LOCK = threading.Lock()
 
 def ensure_active_canonical_plan(force_refresh=False):
     """
     Ensures an authoritative, synchronized CanonicalDispatchPlan is cached in PlanStore.
-    Re-plans every 60 seconds or when explicitly forced.
+    Re-plans every 60 seconds or when explicitly forced. Thread-safe with double-checked locking.
     """
     global _LAST_CANONICAL_PLAN_TIME
     now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
@@ -1480,6 +1501,12 @@ def ensure_active_canonical_plan(force_refresh=False):
     if not force_refresh and current_plan is not None and _LAST_CANONICAL_PLAN_TIME is not None:
         if (now_ams - _LAST_CANONICAL_PLAN_TIME).total_seconds() < 60:
             return current_plan
+
+    with _PLAN_LOCK:
+        current_plan = store.get_plan()
+        if not force_refresh and current_plan is not None and _LAST_CANONICAL_PLAN_TIME is not None:
+            if (now_ams - _LAST_CANONICAL_PLAN_TIME).total_seconds() < 60:
+                return current_plan
 
     # 1. Fetch EPEX prices from dedicated 24h Day-Ahead cache
     raw_prices, _, _ = get_epex_tariffs_cached(is_15m=True)
@@ -1494,12 +1521,13 @@ def ensure_active_canonical_plan(force_refresh=False):
     s_cal = float(s_cfg.get("calibration_factor", 1.18))
     use_fs = s_cfg.get("forecast_provider", "forecast_solar") == "forecast_solar"
 
+    geo_lat, geo_lon = get_geo_coordinates(cfg)
     raw_solar = []
     if use_fs:
         try:
             from layer1_data_collection.forecast_solar import ForecastSolarProvider
             fs_prov = ForecastSolarProvider(
-                lat=51.9537, lon=5.2320, tilt=s_tilt,
+                lat=geo_lat, lon=geo_lon, tilt=s_tilt,
                 azimuth_deg_south=45.0,
                 kwp=s_kwp, inverter_max_kw=s_inv,
                 calibration_factor=s_cal
@@ -1514,7 +1542,7 @@ def ensure_active_canonical_plan(force_refresh=False):
 
     raw_weather = []
     try:
-        url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m&timezone=Europe%2FAmsterdam&forecast_days=2"
+        url_m = f"https://api.open-meteo.com/v1/forecast?latitude={geo_lat}&longitude={geo_lon}&hourly=temperature_2m,shortwave_radiation,wind_speed_10m&timezone=Europe%2FAmsterdam&forecast_days=2"
         req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
         with urllib.request.urlopen(req_m, timeout=5) as r_m:
             m_data = json.loads(r_m.read().decode())

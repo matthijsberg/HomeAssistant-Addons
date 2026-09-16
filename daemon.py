@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.95.1
+Version: 0.95.2
 Generic Energy Management Platform:
   - Multi-Vector Telemetry & Optimization Daemon
   - Domain Router Dispatch to api/routes_*.py
@@ -20,7 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -82,6 +82,20 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         if not path:
             path = "/"
         query_params = urllib.parse.parse_qs(parsed.query)
+
+        # 0. SRE Healthz & Liveness Probe
+        if path == "/healthz" or path == "/health":
+            now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
+            plan = ensure_active_canonical_plan()
+            self._send_json({
+                "status": "healthy",
+                "timestamp": now_ams.isoformat(),
+                "plan_slots": len(plan.slots) if plan else 0,
+                "plan_is_fresh": getattr(plan, "is_fresh", True) if plan else False,
+                "active_dhw_slots": sum(1 for s in plan.slots if s.dhw_kw > 0) if plan else 0,
+                "dynamic_peaks_count": len(plan.dynamic_peaks) if plan else 0
+            })
+            return
 
         # 1. Dispatch to modular domain routers
         if routes_analytics.handle_get(self, path, query_params):
@@ -767,7 +781,11 @@ def run_server(port=8099):
     GLOBAL_COLLECTOR = collector
     import api.context
     api.context.GLOBAL_COLLECTOR = collector
-    server = HTTPServer(("0.0.0.0", port), HemsApiHandler)
+    class HemsServer(ThreadingHTTPServer):
+        daemon_threads = True
+        allow_reuse_address = True
+
+    server = HemsServer(("0.0.0.0", port), HemsApiHandler)
     print(f"Open HEMS Framework Console running on port {port}...")
     server.serve_forever()
 

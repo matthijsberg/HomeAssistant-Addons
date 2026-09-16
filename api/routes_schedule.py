@@ -93,8 +93,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         s_eff = float(s_cfg.get("efficiency_factor", 0.88))
 
         try:
+            from layer1_data_collection.geo_location import get_geo_coordinates
+            geo_lat, geo_lon = get_geo_coordinates(cfg)
             from layer1_data_collection.forecast_solar import ForecastSolarProvider
-            fs_prov = ForecastSolarProvider(lat=51.9537, lon=5.2320, tilt=s_tilt, azimuth_deg_south=45.0, kwp=s_kwp, inverter_max_kw=s_inv, calibration_factor=s_cal)
+            fs_prov = ForecastSolarProvider(lat=geo_lat, lon=geo_lon, tilt=s_tilt, azimuth_deg_south=45.0, kwp=s_kwp, inverter_max_kw=s_inv, calibration_factor=s_cal)
             fs_slots = fs_prov.get_calibrated_quarter_slots(base_dt, horizon_slots=total_slots, step_mins=step_mins)
             for sl in fs_slots:
                 k_s = sl["dt"].strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
@@ -104,7 +106,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
         has_solar_chart = any(v > 0.05 for v in solar_map.values())
         try:
-            url_m = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
+            from layer1_data_collection.geo_location import get_geo_coordinates
+            geo_lat, geo_lon = get_geo_coordinates(cfg)
+            url_m = f"https://api.open-meteo.com/v1/forecast?latitude={geo_lat}&longitude={geo_lon}&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
             req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
             with urllib.request.urlopen(req_m, timeout=5) as r_m:
                 m_data = json.loads(r_m.read().decode())

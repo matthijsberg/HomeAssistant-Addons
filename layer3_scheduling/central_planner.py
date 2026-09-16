@@ -27,6 +27,7 @@ from models.canonical import (
 from layer1_data_collection.sanitizer import CleanTelemetryFrame
 from layer3_scheduling.plan_store import get_plan_store, PlanStore
 from layer3_scheduling.tariff_provider import TariffProvider
+from layer3_scheduling.dhw_specs import DhwTankSpec
 
 
 class CentralPlanner:
@@ -48,11 +49,14 @@ class CentralPlanner:
         tariffs: Optional[TariffProvider] = None,
         store: Optional[PlanStore] = None,
         past_continuous_lockout_mins: int = 0,
-        mins_since_last_lockout: int = 999
+        mins_since_last_lockout: int = 999,
+        dhw_spec: Optional[DhwTankSpec] = None
     ) -> CanonicalDispatchPlan:
         """
         Executes central optimization and returns the single authoritative CanonicalDispatchPlan.
         """
+        spec = dhw_spec or DhwTankSpec()
+        tp = tariffs or TariffProvider()
         now = frame.timestamp
         step_mins = frame.resolution_minutes
         slots = frame.slots
@@ -127,8 +131,8 @@ class CentralPlanner:
         # 3. DHW Boiler 350L Dispatch Engine
         # Physical daytime priority (10:00-16:00) vs night run
         cur_h = now.hour
-        is_night_time = (cur_h >= 20 or cur_h < 6)
-        has_daytime_ahead = (cur_h < 15 and not is_night_time)
+        is_night_time = (cur_h >= 21 or cur_h < 6)
+        has_daytime_ahead = (not is_night_time)
 
         day_solar_surplus = 0.0
         day_solar_slots = []
@@ -149,14 +153,14 @@ class CentralPlanner:
         # Priority 1: Morning comfort risk (<40°C) during night/evening -> Nachtverwarming (20:00 - 06:00)
         # Comfortzekerheid vóór 10:00u weegt zwaarder dan wachten op zon.
         if (morning_comfort_risk or current_dhw_temp <= 41.0) and is_night_time:
-            # 1. Thermal heat requirement to reach 50°C setpoint
+            # 1. Thermal heat requirement to reach target setpoint
             # Factor in estimated cooldown until night run (~1.5K)
             est_tank_temp = max(35.0, current_dhw_temp - 1.5)
-            delta_t = max(1.0, 50.0 - est_tank_temp)
-            th_need_kwh = delta_t * cls.DHW_THERMAL_CAPACITY_KWH_PER_K
+            delta_t = max(1.0, spec.target_setpoint_c - est_tank_temp)
+            th_need_kwh = delta_t * spec.thermal_capacity_kwh_per_k
 
-            # Daikin thermal capacity ~6.5 kW_th -> 1.625 kWh_th per 15-min slot
-            th_per_slot = 6.5 * step_hours
+            # Thermal capacity -> kWh_th per slot
+            th_per_slot = spec.thermal_output_kw * step_hours
             n_req_slots = max(2, min(8, math.ceil(th_need_kwh / th_per_slot)))
 
             # 2. Find morning peak start slot or first slot with hour >= 6
@@ -197,7 +201,7 @@ class CentralPlanner:
                     total_el_kwh += el_slot_kwh
 
                     p_in = s_k.price_all_in
-                    p_exp = max(0.0, (p_in / 1.21) - 0.11085 - 0.0121 - 0.00605)
+                    p_exp = tp.calculate_export_value_from_import(p_in)
                     surplus_kw = max(0.0, s_k.solar_kw - s_k.unallocated_kw)
                     surplus_kwh = surplus_kw * step_hours
                     self_kwh = min(el_slot_kwh, surplus_kwh)
@@ -205,10 +209,10 @@ class CentralPlanner:
 
                     total_window_cost_eur += (grid_kwh * p_in) + (self_kwh * p_exp)
 
-                # b. Standing loss from end of run until morning peak start (58.9W standby loss)
+                # b. Standing loss from end of run until morning peak start
                 mean_cop = sum(cops) / len(cops) if cops else 2.8
                 hours_until_morn = max(0.0, (morn_start_idx - end_idx) * step_hours)
-                extra_th_loss_kwh = hours_until_morn * cls.DHW_STANDBY_LOSS_KW
+                extra_th_loss_kwh = hours_until_morn * spec.standby_loss_50_kw
                 extra_el_loss_kwh = extra_th_loss_kwh / mean_cop
                 mean_price = sum(s_k.price_all_in for s_k in window_slots) / len(window_slots)
                 total_window_cost_eur += extra_el_loss_kwh * mean_price
@@ -219,9 +223,9 @@ class CentralPlanner:
                 candidate_windows.sort(key=lambda x: x[0])
                 best_cost, best_start, best_len, best_el, best_cop = candidate_windows[0]
                 planned_mode = "forced_night_50"
-                planned_mode_label = "Geforceerd aan (Nachtlading tot 50°C)"
-                sww_target_temp = 50.0
-                sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
+                planned_mode_label = f"Geforceerd aan (Nachtlading tot {spec.target_setpoint_c:.0f}°C)"
+                sww_target_temp = spec.target_setpoint_c
+                sww_power_kw = spec.heat_pump_electric_kw
                 planned_dhw_slots = list(range(best_start, best_start + best_len))
             else:
                 planned_mode = "normal"
@@ -238,7 +242,9 @@ class CentralPlanner:
                 dynamic_peaks=dynamic_peaks,
                 dhw_model=dhw_model,
                 now_dt=now,
-                step_hours=step_hours
+                step_hours=step_hours,
+                tariff_provider=tp,
+                tank_spec=spec
             )
             planned_mode = arbiter_res.planned_mode
             planned_mode_label = arbiter_res.planned_mode_label
@@ -382,8 +388,8 @@ class CentralPlanner:
         surplus_now = max(0.0, sol_now - unalloc_now)
         is_solar_surplus = (surplus_now >= 0.8)
 
-        spot_now = max(0.0, (p_now / 1.21) - 0.11085 - 0.0121)
-        export_now = max(0.0, spot_now - 0.00605)
+        spot_now = tp.calculate_spot_from_import(p_now)
+        export_now = tp.calculate_export_value_from_import(p_now)
 
         run_pwr = sww_power_kw or 2.4
         sol_used = min(run_pwr, surplus_now)

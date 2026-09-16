@@ -18,7 +18,7 @@ class TariffConfig:
     vat_rate: float = 0.21
     fixed_monthly_eur: float = 6.25
     net_metering_active: bool = True
-    feed_in_penalty_eur: float = 0.0  # e.g. terugleverkosten per kWh
+    feed_in_penalty_eur: float = 0.00605  # Terugleververgoeding aftrek / kosten
     export_fixed_markup_eur: float = 0.0
 
 
@@ -32,18 +32,38 @@ class TariffProvider:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "TariffProvider":
-        t_cfg = d.get("tariffs", d.get("tariff", {}))
+        # Support both dynamic_tariffs, tariffs, and tariff
+        t_cfg = d.get("dynamic_tariffs", d.get("tariffs", d.get("tariff", {})))
         return cls(
             TariffConfig(
-                supplier_markup_eur=float(t_cfg.get("supplier_markup_eur", 0.01210)),
-                energy_tax_eur=float(t_cfg.get("energy_tax_eur", 0.11085)),
+                supplier_markup_eur=float(t_cfg.get("fallback_markup_import", t_cfg.get("supplier_markup_eur", 0.01210))),
+                energy_tax_eur=float(t_cfg.get("fallback_tax_electricity", t_cfg.get("energy_tax_eur", 0.11085))),
                 vat_rate=float(t_cfg.get("vat_rate", 0.21)),
-                fixed_monthly_eur=float(t_cfg.get("fixed_monthly_eur", 6.25)),
+                fixed_monthly_eur=float(t_cfg.get("fallback_fixed_monthly_fee", t_cfg.get("fixed_monthly_eur", 6.25))),
                 net_metering_active=bool(t_cfg.get("net_metering_active", True)),
-                feed_in_penalty_eur=float(t_cfg.get("feed_in_penalty_eur", 0.0)),
+                feed_in_penalty_eur=float(t_cfg.get("feed_in_penalty_eur", 0.00605)),
                 export_fixed_markup_eur=float(t_cfg.get("export_fixed_markup_eur", 0.0))
             )
         )
+
+    def calculate_spot_from_import(self, price_all_in: float) -> float:
+        """
+        Derives raw EPEX spot price from an all-in consumer import price.
+        Formula: (price_all_in / (1 + vat)) - markup - energy_tax
+        """
+        vat_factor = 1.0 + self.config.vat_rate
+        spot = (price_all_in / vat_factor) - self.config.supplier_markup_eur - self.config.energy_tax_eur
+        return max(0.0, spot)
+
+    def calculate_export_value_from_import(self, price_all_in: float) -> float:
+        """
+        Calculates the net avoided feed-in price (opportunity cost of self-consuming solar)
+        directly from the current slot's all-in price.
+        Formula: max(0, spot - feed_in_penalty + export_markup)
+        """
+        spot = self.calculate_spot_from_import(price_all_in)
+        net_export = spot - self.config.feed_in_penalty_eur + self.config.export_fixed_markup_eur
+        return max(0.0, net_export)
 
     def calculate_import_price(self, spot_eur_per_kwh: float) -> float:
         """

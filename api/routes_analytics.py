@@ -494,7 +494,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             global _weather_history_cache
             if '_weather_history_cache' not in globals() or (time.time() - _weather_history_cache.get('ts', 0) > 3600):
                 try:
-                    om_url = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.232&hourly=temperature_2m,shortwave_radiation_instant&past_days=7&timezone=Europe%2FAmsterdam"
+                    from layer1_data_collection.geo_location import get_geo_coordinates
+                    geo_lat, geo_lon = get_geo_coordinates(cfg)
+                    om_url = f"https://api.open-meteo.com/v1/forecast?latitude={geo_lat}&longitude={geo_lon}&hourly=temperature_2m,shortwave_radiation_instant&past_days=7&timezone=Europe%2FAmsterdam"
                     with urllib.request.urlopen(om_url, timeout=6) as r_om:
                         om_data = json.loads(r_om.read().decode())
                         h_data = om_data.get("hourly", {})
