@@ -10,7 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.93.0] — 2026-09-15 (Architectural Decoupling: Phase 1 Frontend Extraction to web/index.html)
+## [0.94.0] — 2026-09-15 (Architectural Decoupling: Phase 2 Modular Domain API Routers)
+
+### Architecture & Modularization
+- **Modular Domain Routers:** Decoupled 3,000+ lines of monolithic `if path == ...` routing in `daemon.py` into 4 dedicated domain routers under `api/`:
+  - `api/routes_analytics.py`: Real-time energy telemetry, day-ahead electricity prices, power producers, DHW history, decisions audit, and validation overlay.
+  - `api/routes_model.py`: 2R1C space heating thermal trajectories, 350L DHW status, parameter recommendations (GET/POST), retraining, model decomposition, and unallocated baseline.
+  - `api/routes_schedule.py`: 24h rolling dispatch chart data, control status, policies CRUD, exclusion windows, and optimizer recalculation triggers.
+  - `api/routes_system.py`: Single Source of Truth health checks, OpenAPI schema, external providers, device/tariff CRUD, and multi-broker infrastructure connectivity.
+- **Shared Service Context:** Extracted pure helper functions and plan generation to `api/context.py`, eliminating circular dependencies.
+- **Drastic Monolith Shrinkage:** `daemon.py` shrunk from **14,561 lines down to 2,410 lines (-83.4% overall)**, focusing solely on server bootstrap, MQTT subscriptions, and background data collection.
+- **Purity Guardrail Extension:** Updated `tests/architecture/test_ast_handler_purity.py` to continuously verify Dumb View invariants across the new router modules.
+
+---
 
 ### Architecture
 - **Frontend Decoupling:** Extracted 9,195 lines of raw HTML, Tailwind CSS, and JavaScript from `daemon.py` into a dedicated, clean `web/index.html` static asset directory.
