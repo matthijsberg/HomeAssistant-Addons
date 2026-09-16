@@ -95,6 +95,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "thermostat_active": t_active,
             "thermostat_status_label": t_status
         })
+        return True
+
     if path.startswith("/api/model/dhw-status"):
         qp = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
         res_mode = qp.get("resolution", ["15m"])[0]

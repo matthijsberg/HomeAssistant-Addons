@@ -151,7 +151,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
     if path == "/api/openapi.json":
         try:
-            openapi_path = os.path.join(os.path.dirname(__file__), "docs", "openapi.json")
+            openapi_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs", "openapi.json")
             if os.path.exists(openapi_path):
                 with open(openapi_path, "r", encoding="utf-8") as f:
                     spec = json.load(f)

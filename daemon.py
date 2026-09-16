@@ -34,9 +34,11 @@ import threading
 import math
 from typing import Optional, Dict, Any, List, Tuple
 
+ROOT_DIR = str(Path(__file__).resolve().parent)
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 try:
-    sys.path.insert(0, "/config/projects/energy-scheduler")
-    sys.path.insert(0, str(Path(__file__).parent))
     from layer2_calibration.learned_forecaster import HybridForecastingModel
     from layer2_calibration.dhw_thermal_model import DhwThermalModel
     from layer1_data_collection.sanitizer import TelemetrySanitizer, CleanTelemetryFrame
@@ -341,7 +343,7 @@ def get_secret(domain: str, conn_id: str, default: str = "") -> str:
     return sec.get(domain, {}).get(conn_id, default)
 
 
-sys.path.insert(0, "/config/projects/energy-scheduler")
+# Ensure module imports prioritize local add-on packages
 sys.path.insert(0, "/config/lib")
 
 

@@ -471,7 +471,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
             # 1. Query InfluxDB for actuals
             q_telemetry = f"""
-            SELECT mean("solar_w") as solar, mean("total_house_w") as house, mean("unallocated_w") as unalloc, mean("heatpump_w") as hp
+            SELECT mean("solar_w") as solar, mean("total_house_w") as house, mean("unallocated_w") as unalloc, mean("heatpump_w") as hp, mean("temperature_c") as tank_temp
             FROM "energy_telemetry" 
             WHERE time >= '{t_start}' AND time <= '{t_end}'
             GROUP BY time({bucket_sz}) fill(linear);
@@ -529,52 +529,16 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             act_cv, pred_cv = [], []
             act_total, pred_total = [], []
 
-            # Pre-calculate realistic DHW planned dispatch schedule
-            # A 350L tank requires only ~45-75 min to recharge (3 slots @ 1.8kW night, 4-5 slots @ 2.4kW day).
-            dhw_planned_map = {}
-            date_slot_map = {}
-            for idx, p in enumerate(gen_pts):
-                ts_str = p[0]
-                dt_ams = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
-                d_key = dt_ams.date()
-                if d_key not in date_slot_map:
-                    date_slot_map[d_key] = []
-                date_slot_map[d_key].append((idx, dt_ams))
-
-            for d_key, day_indices in date_slot_map.items():
-                # 1. Daytime solar run: 4-5 contiguous slots (60-75 min @ 2.4 kW) around peak sun
-                solar_candidates = [
-                    (idx, dt_ams) for (idx, dt_ams) in day_indices
-                    if 10 <= dt_ams.hour <= 14
-                ]
-                if len(solar_candidates) >= 4:
-                    best_s_sum = -1.0
-                    best_s_start = 0
-                    n_solar_slots = 4
-                    for s_i in range(len(solar_candidates) - (n_solar_slots - 1)):
-                        cur_sum = sum(
-                            calculate_poa_solar_kw(
-                                solar_candidates[s_i + k][1],
-                                rad_map.get(solar_candidates[s_i + k][1].strftime("%Y-%m-%dT%H:00"), 0.0),
-                                kwp=kwp, tilt_deg=tilt, azimuth_deg=azimuth, inverter_limit_kw=inv_max_w/1000.0, eff=eff
-                            ) for k in range(n_solar_slots)
-                        )
-                        if cur_sum > best_s_sum:
-                            best_s_sum = cur_sum
-                            best_s_start = s_i
-                    if best_s_sum >= 3.0:
-                        for k in range(n_solar_slots):
-                            dhw_planned_map[solar_candidates[best_s_start + k][0]] = 2.4
-
-                # 2. Night valley top-up: 3 contiguous slots (45 min @ 1.8 kW) around 04:00 - 05:00
-                night_candidates = [
-                    (idx, dt_ams) for (idx, dt_ams) in day_indices
-                    if (3 <= dt_ams.hour <= 4) or (dt_ams.hour == 5 and dt_ams.minute <= 15)
-                ]
-                if len(night_candidates) >= 3:
-                    n_start = max(0, len(night_candidates) - 4)
-                    for k in range(min(3, len(night_candidates) - n_start)):
-                        dhw_planned_map[night_candidates[n_start + k][0]] = 1.8
+            # Retrieve active CanonicalDispatchPlan for authoritative lockstep forward alignment
+            active_plan = ensure_active_canonical_plan()
+            plan_slot_map = {}
+            if active_plan and active_plan.slots:
+                for s in active_plan.slots:
+                    try:
+                        s_dt = datetime.fromisoformat(s.dt_iso).astimezone(AMS_TZ)
+                        plan_slot_map[(s_dt.date(), s_dt.hour, (s_dt.minute // 15) * 15)] = s
+                    except Exception:
+                        pass
 
             prev_dt = None
             for i, p in enumerate(gen_pts):
@@ -612,20 +576,31 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 q_idx = dt_ams.hour * 4 + dt_ams.minute // 15
                 p_unalloc_kw = (grid_96[dow][q_idx] if (grid_96 and len(grid_96) > dow and len(grid_96[dow]) > q_idx) else 300.0) / 1000.0
 
-                # DHW Run Model:
-                # Option A: Geplande Warmtepomp Sturing (DHW Planned Dispatch in kW_el)
-                p_dhw_kw = dhw_planned_map.get(i, 0.0)
+                # DHW & CV Lockstep Predictions
+                slot_key = (dt_ams.date(), dt_ams.hour, (dt_ams.minute // 15) * 15)
+                tank_t = p[5] if len(p) > 5 and p[5] is not None else 50.0
+
+                if slot_key in plan_slot_map:
+                    p_dhw_kw = plan_slot_map[slot_key].dhw_kw
+                    p_cv_kw = plan_slot_map[slot_key].heating_kw
+                else:
+                    # Historical lockstep:
+                    # Night (20:00 - 06:00): only if tank dropped < 40C
+                    # Day (10:00 - 15:00): only if tank < 48C or (48 <= tank < 53 with solar surplus >= 3.0 kWh)
+                    p_dhw_kw = 0.0
+                    p_cv_kw = 0.0
+
                 pred_dhw.append(p_dhw_kw)
 
                 # Option B: Fysische Warmtevraag (Thermal draw-off in kW_th)
                 p_dhw_dem_kw = round((GLOBAL_DHW_MODEL.get_learned_tap_kwh_th(dow, q_idx) if GLOBAL_DHW_MODEL else 0.03) * 4.0, 3)
                 pred_dhw_demand.append(p_dhw_dem_kw)
 
-                # CV Heating Model: Space heating was turned off in current conditions
-                pred_cv.append(0.0)
+                # CV Heating Model
+                pred_cv.append(p_cv_kw)
 
-                # Total House Prediction
-                pred_total.append(round(p_unalloc_kw + p_dhw_kw, 3))
+                # Total House Prediction (in exact lockstep with DHW and CV models)
+                pred_total.append(round(p_unalloc_kw + p_dhw_kw + p_cv_kw, 3))
 
             def compute_kpis(actual_list, pred_list, peak_cap_kw: float = 5.0):
                 if not actual_list or not pred_list:
@@ -742,6 +717,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             except Exception:
                 pass
 
+            prev_t_raw = None
+            c_vat_kwh_per_k = 0.407  # 350L * 4.184 kJ/(kg*K) / 3600
+            q_standby_kw = 0.055     # ~55W standby thermal loss
+
             for ts_str in sorted_ts:
                 dt_ams = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
                 if prev_dt is not None and dt_ams.day != prev_dt.day:
@@ -755,11 +734,27 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 t_val = t_map.get(ts_str)
                 if t_val is not None:
                     last_t = round(float(t_val), 1)
+                    cur_t_raw = float(t_val)
+                else:
+                    cur_t_raw = last_t
                 temps.append(last_t)
 
                 kwh_el = float(d_map.get(ts_str) or 0.0)
-                kwh_th = round(kwh_el * 2.6, 2) if kwh_el > 0 else 0.0
-                demands_kwh_th.append(kwh_th)
+                th_in = kwh_el * 2.6
+                q_standby = q_standby_kw * interval_h
+
+                if prev_t_raw is not None and cur_t_raw is not None:
+                    delta_e = c_vat_kwh_per_k * (cur_t_raw - prev_t_raw)
+                    # First Law of Thermodynamics: Q_tap = Q_in - Q_standby - Delta E_tank
+                    q_tap = th_in - q_standby - delta_e
+                    q_tap = max(0.0, round(q_tap, 2))
+                    if q_tap < 0.05:
+                        q_tap = 0.0
+                else:
+                    q_tap = 0.0
+
+                prev_t_raw = cur_t_raw
+                demands_kwh_th.append(q_tap)
 
             handler._send_json({
                 "status": "success",
