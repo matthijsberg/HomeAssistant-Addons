@@ -2334,12 +2334,10 @@
                     let maxAbsKwCostChart = Math.max(...netKw.map(Math.abs), 2.0);
                     maxAbsKwCostChart = Math.ceil(maxAbsKwCostChart * 2) / 2;
 
-                    let maxAbsCost = Math.max(...netCostEurArr.map(Math.abs), 0.20);
-                    maxAbsCost = Math.ceil(maxAbsCost * 10) / 10;
-                    if (maxAbsCost < 0.25) maxAbsCost = 0.25;
-
+                    let maxAbsCost = Math.max(...netCostEurArr.map(Math.abs), 0.10);
                     let maxAbsPrice = Math.max(...pricesArr.map(Math.abs), ...exportPricesArr.map(Math.abs), 0.30);
-                    maxAbsPrice = Math.ceil(maxAbsPrice * 10) / 10;
+                    let maxUnifiedEur = Math.max(maxAbsCost, maxAbsPrice, 0.40);
+                    maxUnifiedEur = Math.ceil(maxUnifiedEur * 10) / 10;
 
                     const costConfig = {
                         type: 'bar',
@@ -2354,7 +2352,7 @@
                                     borderColor: '#D97706',
                                     borderWidth: 1,
                                     borderRadius: 3,
-                                    yAxisID: 'yCost',
+                                    yAxisID: 'yEur',
                                     order: 4
                                 },
                                 {
@@ -2381,7 +2379,7 @@
                                     pointRadius: 0,
                                     pointHoverRadius: 4,
                                     tension: 0,
-                                    yAxisID: 'yPrice',
+                                    yAxisID: 'yEur',
                                     order: 2
                                 },
                                 {
@@ -2395,7 +2393,7 @@
                                     pointRadius: 0,
                                     pointHoverRadius: 4,
                                     tension: 0,
-                                    yAxisID: 'yPrice',
+                                    yAxisID: 'yEur',
                                     order: 3
                                 }
                             ]
@@ -2441,45 +2439,25 @@
                                         }
                                     }
                                 },
-                                yCost: {
+                                yEur: {
                                     type: 'linear',
                                     position: 'right',
                                     display: true,
-                                    min: -maxAbsCost,
-                                    max: maxAbsCost,
+                                    min: -maxUnifiedEur,
+                                    max: maxUnifiedEur,
                                     title: {
                                         display: true,
-                                        text: 'Netto Kosten (€)',
-                                        color: '#F59E0B',
+                                        text: window.OpenHEMSi18n ? window.OpenHEMSi18n.t('charts.tariffs_and_costs', 'Tarieven & Kosten (€)') : 'Tarieven & Kosten (€)',
+                                        color: '#38BDF8',
                                         font: { family: 'monospace', size: 10, weight: 'bold' }
                                     },
                                     grid: { drawOnChartArea: false },
                                     ticks: {
-                                        color: '#F59E0B',
+                                        color: '#38BDF8',
                                         font: { family: 'monospace', size: 10 },
                                         callback: function(val) {
-                                            return (val >= 0 ? '+€' : '-€') + Math.abs(val).toFixed(2);
-                                        }
-                                    }
-                                },
-                                yPrice: {
-                                    type: 'linear',
-                                    position: 'right',
-                                    display: true,
-                                    min: -maxAbsPrice,
-                                    max: maxAbsPrice,
-                                    title: {
-                                        display: true,
-                                        text: 'EPEX Tarieven (€/kWh)',
-                                        color: '#06B6D4',
-                                        font: { family: 'monospace', size: 10, weight: 'bold' }
-                                    },
-                                    grid: { drawOnChartArea: false },
-                                    ticks: {
-                                        color: '#06B6D4',
-                                        font: { family: 'monospace', size: 10 },
-                                        callback: function(val) {
-                                            return val >= 0 ? '€' + Number(val).toFixed(2) : '';
+                                            if (val === 0) return '€0.00';
+                                            return (val > 0 ? '+€' : '-€') + Math.abs(val).toFixed(2);
                                         }
                                     }
                                 }
@@ -4166,9 +4144,10 @@
                     }
 
                     // Symmetrical bounds
-                    let maxAbsCost = Math.max(...histNetCostEurArr.map(Math.abs), 0.20);
-                    maxAbsCost = Math.ceil(maxAbsCost * 10) / 10;
-                    if (maxAbsCost < 0.25) maxAbsCost = 0.25;
+                    let maxAbsCost = Math.max(...histNetCostEurArr.map(Math.abs), 0.10);
+                    let maxAbsPrice = Math.max(...histPrices.map(Math.abs), ...histExportPrices.map(Math.abs), 0.30);
+                    let maxUnifiedEur = Math.max(maxAbsCost, maxAbsPrice, 0.40);
+                    maxUnifiedEur = Math.ceil(maxUnifiedEur * 10) / 10;
 
                     const costHistConfig = {
                         type: 'bar',
@@ -4183,7 +4162,7 @@
                                     borderColor: '#D97706',
                                     borderWidth: 1,
                                     borderRadius: 3,
-                                    yAxisID: 'yCost',
+                                    yAxisID: 'yEur',
                                     order: 4
                                 },
                                 {
@@ -4210,7 +4189,7 @@
                                     pointRadius: 0,
                                     pointHoverRadius: 4,
                                     tension: 0,
-                                    yAxisID: 'yPrice',
+                                    yAxisID: 'yEur',
                                     order: 2
                                 },
                                 {
@@ -4224,7 +4203,7 @@
                                     pointRadius: 0,
                                     pointHoverRadius: 4,
                                     tension: 0,
-                                    yAxisID: 'yPrice',
+                                    yAxisID: 'yEur',
                                     order: 3
                                 }
                             ]
@@ -4270,45 +4249,25 @@
                                         }
                                     }
                                 },
-                                yCost: {
+                                yEur: {
                                     type: 'linear',
                                     position: 'right',
                                     display: true,
-                                    min: -maxAbsCost,
-                                    max: maxAbsCost,
+                                    min: -maxUnifiedEur,
+                                    max: maxUnifiedEur,
                                     title: {
                                         display: true,
-                                        text: 'Netto Kosten (€)',
-                                        color: '#F59E0B',
+                                        text: window.OpenHEMSi18n ? window.OpenHEMSi18n.t('charts.tariffs_and_costs', 'Tarieven & Kosten (€)') : 'Tarieven & Kosten (€)',
+                                        color: '#38BDF8',
                                         font: { family: 'monospace', size: 10, weight: 'bold' }
                                     },
                                     grid: { drawOnChartArea: false },
                                     ticks: {
-                                        color: '#F59E0B',
+                                        color: '#38BDF8',
                                         font: { family: 'monospace', size: 10 },
                                         callback: function(val) {
-                                            return (val >= 0 ? '+€' : '-€') + Math.abs(val).toFixed(2);
-                                        }
-                                    }
-                                },
-                                yPrice: {
-                                    type: 'linear',
-                                    position: 'right',
-                                    display: true,
-                                    min: -maxAbsPrice,
-                                    max: maxAbsPrice,
-                                    title: {
-                                        display: true,
-                                        text: 'EPEX Tarieven (€/kWh)',
-                                        color: '#06B6D4',
-                                        font: { family: 'monospace', size: 10, weight: 'bold' }
-                                    },
-                                    grid: { drawOnChartArea: false },
-                                    ticks: {
-                                        color: '#06B6D4',
-                                        font: { family: 'monospace', size: 10 },
-                                        callback: function(val) {
-                                            return val >= 0 ? '€' + Number(val).toFixed(2) : '';
+                                            if (val === 0) return '€0.00';
+                                            return (val > 0 ? '+€' : '-€') + Math.abs(val).toFixed(2);
                                         }
                                     }
                                 }

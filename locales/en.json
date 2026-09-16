@@ -59,7 +59,8 @@
     "solar_kw": "Solar Generation (kW)",
     "net_power_kw": "Net Power (kW)",
     "price_eur": "EPEX Buy (€/kWh)",
-    "export_price_eur": "EPEX Feed-In (€/kWh)"
+    "export_price_eur": "EPEX Feed-In (€/kWh)",
+    "tariffs_and_costs": "Tariffs & Costs (€)"
   },
   "kpi": {
     "costs_24h": "Costs (24h)",

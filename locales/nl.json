@@ -59,7 +59,8 @@
     "solar_kw": "Zonne-energie (kW)",
     "net_power_kw": "Netto Vermogen (kW)",
     "price_eur": "EPEX Inkoop (€/kWh)",
-    "export_price_eur": "EPEX Teruglevering (€/kWh)"
+    "export_price_eur": "EPEX Teruglevering (€/kWh)",
+    "tariffs_and_costs": "Tarieven & Kosten (€)"
   },
   "kpi": {
     "costs_24h": "Kosten (24u)",
