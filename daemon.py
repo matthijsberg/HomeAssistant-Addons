@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.95.4
+Version: 0.95.5
 Generic Energy Management Platform:
   - Multi-Vector Telemetry & Optimization Daemon
   - Domain Router Dispatch to api/routes_*.py
@@ -12,6 +12,7 @@ Generic Energy Management Platform:
 import argparse
 import json
 import os
+import socket
 import ssl
 import sys
 import threading
@@ -31,6 +32,8 @@ if str(ROOT_DIR) not in sys.path:
 
 from api import routes_analytics, routes_model, routes_schedule, routes_system
 from models.canonical import normalize_power_reading
+from site_adapters.daikin_p1p2 import DaikinP1P2StateClassifier
+from layer3_scheduling.decision_audit import DecisionAuditLogger
 from api.context import (
     AMS_TZ, CONFIG_FILE, DUTCH_DAYS_SHORT, GLOBAL_COLLECTOR, GLOBAL_DHW_MODEL,
     GLOBAL_MODEL, INDEX_HTML_PATH, PARAMS_FILE, SECRETS_FILE, WEB_DIR,
