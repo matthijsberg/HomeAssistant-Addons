@@ -76,6 +76,11 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         today_str = now_ams.strftime("%d-%m-%Y")
         tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
 
+        total_slots = 96 if is_15m else 24
+        step_mins = 15 if is_15m else 60
+        start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
+        base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
+
         # 1. Fetch EPEX prices from dedicated Day-Ahead cache
         _, prices_map, map_base = get_epex_tariffs_cached(is_15m=is_15m)
 
@@ -135,11 +140,6 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
         # Interpolate Open-Meteo Hourly Solar to 15-minute quarters
         # Build continuous solar map and temp map per 15-minute slot
-        total_slots = 96 if is_15m else 24
-        step_mins = 15 if is_15m else 60
-        start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
-        base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
-
         labels = []
         prices = []
         export_prices = []
@@ -272,53 +272,14 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         # Fully Dynamic Price Peak Detection across Timeline (no static clock times)
         dynamic_peaks, slot_lockout_map = detect_dynamic_price_peaks(timeline_items, step_mins=step_mins)
 
-        # 2-Mass Floor Heating Dynamic Simulation for Central Plan
-        t_plan_in = indoor_temp_c
-        t_plan_fl = indoor_temp_c + 0.2
-        plan_t_start = plan_t_set - 0.5
-        c_floor = 4.5
-        c_air = 6.0
-        u_fl_air = 1.2
-        step_h = 0.25 if is_15m else 1.0
-        plan_hp_running = False
-
-        for it in timeline_items:
-            i = it["idx"]
-            t_out = it["temp"]
-            wnd = it.get("wind", 3.0)
-            sol = it["solar"] * 1000.0 / 5.5  # Solar W/m2
-
-            # Dynamic Lockout Check: locked only if slot falls in a detected HARD_LOCKOUT peak
-            peak_info = slot_lockout_map.get(i)
-            in_peak_lockout = bool(peak_info and peak_info.get("is_hard_lockout"))
-            emergency_guard = (t_plan_in < 18.5)
-
-            if plan_thermostat_active and not plan_hp_running and (t_plan_in <= plan_t_start):
-                if not in_peak_lockout or emergency_guard:
-                    plan_hp_running = True
-            elif plan_hp_running and (not plan_thermostat_active or t_plan_in >= plan_t_set or (in_peak_lockout and not emergency_guard)):
-                plan_hp_running = False
-
-            if plan_hp_running:
-                p_el_w = max(950.0, min(4200.0, 2885.6 - 95.2 * t_out))
-                cop_val = max(2.5, min(5.5, 5.2 - 0.08 * (35.0 - t_out)))
-                th_kw = (p_el_w * cop_val) / 1000.0
-                heating[i] = round((p_el_w / 1000.0) * step_h, 2)
+        # 4. Space Heating Generation from Authoritative Canonical Plan (Single Source of Truth - Dumb Views Invariant)
+        for i in range(min(total_slots, len(plan.slots))):
+            if is_15m:
+                heating[i] = plan.slots[i].heating_kw
             else:
-                th_kw = 0.0
-                heating[i] = 0.0
-
-            # State integration
-            ua_eff = (321.1 + 15.0 * max(0.0, wnd - 2.0)) / 1000.0
-            q_loss_kw = ua_eff * max(0.0, t_plan_in - t_out)
-            q_solar_kw = (0.12 * sol * 25.0) / 1000.0
-            q_fl_air_kw = u_fl_air * (t_plan_fl - t_plan_in)
-
-            dt_fl = ((th_kw - q_fl_air_kw) * step_h) / c_floor
-            dt_in = ((q_fl_air_kw + q_solar_kw - q_loss_kw) * step_h) / c_air
-
-            t_plan_fl = t_plan_fl + dt_fl
-            t_plan_in = max(15.0, min(26.0, t_plan_in + dt_in))
+                idx_15m = i * 4
+                h_kw = sum(plan.slots[k].heating_kw for k in range(idx_15m, min(len(plan.slots), idx_15m + 4))) / 4.0
+                heating[i] = round(h_kw, 2)
 
         # 5. Hot Water Generation (SWW Boiler 350L) from Authoritative Canonical Plan (Single Source of Truth)
         sww_power_kw = plan.dhw_summary.power_kw if plan.dhw_summary else 1.8
