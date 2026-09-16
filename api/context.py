@@ -66,7 +66,7 @@ PARAMS_FILE = Path("/config/heatpump_model_parameters.json")
 CACHE_FILE = Path("/config/data/energy_feed_cache.json")
 HA_API_CONFIG = Path("/config/.ha_api_config.json")
 SECRETS_FILE = Path("/config/open_hems_secrets.json")
-WEB_DIR = Path(__file__).parent / "web"
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 INDEX_HTML_PATH = WEB_DIR / "index.html"
 
 

@@ -142,7 +142,8 @@ class DecisionAuditLogger:
 
                 pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
                 if pwd:
-                    q = f'SELECT * FROM "hems_decisions" ORDER BY time DESC LIMIT {limit}; SELECT * FROM "hems_annotations" ORDER BY time DESC LIMIT {limit};'
+                    safe_limit = min(500, max(1, int(limit)))
+                    q = f'SELECT * FROM "hems_decisions" ORDER BY time DESC LIMIT {safe_limit}; SELECT * FROM "hems_annotations" ORDER BY time DESC LIMIT {safe_limit};'
                     url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
                     with urllib.request.urlopen(url, timeout=3) as resp:
                         res = json.loads(resp.read().decode())

@@ -574,11 +574,17 @@ def handle_post(handler, path: str, body: dict) -> bool:
         updated = False
         conns = cfg.setdefault("mqtt_connections", [])
         conn_obj = None
+
+        # Securely vault password in private credentials store
+        if body.get("password") and body.get("password") != "••••••••":
+            save_secret("mqtt", conn_id, body["password"])
+
         for c in conns:
             if c["id"] == conn_id:
-                for k in ["name", "type", "host", "port", "username", "password", "base_topic", "client_id", "tls", "enabled", "is_default"]:
+                for k in ["name", "type", "host", "port", "username", "base_topic", "client_id", "tls", "enabled", "is_default"]:
                     if k in body:
                         c[k] = int(body[k]) if k == "port" else body[k]
+                c.pop("password", None)
                 updated = True
                 conn_obj = c
                 break
@@ -590,7 +596,6 @@ def handle_post(handler, path: str, body: dict) -> bool:
                 "host": body.get("host", "localhost"),
                 "port": int(body.get("port", 1883)),
                 "username": body.get("username", ""),
-                "password": body.get("password", ""),
                 "base_topic": body.get("base_topic", "openhems"),
                 "client_id": body.get("client_id", "open-hems-collector"),
                 "tls": bool(body.get("tls", False)),
@@ -603,7 +608,12 @@ def handle_post(handler, path: str, body: dict) -> bool:
             cfg["mqtt"] = conn_obj
 
         save_json(CONFIG_FILE, cfg)
-        handler._send_json({"status": "saved", "connection": conn_obj})
+
+        # Return sanitized connection object without plaintext credentials
+        resp_obj = dict(conn_obj)
+        resp_obj["password"] = "••••••••" if (get_secret("mqtt", conn_id) or body.get("password")) else ""
+        resp_obj["has_password"] = bool(resp_obj["password"])
+        handler._send_json({"status": "saved", "connection": resp_obj})
         return True
 
     # INFRASTRUCTURE: Write Test Telemetry Line to InfluxDB

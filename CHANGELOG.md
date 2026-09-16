@@ -10,7 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.95.0] — 2026-09-15 (Architectural Decoupling: Domain Centralization & Frontend Modularization)
+## [0.95.1] — 2026-09-15 (Security Audit & Vulnerability Remediation)
+
+### Security Hardening
+- **Subprocess Command Elimination:** Removed external shell subprocess execution in `/api/schedule/recalculate`; replaced with safe in-process `ensure_active_canonical_plan(force_refresh=True)`.
+- **MQTT Credential Vaulting:** Implemented secure vaulting for MQTT passwords into `open_hems_secrets.json` (0600 permissions); stripped plaintext credentials from public `heatpump_config.json` and masked in API JSON responses with `••••••••`.
+- **Strict Path Traversal Protection:** Hardened static file resolution in `daemon.py` using Python 3.9+ `file_path.is_relative_to(WEB_DIR.resolve())` to prevent path traversal prefix bypasses.
+- **InfluxQL DoS Clamping:** Clamped user `limit` parameters to `min(500, max(1, limit))` in decision audit queries to prevent memory exhaustion.
 
 ### Architectural Refactor & Single Source of Truth (Invariant 1)
 - **Centralized Decision Contracts:** Moved all financial and trajectory decision evaluation out of HTTP router handlers into `CentralPlanner.plan()` and `DHWPlanSummary.decision_details`. Zero ad-hoc financial calculations or tariff multiplications in routers.

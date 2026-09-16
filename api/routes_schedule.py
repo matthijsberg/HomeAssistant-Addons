@@ -800,12 +800,13 @@ def handle_post(handler, path: str, body: dict) -> bool:
 
     if path == "/api/schedule/recalculate":
         try:
-            import subprocess
-            cmd = ["python3", "/config/projects/energy-scheduler/runners/run_daily_optimizer.py"]
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            fresh_plan = ensure_active_canonical_plan(force_refresh=True)
             handler._send_json({
-                "status": "success" if res.returncode == 0 else "error",
-                "output": res.stdout[-1000:]
+                "status": "success",
+                "message": "Dispatch schema succesvol herberekend via centrale PlanStore",
+                "generated_at": fresh_plan.generated_at,
+                "slots_count": len(fresh_plan.slots),
+                "planned_mode": fresh_plan.dhw_summary.planned_mode if fresh_plan.dhw_summary else "normal"
             })
         except Exception as e:
             handler._send_json({"status": "failed", "error": str(e)}, 500)
