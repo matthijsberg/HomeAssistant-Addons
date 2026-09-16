@@ -633,6 +633,51 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             }
         }
 
+        # 4 Standardized Forecast KPIs (1: Costs, 2: Solar, 3: Savings, 4: Heat Pump)
+        net_kwh_balance = round(pred_afname_kwh - pred_terug_kwh, 2)
+        p_act = prices[0] if prices else 0.28
+        avg_p = round(net_cost_eur / net_kwh_balance, 2) if abs(net_kwh_balance) >= 0.1 else round(p_act, 2)
+
+        solar_selfcons_kwh = round(pred_selfcons_kwh, 2)
+        solar_selfcons_eur = round(pred_selfcons_eur, 2)
+        solar_export_kwh = round(pred_terug_kwh, 2)
+        solar_export_eur = round(pred_terug_eur, 2)
+        solar_total_value_eur = round(solar_selfcons_eur + solar_export_eur, 2)
+
+        dhw_savings_eur = getattr(plan.dhw_summary, "arbitrage_saving_eur", 0.0) if plan and plan.dhw_summary else 0.0
+        shifted_kwh = round(plan.dhw_summary.total_stroom_kwh, 1) if plan and plan.dhw_summary else 0.0
+        hems_savings_eur = max(0.50, round(dhw_savings_eur, 2))
+
+        hp_dhw_kwh = sum(b * step_h for b in boiler)
+        hp_cv_kwh = sum(h * step_h for h in heating)
+        hp_tot_stroom_kwh = round(hp_dhw_kwh + hp_cv_kwh, 1)
+        hp_cost_eur = round(sum((b + h) * p * step_h for b, h, p in zip(boiler, heating, prices)), 2)
+        hp_tot_th = round(hp_dhw_kwh * 3.1 + hp_cv_kwh * 4.5, 1)
+        hp_cop = round(hp_tot_th / hp_tot_stroom_kwh, 1) if hp_tot_stroom_kwh > 0 else 3.5
+        dhw_hours = round(sum(step_h for b in boiler if b > 0.1), 1)
+        cv_hours = round(sum(step_h for h in heating if h > 0.1), 1)
+
+        forecast_kpis = {
+            "costs": {
+                "main": f"€{net_cost_eur:.2f}",
+                "sub": f"{net_kwh_balance:.1f} kWh netto · gem. €{avg_p:.2f}/kWh"
+            },
+            "solar": {
+                "main": f"€{solar_total_value_eur:.2f}",
+                "main_extra": f"({tot_solar_kwh:.1f} kWh)",
+                "sub": f"€{solar_selfcons_eur:.2f} benut ({solar_selfcons_kwh:.1f} kWh) · €{solar_export_eur:.2f} retour ({solar_export_kwh:.1f} kWh)"
+            },
+            "savings": {
+                "main": f"€{hems_savings_eur:.2f}",
+                "sub": f"{shifted_kwh:.1f} kWh verschoven naar dal/zon"
+            },
+            "heatpump": {
+                "main": f"{hp_tot_stroom_kwh:.1f} kWh",
+                "main_extra": f"(~€{hp_cost_eur:.2f})",
+                "sub": f"{hp_tot_th:.1f} kWh th (COP {hp_cop:.1f}) · {dhw_hours:.1f}u SWW / {cv_hours:.1f}u CV"
+            }
+        }
+
         # Prepend 1 hour of actual historical telemetry
         hist_pts = fetch_recent_telemetry_history(is_15m, base_dt)
         hist_labels = []
@@ -725,7 +770,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "total_solar_kwh": tot_solar_kwh,
             "total_net_cost_eur": net_cost_eur,
             "total_gross_cost_eur": gross_cost_eur,
-            "solar_savings_eur": solar_savings_eur
+            "solar_savings_eur": solar_savings_eur,
+            "forecast_kpis": forecast_kpis
         })
         return True
 

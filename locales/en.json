@@ -60,5 +60,22 @@
     "net_power_kw": "Net Power (kW)",
     "price_eur": "EPEX Buy (€/kWh)",
     "export_price_eur": "EPEX Feed-In (€/kWh)"
+  },
+  "kpi": {
+    "costs_24h": "Costs (24h)",
+    "solar_panels": "Solar Panels",
+    "hems_savings": "HEMS Savings",
+    "heatpump": "Heat Pump",
+    "costs_today": "Costs Today",
+    "solar_today": "Solar Today",
+    "savings_today": "Savings Today",
+    "heatpump_today": "Heat Pump Today",
+    "net": "net",
+    "avg": "avg.",
+    "used": "self-used",
+    "feedin": "feed-in",
+    "shifted": "shifted to off-peak/solar",
+    "avoided_peak": "avoided in peak",
+    "measured_scop": "Measured SCOP"
   }
 }

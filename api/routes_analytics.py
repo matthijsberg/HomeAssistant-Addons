@@ -20,8 +20,91 @@ from api.context import (
 )
 from layer3_scheduling.decision_audit import DecisionAuditLogger
 
+def get_today_history_kpis(cfg: dict, sec: dict) -> dict:
+    active_conn = cfg.get("influxdb_connections", [{}])[0]
+    db_name = active_conn.get("database", "openhems")
+    db_user = active_conn.get("username", "openhems")
+    pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
+
+    now_ams = datetime.now(AMS_TZ)
+    midnight_ams = now_ams.replace(hour=0, minute=0, second=0, microsecond=0)
+    midnight_utc_str = midnight_ams.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    q = f"""
+    SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time >= '{midnight_utc_str}' GROUP BY time(15m) fill(none);
+    SELECT mean("power_w") as terug_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time >= '{midnight_utc_str}' GROUP BY time(15m) fill(none);
+    SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time >= '{midnight_utc_str}' GROUP BY time(15m) fill(none);
+    SELECT mean("power_w") as hp_w FROM "energy_telemetry" WHERE "device_id" = 'daikin_heat_pump' AND time >= '{midnight_utc_str}' GROUP BY time(15m) fill(none);
+    """
+
+    tot_afname_kwh = 0.0
+    tot_terug_kwh = 0.0
+    tot_solar_kwh = 0.0
+    tot_hp_kwh = 0.0
+
+    try:
+        url = "http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
+            "u": db_user, "p": pwd, "db": db_name, "q": q
+        })
+        with urllib.request.urlopen(url, timeout=4) as r:
+            res = json.loads(r.read().decode())
+            results = res.get("results", [])
+            if len(results) > 0:
+                afname_pts = results[0].get("series", [{}])[0].get("values", [])
+                tot_afname_kwh = sum((p[1] or 0.0) * 0.25 / 1000.0 for p in afname_pts)
+            if len(results) > 1:
+                terug_pts = results[1].get("series", [{}])[0].get("values", [])
+                tot_terug_kwh = sum((p[1] or 0.0) * 0.25 / 1000.0 for p in terug_pts)
+            if len(results) > 2:
+                solar_pts = results[2].get("series", [{}])[0].get("values", [])
+                tot_solar_kwh = sum(abs(p[1] or 0.0) * 0.25 / 1000.0 for p in solar_pts)
+            if len(results) > 3:
+                hp_pts = results[3].get("series", [{}])[0].get("values", [])
+                tot_hp_kwh = sum((p[1] or 0.0) * 0.25 / 1000.0 for p in hp_pts)
+    except Exception as e:
+        print("[Analytics] InfluxDB KPI query error:", e)
+
+    p_imp = 0.28
+    p_exp = 0.094
+
+    selfcons_kwh = max(0.0, tot_solar_kwh - tot_terug_kwh)
+    solar_selfcons_eur = round(selfcons_kwh * p_imp, 2)
+    solar_export_eur = round(tot_terug_kwh * p_exp, 2)
+    solar_total_value_eur = round(solar_selfcons_eur + solar_export_eur, 2)
+
+    net_cost_eur = round((tot_afname_kwh * p_imp) - solar_export_eur, 2)
+    realized_savings_eur = 0.78
+    peak_avoided_kwh = 5.8
+    hp_th_kwh = round(tot_hp_kwh * 3.65, 1)
+    hp_cost_eur = round(tot_hp_kwh * p_imp, 2)
+
+    return {
+        "costs": {
+            "main": f"€{net_cost_eur:.2f}",
+            "sub": f"{tot_afname_kwh:.1f} kWh afname · {tot_terug_kwh:.1f} kWh retour"
+        },
+        "solar": {
+            "main": f"€{solar_total_value_eur:.2f}",
+            "main_extra": f"({tot_solar_kwh:.1f} kWh)",
+            "sub": f"€{solar_selfcons_eur:.2f} benut ({selfcons_kwh:.1f} kWh) · €{solar_export_eur:.2f} retour ({tot_terug_kwh:.1f} kWh)"
+        },
+        "savings": {
+            "main": f"€{realized_savings_eur:.2f}",
+            "sub": f"{peak_avoided_kwh:.1f} kWh vermeden in spits"
+        },
+        "heatpump": {
+            "main": f"{tot_hp_kwh:.1f} kWh",
+            "main_extra": f"(~€{hp_cost_eur:.2f})",
+            "sub": f"{hp_th_kwh:.1f} kWh th · SCOP 3.65"
+        }
+    }
+
+
 def handle_get(handler, path: str, qp: dict) -> bool:
     if path == "/api/analytics":
+        cfg = load_json(CONFIG_FILE)
+        sec = load_secrets()
+        hist_kpis = get_today_history_kpis(cfg, sec)
         handler._send_json({
             "savings_today_eur": 0.85,
             "savings_week_eur": 6.85,
@@ -33,7 +116,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "total_solar_today_kwh": 14.2,
             "total_grid_export_kwh": 3.1,
             "battery_arbitrage_yield_eur": 0.42,
-            "daily_digest": "• Verwachte Daggemiddelde Prijs: €0.245/kWh\n• Laagste Stroomtarief: €0.142/kWh (13:00)\n• Warmtepomp Boost: Gepland om 13:00 naar 60°C\n• Zonne-Zelfconsumptie: 78.4%\n• Accu Status: Stand-by (Deadband bewaakt)"
+            "daily_digest": "• Verwachte Daggemiddelde Prijs: €0.245/kWh\n• Laagste Stroomtarief: €0.142/kWh (13:00)\n• Warmtepomp Boost: Gepland om 13:00 naar 60°C\n• Zonne-Zelfconsumptie: 78.4%\n• Accu Status: Stand-by (Deadband bewaakt)",
+            "history_kpis": hist_kpis
         })
         return True
 

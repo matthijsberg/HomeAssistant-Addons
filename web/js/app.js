@@ -1783,6 +1783,34 @@
                     document.getElementById('solar-recommendation-text').innerText = data.solar_recommendation || "☀️ Geen overschot";
                 }
 
+                // Render Top 4 Forecast KPI Cards (1: Costs, 2: Solar, 3: Savings, 4: Heat Pump)
+                if (data.forecast_kpis) {
+                    const fk = data.forecast_kpis;
+                    const elCostsMain = document.getElementById('pred-kpi-costs-main');
+                    const elCostsSub = document.getElementById('pred-kpi-costs-sub');
+                    if (elCostsMain) elCostsMain.innerText = fk.costs.main;
+                    if (elCostsSub) elCostsSub.innerText = fk.costs.sub;
+
+                    const elSolarMain = document.getElementById('pred-kpi-solar-main');
+                    const elSolarSub = document.getElementById('pred-kpi-solar-sub');
+                    if (elSolarMain) {
+                        elSolarMain.innerHTML = `${fk.solar.main} <span class="text-xs text-slate-400 font-normal">${fk.solar.main_extra || ''}</span>`;
+                    }
+                    if (elSolarSub) elSolarSub.innerText = fk.solar.sub;
+
+                    const elSavMain = document.getElementById('pred-kpi-savings-main');
+                    const elSavSub = document.getElementById('pred-kpi-savings-sub');
+                    if (elSavMain) elSavMain.innerText = fk.savings.main;
+                    if (elSavSub) elSavSub.innerText = fk.savings.sub;
+
+                    const elHpMain = document.getElementById('pred-kpi-hp-main');
+                    const elHpSub = document.getElementById('pred-kpi-hp-sub');
+                    if (elHpMain) {
+                        elHpMain.innerHTML = `${fk.heatpump.main} <span class="text-xs text-slate-400 font-normal">${fk.heatpump.main_extra || ''}</span>`;
+                    }
+                    if (elHpSub) elHpSub.innerText = fk.heatpump.sub;
+                }
+
                 // Populate Live Active DHW Banner (Visible only when heating)
                 const liveDhwCard = document.getElementById('live-dhw-active-card');
                 const adh = data.active_dhw_status;
@@ -4406,10 +4434,35 @@
             try {
                 const res = await fetch('./api/analytics');
                 const d = await res.json();
-                document.getElementById('kpi-savings-today').innerText = `€${d.savings_today_eur.toFixed(2)}`;
-                document.getElementById('kpi-self-consumption').innerText = `${d.self_consumption_pct}%`;
-                document.getElementById('kpi-cop-dhw').innerHTML = `${d.dhw_cop} <span class="text-xs text-slate-400 font-normal">SWW</span> · ${d.cv_cop} <span class="text-xs text-slate-400 font-normal">CV</span>`;
-                document.getElementById('kpi-accuracy').innerText = `${d.forecast_accuracy_pct}%`;
+                
+                // Populate Top 4 History KPI cards (1: Costs Today, 2: Solar Today, 3: Savings Today, 4: Heat Pump Today)
+                if (d.history_kpis) {
+                    const hk = d.history_kpis;
+                    const elCostsMain = document.getElementById('hist-kpi-costs-main');
+                    const elCostsSub = document.getElementById('hist-kpi-costs-sub');
+                    if (elCostsMain) elCostsMain.innerText = hk.costs.main;
+                    if (elCostsSub) elCostsSub.innerText = hk.costs.sub;
+
+                    const elSolarMain = document.getElementById('hist-kpi-solar-main');
+                    const elSolarSub = document.getElementById('hist-kpi-solar-sub');
+                    if (elSolarMain) {
+                        elSolarMain.innerHTML = `${hk.solar.main} <span class="text-xs text-slate-400 font-normal">${hk.solar.main_extra || ''}</span>`;
+                    }
+                    if (elSolarSub) elSolarSub.innerText = hk.solar.sub;
+
+                    const elSavMain = document.getElementById('hist-kpi-savings-main');
+                    const elSavSub = document.getElementById('hist-kpi-savings-sub');
+                    if (elSavMain) elSavMain.innerText = hk.savings.main;
+                    if (elSavSub) elSavSub.innerText = hk.savings.sub;
+
+                    const elHpMain = document.getElementById('hist-kpi-hp-main');
+                    const elHpSub = document.getElementById('hist-kpi-hp-sub');
+                    if (elHpMain) {
+                        elHpMain.innerHTML = `${hk.heatpump.main} <span class="text-xs text-slate-400 font-normal">${hk.heatpump.main_extra || ''}</span>`;
+                    }
+                    if (elHpSub) elHpSub.innerText = hk.heatpump.sub;
+                }
+
                 document.getElementById('analytics-digest').innerText = d.daily_digest;
             } catch (e) {
                 console.warn('Analytics load error:', e);

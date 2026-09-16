@@ -60,5 +60,22 @@
     "net_power_kw": "Netto Vermogen (kW)",
     "price_eur": "EPEX Inkoop (€/kWh)",
     "export_price_eur": "EPEX Teruglevering (€/kWh)"
+  },
+  "kpi": {
+    "costs_24h": "Kosten (24u)",
+    "solar_panels": "Zonnepanelen",
+    "hems_savings": "HEMS Besparing",
+    "heatpump": "Warmtepomp",
+    "costs_today": "Kosten Vandaag",
+    "solar_today": "Zonnepanelen Vandaag",
+    "savings_today": "Besparing Vandaag",
+    "heatpump_today": "Warmtepomp Vandaag",
+    "net": "netto",
+    "avg": "gem.",
+    "used": "benut",
+    "feedin": "retour",
+    "shifted": "verschoven naar dal/zon",
+    "avoided_peak": "uit spits gehouden",
+    "measured_scop": "Gemeten SCOP"
   }
 }
