@@ -10,7 +10,14 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.92.63] — 2026-09-15 (Thermal-Grounded OLS Building Heat Loss Regression)
+## [0.92.64] — 2026-09-15 (DHW Chart Vertical Translucent Forced-Off Spitsblok Overlay)
+
+### Added
+- **Visual Forced-Off Spitsblok Bands in DHW Chart:** Added custom Chart.js vertical overlay plugin to `chart-dhw-temperature` that projects active `forced_off` hard peak lockout intervals as translucent red vertical background bands (`rgba(239, 68, 68, 0.16)`) with dashed borders and top lock labels (`🔒 SPITSBLOK`).
+- **Strictly Forced-Off Only:** Advisory/recommended off (`advised_off`) intervals remain transparent so hard lockouts stand out unambiguously.
+- **DHW Legend Indicator:** Added `[Spitsblok 🔒]` badge to the DHW temperature chart legend.
+
+---
 
 ### Fixed
 - **Direct Thermal OLS Regression:** Replaced the post-hoc static COP multiplier (`slope * 3.8`) in `retrain_from_openhems` with direct day-by-day thermal heat regression ($Q_{th,day} = E_{el,day} \times \text{COP}(T_{out,day})$) against temperature lift $\Delta T = (19.5 - T_{out})$.

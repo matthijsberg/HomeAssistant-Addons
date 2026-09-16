@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.92.63
+Version: 0.92.64
 Generic Energy Management Platform:
   - Solidified Data Collection Layer (Laag 1) with Full Multi-Instance CRUD:
       * InfluxDB Multi-Instance CRUD (Local HA, Remote Dedicated Servers, InfluxDB Cloud)
@@ -2935,12 +2935,42 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                     unheated_traj["temperatures_p05_c"] = hist_temps + unheated_traj.get("temperatures_p05_c", [])
                     unheated_traj["temperatures_p95_c"] = hist_temps + unheated_traj.get("temperatures_p95_c", [])
 
+                forced_off_ranges = []
+                in_block = False
+                start_b_idx = 0
+                h_cnt = len(hist_pts)
+                n_eval = len(plan.slots) if is_15m else min(24, len(plan.slots) // 4)
+                for h_idx in range(n_eval):
+                    if is_15m:
+                        is_forced = (plan.slots[h_idx].mode_code == "forced_off")
+                    else:
+                        is_forced = any(plan.slots[h_idx * 4 + k].mode_code == "forced_off" for k in range(4) if (h_idx * 4 + k) < len(plan.slots))
+                    if is_forced and not in_block:
+                        in_block = True
+                        start_b_idx = h_idx
+                    elif not is_forced and in_block:
+                        in_block = False
+                        forced_off_ranges.append({
+                            "start_idx": h_cnt + start_b_idx,
+                            "end_idx": h_cnt + h_idx - 1,
+                            "start_label": plan.slots[start_b_idx * 4 if not is_15m else start_b_idx].time_label,
+                            "end_label": plan.slots[(h_idx - 1) * 4 if not is_15m else (h_idx - 1)].time_label
+                        })
+                if in_block:
+                    forced_off_ranges.append({
+                        "start_idx": h_cnt + start_b_idx,
+                        "end_idx": h_cnt + n_eval - 1,
+                        "start_label": plan.slots[start_b_idx * 4 if not is_15m else start_b_idx].time_label,
+                        "end_label": plan.slots[-1].time_label
+                    })
+
                 self._send_json({
                     "status": "online",
                     "resolution": res_mode,
                     "decision": decision,
                     "trajectory": traj,
                     "unheated_trajectory": unheated_traj,
+                    "forced_off_ranges": forced_off_ranges,
                     "history_count": len(hist_pts)
                 })
             else:
@@ -3138,7 +3168,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             ensure_framework_defaults(cfg)
             self._send_json({
                 "system": "Open HEMS Framework",
-                "version": "0.92.63",
+                "version": "0.92.64",
                 "timestamp": datetime.now().isoformat(),
                 "status": "online",
                 "site_name": cfg.get("site", {}).get("name", "Woning Culemborg"),
@@ -4869,7 +4899,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.92.63</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.92.64</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -5252,6 +5282,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                                 <span class="flex items-center gap-1.5 text-red-400"><span class="w-3 h-0.5 border-b border-red-500 border-dashed"></span> Comfort 40°C</span>
                                 <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-0.5 border-b border-emerald-500 border-dashed"></span> Doel 50°C</span>
                                 <span class="flex items-center gap-1.5 text-sky-300"><span class="w-2.5 h-2.5 bg-sky-500/50 rounded-sm"></span> Warmtevraag (kWh)</span>
+                                <span class="flex items-center gap-1.5 text-red-400/90"><span class="w-3 h-2 bg-red-600/30 border border-red-500/60 rounded-sm"></span> Spitsblok 🔒</span>
                             </div>
                         </div>
 
@@ -6769,7 +6800,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div class="space-y-1.5">
                             <div class="flex items-center gap-2.5">
-                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.63</span>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.92.64</span>
                                 <span class="text-xs text-slate-400 font-mono">OpenAPI 3.1.0 Compliant</span>
                             </div>
                             <h2 class="text-xl font-bold text-white tracking-wide">Open HEMS Systeemdocumentatie &amp; API Gids</h2>
@@ -13031,9 +13062,66 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     order: 7
                 });
 
+                const forcedOffPlugin = {
+                    id: 'dhwForcedOffBackground',
+                    beforeDatasetsDraw(chart) {
+                        const { ctx, chartArea, scales: { x } } = chart;
+                        if (!chartArea || !x) return;
+                        const ranges = data.forced_off_ranges || [];
+                        if (!ranges.length) return;
+
+                        ctx.save();
+                        const totalSlots = chart.data.labels ? chart.data.labels.length : 1;
+                        const slotWidth = totalSlots > 1 ? Math.abs(x.getPixelForValue(1) - x.getPixelForValue(0)) : 10;
+                        const halfSlot = slotWidth / 2;
+
+                        ranges.forEach(r => {
+                            const sIdx = r.start_idx;
+                            const eIdx = r.end_idx;
+                            if (sIdx === undefined || eIdx === undefined) return;
+
+                            const xStart = x.getPixelForValue(sIdx);
+                            const xEnd = x.getPixelForValue(eIdx);
+                            if (isNaN(xStart) || isNaN(xEnd)) return;
+
+                            const left = Math.max(chartArea.left, Math.min(xStart, xEnd) - halfSlot);
+                            const right = Math.min(chartArea.right, Math.max(xStart, xEnd) + halfSlot);
+                            const width = Math.max(0, right - left);
+                            if (width <= 0) return;
+
+                            // 1. Translucent red background
+                            ctx.fillStyle = 'rgba(239, 68, 68, 0.16)';
+                            ctx.fillRect(left, chartArea.top, width, chartArea.height);
+
+                            // 2. Subtle dashed red borders at vertical edges
+                            ctx.strokeStyle = 'rgba(239, 68, 68, 0.45)';
+                            ctx.lineWidth = 1.2;
+                            ctx.setLineDash([4, 4]);
+                            ctx.beginPath();
+                            ctx.moveTo(left, chartArea.top);
+                            ctx.lineTo(left, chartArea.bottom);
+                            ctx.moveTo(right, chartArea.top);
+                            ctx.lineTo(right, chartArea.bottom);
+                            ctx.stroke();
+
+                            // 3. Subtle top label
+                            ctx.setLineDash([]);
+                            ctx.fillStyle = 'rgba(248, 113, 113, 0.9)';
+                            ctx.font = 'bold 9px monospace';
+                            ctx.textAlign = 'center';
+                            const midX = left + width / 2;
+                            if (width > 30) {
+                                ctx.fillText('🔒 SPITSBLOK', midX, chartArea.top + 14);
+                            }
+                        });
+                        ctx.restore();
+                    }
+                };
+
                 const ctx = canvas.getContext('2d');
                 dhwTempChartInstance = new Chart(ctx, {
                     type: 'line',
+                    plugins: [forcedOffPlugin],
                     data: {
                         labels: labels,
                         datasets: chartDatasets
