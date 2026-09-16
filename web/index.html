@@ -143,7 +143,7 @@
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.96.1</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.96.2</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -577,32 +577,20 @@
                             <!-- Opportunistic Merger Banner -->
                             <div id="dhw-merge-banner" class="hidden"></div>
                             
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-[11px] leading-relaxed">
-                                <!-- Links: Comfort & Fysisch Verloop -->
-                                <div class="space-y-1.5 bg-slate-900/40 p-2.5 rounded-lg border border-slate-800/60">
-                                    <div class="font-semibold text-amber-400 flex items-center gap-1.5">
-                                        <span>🌡️</span> <span id="dhw-comfort-card-title">Comfort- &amp; Temperatuurverloop</span>
+                            <div class="pt-1 text-[11px] leading-relaxed">
+                                <div class="space-y-2 bg-slate-900/50 p-3 rounded-lg border border-slate-800/70">
+                                    <div class="font-semibold text-cyan-300 flex items-center justify-between">
+                                        <div class="flex items-center gap-1.5">
+                                            <span>💡</span> <span id="dhw-comfort-card-title">Dispatch-Redenering &amp; Doeltemperatuur</span>
+                                        </div>
                                     </div>
-                                    <p id="dhw-eval-comfort-text">
-                                        Zonder bijwarmen (<span class="text-slate-400 font-mono">grijze lijn</span>) daalt het vat door stilstandsverlies en douchebeurten naar <strong class="text-amber-300" id="dhw-box-dip-text">39,9°C</strong> (bij piekverbruik zelfs <strong class="text-red-400" id="dhw-box-p95-text">38,3°C</strong>) vóór 10:00 uur morgenochtend.
+                                    <p id="dhw-eval-comfort-text" class="text-slate-200">
+                                        Laden van berekening...
                                     </p>
-                                    <div class="text-[10px] text-slate-400 font-mono space-y-0.5 pt-0.5">
-                                        <div>• Ochtenddip zonder bijwarmen: <span class="text-amber-300 font-bold" id="dhw-box-dip-val">39,9°C om 09:44</span></div>
+                                    <div class="text-[10px] text-slate-400 font-mono space-y-1 pt-1.5 border-t border-slate-800/50">
+                                        <div id="dhw-box-bullet-1">• <span class="text-slate-300 font-bold" id="dhw-box-diff-val">--</span></div>
+                                        <div id="dhw-box-bullet-2">• <span class="text-emerald-300 font-bold" id="dhw-box-advies-val">--</span></div>
                                         <div>• Piekblokkades: <span class="text-slate-300 font-bold" id="dhw-box-spits-detail">Real-time berekening...</span></div>
-                                    </div>
-                                </div>
-
-                                <!-- Rechts: Economische Afweging -->
-                                <div class="space-y-1.5 bg-slate-900/40 p-2.5 rounded-lg border border-slate-800/60">
-                                    <div class="font-semibold text-emerald-400 flex items-center gap-1.5">
-                                        <span>💶</span> <span id="dhw-finance-card-title">Financiële Afweging (Daglading vs. Avond/Nacht)</span>
-                                    </div>
-                                    <p id="dhw-eval-finance-text">
-                                        Nu doorwarmen naar 60°C vraagt ~1.4 kWh stroom. Met actueel zonne-overschot kost dit slechts ~€0,08. Later bijwarmen in de avondspits (€0,35/kWh) zou ~€0,48 kosten.
-                                    </p>
-                                    <div class="text-[10px] text-slate-400 font-mono space-y-0.5 pt-0.5">
-                                        <div id="dhw-box-bullet-1">• Verschil: <span class="text-emerald-300 font-bold" id="dhw-box-diff-val">~€0,39 voordeel</span> bij nu bufferen.</div>
-                                        <div id="dhw-box-bullet-2">• Advies: <span class="text-white font-bold" id="dhw-box-advies-val">Zonnebuffer naar 60°C overbrugt de avondspits</span>.</div>
                                     </div>
                                 </div>
                             </div>
@@ -2044,7 +2032,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div class="space-y-1.5">
                             <div class="flex items-center gap-2.5">
-                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.96.1</span>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.96.2</span>
                                 <span class="text-xs text-slate-400 font-mono">OpenAPI 3.1.0 Compliant</span>
                             </div>
                             <h2 class="text-xl font-bold text-white tracking-wide">Open HEMS Systeemdocumentatie &amp; API Gids</h2>
