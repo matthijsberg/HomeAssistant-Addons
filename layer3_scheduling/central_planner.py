@@ -412,16 +412,32 @@ class CentralPlanner:
 
         unh_spits = round(min([t["temp_c"] for t in unheated_trajectory if "18:" in t["time"] or "19:" in t["time"] or "20:" in t["time"] or "21:" in t["time"]], default=current_dhw_temp - 4.5), 1)
 
+        # Time headroom until evening peak lockout
+        mins_until_peak = 999.0
+        peak_start_lbl = "18:45"
+        for p in dynamic_peaks:
+            if p.get("is_hard_lockout") and ("avond" in p.get("name", "").lower() or "spits" in p.get("name", "").lower()):
+                p_s = p.get("hard_start_time") or p.get("start_time")
+                if p_s:
+                    peak_start_lbl = p_s
+                s_idx = p.get("start_idx", 999)
+                mins_until_peak = max(0.0, s_idx * step_mins)
+                break
+
+        th_need_60 = max(2.5, spec.boost_setpoint_c - current_dhw_temp) * spec.thermal_capacity_kwh_per_k
+        n_slots_60 = max(3, min(8, math.ceil(th_need_60 / (spec.thermal_output_kw * step_hours))))
+        est_duration_60_mins = n_slots_60 * step_mins
+        buffer_60_feasible = (mins_until_peak >= est_duration_60_mins)
+
         if is_daytime:
             box_title = "Buffer Efficiëntie: Wel of Niet Bufferen (50°C vs. 60°C)?"
             comfort_card_title = "1️⃣ Basislading 50°C Nodig voor Avondspits?"
-            finance_card_title = "2️⃣ Afweging: Doorbuffereen naar 60°C (24h Dekking)?"
 
             is_50_needed = (current_dhw_temp < 48.0 or unh_spits < 43.0)
             if not is_50_needed:
                 comfort_text = (
                     f"Het vat is nu <strong>{current_dhw_temp:.1f}°C</strong> en al op basistemperatuur (doel: 50°C). "
-                    f"Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) blijft het vat tijdens de avondspits (18:45–21:15) ruim op comforttemperatuur "
+                    f"Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) blijft het vat tijdens de avondspits ({peak_start_lbl}) ruim op comforttemperatuur "
                     f"(~{unh_spits:.1f}°C). Een basislading naar 50°C is vóór de spits <strong>niet nodig</strong>."
                 )
                 bullet_1 = f"Basislading 50°C: Niet nodig (vat op peil, daalt naar ~{unh_spits:.1f}°C in spits)"
@@ -431,7 +447,7 @@ class CentralPlanner:
                     f"naar <strong>{unh_spits:.1f}°C</strong> (richting de 40°C comfortdrempel). "
                     f"Een basislading naar 50°C is vóór de avondspits <strong>noodzakelijk</strong> om koude douches te voorkomen."
                 )
-                bullet_1 = f"Basislading 50°C: Noodzakelijk vóór 18:45 (spitsdip {unh_spits:.1f}°C dreigt)"
+                bullet_1 = f"Basislading 50°C: Noodzakelijk vóór {peak_start_lbl} (spitsdip {unh_spits:.1f}°C dreigt)"
 
             if is_solar_surplus:
                 sol_pct = int(round(sol_share * 100))
@@ -439,13 +455,24 @@ class CentralPlanner:
             else:
                 blend_str = f"~€{cost_now_run:.2f} tegen actueel tarief (€{p_now:.3f}/kWh)"
 
-            finance_text = (
-                f"Doorwarmen naar 60°C vraagt ~{kwh_e_run:.2f} kWh stroom. "
-                f"Met 60°C dekken we niet alleen de avondspits, maar overbruggen we ook de complete nacht én ochtendspits (een <strong>volledige dag vooruit</strong> zonder tussentijdse runs!). "
-                f"Ondanks het lichte extra stilstandsverlies (~0,5 kWh over 20u) is nu laden met zon/dalstroom "
-                f"({blend_str}) veel voordeliger dan later bijwarmen tijdens het nachtdal (~€{cost_later:.2f} tegen €{later_price:.3f}/kWh)."
-            )
-            bullet_2 = f"Bufferen naar 60°C: ~€{calc_savings:.2f} voordeel + 24h rust voor warmtepomp"
+            if not buffer_60_feasible and mins_until_peak < 999:
+                finance_card_title = "2️⃣ Afweging: Doorbuffereen naar 60°C Niet Meer Haalbaar"
+                finance_text = (
+                    f"Doorwarmen naar 60°C vraagt circa <strong>{est_duration_60_mins} minuten</strong> ononderbroken stooktijd. "
+                    f"Er resteren nog slechts <strong>{int(mins_until_peak)} minuten</strong> tot de avondspitsblokkade ({peak_start_lbl}). "
+                    f"Een 60°C bufferrun kan daardoor vóór de spits niet meer worden afgerond zonder in het dure piektarief te lopen. "
+                    f"Daarom is doorbufferen vergrendeld en is uitsluitend een kortere 50°C comfortlading (of afwachten) toegestaan."
+                )
+                bullet_2 = f"Bufferen naar 60°C: Niet meer haalbaar vóór {peak_start_lbl} (nog {int(mins_until_peak)}m, {est_duration_60_mins}m vereist)"
+            else:
+                finance_card_title = "2️⃣ Afweging: Doorbuffereen naar 60°C (24h Dekking)?"
+                finance_text = (
+                    f"Doorwarmen naar 60°C vraagt ~{kwh_e_run:.2f} kWh stroom. "
+                    f"Met 60°C dekken we niet alleen de avondspits, maar overbruggen we ook de complete nacht én ochtendspits (een <strong>volledige dag vooruit</strong> zonder tussentijdse runs!). "
+                    f"Ondanks het lichte extra stilstandsverlies (~0,5 kWh over 20u) is nu laden met zon/dalstroom "
+                    f"({blend_str}) veel voordeliger dan later bijwarmen tijdens het nachtdal (~€{cost_later:.2f} tegen €{later_price:.3f}/kWh)."
+                )
+                bullet_2 = f"Bufferen naar 60°C: ~€{calc_savings:.2f} voordeel + 24h rust voor warmtepomp"
 
             if planned_mode in ["forced_solar_boost_60", "max_on"]:
                 badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-950/80 text-purple-300 border border-purple-800/80"><span class="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span> Zonnebuffer Geadviseerd (tot 60°C)</span>'

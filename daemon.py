@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.95.3
+Version: 0.95.4
 Generic Energy Management Platform:
   - Multi-Vector Telemetry & Optimization Daemon
   - Domain Router Dispatch to api/routes_*.py
@@ -30,6 +30,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from api import routes_analytics, routes_model, routes_schedule, routes_system
+from models.canonical import normalize_power_reading
 from api.context import (
     AMS_TZ, CONFIG_FILE, DUTCH_DAYS_SHORT, GLOBAL_COLLECTOR, GLOBAL_DHW_MODEL,
     GLOBAL_MODEL, INDEX_HTML_PATH, PARAMS_FILE, SECRETS_FILE, WEB_DIR,
@@ -326,14 +327,20 @@ class HemsBackgroundCollector(threading.Thread):
         while self.running:
             try:
                 self.sample_devices()
-                now = time.time()
-                if now - self._last_flush_time >= self.flush_window:
+            except Exception as e_samp:
+                print(f"[Open HEMS Collector] Error in sample_devices: {e_samp}", flush=True)
+
+            now = time.time()
+            if now - self._last_flush_time >= self.flush_window:
+                try:
                     self.flush_window_to_influx()
-                    self._last_flush_time = now
-                    # Layer 4 Active Live Dispatch Execution
+                except Exception as e_flush:
+                    print(f"[Open HEMS Collector] Error in flush_window_to_influx: {e_flush}", flush=True)
+                self._last_flush_time = now
+                try:
                     self.execute_live_dispatch()
-            except Exception as e:
-                print(f"[Open HEMS Collector] Error in loop: {e}")
+                except Exception as e_disp:
+                    print(f"[Open HEMS Collector] Error in execute_live_dispatch: {e_disp}", flush=True)
             time.sleep(self.sample_interval)
 
     def execute_live_dispatch(self):
@@ -426,6 +433,7 @@ class HemsBackgroundCollector(threading.Thread):
                 )
 
                 if has_switched:
+                    print(f"[Open HEMS Actuator] Hardware geschakeld naar stand '{mode_to_execute}': S10S={res.command.s10s_relay_on}, S11S={res.command.s11s_relay_on}, CV_Master={res.command.cv_master_switch_on}", flush=True)
                     time.sleep(0.5)
                     fresh_states = get_ha_states_map()
                     act_s10s = (fresh_states.get("switch.warmtepomp_smart_grid_1_s10s", {}).get("state") == "on")
