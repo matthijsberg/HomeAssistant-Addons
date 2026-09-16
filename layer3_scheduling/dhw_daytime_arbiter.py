@@ -317,14 +317,17 @@ class DhwDaytimeArbiter:
 
         if night_required:
             # Plan night run to 50°C between 20:00 and 06:00
-            # Find night search window
+            # Find night search window (between 21:00 tonight and 06:00 tomorrow morning)
             night_start_idx = 0
             morn_start_idx = n_slots
             for idx, s in enumerate(slots):
-                dt_val = getattr(s, "dt", now_dt)
+                dt_val = getattr(s, "dt", None)
+                if dt_val is None:
+                    sl_iso = getattr(s, "dt_iso", "")
+                    dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
                 lbl = getattr(s, "label", getattr(s, "time_label", ""))
                 h = int(lbl.split(":")[0]) if ":" in lbl and not lbl.startswith("Nu") else dt_val.hour
-                if (h >= 20 or dt_val.hour >= 20) and night_start_idx == 0:
+                if (h >= 21 or dt_val.hour >= 21) and night_start_idx == 0 and dt_val.date() == now_dt.date():
                     night_start_idx = idx
                 if idx > 0 and (h >= 6 or dt_val.hour >= 6) and (dt_val.date() > now_dt.date() or now_dt.hour < 6):
                     morn_start_idx = idx
@@ -795,17 +798,34 @@ class DhwDaytimeArbiter:
                         f"Vannacht laden op daltarief is €{diff:.2f} voordeliger dan overdag forceren naar {spec.boost_setpoint_c:.0f}°C."
                     )
 
+        # Determine final planned slots: combine day slots and scheduled night run
+        final_planned_slots = list(selected_path.day_slots)
+        final_mode = planned_mode
+        final_label = planned_mode_label
+        final_target_c = selected_path.day_target_temp_c
+        final_power_kw = selected_path.day_power_kw
+
+        if selected_path.night_run_required and selected_path.night_slots:
+            for s_n in selected_path.night_slots:
+                if s_n not in final_planned_slots:
+                    final_planned_slots.append(s_n)
+            final_planned_slots.sort()
+            if not selected_path.day_slots:
+                final_label = f"Normaal (Standby — Nachtlading gepland om {selected_path.night_window_label})"
+                final_target_c = spec.target_setpoint_c
+                final_power_kw = spec.heat_pump_electric_kw
+
         return DaytimeArbitrationResult(
             situation=situation,
             unheated_evening_dip_c=unheated_evening_dip,
             evening_dip_time=evening_dip_time,
             evaluated_paths=evaluated_paths,
             selected_path=selected_path,
-            planned_mode=planned_mode,
-            planned_mode_label=planned_mode_label,
-            target_temp_c=selected_path.day_target_temp_c,
-            power_kw=selected_path.day_power_kw,
-            planned_slots=selected_path.day_slots,
+            planned_mode=final_mode,
+            planned_mode_label=final_label,
+            target_temp_c=final_target_c,
+            power_kw=final_power_kw,
+            planned_slots=final_planned_slots,
             savings_eur=savings,
             explanation=explanation
         )
