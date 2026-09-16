@@ -10,7 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
-## [0.92.64] — 2026-09-15 (DHW Chart Vertical Translucent Forced-Off Spitsblok Overlay)
+## [0.93.0] — 2026-09-15 (Architectural Decoupling: Phase 1 Frontend Extraction to web/index.html)
+
+### Architecture
+- **Frontend Decoupling:** Extracted 9,195 lines of raw HTML, Tailwind CSS, and JavaScript from `daemon.py` into a dedicated, clean `web/index.html` static asset directory.
+- **Drastic File Size Reduction:** `daemon.py` shrunk from **14,561 lines down to 5,396 lines (-63%)**, separating web presentation from core HTTP routing, InfluxDB telemetry, and background dispatch threads.
+- **Static File Serving:** Implemented static asset delivery (`_serve_spa`, `_serve_static_file`) with proper MIME types and cache headers.
+- **Integrity Gate Alignment:** Updated `scripts/verify_data_integrity.py` to validate design tokens and frontend engine directly against `web/index.html`.
+
+---
 
 ### Added
 - **Visual Forced-Off Spitsblok Bands in DHW Chart:** Added custom Chart.js vertical overlay plugin to `chart-dhw-temperature` that projects active `forced_off` hard peak lockout intervals as translucent red vertical background bands (`rgba(239, 68, 68, 0.16)`) with dashed borders and top lock labels (`🔒 SPITSBLOK`).

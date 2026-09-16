@@ -115,11 +115,14 @@ def check_canonical_plan_invariants(errors: list):
 
 def check_frontend_tokens_and_scripts(daemon_path: Path, errors: list):
     """Verify frontend JavaScript syntax, design tokens, and absence of conflicting controls."""
-    if not daemon_path.exists():
-        log_fail(f"daemon.py not found at {daemon_path}", errors)
+    html_path = daemon_path.parent / "web" / "index.html"
+    if html_path.exists():
+        content = html_path.read_text(encoding="utf-8")
+    elif daemon_path.exists():
+        content = daemon_path.read_text(encoding="utf-8")
+    else:
+        log_fail(f"Frontend file not found at {html_path} or {daemon_path}", errors)
         return
-
-    content = daemon_path.read_text(encoding="utf-8")
 
     # 1. Check for conflicting local select dropdowns
     if 'id="epex-res-select"' in content:
