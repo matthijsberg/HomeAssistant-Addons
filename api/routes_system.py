@@ -36,7 +36,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "opportunity_cost_per_kwh": float(sol.get("opportunity_cost_per_kwh", 0.06))
             }
         })
-        return
+        return True
 
     if path == "/api/providers":
         cfg = load_json(CONFIG_FILE)
@@ -94,7 +94,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             ]
         }
         handler._send_json(res)
-        return
+        return True
 
     if path == "/api/pipeline/status":
         global GLOBAL_COLLECTOR
@@ -114,7 +114,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             })
         else:
             handler._send_json({"status": "starting", "samples_in_window": 0})
-        return
+        return True
 
     if path == "/api/health/consistency":
         plan = ensure_active_canonical_plan()
@@ -144,7 +144,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             }
         }
         handler._send_json(report)
-        return
+        return True
 
     if path == "/api/openapi.json":
         try:
@@ -155,10 +155,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 handler._send_json(spec)
             else:
                 handler._send_json({"error": "openapi.json not found"}, 404)
-            return
+            return True
         except Exception as e:
             handler._send_json({"error": str(e)}, 500)
-            return
+            return True
 
     if path == "/api/status":
         cfg = load_json(CONFIG_FILE)
@@ -181,7 +181,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "smart_grid_mode": "SG2",
             "last_calibration": params.get("calibration_timestamp", "Recent")
         })
-        return
+        return True
 
     # API: Infrastructure & Connectivity (Laag 1)
     if path == "/api/infrastructure":
@@ -325,7 +325,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "influxdb": idb_conns[0] if idb_conns else {},
             "mqtt": mq_conns[0] if mq_conns else {}
         })
-        return
+        return True
 
     # API: Telemetry Stats from InfluxDB
     if path == "/api/infrastructure/telemetry-stats":
@@ -353,27 +353,27 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         except Exception as e:
             stats["error"] = str(e)
         handler._send_json(stats)
-        return
+        return True
 
     # API: Home Assistant Entities Dropdown
     if path == "/api/ha/entities":
         entities = fetch_ha_entities()
         handler._send_json({"entities": entities})
-        return
+        return True
 
     # API: Policies (Read All)
     if path == "/api/devices":
         cfg = load_json(CONFIG_FILE)
         ensure_framework_defaults(cfg)
         handler._send_json({"devices": cfg.get("devices", [])})
-        return
+        return True
 
     # API: Tariffs / Suppliers (Read All)
     if path == "/api/tariffs":
         cfg = load_json(CONFIG_FILE)
         ensure_framework_defaults(cfg)
         handler._send_json({"tariffs": cfg.get("tariffs_list", [])})
-        return
+        return True
 
     # API: Calibration & Offsets
     if path == "/api/calibration":
@@ -383,7 +383,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "parameters": params,
             "exclusion_windows": cfg.get("data_exclusion_windows", [])
         })
-        return
+        return True
 
             # API: 24h Rolling Ahead Power Consumption Prediction Engine
 
@@ -404,14 +404,14 @@ def handle_post(handler, path: str, body: dict) -> bool:
         if "efficiency_factor" in data: cfg["solar"]["efficiency_factor"] = float(data["efficiency_factor"])
         save_json(CONFIG_FILE, cfg)
         handler._send_json({"status": "success", "message": "Zonnepanelen configuratie opgeslagen", "solar": cfg["solar"]})
-        return
+        return True
 
     if path == "/api/infrastructure/homeassistant/test":
         ha_sec = load_secrets()
         ha_base_url, ha_token = get_ha_client_config()
         if not ha_token:
             handler._send_json({"status": "error", "message": "Geen Supervisor of HASS token gevonden"}, 400)
-            return
+            return True
         try:
             headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
             ctx = ssl.create_default_context()
@@ -429,10 +429,10 @@ def handle_post(handler, path: str, body: dict) -> bool:
                     "location": data.get("location_name"),
                     "message": f"Home Assistant Core verbonden! Latency: {lat}ms, Versie: {data.get('version')}"
                 })
-                return
+                return True
         except Exception as e:
             handler._send_json({"status": "error", "message": f"Fout bij verbinden met Home Assistant: {str(e)}"}, 500)
-            return
+            return True
 
     # INFRASTRUCTURE: Test InfluxDB
     if path == "/api/infrastructure/influxdb/test":
@@ -458,7 +458,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
             password=password or ""
         )
         handler._send_json(res)
-        return
+        return True
 
     # INFRASTRUCTURE: Save / Upsert InfluxDB Connection Profile
     # SETTINGS: Update baseload & solar cost parameters
@@ -475,10 +475,10 @@ def handle_post(handler, path: str, body: dict) -> bool:
                 "baseload_watts": cfg.get("baseload_watts", 300),
                 "solar_cost_eur_kwh": cfg.get("solar_cost_eur_kwh", 0.06)
             })
-            return
+            return True
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, 400)
-            return
+            return True
 
     if False and path == "/api/analytics/solar_cost":
         try:
@@ -487,10 +487,10 @@ def handle_post(handler, path: str, body: dict) -> bool:
             cfg["solar_cost_eur_kwh"] = round(new_cost, 4)
             save_json(CONFIG_FILE, cfg)
             handler._send_json({"status": "success", "solar_cost_eur_kwh": cfg["solar_cost_eur_kwh"]})
-            return
+            return True
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, 400)
-            return
+            return True
 
     if path == "/api/infrastructure/influxdb":
         cfg = load_json(CONFIG_FILE)
@@ -534,7 +534,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
 
         save_json(CONFIG_FILE, cfg)
         handler._send_json({"status": "saved", "connection": conn_obj})
-        return
+        return True
 
     # INFRASTRUCTURE: Test MQTT
     if path == "/api/infrastructure/mqtt/test":
@@ -561,7 +561,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
             client_id=client_id
         )
         handler._send_json(res)
-        return
+        return True
 
     # INFRASTRUCTURE: Save / Upsert MQTT Connection Profile
     if path == "/api/infrastructure/mqtt":
@@ -601,7 +601,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
 
         save_json(CONFIG_FILE, cfg)
         handler._send_json({"status": "saved", "connection": conn_obj})
-        return
+        return True
 
     # INFRASTRUCTURE: Write Test Telemetry Line to InfluxDB
     if path == "/api/infrastructure/write-test-point":
@@ -636,7 +636,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
                 })
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, 500)
-        return
+        return True
 
     # CREATE: Policy
     if path == "/api/devices":
@@ -667,7 +667,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
         cfg["devices"].append(new_dev)
         save_json(CONFIG_FILE, cfg)
         handler._send_json({"status": "created", "device": new_dev}, 201)
-        return
+        return True
 
     # CREATE: Energy Supplier / Tariff
     if path == "/api/tariffs":
@@ -689,7 +689,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
         cfg["tariffs_list"].append(new_tariff)
         save_json(CONFIG_FILE, cfg)
         handler._send_json({"status": "created", "tariff": new_tariff}, 201)
-        return
+        return True
 
     # CREATE: Exclusion Window
 
@@ -721,7 +721,7 @@ def handle_put(handler, path: str, body: dict) -> bool:
             except Exception:
                 pass
         handler._send_json({"status": "updated", "homeassistant": ha_cfg})
-        return
+        return True
 
     # UPDATE: Specific Device
     m_dev = re.match(r"^/api/devices/([^/]+)$", path)
@@ -736,9 +736,9 @@ def handle_put(handler, path: str, body: dict) -> bool:
                         d[k] = body[k]
                 save_json(CONFIG_FILE, cfg)
                 handler._send_json({"status": "updated", "device": d})
-                return
+                return True
         handler._send_json({"error": "Device not found"}, 404)
-        return
+        return True
 
     # UPDATE: Specific Tariff
     m_tar = re.match(r"^/api/tariffs/([^/]+)$", path)
@@ -753,9 +753,9 @@ def handle_put(handler, path: str, body: dict) -> bool:
                         t[k] = float(body[k]) if "eur" in k else body[k]
                 save_json(CONFIG_FILE, cfg)
                 handler._send_json({"status": "updated", "tariff": t})
-                return
+                return True
         handler._send_json({"error": "Tariff not found"}, 404)
-        return
+        return True
 
     handler._send_json({"error": "Endpoint not found"}, 404)
 
@@ -779,7 +779,7 @@ def handle_delete(handler, path: str) -> bool:
             handler._send_json({"status": "deleted", "id": c_id})
         else:
             handler._send_json({"error": "InfluxDB connection not found"}, 404)
-        return
+        return True
 
     # DELETE: MQTT Broker Connection
     m_mq = re.match(r"^/api/infrastructure/mqtt/([^/]+)$", path)
@@ -796,7 +796,7 @@ def handle_delete(handler, path: str) -> bool:
             handler._send_json({"status": "deleted", "id": c_id})
         else:
             handler._send_json({"error": "MQTT connection not found"}, 404)
-        return
+        return True
 
     # DELETE: Policy
     m_pol = re.match(r"^/api/policies/([^/]+)$", path)
@@ -811,7 +811,7 @@ def handle_delete(handler, path: str) -> bool:
             handler._send_json({"status": "deleted", "id": pol_id})
         else:
             handler._send_json({"error": "Policy not found"}, 404)
-        return
+        return True
 
     # DELETE: Device
     m_dev = re.match(r"^/api/devices/([^/]+)$", path)
@@ -826,7 +826,7 @@ def handle_delete(handler, path: str) -> bool:
             handler._send_json({"status": "deleted", "id": dev_id})
         else:
             handler._send_json({"error": "Device not found"}, 404)
-        return
+        return True
 
     # DELETE: Tariff
     m_tar = re.match(r"^/api/tariffs/([^/]+)$", path)
@@ -841,7 +841,7 @@ def handle_delete(handler, path: str) -> bool:
             handler._send_json({"status": "deleted", "id": t_id})
         else:
             handler._send_json({"error": "Tariff not found"}, 404)
-        return
+        return True
 
     # DELETE: Exclusion Window
     m_win = re.match(r"^/api/exclusion-windows/(\d+)$", path)
@@ -855,7 +855,7 @@ def handle_delete(handler, path: str) -> bool:
             handler._send_json({"status": "deleted", "window": removed})
         else:
             handler._send_json({"error": "Index out of range"}, 404)
-        return
+        return True
 
     handler._send_json({"error": "Endpoint not found"}, 404)
 

@@ -36,14 +36,14 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "buh_locked_out": False
             }
         })
-        return
+        return True
 
     # API: Status
     if path == "/api/policies":
         cfg = load_json(CONFIG_FILE)
         ensure_framework_defaults(cfg)
         handler._send_json({"policies": cfg.get("policies", [])})
-        return
+        return True
 
     # API: Devices (Read All)
     if path == "/api/schedule/chart-data":
@@ -756,7 +756,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "total_gross_cost_eur": gross_cost_eur,
             "solar_savings_eur": solar_savings_eur
         })
-        return
+        return True
 
     return False
 
@@ -775,7 +775,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
         cfg["policies"].append(new_pol)
         save_json(CONFIG_FILE, cfg)
         handler._send_json({"status": "created", "policy": new_pol}, 201)
-        return
+        return True
 
     # CREATE: Device
     if path == "/api/exclusion-windows":
@@ -790,7 +790,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
         windows.append(new_win)
         save_json(CONFIG_FILE, cfg)
         handler._send_json({"status": "created", "window": new_win}, 201)
-        return
+        return True
 
     if path == "/api/schedule/recalculate":
         try:
@@ -803,7 +803,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
             })
         except Exception as e:
             handler._send_json({"status": "failed", "error": str(e)}, 500)
-        return
+        return True
 
 
     return False
@@ -821,8 +821,8 @@ def handle_put(handler, path: str, body: dict) -> bool:
                         p[k] = body[k]
                 save_json(CONFIG_FILE, cfg)
                 handler._send_json({"status": "updated", "policy": p})
-                return
+                return True
         handler._send_json({"error": "Policy not found"}, 404)
-        return
+        return True
 
     return False

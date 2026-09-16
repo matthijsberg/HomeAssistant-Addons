@@ -32,7 +32,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "battery_arbitrage_yield_eur": 0.42,
             "daily_digest": "• Verwachte Daggemiddelde Prijs: €0.245/kWh\n• Laagste Stroomtarief: €0.142/kWh (13:00)\n• Warmtepomp Boost: Gepland om 13:00 naar 60°C\n• Zonne-Zelfconsumptie: 78.4%\n• Accu Status: Stand-by (Deadband bewaakt)"
         })
-        return
+        return True
 
     # API: Layer 4 Hardware Control Status
     if path.startswith("/api/analytics/electricity_prices"):
@@ -145,10 +145,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 }
             }
             handler._send_json(res)
-            return
+            return True
         except Exception as e:
             handler._send_json({"status": "error", "message": f"Fout bij ophalen EPEX tarieven & zonvoorspelling: {str(e)}"}, 500)
-            return
+            return True
 
     if path == "/api/analytics/solar_cost" and handler.command == "POST":
         # Handled in do_POST
@@ -436,10 +436,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "stats": stats
             }
             handler._send_json(res)
-            return
+            return True
         except Exception as e:
             handler._send_json({"status": "error", "message": f"Fout bij ophalen InfluxDB telemetrie: {str(e)}"}, 500)
-            return
+            return True
 
 
     # =========================================================================
@@ -678,10 +678,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 },
                 "metrics": metrics
             })
-            return
+            return True
         except Exception as e:
             handler._send_json({"status": "error", "message": f"Fout bij berekenen validatie overlay: {str(e)}"}, 500)
-            return
+            return True
 
     # =========================================================================
     # API: HISTORICAL DHW TEMPERATURE & THERMAL DEMAND (kWh_th & V40)
@@ -765,10 +765,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "demand_kwh_th": demands_kwh_th,
                 "interval_h": interval_h
             })
-            return
+            return True
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, status=500)
-            return
+            return True
 
     if path.startswith("/api/analytics/decisions"):
         qp = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
@@ -777,7 +777,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         from layer3_scheduling.decision_audit import DecisionAuditLogger
         recs = DecisionAuditLogger.get_recent_decisions(limit=limit, domain=domain)
         handler._send_json({"status": "success", "total": len(recs), "decisions": recs})
-        return
+        return True
 
 
     return False

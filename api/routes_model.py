@@ -423,7 +423,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             })
         else:
             handler._send_json({"status": "error", "message": "DHW model niet geladen"}, 500)
-        return
+        return True
 
     if path == "/api/model/algorithm-config":
         params = load_json(PARAMS_FILE) if PARAMS_FILE.exists() else {}
@@ -434,7 +434,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "wind_exclusion_limit_ms": float(params.get("wind_exclusion_limit_ms", 8.0)),
             "solar_exclusion_limit_w_m2": float(params.get("solar_exclusion_limit_w_m2", 500.0))
         })
-        return
+        return True
 
     if path == "/api/model/recommendations":
         recs_file = Path("/config/model_recommendations.json")
@@ -463,12 +463,12 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             handler._send_json(recs_dict)
         else:
             handler._send_json({"status": "empty", "recommendations": []})
-        return
+        return True
 
     if path == "/api/model/status":
         if not GLOBAL_MODEL:
             handler._send_json({"status": "error", "message": "Model niet geladen"}, 500)
-            return
+            return True
         handler._send_json({
             "status": "online",
             "params": GLOBAL_MODEL.params,
@@ -478,19 +478,19 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "dow_count": len(GLOBAL_MODEL.profile.get("profile_96_quarters", []))
             }
         })
-        return
+        return True
 
     if path == "/api/model/retrain":
         if not GLOBAL_MODEL:
             handler._send_json({"status": "error", "message": "Model niet geladen"}, 500)
-            return
+            return True
         days = 120
         try:
             res = GLOBAL_MODEL.retrain_from_openhems(days_history=days)
             handler._send_json(res)
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, 500)
-        return
+        return True
 
     if path == "/api/model/decomposition":
         plan = ensure_active_canonical_plan()
@@ -508,7 +508,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "prices": [s.price_eur for s in slots]
         }
         handler._send_json(res_dict)
-        return
+        return True
 
     if path == "/api/calibration/unallocated-model":
         prof_data = {}
@@ -554,7 +554,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         prof_data["day_names"] = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag']
         prof_data["model_params"] = GLOBAL_MODEL.params if GLOBAL_MODEL else {}
         handler._send_json(prof_data)
-        return
+        return True
 
 
     return False
@@ -575,14 +575,14 @@ def handle_post(handler, path: str, body: dict) -> bool:
             handler._send_json({"status": "success", "message": "Algoritme instellingen opgeslagen", "params": params})
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, 500)
-        return
+        return True
 
     if path == "/api/model/recommendations/accept":
         try:
             recs_file = Path("/config/model_recommendations.json")
             if not recs_file.exists():
                 handler._send_json({"status": "error", "message": "Geen aanbevelingen gevonden"}, 404)
-                return
+                return True
             recs_data = load_json(recs_file)
             params = load_json(PARAMS_FILE) if PARAMS_FILE.exists() else {}
             ewma = float(params.get("learning_rate_ewma", 0.05))
@@ -622,7 +622,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
             handler._send_json({"status": "success", "message": "Aanbevelingen geaccepteerd en modelparameters geactiveerd!"})
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, 500)
-        return
+        return True
 
     if path == "/api/model/recommendations/reject":
         try:
@@ -635,19 +635,19 @@ def handle_post(handler, path: str, body: dict) -> bool:
             handler._send_json({"status": "success", "message": "Aanbevelingen afgewezen; actieve parameters blijven ongewijzigd."})
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, 500)
-        return
+        return True
 
     if path == "/api/model/retrain":
         if not GLOBAL_MODEL:
             handler._send_json({"status": "error", "message": "Model niet geladen"}, 500)
-            return
+            return True
         try:
             days = int(body.get("days", 120)) if body else 120
             res = GLOBAL_MODEL.retrain_from_openhems(days_history=days)
             handler._send_json(res)
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, 500)
-        return
+        return True
 
 
     # INFRASTRUCTURE: Test Home Assistant Core
