@@ -410,7 +410,25 @@ class CentralPlanner:
         if daytime_arbitrage_audit and daytime_arbitrage_audit.get("savings_eur"):
             calc_savings = round(daytime_arbitrage_audit["savings_eur"], 2)
 
-        unh_spits = round(min([t["temp_c"] for t in unheated_trajectory if "18:" in t["time"] or "19:" in t["time"] or "20:" in t["time"] or "21:" in t["time"]], default=current_dhw_temp - 4.5), 1)
+        # Today's evening peak dip: strictly evaluate slots belonging to TODAY'S evening peak (do not look at tomorrow evening!)
+        eve_peak_slots = []
+        for p in dynamic_peaks:
+            if "avond" in p.get("name", "").lower() or "spits" in p.get("name", "").lower():
+                s_idx = p.get("start_idx", 0)
+                e_idx = p.get("end_idx", 0)
+                if s_idx < 32:  # Only today's peak
+                    for k in range(s_idx, min(e_idx, len(sim_temps))):
+                        eve_peak_slots.append(sim_temps[k])
+                break
+
+        if eve_peak_slots:
+            unh_spits = round(min(eve_peak_slots), 1)
+        else:
+            today_eve = [
+                sim_temps[k] for k in range(min(28, len(sim_temps)))
+                if 17 <= (now.hour + k * step_mins // 60) % 24 <= 22
+            ]
+            unh_spits = round(min(today_eve), 1) if today_eve else round(current_dhw_temp - 4.5, 1)
 
         # Time headroom until evening peak lockout
         mins_until_peak = 999.0
