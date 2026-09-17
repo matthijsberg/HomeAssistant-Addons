@@ -853,6 +853,175 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             handler._send_json({"status": "error", "message": str(e)}, status=500)
             return True
 
+    # =========================================================================
+    # API: HISTORICAL SPACE HEATING TEMPERATURE & THERMAL DEMAND
+    # =========================================================================
+    if path.startswith("/api/analytics/heating_history"):
+        try:
+            parsed_url = urllib.parse.urlparse(handler.path)
+            qp = urllib.parse.parse_qs(parsed_url.query)
+            tf = qp.get("range", ["24h"])[0]
+            user_res = qp.get("resolution", ["15m"])[0]
+
+            days = 1 if tf == "24h" else (2 if tf == "48h" else 7)
+            bucket_sz = "1h" if user_res == "1h" else "15m"
+            interval_h = 1.0 if bucket_sz == "1h" else 0.25
+            step_mins = int(interval_h * 60)
+
+            now = datetime.now(timezone.utc)
+            t_start = (now - timedelta(days=days)).replace(minute=0, second=0, microsecond=0)
+            t_end = now.replace(minute=0, second=0, microsecond=0)
+
+            # Query HA history for indoor and outdoor temperatures
+            base_url, token = get_ha_client_config()
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            ha_url = f"{base_url}/api/history/period/{t_start.strftime('%Y-%m-%dT%H:00:00Z')}?end_time={t_end.strftime('%Y-%m-%dT%H:00:00Z')}&filter_entity_id=sensor.hc_sensors_temperature_room,sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature"
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            req = urllib.request.Request(ha_url, headers=headers)
+            try:
+                with urllib.request.urlopen(req, context=ctx, timeout=5) as r:
+                    ha_data = json.loads(r.read().decode())
+            except Exception:
+                ha_data = []
+
+            room_pts = []
+            out_pts = []
+            for ent in ha_data:
+                if not ent: continue
+                e_id = ent[0].get("entity_id", "")
+                if "room" in e_id:
+                    room_pts = ent
+                elif "outdoor" in e_id:
+                    out_pts = ent
+
+            slots = []
+            cur = t_start
+            while cur <= t_end:
+                slots.append(cur)
+                cur += timedelta(minutes=step_mins)
+
+            def sample_series(pts, slot_dts, default_val):
+                res = []
+                p_idx = 0
+                cur_val = default_val
+                for s_dt in slot_dts:
+                    s_iso = s_dt.isoformat()
+                    while p_idx < len(pts) and pts[p_idx].get("last_updated", "") <= s_iso:
+                        st = pts[p_idx].get("state")
+                        try:
+                            cur_val = float(st)
+                        except (ValueError, TypeError):
+                            pass
+                        p_idx += 1
+                    res.append(round(cur_val, 1))
+                return res
+
+            r_sampled = sample_series(room_pts, slots, 21.5)
+            o_sampled = sample_series(out_pts, slots, 16.0)
+
+            # Query InfluxDB for space heating electrical power
+            sec = load_secrets()
+            pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influx_password", "")
+            q = f"""
+            SELECT mean("power_w")/1000.0 * {interval_h} as cv_kwh_el
+            FROM "energy_telemetry"
+            WHERE "mode" = 'heating' AND time >= '{t_start.strftime("%Y-%m-%dT%H:00:00Z")}' AND time <= '{t_end.strftime("%Y-%m-%dT%H:00:00Z")}'
+            GROUP BY time({bucket_sz}) fill(0);
+            """
+            cv_map = {}
+            try:
+                influx_url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
+                with urllib.request.urlopen(influx_url, timeout=4) as r:
+                    res = json.loads(r.read().decode())
+                    for row in res.get("results", [{}])[0].get("series", [{}])[0].get("values", []):
+                        cv_map[row[0]] = float(row[1] or 0.0)
+            except Exception:
+                pass
+
+            labels = []
+            prev_dt = None
+            for s_dt in slots:
+                dt_ams = s_dt.astimezone(AMS_TZ)
+                if prev_dt is not None and dt_ams.day != prev_dt.day:
+                    day_str = DUTCH_DAYS_SHORT[dt_ams.weekday()]
+                    lbl = f"{day_str} {dt_ams.strftime('%H:%M' if bucket_sz == '15m' else '%H:00')}"
+                else:
+                    lbl = dt_ams.strftime("%H:%M" if bucket_sz == "15m" else "%H:00")
+                prev_dt = dt_ams
+                labels.append(lbl)
+
+            # Demand in kWh thermal = UA * max(0, T_room - T_out) * interval_h
+            UA = 0.3211
+            demand_kwh_th = [round(UA * max(0.0, r - o) * interval_h, 2) for r, o in zip(r_sampled, o_sampled)]
+
+            # Detect price peaks across historical timeline
+            from models.canonical import detect_dynamic_price_peaks
+            _, epex_prices_map, _ = get_epex_tariffs_cached(is_15m=(bucket_sz == "15m"))
+            hist_timeline = []
+            for s_dt in slots:
+                dt_ams = s_dt.astimezone(AMS_TZ)
+                k_p = dt_ams.strftime("%Y-%m-%d %H:%M" if bucket_sz == "15m" else "%Y-%m-%d %H:00")
+                p_val = epex_prices_map.get(k_p, 0.28)
+                hist_timeline.append({"dt": dt_ams, "price": p_val})
+            dyn_peaks, _ = detect_dynamic_price_peaks(hist_timeline, step_mins=step_mins)
+
+            forced_off_ranges = []
+            for p in dyn_peaks:
+                if p.get("is_hard_lockout"):
+                    forced_off_ranges.append({
+                        "start_idx": p.get("start_idx"),
+                        "end_idx": p.get("end_idx"),
+                        "start_label": p.get("hard_start_time") or p.get("start_time"),
+                        "end_label": p.get("hard_end_time") or p.get("end_time"),
+                        "name": "SPITSBLOK"
+                    })
+
+            # Heating ranges (historical active runs)
+            heating_ranges = []
+            in_heat = False
+            start_h = 0
+            for i, s_dt in enumerate(slots):
+                iso_key = s_dt.strftime("%Y-%m-%dT%H:%M:00Z")
+                kwh_val = cv_map.get(iso_key, 0.0)
+                if kwh_val > 0.02 and not in_heat:
+                    in_heat = True
+                    start_h = i
+                elif kwh_val <= 0.02 and in_heat:
+                    in_heat = False
+                    heating_ranges.append({
+                        "start_idx": start_h,
+                        "end_idx": i - 1,
+                        "start_label": labels[start_h],
+                        "end_label": labels[i - 1],
+                        "name": "VERWARMT"
+                    })
+            if in_heat:
+                heating_ranges.append({
+                    "start_idx": start_h,
+                    "end_idx": len(slots) - 1,
+                    "start_label": labels[start_h],
+                    "end_label": labels[-1],
+                    "name": "VERWARMT"
+                })
+
+            handler._send_json({
+                "status": "success",
+                "labels": labels,
+                "indoor_temperatures_c": r_sampled,
+                "outdoor_temperatures_c": o_sampled,
+                "demand_kwh_th": demand_kwh_th,
+                "heating_kwh_el": [cv_map.get(s_dt.strftime("%Y-%m-%dT%H:%M:00Z"), 0.0) for s_dt in slots],
+                "forced_off_ranges": forced_off_ranges,
+                "heating_ranges": heating_ranges,
+                "interval_h": interval_h
+            })
+            return True
+        except Exception as e:
+            handler._send_json({"status": "error", "message": str(e)}, status=500)
+            return True
+
     if path.startswith("/api/analytics/decisions"):
         qp = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
         limit = int(qp.get("limit", [50])[0])

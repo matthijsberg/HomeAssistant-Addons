@@ -373,6 +373,7 @@
             updatePowerProducersResButtons(powerProducersResolution);
             loadPowerProducersChart();
             loadDhwHistoryChart();
+            loadHeatingHistoryChart();
         }
 
         window.__simulateBattery = false;
@@ -458,6 +459,7 @@
                 loadPowerProducersChart();
                 loadValidationOverlayChart();
                 loadDhwHistoryChart();
+                loadHeatingHistoryChart();
             }
             if (tabId === 'decisions') {
                 loadDecisionAuditLog();
@@ -4426,6 +4428,7 @@
                     },
                     options: {
                         spitsblokRanges: data.forced_off_ranges,
+                        heatingRanges: data.heating_ranges,
                         responsive: true,
                         maintainAspectRatio: false,
                         interaction: { mode: 'index', intersect: false },
@@ -4478,6 +4481,129 @@
                 });
             } catch (e) {
                 console.error('Failed to load DHW history chart:', e);
+            }
+        }
+
+        let heatingHistoryChartInstance = null;
+        async function loadHeatingHistoryChart() {
+            const canvas = document.getElementById('heatingHistoryChart');
+            if (!canvas) return;
+
+            try {
+                const rangeSelect = document.getElementById('pp-range-select');
+                const rangeVal = rangeSelect ? rangeSelect.value : '24h';
+                const res = await fetch('./api/analytics/heating_history?range=' + encodeURIComponent(rangeVal) + '&resolution=15m');
+                const data = await res.json();
+                if (data.status !== 'success') {
+                    console.error('Heating history error:', data.message);
+                    return;
+                }
+
+                if (heatingHistoryChartInstance) {
+                    heatingHistoryChartInstance.destroy();
+                    heatingHistoryChartInstance = null;
+                }
+
+                const ctx = canvas.getContext('2d');
+                heatingHistoryChartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.labels,
+                        datasets: [
+                            {
+                                id: 'indoor_temp',
+                                label: 'Binnentemperatuur (°C)',
+                                data: data.indoor_temperatures_c,
+                                borderColor: '#F59E0B',
+                                backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                                borderWidth: 2.5,
+                                pointRadius: data.labels.length > 50 ? 0 : 2,
+                                pointHoverRadius: 5,
+                                fill: true,
+                                tension: 0.3,
+                                yAxisID: 'y'
+                            },
+                            {
+                                id: 'outdoor_temp',
+                                label: 'Buitentemperatuur (°C)',
+                                data: data.outdoor_temperatures_c,
+                                borderColor: '#60A5FA',
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.8,
+                                pointRadius: 0,
+                                pointHoverRadius: 4,
+                                fill: false,
+                                tension: 0.3,
+                                yAxisID: 'y'
+                            },
+                            {
+                                id: 'th_loss_demand',
+                                label: 'Warmtevraag (kWh)',
+                                data: data.demand_kwh_th,
+                                type: 'bar',
+                                backgroundColor: 'rgba(56, 189, 248, 0.45)',
+                                borderColor: '#38BDF8',
+                                borderWidth: 1,
+                                borderRadius: 3,
+                                yAxisID: 'y1'
+                            }
+                        ]
+                    },
+                    options: {
+                        spitsblokRanges: data.forced_off_ranges,
+                        heatingRanges: data.heating_ranges,
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                enabled: false,
+                                external: function(context) {
+                                    if (typeof customHeatingTooltipHandler === 'function') {
+                                        customHeatingTooltipHandler(context);
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                                ticks: {
+                                    color: '#94a3b8',
+                                    font: { size: 10, family: 'monospace' },
+                                    maxTicksLimit: 14
+                                }
+                            },
+                            y: {
+                                position: 'left',
+                                title: { display: true, text: 'Temperatuur (°C)', color: '#F59E0B', font: { size: 10, weight: 'bold' } },
+                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                                ticks: {
+                                    color: '#F59E0B',
+                                    font: { size: 10, family: 'monospace' },
+                                    callback: function(v) { return v + '°C'; }
+                                },
+                                suggestedMin: 15,
+                                suggestedMax: 25
+                            },
+                            y1: {
+                                position: 'right',
+                                title: { display: true, text: 'Warmtevraag (kWh)', color: '#38BDF8', font: { size: 10, weight: 'bold' } },
+                                grid: { drawOnChartArea: false },
+                                ticks: {
+                                    color: '#38BDF8',
+                                    font: { size: 10, family: 'monospace' },
+                                    callback: function(v) { return v.toFixed(1) + ' kWh'; }
+                                },
+                                min: 0,
+                                suggestedMax: 2.0
+                            }
+                        }
+                    }
+                });
+            } catch (err) {
+                console.error('Failed to load heating history chart:', err);
             }
         }
 
