@@ -292,3 +292,58 @@ def test_compute_historical_draw_offs_no_phantom_demand():
     assert demands[3] == 0.0
     # Shower (dropped 3.9C) -> ~1.5 kWh genuine tap water!
     assert demands[4] > 1.4
+
+
+def test_rolling_24h_night_start_plans_tomorrow_daytime():
+    """
+    Verify that when the planner runs late at night (e.g. 23:30),
+    and the tank is warm enough to bridge the morning peak,
+    the arbiter dynamically schedules the daytime heating run tomorrow midday.
+    """
+    now_dt = datetime(2026, 9, 17, 23, 30, tzinfo=AMS_TZ)
+    # 24h rolling slots starting at 23:30 today
+    slots = []
+    for i in range(96):
+        s_dt = now_dt + timedelta(minutes=15 * i)
+        # Tomorrow solar peak 11:00-14:00
+        solar = 2.4 if (s_dt.date() > now_dt.date() and 11 <= s_dt.hour <= 14) else 0.0
+        # Morning peak 06:30-09:15, evening peak 18:30-21:30
+        p = 0.20
+        if 11 <= s_dt.hour <= 14:
+            p = 0.11
+        elif 6 <= s_dt.hour <= 9 or 18 <= s_dt.hour <= 21:
+            p = 0.35
+        slots.append(
+            MockSlot(
+                slot_idx=i,
+                dt=s_dt,
+                label=s_dt.strftime("%H:%M"),
+                price_all_in=p,
+                solar_kw=solar,
+                unallocated_kw=0.45,
+                outdoor_temp_c=12.0
+            )
+        )
+
+    dynamic_peaks = [
+        {"name": "Ochtendspits", "start_idx": 28, "end_idx": 39, "is_hard_lockout": True},
+        {"name": "Avondspits", "start_idx": 76, "end_idx": 88, "is_hard_lockout": True}
+    ]
+
+    model = DhwThermalModel()
+    arb_res = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+        slots=slots,
+        current_dhw_temp=45.8,
+        dynamic_peaks=dynamic_peaks,
+        dhw_model=model,
+        now_dt=now_dt
+    )
+
+    # Must detect evening comfort risk on tomorrow evening and plan daytime run
+    assert arb_res.situation == "SITUATION_1_EVENING_COMFORT_RISK"
+    assert arb_res.planned_mode in ["forced_on", "forced_solar_boost_60"]
+    assert len(arb_res.planned_slots) > 0
+    # Must be scheduled within the dynamic midday valley (between morning and evening peaks)
+    for s_idx in arb_res.planned_slots:
+        assert 39 <= s_idx < 76, f"Slot {s_idx} outside dynamic daytime valley"
+

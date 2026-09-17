@@ -473,76 +473,82 @@ class DhwDaytimeArbiter:
         unheated_temps = unheated_sim.get("temperatures_c", [])
         unheated_labels = unheated_sim.get("labels", [])
 
-        # Evening comfort check (18:00 - 22:00 today)
+        # 2. Dynamic Peak Boundaries & Inter-Peak Valley
+        # Find the upcoming morning peak and upcoming evening peak in the rolling horizon
+        morn_lockout_end_idx = 0
+        eve_lockout_start_idx = n_slots
+
+        for p in dynamic_peaks:
+            if p.get("is_hard_lockout"):
+                s_i = p.get("start_idx", 0)
+                e_i = p.get("end_idx", n_slots)
+                p_name = p.get("name", "")
+
+                p_slot = slots[min(s_i, n_slots - 1)]
+                p_dt = getattr(p_slot, "dt", None)
+                if p_dt is None:
+                    sl_iso = getattr(p_slot, "dt_iso", "")
+                    p_dt = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * s_i))
+
+                if "Ochtend" in p_name or p_dt.hour < 12:
+                    morn_lockout_end_idx = max(morn_lockout_end_idx, e_i)
+                elif "Avond" in p_name or "Middag" in p_name or p_dt.hour >= 12:
+                    eve_lockout_start_idx = min(eve_lockout_start_idx, s_i)
+
+        # 3. Dynamic Comfort Risk Assessment
+        # Inspect temperature dip before/during the upcoming evening peak in the 24h rolling horizon
         evening_slots = []
         for i, (lbl, t) in enumerate(zip(unheated_labels, unheated_temps)):
-            dt_val = getattr(slots[i], "dt", now_dt + timedelta(minutes=15 * i)) if i < n_slots else (now_dt + timedelta(minutes=15 * i))
-            if 18 <= dt_val.hour <= 22 and dt_val.date() == now_dt.date():
-                evening_slots.append((i, lbl, t))
+            if i < n_slots:
+                sl_dt = getattr(slots[i], "dt", None)
+                if sl_dt is None:
+                    sl_iso = getattr(slots[i], "dt_iso", "")
+                    sl_dt = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * i))
+                if 17 <= sl_dt.hour <= 22:
+                    evening_slots.append((i, lbl, t))
 
         if evening_slots:
             min_eve = min(evening_slots, key=lambda x: x[2])
             unheated_evening_dip = round(min_eve[2], 1)
             evening_dip_time = min_eve[1]
         else:
-            unheated_evening_dip = round(current_dhw_temp - 3.5, 1)
+            unheated_evening_dip = round(min(unheated_temps), 1) if unheated_temps else current_dhw_temp
             evening_dip_time = "19:30"
 
         # Determine situation: evening comfort at risk if unheated tank dips below comfort threshold before/during evening peak
         evening_comfort_risk = (unheated_evening_dip < spec.comfort_min_temp_c or current_dhw_temp <= 43.5)
 
-        # Daytime & Pre-Spits Search Window:
-        # Find start of evening hard peak lockout (if today)
-        eve_lockout_start_idx = n_slots
-        for p in dynamic_peaks:
-            if p.get("is_hard_lockout"):
-                p_start_time = p.get("hard_start_time") or p.get("start_time")
-                for s_i, sl in enumerate(slots):
-                    sl_dt = getattr(sl, "dt", None)
-                    if sl_dt is None:
-                        sl_iso = getattr(sl, "dt_iso", "")
-                        sl_dt = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * s_i))
-                    sl_lbl = getattr(sl, "label", getattr(sl, "time_label", ""))
-                    if sl_dt.date() == now_dt.date() and 17 <= sl_dt.hour <= 22:
-                        if p_start_time and (p_start_time in sl_lbl or sl_lbl.endswith(p_start_time)):
-                            eve_lockout_start_idx = min(eve_lockout_start_idx, s_i)
-                            break
-                        elif slot_lockout_map.get(s_i, {}).get("is_hard_lockout"):
-                            eve_lockout_start_idx = min(eve_lockout_start_idx, s_i)
-                            break
+        # 4. Pure Dynamic Search Window:
+        # The daytime heating window is the dynamic valley between the morning peak and the evening peak
+        day_start_idx = morn_lockout_end_idx
+        day_end_idx = eve_lockout_start_idx
 
-        # Daytime & Pre-Spits Search Window:
-        if evening_comfort_risk:
-            # SITUATION 1: Comfort risk before evening peak -> window is from slot 0 until evening peak lockout
-            if now_dt.hour >= 10:
-                day_start_idx = 0
-                day_end_idx = min(n_slots, eve_lockout_start_idx)
-            else:
-                day_start_idx = 0
-                day_end_idx = min(n_slots, eve_lockout_start_idx)
-                for idx, s in enumerate(slots):
-                    dt_val = getattr(s, "dt", None)
-                    if dt_val is None:
-                        sl_iso = getattr(s, "dt_iso", "")
-                        dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
-                    if dt_val.hour >= 10 and dt_val.date() == now_dt.date():
-                        day_start_idx = idx
-                        break
-        else:
-            # SITUATION 2: Comfort safe -> Solar buffer search window (10:00 to 16:30 today)
-            day_start_idx = 0
-            day_end_idx = min(n_slots, 32)
+        # If no dynamic morning peak is present in horizon, find start of daytime (hour >= 9 or solar generation)
+        if day_start_idx == 0:
             for idx, s in enumerate(slots):
                 dt_val = getattr(s, "dt", None)
                 if dt_val is None:
                     sl_iso = getattr(s, "dt_iso", "")
                     dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
-                lbl = getattr(s, "label", getattr(s, "time_label", ""))
-                h = int(lbl.split(":")[0]) if ":" in lbl and not lbl.startswith("Nu") else dt_val.hour
-                if 10 <= h <= 16 and dt_val.date() == now_dt.date():
-                    if day_start_idx == 0:
-                        day_start_idx = idx
-                    day_end_idx = max(day_end_idx, idx + 1)
+                if dt_val.hour >= 9 or getattr(s, "solar_kw", 0.0) > 0.2:
+                    day_start_idx = idx
+                    break
+
+        # If no dynamic evening peak is present in horizon, bound daytime before evening (hour >= 18)
+        if day_end_idx == n_slots:
+            for idx in range(day_start_idx, n_slots):
+                s = slots[idx]
+                dt_val = getattr(s, "dt", None)
+                if dt_val is None:
+                    sl_iso = getattr(s, "dt_iso", "")
+                    dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
+                if dt_val.hour >= 18:
+                    day_end_idx = idx
+                    break
+
+        if day_start_idx >= day_end_idx:
+            day_start_idx = 0
+            day_end_idx = n_slots
 
         # Compute dynamic continuous optimal target temperature via Backwards Horizon Solver
         t_target_opt, next_anchor_idx, hours_to_anchor, q_needed, q_draw, q_loss = cls.compute_optimal_horizon_target_temp(

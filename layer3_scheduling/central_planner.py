@@ -131,19 +131,9 @@ class CentralPlanner:
         morning_comfort_risk = (morning_dip_c < 40.0)
 
         # 3. DHW Boiler 350L Dispatch Engine
-        # Physical daytime priority (10:00-16:00) vs night run
+        # Physical daytime priority vs emergency night run
         cur_h = now.hour
         is_night_time = (cur_h >= 21 or cur_h < 6)
-        has_daytime_ahead = (not is_night_time)
-
-        day_solar_surplus = 0.0
-        day_solar_slots = []
-        for i, s in enumerate(slots):
-            if 10 <= s.dt.hour <= 16:
-                surplus = max(0.0, s.solar_kw - s.unallocated_kw)
-                day_solar_surplus += surplus * step_hours
-                if surplus >= 0.8:
-                    day_solar_slots.append(i)
 
         planned_dhw_slots = []
         planned_mode = "normal"
@@ -161,7 +151,7 @@ class CentralPlanner:
             sww_power_kw = 0.0
             daytime_arbitrage_audit = None
         # Priority 1: Morning comfort risk (<40°C) during night/evening -> Nachtverwarming (20:00 - 06:00)
-        # Comfortzekerheid vóór 10:00u weegt zwaarder dan wachten op zon.
+        # Comfortzekerheid vóór ochtendspits weegt zwaarder dan wachten op zon.
         elif (morning_comfort_risk or current_dhw_temp <= 41.0) and is_night_time:
             # 1. Thermal heat requirement to reach target setpoint
             # Factor in estimated cooldown until night run (~1.5K)
@@ -242,9 +232,9 @@ class CentralPlanner:
                 planned_mode_label = "Normaal (Standby — Geen nachtvenster)"
                 planned_dhw_slots = []
 
-        # Priority 2: Daytime Economic Arbitration (DhwDaytimeArbiter)
-        # Evaluates 24-hour all-in electricity cost comparing 50°C vs 60°C and simulated night run
-        elif has_daytime_ahead:
+        # Priority 2: Dynamic Daytime Economic Arbitration (DhwDaytimeArbiter)
+        # Evaluates 24-hour all-in electricity cost comparing 50°C vs 60°C across the rolling horizon
+        else:
             from layer3_scheduling.dhw_daytime_arbiter import DhwDaytimeArbiter
             arbiter_res = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
                 slots=slots,
@@ -262,10 +252,6 @@ class CentralPlanner:
             sww_power_kw = arbiter_res.power_kw
             planned_dhw_slots = arbiter_res.planned_slots
             daytime_arbitrage_audit = arbiter_res.to_audit_dict()
-        else:
-            planned_mode = "normal"
-            planned_mode_label = "Normaal (Standby — Wachten op middag/zon)"
-            planned_dhw_slots = []
 
         # Avoid hard peak lockout for DHW runs
         final_dhw_slots = []
@@ -573,7 +559,7 @@ class CentralPlanner:
                 "aligned_grid_start": frame.metadata.get("aligned_grid_start"),
                 "dhw_tank_liters": cls.DHW_TANK_LITERS,
                 "daytime_arbitrage_audit": daytime_arbitrage_audit,
-                "solar_surplus_day_kwh": round(day_solar_surplus, 2),
+                "solar_surplus_day_kwh": round(sum(max(0.0, s.solar_kw - s.unallocated_kw) * step_hours for s in slots), 2),
                 "is_heating_season": heating_plan.is_heating_season,
                 "season_status_label": heating_plan.season_status_label,
                 "total_heating_kwh_el": heating_plan.total_heating_kwh_el,
