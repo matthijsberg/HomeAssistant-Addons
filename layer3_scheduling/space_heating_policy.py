@@ -328,12 +328,20 @@ class SpaceHeatingPolicy:
                     if is_solar_surplus or needs_deficit_buffer:
                         preheat_allowed = (t_room < max_preheat_room)
                     else:
-                        preheat_allowed = (t_room < target_room)
+                        preheat_allowed = False
+
+                    # Guarantee preheat runway: never start an orphan micro-run (< 1 hour) before a lockout or DHW run
+                    min_runway_slots = int(1.0 / step_hours)  # 4 slots = 1 hour
+                    has_preheat_runway = all(
+                        (idx not in lockout_slot_map and idx not in active_dhw_slots)
+                        for idx in range(i, min(n_slots, i + min_runway_slots))
+                    )
 
                     preheat_trigger = (
                         i in preheat_candidate_slots and
                         t_floor < cls.MAX_FLOOR_TEMP_C and
-                        preheat_allowed
+                        preheat_allowed and
+                        has_preheat_runway
                     )
 
                     if comfort_trigger or preheat_trigger:

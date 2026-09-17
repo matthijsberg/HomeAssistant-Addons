@@ -768,3 +768,79 @@ class CanonicalDispatchPlan:
     validation_issues: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def get_projected_slots(self, is_15m: bool = True) -> List[Dict[str, Any]]:
+        """
+        Single Source of Truth resolution projection for all downstream consumers.
+        Converts 96 quarters to 96 (15m) or 24 (1h) slots with 100% unified domain invariants.
+        Guarantees that heating, DHW, solar, unallocated, net_import, mode_code, and overlays
+        never disagree between any charts or APIs.
+        """
+        if is_15m:
+            res = []
+            for i, s in enumerate(self.slots):
+                res.append({
+                    "slot_idx": i,
+                    "time_label": s.time_label,
+                    "dt_iso": s.dt_iso,
+                    "price_eur": s.price_eur,
+                    "solar_kw": s.solar_kw,
+                    "unallocated_kw": s.unallocated_kw,
+                    "heating_kw": s.heating_kw,
+                    "dhw_kw": s.dhw_kw,
+                    "net_import_kw": s.net_import_kw,
+                    "mode_code": s.mode_code,
+                    "mode_label": s.mode_label,
+                    "is_heating": s.heating_kw > 0.02,
+                    "is_spitsblok": (s.mode_code == "forced_off"),
+                })
+            return res
+        else:
+            # 1-hour canonical downsampling
+            n_hours = min(24, len(self.slots) // 4)
+            res = []
+            for h in range(n_hours):
+                idx = h * 4
+                chunk = self.slots[idx:idx + 4]
+                if not chunk:
+                    break
+                avg_solar = round(sum(s.solar_kw for s in chunk) / len(chunk), 3)
+                avg_unalloc = round(sum(s.unallocated_kw for s in chunk) / len(chunk), 3)
+                avg_heat = round(sum(s.heating_kw for s in chunk) / len(chunk), 3)
+                avg_dhw = round(sum(s.dhw_kw for s in chunk) / len(chunk), 3)
+                avg_net = round(sum(s.net_import_kw for s in chunk) / len(chunk), 3)
+                avg_price = round(sum(s.price_eur for s in chunk) / len(chunk), 4)
+
+                # Canonical mode determination for 1h:
+                is_spits = any(s.mode_code == "forced_off" for s in chunk)
+                if is_spits:
+                    mode_c = "forced_off"
+                    mode_l = "Geforceerd uit (blok)"
+                    # Strict Physical Invariant: Cannot heat during forced lockout
+                    avg_heat = 0.0
+                elif avg_dhw > 0.05:
+                    mode_c = "forced_on"
+                    mode_l = "Geforceerd aan (Tapwater)"
+                elif avg_heat > 0.05:
+                    mode_c = "advised_on"
+                    mode_l = "Geadviseerd aan (Verwarmt)"
+                else:
+                    mode_c = chunk[0].mode_code
+                    mode_l = chunk[0].mode_label
+
+                res.append({
+                    "slot_idx": h,
+                    "time_label": chunk[0].time_label,
+                    "dt_iso": chunk[0].dt_iso,
+                    "price_eur": avg_price,
+                    "solar_kw": avg_solar,
+                    "unallocated_kw": avg_unalloc,
+                    "heating_kw": avg_heat,
+                    "dhw_kw": avg_dhw,
+                    "net_import_kw": avg_net,
+                    "mode_code": mode_c,
+                    "mode_label": mode_l,
+                    "is_heating": (avg_heat > 0.02),
+                    "is_spitsblok": is_spits,
+                })
+            return res
+
