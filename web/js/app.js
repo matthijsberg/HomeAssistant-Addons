@@ -55,45 +55,52 @@
                 ctx.save();
 
                 // 1. Darker shaded background for historical zone
-                ctx.fillStyle = 'rgba(3, 7, 18, 0.78)';
-                ctx.fillRect(chartArea.left, chartArea.top, xBoundary - chartArea.left, chartArea.height);
+                const histWidth = xBoundary - chartArea.left;
+                if (histWidth > 0) {
+                    ctx.fillStyle = 'rgba(3, 7, 18, 0.70)';
+                    ctx.fillRect(chartArea.left, chartArea.top, histWidth, chartArea.height);
+                }
 
                 // 2. Crisp dashed vertical divider at the boundary
                 ctx.beginPath();
-                ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
+                ctx.strokeStyle = 'rgba(168, 85, 247, 0.65)';
                 ctx.lineWidth = 1.5;
                 ctx.setLineDash([4, 3]);
                 ctx.moveTo(xBoundary, chartArea.top);
                 ctx.lineTo(xBoundary, chartArea.bottom);
                 ctx.stroke();
 
-                // 3. Subtle pill badge in the historical zone
+                // 3. Clean, non-colliding pill markers
                 ctx.setLineDash([]);
-                ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
-                const badgeWidth = 92;
-                const badgeHeight = 18;
-                const badgeX = chartArea.left + 8;
-                const badgeY = chartArea.top + 8;
-                ctx.beginPath();
-                ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 4);
-                ctx.fill();
-                ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
-                ctx.lineWidth = 1;
-                ctx.stroke();
 
-                // Badge text
-                ctx.fillStyle = '#94A3B8';
-                ctx.font = '700 9px ui-sans-serif, system-ui, sans-serif';
-                ctx.fillText('HISTORIE (1U)', badgeX + 10, badgeY + 12);
+                // Historical label on the left of boundary if enough space
+                if (histWidth >= 55) {
+                    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+                    ctx.strokeStyle = 'rgba(148, 163, 184, 0.30)';
+                    const hBadgeW = Math.min(68, histWidth - 10);
+                    const hBadgeX = xBoundary - hBadgeW - 4;
+                    ctx.beginPath();
+                    ctx.roundRect(hBadgeX, chartArea.top + 6, hBadgeW, 16, 3);
+                    ctx.fill();
+                    ctx.stroke();
 
-                // 4. Subtle "Nu" marker tag next to boundary line
+                    ctx.fillStyle = '#94A3B8';
+                    ctx.font = '700 8.5px ui-sans-serif, system-ui, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('◀ 1U HIST', hBadgeX + (hBadgeW / 2), chartArea.top + 17.5);
+                }
+
+                // "NU ▶" marker tag to the right of boundary line
                 ctx.fillStyle = 'rgba(168, 85, 247, 0.90)';
                 ctx.beginPath();
-                ctx.roundRect(xBoundary + 4, chartArea.top + 8, 38, 18, 4);
+                ctx.roundRect(xBoundary + 4, chartArea.top + 6, 34, 16, 3);
                 ctx.fill();
+
                 ctx.fillStyle = '#FFFFFF';
-                ctx.font = '700 9px ui-sans-serif, system-ui, sans-serif';
-                ctx.fillText('NU ▶', xBoundary + 10, chartArea.top + 20);
+                ctx.font = '700 8.5px ui-sans-serif, system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('NU ▶', xBoundary + 21, chartArea.top + 17.5);
+                ctx.textAlign = 'start';
 
                 ctx.restore();
             }

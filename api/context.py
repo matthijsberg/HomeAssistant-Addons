@@ -974,9 +974,11 @@ def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
     except Exception as e:
         print(f"Warning fetching history telemetry: {e}")
 
-    # Read live tank temperature from HA to avoid artificial 50°C cliff
+    # Read live tank and outdoor temperatures from HA to avoid artificial cliffs at the boundary
     cur_tank_default = 42.8
     cur_room_default = 24.5
+    cur_outdoor_default = 17.2
+    live_solar_default = 0.0
     try:
         sm = get_ha_states_map()
         v = float(sm.get("sensor.hc_dhw_temperature_r5t_dhw_tank", {}).get("state", 42.8))
@@ -989,6 +991,22 @@ def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
             r_t = float(sm.get("sensor.hc_sensors_temperature_room", {}).get("state", 24.5))
             if 15.0 <= r_t <= 35.0:
                 cur_room_default = r_t
+
+        for s_id in ["sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature", "sensor.temperatuur_buiten"]:
+            s_st = sm.get(s_id, {}).get("state")
+            if s_st and s_st not in ["unavailable", "unknown"]:
+                try:
+                    cur_outdoor_default = float(s_st)
+                    break
+                except ValueError:
+                    pass
+
+        s_pow = sm.get("sensor.zonnepanelen_power_avg_5_minutes", {}).get("state")
+        if s_pow and s_pow not in ["unavailable", "unknown"]:
+            try:
+                live_solar_default = round(abs(float(s_pow)) / 1000.0, 3)
+            except ValueError:
+                pass
     except Exception:
         pass
 
@@ -1000,6 +1018,9 @@ def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
 
         en_row = en_map.get(slot_utc_str, [0.0, 0.45, 0.45, 0.033])
         solar_kw = round(max(0.0, float(en_row[0] or 0.0)), 3)
+        if solar_kw == 0.0 and i == (num_slots - 1) and live_solar_default > 0:
+            solar_kw = live_solar_default
+
         house_kw = round(max(0.0, float(en_row[1] or 0.45)), 3)
         unalloc_kw = round(max(0.0, float(en_row[2] or 0.35)), 3)
         hp_kw = round(max(0.0, float(en_row[3] or 0.033)), 3)
@@ -1010,7 +1031,7 @@ def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
         tank_t = last_tank
 
         out_t = out_map.get(slot_utc_str)
-        out_t = round(float(out_t), 1) if out_t is not None else 18.0
+        out_t = round(float(out_t), 1) if out_t is not None else cur_outdoor_default
 
         dhw_kw = hp_kw if hp_kw > 0.5 else 0.0
         cv_kw = hp_kw if hp_kw > 0.5 and dhw_kw == 0.0 else 0.0
@@ -1625,11 +1646,13 @@ def ensure_active_canonical_plan(force_refresh=False):
             pass
 
     # 3b. Local Microclimate Observation Nudging (Wittboy & Rooftop Inverter)
+    live_t_out = None
+    live_solar_kw = None
+    live_wind_ms = None
     try:
         from layer1_data_collection.nowcasting import ObservationNowcaster
 
         # Live Outdoor Temp from Wittboy
-        live_t_out = None
         for ent in ["sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature", "sensor.temperatuur_buiten"]:
             st = states_map.get(ent, {}).get("state")
             if st and st not in ["unavailable", "unknown"]:
@@ -1651,20 +1674,6 @@ def ensure_active_canonical_plan(force_refresh=False):
                 except ValueError:
                     pass
 
-        # Nudge forward solar forecast
-        if raw_solar and live_solar_kw is not None:
-            raw_s_values = [s.get("solar_kw", 0.0) for s in raw_solar]
-            nudged_s = ObservationNowcaster.nudge_solar_forecast(raw_s_values, live_solar_kw)
-            for idx, n_val in enumerate(nudged_s):
-                raw_solar[idx]["solar_kw"] = n_val
-
-        # Nudge forward outdoor temperature forecast
-        if raw_weather and live_t_out is not None:
-            raw_t_values = [w.get("temperature", 15.0) for w in raw_weather]
-            nudged_t = ObservationNowcaster.nudge_temperature_forecast(raw_t_values, live_t_out)
-            for idx, n_val in enumerate(nudged_t):
-                raw_weather[idx]["temperature"] = n_val
-
         # Live Wind Speed from Wittboy
         live_wind_ms = None
         st_w = states_map.get("sensor.wittboy_gw2000a_weather_station_gw2000a_wind_speed", {}).get("state")
@@ -1673,15 +1682,8 @@ def ensure_active_canonical_plan(force_refresh=False):
                 live_wind_ms = round(float(st_w) / 3.6, 2)
             except ValueError:
                 pass
-
-        # Nudge forward wind forecast
-        if raw_weather and live_wind_ms is not None:
-            raw_w_values = [w.get("wind_speed_ms", 0.0) for w in raw_weather]
-            nudged_w = ObservationNowcaster.nudge_wind_forecast(raw_w_values, live_wind_ms)
-            for idx, n_val in enumerate(nudged_w):
-                raw_weather[idx]["wind_speed_ms"] = n_val
     except Exception as e_nowcast:
-        print(f"[Open HEMS Nowcasting] Error applying observation nudging: {e_nowcast}")
+        print(f"[Open HEMS Nowcasting] Error reading live weather telemetry: {e_nowcast}")
 
     # 4. Check if Space Heating (CV) is enabled via integration adapter
     from integrations.daikin_altherma.reader import DaikinReader
@@ -1692,7 +1694,7 @@ def ensure_active_canonical_plan(force_refresh=False):
     if GLOBAL_MODEL and GLOBAL_MODEL.profile:
         grid_96 = GLOBAL_MODEL.profile.get("profile_96_quarters", [])
 
-    # 6. Sanitize telemetry
+    # 6. Sanitize telemetry and apply Local Microclimate Observation Nudging
     frame = TelemetrySanitizer.sanitize(
         now=now_ams,
         raw_prices=raw_prices,
@@ -1704,6 +1706,9 @@ def ensure_active_canonical_plan(force_refresh=False):
         target_room_temp=cur_target_room,
         last_hardware_reading_time=last_hw_time,
         is_space_heating_enabled=is_cv_enabled,
+        live_outdoor_temp_c=live_t_out,
+        live_solar_kw=live_solar_kw,
+        live_wind_speed_ms=live_wind_ms,
         horizon_slots=96,
         step_mins=15
     )

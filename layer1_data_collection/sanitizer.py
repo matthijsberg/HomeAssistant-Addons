@@ -98,6 +98,9 @@ class TelemetrySanitizer:
         target_room_temp: Optional[float] = None,
         last_hardware_reading_time: Optional[datetime] = None,
         is_space_heating_enabled: bool = True,
+        live_outdoor_temp_c: Optional[float] = None,
+        live_solar_kw: Optional[float] = None,
+        live_wind_speed_ms: Optional[float] = None,
         horizon_slots: int = 96,
         step_mins: int = 15
     ) -> CleanTelemetryFrame:
@@ -287,6 +290,35 @@ class TelemetrySanitizer:
                 )
             )
 
+        # Apply Local Microclimate Observation Nudging (Wittboy & Rooftop Solar Inverter)
+        nowcasting_active = False
+        try:
+            from layer1_data_collection.nowcasting import ObservationNowcaster
+            slot_hours = step_mins / 60.0
+
+            if live_solar_kw is not None and slots:
+                raw_s = [s.solar_kw for s in slots]
+                nudged_s = ObservationNowcaster.nudge_solar_forecast(raw_s, live_solar_kw, slot_hours=slot_hours)
+                for idx_s, val in enumerate(nudged_s):
+                    slots[idx_s].solar_kw = val
+                nowcasting_active = True
+
+            if live_outdoor_temp_c is not None and slots:
+                raw_t = [s.outdoor_temp_c for s in slots]
+                nudged_t = ObservationNowcaster.nudge_temperature_forecast(raw_t, live_outdoor_temp_c, slot_hours=slot_hours)
+                for idx_t, val in enumerate(nudged_t):
+                    slots[idx_t].outdoor_temp_c = val
+                nowcasting_active = True
+
+            if live_wind_speed_ms is not None and slots:
+                raw_w = [s.wind_speed_ms for s in slots]
+                nudged_w = ObservationNowcaster.nudge_wind_forecast(raw_w, live_wind_speed_ms, slot_hours=slot_hours)
+                for idx_w, val in enumerate(nudged_w):
+                    slots[idx_w].wind_speed_ms = val
+                nowcasting_active = True
+        except Exception as e_nudge:
+            validation_errors.append(f"Observation nowcasting error: {e_nudge}")
+
         return CleanTelemetryFrame(
             timestamp=now,
             is_fresh=is_fresh,
@@ -298,7 +330,13 @@ class TelemetrySanitizer:
                 "slot_count": len(slots),
                 "horizon_hours": (horizon_slots * step_mins) / 60.0,
                 "target_room_temp_c": round(max(15.0, min(25.0, target_room_temp)), 1) if target_room_temp is not None else 20.0,
-                "is_space_heating_enabled": is_space_heating_enabled
+                "is_space_heating_enabled": is_space_heating_enabled,
+                "nowcasting": {
+                    "active": nowcasting_active,
+                    "live_outdoor_temp_c": live_outdoor_temp_c,
+                    "live_solar_kw": live_solar_kw,
+                    "live_wind_speed_ms": live_wind_speed_ms
+                }
             },
             validation_errors=validation_errors + issues,
             is_space_heating_enabled=is_space_heating_enabled

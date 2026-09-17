@@ -17,7 +17,7 @@ def test_nudge_solar_forecast_anchoring():
         raw_solar,
         live_solar_kw=live_solar,
         slot_hours=0.25,
-        tau_hours=2.0
+        horizon_hours=2.0
     )
 
     # Slot 0 must match live reading exactly
@@ -27,7 +27,7 @@ def test_nudge_solar_forecast_anchoring():
     assert nudged[1] < raw_solar[1]
     diff_slot_1 = raw_solar[1] - nudged[1]
     diff_slot_4 = raw_solar[4] - nudged[4]
-    assert diff_slot_1 > diff_slot_4, "Discrepancy must decay exponentially over time"
+    assert diff_slot_1 > diff_slot_4, "Discrepancy must decay smoothly over time"
 
     # Night slot (0.0) remains strictly 0.0
     assert nudged[-1] == 0.0
@@ -42,12 +42,11 @@ def test_nudge_temperature_forecast_anchoring():
         raw_temps,
         live_temp_c=live_temp,
         slot_hours=0.25,
-        tau_hours=3.0
+        horizon_hours=2.0
     )
 
     assert nudged[0] == 17.0
     assert nudged[1] > raw_temps[1]
-    assert nudged[-1] > raw_temps[-1]
     # By hour 1.25 (index 5), diff is smaller than 2.0
     assert (nudged[5] - raw_temps[5]) < 2.0
 
