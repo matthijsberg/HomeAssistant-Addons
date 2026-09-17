@@ -210,6 +210,22 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             full_export_prices = [round(b - 0.00605, 4) for b in (hist_prices_base + prices_base)]
             avg_export = (sum(full_export_prices) / len(full_export_prices)) if full_export_prices else 0.0
 
+            hist_offset = len(hist_pts)
+            forced_off_ranges = []
+            if plan and hasattr(plan, "dynamic_peaks"):
+                for p in plan.dynamic_peaks:
+                    if p.get("is_hard_lockout"):
+                        s_i = p.get("start_idx", 0)
+                        e_i = p.get("end_idx", 0)
+                        if not is_15m:
+                            s_i = s_i // 4
+                            e_i = e_i // 4
+                        forced_off_ranges.append({
+                            "start_idx": hist_offset + s_i,
+                            "end_idx": hist_offset + e_i,
+                            "name": "SPITSBLOK"
+                        })
+
             res = {
                 "status": "success",
                 "resolution": res_mode,
@@ -220,6 +236,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "solar_forecast_kw": hist_solar + solar_forecast_kw,
                 "solar_cost": solar_cost,
                 "history_count": len(hist_pts),
+                "forced_off_ranges": forced_off_ranges,
                 "stats": {
                     "min_price": f"€{min_p:.4f}/kWh",
                     "min_time": min_time,
@@ -509,6 +526,21 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 }
             }
 
+            from models.canonical import detect_dynamic_price_peaks
+            hist_timeline = []
+            for ts_s, p in zip(sorted_ts, series_prices):
+                dt_pt = datetime.fromisoformat(ts_s.replace("Z", "+00:00")).astimezone(AMS_TZ)
+                hist_timeline.append({"dt": dt_pt, "price": p})
+            dyn_peaks, _ = detect_dynamic_price_peaks(hist_timeline, step_mins=int(interval_h * 60))
+            forced_off_ranges = []
+            for p in dyn_peaks:
+                if p.get("is_hard_lockout"):
+                    forced_off_ranges.append({
+                        "start_idx": p.get("start_idx"),
+                        "end_idx": p.get("end_idx"),
+                        "name": "SPITSBLOK"
+                    })
+
             res = {
                 "status": "success",
                 "labels": labels,
@@ -520,6 +552,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "teruglevering_negative": series_terug_neg,
                 "prices": series_prices,
                 "export_prices": series_export_prices,
+                "forced_off_ranges": forced_off_ranges,
                 "stats": stats
             }
             handler._send_json(res)
@@ -801,11 +834,30 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     last_t = round(float(t_val), 1)
                 temps.append(last_t)
 
+            from models.canonical import detect_dynamic_price_peaks
+            _, epex_prices_map, _ = get_epex_tariffs_cached(is_15m=(bucket_sz == "15m"))
+            hist_timeline = []
+            for ts_str in sorted_ts:
+                dt_ams = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
+                k_p = dt_ams.strftime("%Y-%m-%d %H:%M" if bucket_sz == "15m" else "%Y-%m-%d %H:00")
+                p_val = epex_prices_map.get(k_p, 0.28)
+                hist_timeline.append({"dt": dt_ams, "price": p_val})
+            dyn_peaks, _ = detect_dynamic_price_peaks(hist_timeline, step_mins=int(interval_h * 60))
+            forced_off_ranges = []
+            for p in dyn_peaks:
+                if p.get("is_hard_lockout"):
+                    forced_off_ranges.append({
+                        "start_idx": p.get("start_idx"),
+                        "end_idx": p.get("end_idx"),
+                        "name": "SPITSBLOK"
+                    })
+
             handler._send_json({
                 "status": "success",
                 "labels": labels,
                 "temperatures_c": temps,
                 "demand_kwh_th": demands_kwh_th,
+                "forced_off_ranges": forced_off_ranges,
                 "interval_h": interval_h
             })
             return True
