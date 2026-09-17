@@ -1639,7 +1639,14 @@ def ensure_active_canonical_plan(force_refresh=False):
                 except ValueError:
                     pass
         if floor_vals:
-            cur_floor = round(sum(floor_vals) / len(floor_vals), 1)
+            raw_floor = sum(floor_vals) / len(floor_vals)
+            # Physical equilibrium check: when heat pump is idle/standby, stagnant pipes in the utility cupboard
+            # read lower than the actual living room concrete thermal mass, which is in equilibrium with room air.
+            is_hp_heating = states_map.get("climate.woonkamer_climate_daikin", {}).get("attributes", {}).get("hvac_action") == "heating"
+            if not is_hp_heating:
+                cur_floor = round(max(raw_floor, cur_room - 0.2), 1)
+            else:
+                cur_floor = round(raw_floor, 1)
         else:
             cur_floor = cur_room
     except Exception as e_st:
