@@ -50,26 +50,82 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
         if h_summary and h_summary.slots:
             n_sim = len(h_summary.slots)
-            labels = [plan.slots[i].time_label for i in range(n_sim)] if plan.slots else [f"T+{i}" for i in range(n_sim)]
-            out_temps = [round(s.outdoor_temp_c, 1) for s in h_summary.slots]
-            in_temps = [round(s.room_temp_c, 1) for s in h_summary.slots]
-            floor_temps = [round(s.floor_temp_c, 1) for s in h_summary.slots]
-            cops = [round(s.cop, 2) for s in h_summary.slots]
-            th_loss_kw = [round(s.heat_loss_kw, 2) for s in h_summary.slots]
-            el_power_kw = [round(s.heating_kw_el, 2) for s in h_summary.slots]
-            costs_eur = [
-                round(s.heating_kw_el * interval_h * (plan.slots[i].price_eur if i < len(plan.slots) else 0.25), 3)
+            raw_labels = [plan.slots[i].time_label for i in range(n_sim)] if plan.slots else [f"T+{i}" for i in range(n_sim)]
+            raw_out_temps = [round(s.outdoor_temp_c, 1) for s in h_summary.slots]
+            raw_in_temps = [round(s.room_temp_c, 1) for s in h_summary.slots]
+            raw_floor_temps = [round(s.floor_temp_c, 1) for s in h_summary.slots]
+            raw_cops = [round(s.cop, 2) for s in h_summary.slots]
+            raw_th_loss_kw = [round(s.heat_loss_kw, 2) for s in h_summary.slots]
+            raw_el_power_kw = [round(s.heating_kw_el, 2) for s in h_summary.slots]
+            raw_costs_eur = [
+                round(s.heating_kw_el * 0.25 * (plan.slots[i].price_eur if i < len(plan.slots) else 0.25), 3)
                 for i, s in enumerate(h_summary.slots)
             ]
+            raw_unh = (h_summary.unheated_room_temps_c if (h_summary and h_summary.unheated_room_temps_c) else raw_in_temps)
+            raw_in_p05 = (h_summary.room_temps_p05_c if (h_summary and h_summary.room_temps_p05_c) else raw_in_temps)
+            raw_in_p95 = (h_summary.room_temps_p95_c if (h_summary and h_summary.room_temps_p95_c) else raw_in_temps)
+            raw_unh_p05 = (h_summary.unheated_temps_p05_c if (h_summary and h_summary.unheated_temps_p05_c) else raw_in_temps)
+            raw_unh_p95 = (h_summary.unheated_temps_p95_c if (h_summary and h_summary.unheated_temps_p95_c) else raw_in_temps)
+
             tot_th = h_summary.total_heating_kwh_th
             tot_el = h_summary.total_heating_kwh_el
-            tot_cost = round(sum(costs_eur), 2)
+            tot_cost = round(sum(raw_costs_eur), 2)
             t_setpoint = h_summary.target_room_temp_c
             t_start_threshold = h_summary.min_comfort_room_c
             t_active = h_summary.is_heating_season
             t_status = h_summary.season_status_label
+
+            if not is_15m:
+                # Aggregate 96 quarter-hour slots to 24 1-hour slots
+                labels = []
+                out_temps = []
+                in_temps = []
+                unheated_temps = []
+                in_p05 = []
+                in_p95 = []
+                unh_p05 = []
+                unh_p95 = []
+                floor_temps = []
+                cops = []
+                th_loss_kw = []
+                el_power_kw = []
+                costs_eur = []
+                prev_h_dt = None
+                for h_i in range(min(24, n_sim // 4)):
+                    idx = h_i * 4
+                    h_dt = base_dt + timedelta(hours=h_i)
+                    labels.append(format_slot_label(h_dt, prev_h_dt, h_i == 0, False))
+                    prev_h_dt = h_dt
+
+                    out_temps.append(round(sum(raw_out_temps[idx:idx+4]) / 4.0, 1))
+                    in_temps.append(round(sum(raw_in_temps[idx:idx+4]) / 4.0, 1))
+                    unheated_temps.append(round(sum(raw_unh[idx:idx+4]) / 4.0, 1))
+                    in_p05.append(round(sum(raw_in_p05[idx:idx+4]) / 4.0, 1))
+                    in_p95.append(round(sum(raw_in_p95[idx:idx+4]) / 4.0, 1))
+                    unh_p05.append(round(sum(raw_unh_p05[idx:idx+4]) / 4.0, 1))
+                    unh_p95.append(round(sum(raw_unh_p95[idx:idx+4]) / 4.0, 1))
+                    floor_temps.append(round(sum(raw_floor_temps[idx:idx+4]) / 4.0, 1))
+                    cops.append(round(sum(raw_cops[idx:idx+4]) / 4.0, 2))
+                    th_loss_kw.append(round(sum(raw_th_loss_kw[idx:idx+4]) / 4.0, 2))
+                    el_power_kw.append(round(sum(raw_el_power_kw[idx:idx+4]) / 4.0, 2))
+                    costs_eur.append(round(sum(raw_costs_eur[idx:idx+4]), 3))
+            else:
+                labels = raw_labels
+                out_temps = raw_out_temps
+                in_temps = raw_in_temps
+                unheated_temps = raw_unh
+                in_p05 = raw_in_p05
+                in_p95 = raw_in_p95
+                unh_p05 = raw_unh_p05
+                unh_p95 = raw_unh_p95
+                floor_temps = raw_floor_temps
+                cops = raw_cops
+                th_loss_kw = raw_th_loss_kw
+                el_power_kw = raw_el_power_kw
+                costs_eur = raw_costs_eur
         else:
             labels, out_temps, in_temps, floor_temps, cops, th_loss_kw, el_power_kw, costs_eur = [], [], [], [], [], [], [], []
+            unheated_temps, in_p05, in_p95, unh_p05, unh_p95 = [], [], [], [], []
             tot_th, tot_el, tot_cost = 0.0, 0.0, 0.0
             t_setpoint = 20.0
             t_start_threshold = 19.6
@@ -86,11 +142,11 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "labels": hist_labels + labels,
             "outdoor_temps_c": hist_outdoor + out_temps,
             "indoor_temps_c": hist_indoor + in_temps,
-            "unheated_temps_c": hist_indoor + (h_summary.unheated_room_temps_c if (h_summary and h_summary.unheated_room_temps_c) else in_temps),
-            "indoor_temps_p05_c": hist_indoor + (h_summary.room_temps_p05_c if (h_summary and h_summary.room_temps_p05_c) else in_temps),
-            "indoor_temps_p95_c": hist_indoor + (h_summary.room_temps_p95_c if (h_summary and h_summary.room_temps_p95_c) else in_temps),
-            "unheated_temps_p05_c": hist_indoor + (h_summary.unheated_temps_p05_c if (h_summary and h_summary.unheated_temps_p05_c) else in_temps),
-            "unheated_temps_p95_c": hist_indoor + (h_summary.unheated_temps_p95_c if (h_summary and h_summary.unheated_temps_p95_c) else in_temps),
+            "unheated_temps_c": hist_indoor + unheated_temps,
+            "indoor_temps_p05_c": hist_indoor + in_p05,
+            "indoor_temps_p95_c": hist_indoor + in_p95,
+            "unheated_temps_p05_c": hist_indoor + unh_p05,
+            "unheated_temps_p95_c": hist_indoor + unh_p95,
             "floor_temps_c": hist_floor + floor_temps,
             "cops": hist_cops + cops,
             "thermal_loss_kw": hist_th_loss + th_loss_kw,

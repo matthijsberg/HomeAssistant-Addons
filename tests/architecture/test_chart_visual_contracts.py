@@ -66,3 +66,39 @@ def test_forecast_kpi_cards_carry_explicit_24u_rollend_titles():
     assert 'Zonnepanelen (24u Rollend)' in content
     assert 'Besparing (24u Rollend)' in content
     assert 'Warmtepomp (24u Rollend)' in content
+
+
+def test_heating_forecast_resolution_parity():
+    """Guarantee that /api/model/heating-forecast returns label count and overlays matching resolution."""
+    from api.routes_model import handle_get
+
+    class DummyHandler:
+        def __init__(self, path):
+            self.path = path
+            self.response = None
+        def _send_json(self, data):
+            self.response = data
+
+    # 15m mode: exactly 4 history + 96 future = 100 slots
+    h15 = DummyHandler('/api/model/heating-forecast?resolution=15m')
+    handle_get(h15, '/api/model/heating-forecast', {'resolution': ['15m']})
+    d15 = h15.response
+    assert d15 is not None
+    assert len(d15['labels']) == 100
+    assert len(d15['indoor_temps_c']) == 100
+    for s in d15['forced_off_ranges']:
+        assert 0 <= s['start_idx'] <= s['end_idx'] < 100
+    for h in d15['heating_ranges']:
+        assert 0 <= h['start_idx'] <= h['end_idx'] < 100
+
+    # 1h mode: exactly 1 history + 24 future = 25 slots
+    h1 = DummyHandler('/api/model/heating-forecast?resolution=1h')
+    handle_get(h1, '/api/model/heating-forecast', {'resolution': ['1h']})
+    d1 = h1.response
+    assert d1 is not None
+    assert len(d1['labels']) == 25
+    assert len(d1['indoor_temps_c']) == 25
+    for s in d1['forced_off_ranges']:
+        assert 0 <= s['start_idx'] <= s['end_idx'] < 25
+    for h in d1['heating_ranges']:
+        assert 0 <= h['start_idx'] <= h['end_idx'] < 25
