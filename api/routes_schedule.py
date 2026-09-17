@@ -659,19 +659,23 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
         forecast_kpis = {
             "costs": {
+                "title": "Kosten (24u Rollend)",
                 "main": f"€{net_cost_eur:.2f}",
                 "sub": f"{net_kwh_balance:.1f} kWh netto · gem. €{avg_p:.2f}/kWh"
             },
             "solar": {
+                "title": "Zonnepanelen (24u Rollend)",
                 "main": f"€{solar_total_value_eur:.2f}",
                 "main_extra": f"({tot_solar_kwh:.1f} kWh)",
                 "sub": f"€{solar_selfcons_eur:.2f} benut ({solar_selfcons_kwh:.1f} kWh) · €{solar_export_eur:.2f} retour ({solar_export_kwh:.1f} kWh)"
             },
             "savings": {
+                "title": "Besparing (24u Rollend)",
                 "main": f"€{hems_savings_eur:.2f}",
                 "sub": f"{shifted_kwh:.1f} kWh verschoven naar dal/zon"
             },
             "heatpump": {
+                "title": "Warmtepomp (24u Rollend)",
                 "main": f"{hp_tot_stroom_kwh:.1f} kWh",
                 "main_extra": f"(~€{hp_cost_eur:.2f})",
                 "sub": f"{hp_tot_th:.1f} kWh th (COP {hp_cop:.1f}) · {dhw_hours:.1f}u SWW / {cv_hours:.1f}u CV"

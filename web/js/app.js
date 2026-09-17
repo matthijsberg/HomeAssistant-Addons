@@ -1870,25 +1870,33 @@
                 // Render Top 4 Forecast KPI Cards (1: Costs, 2: Solar, 3: Savings, 4: Heat Pump)
                 if (data.forecast_kpis) {
                     const fk = data.forecast_kpis;
+                    const elCostsTitle = document.getElementById('pred-kpi-costs-title');
                     const elCostsMain = document.getElementById('pred-kpi-costs-main');
                     const elCostsSub = document.getElementById('pred-kpi-costs-sub');
+                    if (elCostsTitle && fk.costs.title) elCostsTitle.innerText = fk.costs.title;
                     if (elCostsMain) elCostsMain.innerText = fk.costs.main;
                     if (elCostsSub) elCostsSub.innerText = fk.costs.sub;
 
+                    const elSolarTitle = document.getElementById('pred-kpi-solar-title');
                     const elSolarMain = document.getElementById('pred-kpi-solar-main');
                     const elSolarSub = document.getElementById('pred-kpi-solar-sub');
+                    if (elSolarTitle && fk.solar.title) elSolarTitle.innerText = fk.solar.title;
                     if (elSolarMain) {
                         elSolarMain.innerHTML = `${fk.solar.main} <span class="text-xs text-slate-400 font-normal">${fk.solar.main_extra || ''}</span>`;
                     }
                     if (elSolarSub) elSolarSub.innerText = fk.solar.sub;
 
+                    const elSavTitle = document.getElementById('pred-kpi-savings-title');
                     const elSavMain = document.getElementById('pred-kpi-savings-main');
                     const elSavSub = document.getElementById('pred-kpi-savings-sub');
+                    if (elSavTitle && fk.savings.title) elSavTitle.innerText = fk.savings.title;
                     if (elSavMain) elSavMain.innerText = fk.savings.main;
                     if (elSavSub) elSavSub.innerText = fk.savings.sub;
 
+                    const elHpTitle = document.getElementById('pred-kpi-hp-title');
                     const elHpMain = document.getElementById('pred-kpi-hp-main');
                     const elHpSub = document.getElementById('pred-kpi-hp-sub');
+                    if (elHpTitle && fk.heatpump.title) elHpTitle.innerText = fk.heatpump.title;
                     if (elHpMain) {
                         elHpMain.innerHTML = `${fk.heatpump.main} <span class="text-xs text-slate-400 font-normal">${fk.heatpump.main_extra || ''}</span>`;
                     }
