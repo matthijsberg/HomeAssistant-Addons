@@ -27,6 +27,7 @@ class TelemetrySlot:
     dhw_temp_c: Optional[float] = None
     room_temp_c: Optional[float] = None
     floor_temp_c: Optional[float] = None
+    wind_speed_ms: float = 0.0
     quality: Quality = Quality.GOOD
     issues: List[str] = field(default_factory=list)
 
@@ -41,6 +42,7 @@ class CleanTelemetryFrame:
     slots: List[TelemetrySlot]
     metadata: Dict[str, Any] = field(default_factory=dict)
     validation_errors: List[str] = field(default_factory=list)
+    is_space_heating_enabled: bool = True
 
     @property
     def prices(self) -> List[float]:
@@ -53,6 +55,10 @@ class CleanTelemetryFrame:
     @property
     def outdoor_temperatures(self) -> List[float]:
         return [s.outdoor_temp_c for s in self.slots]
+
+    @property
+    def wind_speeds(self) -> List[float]:
+        return [s.wind_speed_ms for s in self.slots]
 
     @property
     def unallocated_kw(self) -> List[float]:
@@ -91,6 +97,7 @@ class TelemetrySanitizer:
         current_floor_temp: Optional[float] = None,
         target_room_temp: Optional[float] = None,
         last_hardware_reading_time: Optional[datetime] = None,
+        is_space_heating_enabled: bool = True,
         horizon_slots: int = 96,
         step_mins: int = 15
     ) -> CleanTelemetryFrame:
@@ -165,8 +172,10 @@ class TelemetrySanitizer:
                 t_val = float(w.get("temperature", w.get("temp_c", 15.0)))
                 # Physical sanity bounds: -30°C to +50°C
                 t_val = max(-30.0, min(50.0, t_val))
+                w_val = float(w.get("wind_speed_ms", w.get("wind_speed", w.get("wind_speed_10m", 0.0))))
+                w_val = max(0.0, min(50.0, w_val))
                 key = dt.strftime("%Y-%m-%d %H:%M")
-                weather_map[key] = t_val
+                weather_map[key] = {"temp": t_val, "wind": w_val}
 
         # Sanitize current temperatures
         clean_dhw = None
@@ -216,13 +225,15 @@ class TelemetrySanitizer:
             else:
                 s_val = 0.0
 
-            # Outdoor temp matching
+            # Outdoor temp & wind matching
             if key_exact in weather_map:
-                t_val = weather_map[key_exact]
+                w_entry = weather_map[key_exact]
             elif key_hour in weather_map:
-                t_val = weather_map[key_hour]
+                w_entry = weather_map[key_hour]
             else:
-                t_val = last_known_t
+                w_entry = {"temp": last_known_t, "wind": 0.0}
+            t_val = w_entry.get("temp", last_known_t)
+            w_val = w_entry.get("wind", 0.0)
             last_known_t = t_val
 
             # Unallocated demand matching (7x96 matrix support)
@@ -270,6 +281,7 @@ class TelemetrySanitizer:
                     dhw_temp_c=clean_dhw if i == 0 else None,
                     room_temp_c=clean_room if i == 0 else None,
                     floor_temp_c=clean_floor if i == 0 else None,
+                    wind_speed_ms=round(w_val, 1),
                     quality=p_q if is_fresh else Quality.STALE,
                     issues=slot_issues
                 )
@@ -285,7 +297,9 @@ class TelemetrySanitizer:
                 "aligned_grid_start": grid_start.isoformat(),
                 "slot_count": len(slots),
                 "horizon_hours": (horizon_slots * step_mins) / 60.0,
-                "target_room_temp_c": round(max(15.0, min(25.0, target_room_temp)), 1) if target_room_temp is not None else 20.0
+                "target_room_temp_c": round(max(15.0, min(25.0, target_room_temp)), 1) if target_room_temp is not None else 20.0,
+                "is_space_heating_enabled": is_space_heating_enabled
             },
-            validation_errors=validation_errors + issues
+            validation_errors=validation_errors + issues,
+            is_space_heating_enabled=is_space_heating_enabled
         )

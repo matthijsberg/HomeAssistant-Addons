@@ -276,6 +276,8 @@ class CentralPlanner:
             current_room_temp_c=frame.current_room_temp,
             current_floor_temp_c=frame.current_floor_temp,
             target_room_temp_c=frame.target_room_temp,
+            wind_speeds_ms=frame.wind_speeds,
+            is_heating_enabled=frame.is_space_heating_enabled,
             step_hours=step_hours
         )
 

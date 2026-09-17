@@ -58,3 +58,32 @@ def test_daikin_actuator_feedback():
     assert executed_switches["cv_master"] is False
     assert executed_switches["s11s"] is True
     assert executed_switches["s10s"] is True
+
+
+def test_daikin_reader_space_heating_enabled():
+    """Verify circuit enable multi-entity rule."""
+    from integrations.daikin_altherma.reader import DaikinReader
+
+    # Case 1: All on
+    states_on = {
+        "switch.hc_mode_altherma_on": {"state": "on"},
+        "climate.hc_room_room_heating": {"state": "heat"},
+        "climate.woonkamer_climate_daikin": {"state": "heat"}
+    }
+    assert DaikinReader.is_space_heating_circuit_enabled(states_on) is True
+
+    # Case 2: Room heating climate off
+    states_circuit_off = {
+        "switch.hc_mode_altherma_on": {"state": "on"},
+        "climate.hc_room_room_heating": {"state": "off"},
+        "climate.woonkamer_climate_daikin": {"state": "heat"}
+    }
+    assert DaikinReader.is_space_heating_circuit_enabled(states_circuit_off) is False
+
+    # Case 3: Master switch off
+    states_master_off = {
+        "switch.hc_mode_altherma_on": {"state": "off"},
+        "climate.hc_room_room_heating": {"state": "heat"},
+        "climate.woonkamer_climate_daikin": {"state": "heat"}
+    }
+    assert DaikinReader.is_space_heating_circuit_enabled(states_master_off) is False

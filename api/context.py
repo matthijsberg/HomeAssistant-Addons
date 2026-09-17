@@ -1549,15 +1549,17 @@ def ensure_active_canonical_plan(force_refresh=False):
             m_times = m_data.get("hourly", {}).get("time", [])
             m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
             m_temps = m_data.get("hourly", {}).get("temperature_2m", [])
+            m_winds = m_data.get("hourly", {}).get("wind_speed_10m", [])
             s_eff = float(s_cfg.get("efficiency_factor", 0.88))
 
-            for t, rad, tmp in zip(m_times, m_rads, m_temps):
+            for idx_m, (t, rad, tmp) in enumerate(zip(m_times, m_rads, m_temps)):
                 k_t = t.replace('T', ' ')[:13] + ':00'
                 dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
                 if not has_solar_plan:
                     poa_kw = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
                     raw_solar.append({"dt": dt_h, "solar_kw": poa_kw})
-                raw_weather.append({"dt": dt_h, "temperature": float(tmp)})
+                w_kmh = float(m_winds[idx_m]) if (idx_m < len(m_winds) and m_winds[idx_m] is not None) else 0.0
+                raw_weather.append({"dt": dt_h, "temperature": float(tmp), "wind_speed_ms": round(w_kmh / 3.6, 2)})
     except Exception as e_w:
         print(f"Warning fetching Open-Meteo in ensure_active_canonical_plan: {e_w}")
 
@@ -1662,15 +1664,35 @@ def ensure_active_canonical_plan(force_refresh=False):
             nudged_t = ObservationNowcaster.nudge_temperature_forecast(raw_t_values, live_t_out)
             for idx, n_val in enumerate(nudged_t):
                 raw_weather[idx]["temperature"] = n_val
+
+        # Live Wind Speed from Wittboy
+        live_wind_ms = None
+        st_w = states_map.get("sensor.wittboy_gw2000a_weather_station_gw2000a_wind_speed", {}).get("state")
+        if st_w and st_w not in ["unavailable", "unknown"]:
+            try:
+                live_wind_ms = round(float(st_w) / 3.6, 2)
+            except ValueError:
+                pass
+
+        # Nudge forward wind forecast
+        if raw_weather and live_wind_ms is not None:
+            raw_w_values = [w.get("wind_speed_ms", 0.0) for w in raw_weather]
+            nudged_w = ObservationNowcaster.nudge_wind_forecast(raw_w_values, live_wind_ms)
+            for idx, n_val in enumerate(nudged_w):
+                raw_weather[idx]["wind_speed_ms"] = n_val
     except Exception as e_nowcast:
         print(f"[Open HEMS Nowcasting] Error applying observation nudging: {e_nowcast}")
 
-    # 4. Extract unallocated profile
+    # 4. Check if Space Heating (CV) is enabled via integration adapter
+    from integrations.daikin_altherma.reader import DaikinReader
+    is_cv_enabled = DaikinReader.is_space_heating_circuit_enabled(states_map)
+
+    # 5. Extract unallocated profile
     grid_96 = []
     if GLOBAL_MODEL and GLOBAL_MODEL.profile:
         grid_96 = GLOBAL_MODEL.profile.get("profile_96_quarters", [])
 
-    # 5. Sanitize telemetry
+    # 6. Sanitize telemetry
     frame = TelemetrySanitizer.sanitize(
         now=now_ams,
         raw_prices=raw_prices,
@@ -1681,6 +1703,7 @@ def ensure_active_canonical_plan(force_refresh=False):
         current_room_temp=cur_room,
         target_room_temp=cur_target_room,
         last_hardware_reading_time=last_hw_time,
+        is_space_heating_enabled=is_cv_enabled,
         horizon_slots=96,
         step_mins=15
     )

@@ -33,6 +33,7 @@ class SpaceHeatingPolicy:
     C_FLOOR_KWH_PER_K = 14.5
     R_FLOOR_AIR_K_PER_KW = 0.08
     SOLAR_GAIN_COEFFICIENT = 0.18  # Fraction of PV-equivalent solar radiation entering as thermal gain
+    WIND_INFILTRATION_COEFF_KW_PER_K_PER_MS = 0.015  # 15 W/K per m/s wind above 2 m/s
 
     # Temperatures & Comfort bounds
     TARGET_ROOM_TEMP_C = 20.0
@@ -123,6 +124,8 @@ class SpaceHeatingPolicy:
         current_room_temp_c: Optional[float] = None,
         current_floor_temp_c: Optional[float] = None,
         target_room_temp_c: Optional[float] = None,
+        wind_speeds_ms: Optional[List[float]] = None,
+        is_heating_enabled: bool = True,
         step_hours: float = 0.25
     ) -> SpaceHeatingPlanSummary:
         """
@@ -135,8 +138,8 @@ class SpaceHeatingPolicy:
         min_comfort_room = round(target_room - cls.MIN_COMFORT_DELTA_C, 2)
         max_preheat_room = round(target_room + cls.MAX_PREHEAT_OVERSHOOT_C, 2)
 
-        # Check summer lockout
-        is_heating_season = (mean_outdoor < cls.SUMMER_LOCKOUT_OUTDOOR_C)
+        # Check summer lockout and master enable status
+        is_heating_season = (mean_outdoor < cls.SUMMER_LOCKOUT_OUTDOOR_C) and is_heating_enabled
 
         # 1. Map dynamic peak lockouts
         lockout_slot_map = {}
@@ -200,8 +203,10 @@ class SpaceHeatingPolicy:
             cop = slot_cops[i]
             c_th = thermal_costs[i]
 
-            # Instantaneous building heat loss
-            q_loss = cls.UA_BUILDING_KW_PER_K * max(0.0, t_room - t_out)
+            # Instantaneous building heat loss with wind infiltration correction
+            v_wind = wind_speeds_ms[i] if (wind_speeds_ms and i < len(wind_speeds_ms)) else 0.0
+            effective_ua = cls.UA_BUILDING_KW_PER_K + cls.WIND_INFILTRATION_COEFF_KW_PER_K_PER_MS * max(0.0, v_wind - 2.0)
+            q_loss = effective_ua * max(0.0, t_room - t_out)
             # Passive window solar thermal gain
             q_solar_gain = cls.SOLAR_GAIN_COEFFICIENT * solar_kw[i]
 
@@ -325,7 +330,12 @@ class SpaceHeatingPolicy:
             )
 
         all_r_temps = [s.room_temp_c for s in slot_results]
-        season_label = "Stookseizoen Actief (Slimme Vloerbuffer)" if is_heating_season else "Zomersluiting (CV Vergrendeld)"
+        if not is_heating_enabled:
+            season_label = "Verwarming Uitgeschakeld (Thermostaat Uit)"
+        elif not is_heating_season:
+            season_label = "Zomersluiting (CV Vergrendeld)"
+        else:
+            season_label = "Stookseizoen Actief (Slimme Vloerbuffer)"
         return SpaceHeatingPlanSummary(
             is_heating_season=is_heating_season,
             season_status_label=season_label,

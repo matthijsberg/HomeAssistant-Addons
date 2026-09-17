@@ -174,3 +174,62 @@ def test_winter_sun_and_evening_peak_buffering():
     # Coasting through peak: room temp must stay above min comfort (summary.min_comfort_room_c = 19.5C)
     peak_room_temps = [summary.slots[s_idx].room_temp_c for s_idx in range(68, 83)]
     assert min(peak_room_temps) >= summary.min_comfort_room_c, f"Room dropped to {min(peak_room_temps)}C during peak!"
+
+
+def test_space_heating_disabled_by_thermostat():
+    """Verify that when thermostat or circuit is off, heating is strictly 0.0 kW."""
+    outdoor_cold = [5.0] * 96
+    prices = [0.15] * 96
+    solar = [0.0] * 96
+
+    summary = SpaceHeatingPolicy.plan_space_heating(
+        outdoor_temps_c=outdoor_cold,
+        prices_eur=prices,
+        solar_kw=solar,
+        active_dhw_slots=[],
+        dynamic_peaks=[],
+        current_room_temp_c=18.5,
+        is_heating_enabled=False
+    )
+
+    assert not summary.is_heating_season
+    assert "Uitgeschakeld" in summary.season_status_label
+    assert summary.total_heating_kwh_el == 0.0
+    for s in summary.slots:
+        assert s.heating_kw_el == 0.0
+
+
+def test_space_heating_wind_infiltration():
+    """Verify that strong wind increases heat loss and floor/room temperature cooling."""
+    outdoor = [8.0] * 96
+    prices = [0.20] * 96
+    solar = [0.0] * 96
+
+    # Case A: Calm wind (1 m/s)
+    summary_calm = SpaceHeatingPolicy.plan_space_heating(
+        outdoor_temps_c=outdoor,
+        prices_eur=prices,
+        solar_kw=solar,
+        active_dhw_slots=[],
+        dynamic_peaks=[],
+        current_room_temp_c=20.0,
+        current_floor_temp_c=21.0,
+        wind_speeds_ms=[1.0] * 96,
+        is_heating_enabled=False  # Compare passive drift
+    )
+
+    # Case B: Gale wind (12 m/s = ~6 Bft)
+    summary_gale = SpaceHeatingPolicy.plan_space_heating(
+        outdoor_temps_c=outdoor,
+        prices_eur=prices,
+        solar_kw=solar,
+        active_dhw_slots=[],
+        dynamic_peaks=[],
+        current_room_temp_c=20.0,
+        current_floor_temp_c=21.0,
+        wind_speeds_ms=[12.0] * 96,
+        is_heating_enabled=False  # Compare passive drift
+    )
+
+    # With higher wind, envelope loss is higher, so final room temp is lower
+    assert summary_gale.slots[-1].room_temp_c < summary_calm.slots[-1].room_temp_c
