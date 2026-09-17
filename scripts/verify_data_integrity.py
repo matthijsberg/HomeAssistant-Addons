@@ -272,6 +272,10 @@ def check_chart_contracts_and_overlays(errors: list):
             s_idx, e_idx = h["start_idx"], h["end_idx"]
             if not (0 <= s_idx <= e_idx < total_slots):
                 log_fail(f"Heating range out of bounds ({res_label}): {h}", errors)
+            dur_slots = e_idx - s_idx + 1
+            max_dur = 32 if is_15m else 8  # max 8 hours
+            if dur_slots > max_dur:
+                log_fail(f"Heating duration excessive ({res_label}): {dur_slots} slots exceeds {max_dur}!", errors)
             for i in range(s_idx, e_idx + 1):
                 if i in spits_set:
                     log_fail(f"ILLEGAL OVERLAP at slot {i} ({res_label}): active heating overlaps with spitsblok!", errors)
