@@ -250,3 +250,45 @@ def test_daytime_arbitrage_saturation_lockout_at_59c():
     assert "Vat Al Verzadigd" in arb_res.planned_mode_label
     assert "drempel" in arb_res.explanation
     assert "59.0°C" in arb_res.explanation
+
+
+def test_compute_historical_draw_offs_no_phantom_demand():
+    """Verify that during heat pump heating, stratification charging does not register as phantom tap demand."""
+    timestamps = [
+        "2026-09-17T03:00:00Z",
+        "2026-09-17T03:15:00Z",
+        "2026-09-17T03:30:00Z",
+        "2026-09-17T03:45:00Z",
+        "2026-09-17T04:00:00Z"
+    ]
+    # Heat pump runs at 2.5 kW el (0.625 kWh per quarter), tank rises from 43C to 50C
+    temp_map = {
+        "2026-09-17T03:00:00Z": 43.0,
+        "2026-09-17T03:15:00Z": 46.0,
+        "2026-09-17T03:30:00Z": 50.0,
+        "2026-09-17T03:45:00Z": 49.9,
+        "2026-09-17T04:00:00Z": 46.0  # Real shower! (dropped 3.9C)
+    }
+    el_map = {
+        "2026-09-17T03:00:00Z": 0.625,
+        "2026-09-17T03:15:00Z": 0.625,
+        "2026-09-17T03:30:00Z": 0.625,
+        "2026-09-17T03:45:00Z": 0.0,
+        "2026-09-17T04:00:00Z": 0.0
+    }
+
+    demands = DhwThermalModel.compute_historical_draw_offs(
+        sorted_timestamps=timestamps,
+        temperature_map=temp_map,
+        heatpump_el_kwh_map=el_map,
+        interval_h=0.25
+    )
+
+    # During heating (03:00 to 03:30), tank is rising -> 0 phantom tap water
+    assert demands[0] == 0.0
+    assert demands[1] == 0.0
+    assert demands[2] == 0.0
+    # Idle with minor standby drop -> 0 tap
+    assert demands[3] == 0.0
+    # Shower (dropped 3.9C) -> ~1.5 kWh genuine tap water!
+    assert demands[4] > 1.4

@@ -748,7 +748,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             FROM "energy_telemetry"
             WHERE "device_id" = 'dhw_tank' AND time >= '{t_start}' AND time <= '{t_end}'
             GROUP BY time({bucket_sz}) fill(linear);
-            SELECT sum("power_w")/1000.0 * {interval_h} as kwh_el
+            SELECT mean("power_w")/1000.0 * {interval_h} as kwh_el
             FROM "energy_telemetry"
             WHERE "mode" = 'dhw' AND time >= '{t_start}' AND time <= '{t_end}'
             GROUP BY time({bucket_sz}) fill(0);

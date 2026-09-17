@@ -80,18 +80,25 @@ class DhwThermalModel:
     def compute_historical_draw_offs(
         cls,
         sorted_timestamps: List[str],
-        temperature_map: Dict[str, Optional[float]],
-        heatpump_el_kwh_map: Dict[str, Optional[float]],
+        temperature_map: Any,
+        heatpump_el_kwh_map: Any,
         interval_h: float = 0.25,
         c_tank_kwh_per_k: float = 0.407,
         q_standby_kw: float = 0.055,
-        cop_heating: float = 2.6
+        cop_heating: Optional[float] = None
     ) -> List[float]:
         """
-        Pure thermodynamic energy balance (First Law of Thermodynamics) on 350L DHW storage:
-        Delta E_tank = Q_heatpump - Q_standby - Q_tap
-        ==> Q_tap = Q_heatpump - Q_standby - Delta E_tank
-        Where Delta E_tank = C_vat * (T_t - T_{t-1}).
+        Thermodynamic energy balance on 350L stratified DHW storage (First Law):
+
+        1. When heat pump is OFF (kwh_el <= 0.05):
+           Any temperature drop beyond standby loss is genuine tap water consumption:
+           Q_tap = max(0.0, -Q_standby - C_vat * (T_t - T_{t-1}))
+
+        2. When heat pump is ON (kwh_el > 0.05):
+           Heat pump charges the internal coil and breaks stratification.
+           If tank temperature is rising (T_t >= T_{t-1}), heat is absorbed into the
+           thermal mass (stratification charging); tap water is 0.0 unless there is an
+           active temperature drop (indicating draw-off exceeding heat pump output).
         """
         prev_t = None
         demands_kwh_th = []
@@ -101,11 +108,27 @@ class DhwThermalModel:
             t_val = temperature_map.get(ts)
             cur_t = float(t_val) if t_val is not None else (prev_t or 50.0)
             kwh_el = float(heatpump_el_kwh_map.get(ts) or 0.0)
-            th_in = kwh_el * cop_heating
 
             if prev_t is not None and cur_t is not None:
-                delta_e = c_tank_kwh_per_k * (cur_t - prev_t)
-                q_tap = th_in - q_standby_quarter - delta_e
+                delta_t = cur_t - prev_t
+                delta_e = c_tank_kwh_per_k * delta_t
+
+                if kwh_el > 0.05:
+                    # Heat pump active
+                    avg_t = (cur_t + prev_t) / 2.0
+                    effective_cop = cop_heating or max(1.8, min(3.2, 4.6 - 0.05 * avg_t))
+                    th_in = kwh_el * effective_cop
+                    if delta_t < 0:
+                        # Temperature fell despite heat pump running -> heavy tap draw-off
+                        q_tap = max(0.0, th_in - q_standby_quarter - delta_e)
+                    else:
+                        # Temperature rising -> tank mass is absorbing heat; 0 phantom tap water
+                        q_tap = 0.0
+                else:
+                    # Heat pump standby/idle
+                    # Loss due to tapping equals thermal decrease minus standby
+                    q_tap = max(0.0, -q_standby_quarter - delta_e)
+
                 q_tap = max(0.0, round(q_tap, 2))
                 if q_tap < 0.05:
                     q_tap = 0.0
