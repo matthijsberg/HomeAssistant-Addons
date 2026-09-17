@@ -356,9 +356,13 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
         # 2. Recalibrate Building UA using OLS on Heating Days
         old_ua = float(self.params.get("building", {}).get("ua_base_w_per_k", 321.1))
         calibrated_ua = old_ua
-        r_squared = 0.81
-        rmse_w = 185.4
-        mae_w = 132.0
+        r_squared = 0.0
+        mae_w = None
+        rmse_w = None
+        mape_pct = None
+        has_sufficient_ua_data = False
+        n_stookdagen = 0
+
         if len(results) > 2 and results[1].get("series") and results[2].get("series"):
             cv_days = {v[0]: v[1] for v in results[1]["series"][0].get("values", []) if v[1] is not None}
             tout_days = {v[0]: v[1] for v in results[2]["series"][0].get("values", []) if v[1] is not None}
@@ -375,7 +379,8 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
                     kwh_th = kwh_el * cop_day
                     x_dt.append(dt_k)
                     y_th_kwh.append(kwh_th)
-            if len(x_dt) >= 14:
+            n_stookdagen = len(x_dt)
+            if n_stookdagen >= 14:
                 slope_th, intercept = statistics.linear_regression(x_dt, y_th_kwh)
                 r_val = statistics.correlation(x_dt, y_th_kwh)
                 r_squared = round(float(r_val ** 2), 3)
@@ -383,72 +388,67 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
                 calibrated_ua = round((slope_th * 1000.0 / 24.0), 1)
                 if not (180.0 <= calibrated_ua <= 450.0):
                     calibrated_ua = 318.5
+                has_sufficient_ua_data = True
+
+                # Compute empirical regression residuals
+                residuals = [(y - (slope_th * x + intercept)) for x, y in zip(x_dt, y_th_kwh)]
+                mae_kwh = sum(abs(e) for e in residuals) / len(residuals)
+                rmse_kwh = math.sqrt(sum(e ** 2 for e in residuals) / len(residuals))
+                mae_w = round(mae_kwh * 1000.0 / 24.0, 1)
+                rmse_w = round(rmse_kwh * 1000.0 / 24.0, 1)
+                mape_pct = round(sum(abs(e / y) for e, y in zip(residuals, y_th_kwh) if y > 0) / len(residuals) * 100.0, 1)
+            else:
+                mae_w = None
+                rmse_w = None
+                mape_pct = None
 
         # 3. Model Governance: Evaluate Parameter Drift & Proposed Recommendations
-        ua_drift_pct = round(((calibrated_ua - old_ua) / old_ua) * 100.0, 1) if old_ua > 0 else 0.0
-
-        # Night baseload drift
-        night_median_new = round(statistics.median(self.profile["profile_96_quarters"][0][4:20]), 1) if self.profile.get("profile_96_quarters") else 252.0
-        old_night = float(self.params.get("unallocated", {}).get("night_baseload_floor_w", 265.0))
-        night_drift_pct = round(((night_median_new - old_night) / old_night) * 100.0, 1) if old_night > 0 else 0.0
-
-        # DHW standby loss drift
-        old_dhw_loss = float(self.params.get("dhw_tank", {}).get("standby_loss_w_per_k", 2.50))
-        proposed_dhw_loss = 2.38
-        dhw_drift_pct = round(((proposed_dhw_loss - old_dhw_loss) / old_dhw_loss) * 100.0, 1)
-
         auto_accept_threshold = float(self.params.get("auto_accept_max_drift_pct", 3.0))
+        recs = []
 
-        recs = [
-            {
+        # 3a. Building UA recommendation (strictly from empirical stookdagen OLS)
+        if has_sufficient_ua_data:
+            ua_drift_pct = round(((calibrated_ua - old_ua) / old_ua) * 100.0, 1) if old_ua > 0 else 0.0
+            auto_apply_ua = abs(ua_drift_pct) <= auto_accept_threshold
+            recs.append({
                 "id": "building_ua",
                 "name": "Gebouwverlies Woning (UA)",
                 "current_value": old_ua,
                 "proposed_value": calibrated_ua,
                 "unit": "W/K",
                 "drift_pct": ua_drift_pct,
-                "auto_applied": abs(ua_drift_pct) <= auto_accept_threshold,
-                "evidence": f"OLS regressie over stookdagen (R² = {r_squared})"
-            },
-            {
-                "id": "heating_modulation",
-                "name": "Daikin CV Modulatie",
-                "current_value": "2885 - 95·T",
-                "proposed_value": "2840 - 92·T",
-                "unit": "W",
-                "drift_pct": -1.6,
-                "auto_applied": True,
-                "evidence": "230 winterruns in InfluxDB gefit"
-            },
-            {
-                "id": "night_baseload",
-                "name": "Nacht Sluipverbruik (01:00 - 05:00u)",
-                "current_value": old_night,
-                "proposed_value": night_median_new,
-                "unit": "W",
-                "drift_pct": night_drift_pct,
-                "auto_applied": abs(night_drift_pct) <= auto_accept_threshold,
-                "evidence": "7×96 kwartieren nachtmediaan"
-            },
-            {
-                "id": "dhw_standby",
-                "name": "DHW Vat Standby-verlies",
-                "current_value": old_dhw_loss,
-                "proposed_value": proposed_dhw_loss,
-                "unit": "W/K",
-                "drift_pct": dhw_drift_pct,
-                "auto_applied": abs(dhw_drift_pct) <= auto_accept_threshold,
-                "evidence": "374 nachten afkoelsnelheid 350L vat"
-            }
-        ]
+                "auto_applied": auto_apply_ua,
+                "evidence": f"OLS regressie over {n_stookdagen} stookdagen (R² = {r_squared})"
+            })
+            if auto_apply_ua:
+                self.params.setdefault("building", {})["ua_base_w_per_k"] = round(
+                    (1.0 - ewma_alpha) * old_ua + ewma_alpha * calibrated_ua, 1
+                )
+
+        # 3b. Night baseload drift (strictly from empirical 7x96 night quarters median)
+        if self.profile.get("profile_96_quarters") and len(self.profile["profile_96_quarters"]) > 0:
+            night_samples = self.profile["profile_96_quarters"][0][4:20]
+            if night_samples:
+                night_median_new = round(statistics.median(night_samples), 1)
+                old_night = float(self.params.get("unallocated", {}).get("night_baseload_floor_w", 265.0))
+                night_drift_pct = round(((night_median_new - old_night) / old_night) * 100.0, 1) if old_night > 0 else 0.0
+                auto_apply_night = abs(night_drift_pct) <= auto_accept_threshold
+                recs.append({
+                    "id": "night_baseload",
+                    "name": "Nacht Sluipverbruik (01:00 - 05:00u)",
+                    "current_value": old_night,
+                    "proposed_value": night_median_new,
+                    "unit": "W",
+                    "drift_pct": night_drift_pct,
+                    "auto_applied": auto_apply_night,
+                    "evidence": f"7×96 kwartieren nachtmediaan over {days_history} dagen"
+                })
+                if auto_apply_night:
+                    self.params.setdefault("unallocated", {})["night_baseload_floor_w"] = round(
+                        (1.0 - ewma_alpha) * old_night + ewma_alpha * night_median_new, 1
+                    )
 
         has_pending = any(not r["auto_applied"] for r in recs)
-
-        # Apply auto-accepted items immediately via EWMA
-        if abs(ua_drift_pct) <= auto_accept_threshold:
-            self.params["building"]["ua_base_w_per_k"] = round((1.0 - ewma_alpha) * old_ua + ewma_alpha * calibrated_ua, 1)
-        if abs(night_drift_pct) <= auto_accept_threshold:
-            self.params["unallocated"]["night_baseload_floor_w"] = round((1.0 - ewma_alpha) * old_night + ewma_alpha * night_median_new, 1)
 
         self.params["last_trained"] = datetime.now(AMSTERDAM_TZ).isoformat()
         self.params["metrics"] = {
@@ -456,7 +456,7 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
             "r_squared": r_squared,
             "rmse_w": rmse_w,
             "mae_w": mae_w,
-            "mape_pct": 14.8
+            "mape_pct": mape_pct
         }
         save_json(PARAMS_FILE, self.params)
 
