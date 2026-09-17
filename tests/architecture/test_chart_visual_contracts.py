@@ -102,3 +102,30 @@ def test_heating_forecast_resolution_parity():
         assert 0 <= s['start_idx'] <= s['end_idx'] < 25
     for h in d1['heating_ranges']:
         assert 0 <= h['start_idx'] <= h['end_idx'] < 25
+
+
+def test_heating_history_resolution_parity():
+    """Guarantee that /api/analytics/heating_history returns matching resolution datasets."""
+    from api.routes_analytics import handle_get
+
+    class DummyHandler:
+        def __init__(self, path):
+            self.path = path
+            self.response = None
+        def _send_json(self, data):
+            self.response = data
+
+    # 1h mode: ~24-25 slots
+    h1 = DummyHandler('/api/analytics/heating_history?range=24h&resolution=1h')
+    handle_get(h1, '/api/analytics/heating_history', {'range': ['24h'], 'resolution': ['1h']})
+    d1 = h1.response
+    assert d1 is not None
+    assert d1['status'] == 'success'
+    n1 = len(d1['labels'])
+    assert len(d1['indoor_temperatures_c']) == n1
+    assert len(d1['outdoor_temperatures_c']) == n1
+    assert len(d1['demand_kwh_th']) == n1
+    for s in d1['forced_off_ranges']:
+        assert 0 <= s['start_idx'] <= s['end_idx'] < n1
+    for h in d1['heating_ranges']:
+        assert 0 <= h['start_idx'] <= h['end_idx'] < n1

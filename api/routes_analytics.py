@@ -1095,7 +1095,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 labels.append(lbl)
 
             # Demand in kWh thermal = UA * max(0, T_room - T_out) * interval_h
-            UA = 0.3211
+            from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
+            act_p = SpaceHeatingPolicy.get_active_parameters()
+            UA = act_p.get("ua_kw_per_k", 0.3211)
             demand_kwh_th = [round(UA * max(0.0, r - o) * interval_h, 2) for r, o in zip(r_sampled, o_sampled)]
 
             # Detect price peaks across historical timeline
@@ -1110,27 +1112,33 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             dyn_peaks, _ = detect_dynamic_price_peaks(hist_timeline, step_mins=step_mins)
 
             forced_off_ranges = []
+            spits_indices = set()
             for p in dyn_peaks:
                 if p.get("is_hard_lockout"):
+                    s_idx = p.get("start_idx", 0)
+                    e_idx = p.get("end_idx", 0)
+                    for idx_s in range(s_idx, min(len(slots), e_idx + 1)):
+                        spits_indices.add(idx_s)
                     forced_off_ranges.append({
-                        "start_idx": p.get("start_idx"),
-                        "end_idx": p.get("end_idx"),
+                        "start_idx": s_idx,
+                        "end_idx": e_idx,
                         "start_label": p.get("hard_start_time") or p.get("start_time"),
                         "end_label": p.get("hard_end_time") or p.get("end_time"),
                         "name": "SPITSBLOK"
                     })
 
-            # Heating ranges (historical active runs)
+            # Heating ranges (historical active runs) - strict non-overlap invariant with Spitsblok
             heating_ranges = []
             in_heat = False
             start_h = 0
             for i, s_dt in enumerate(slots):
                 iso_key = s_dt.strftime("%Y-%m-%dT%H:%M:00Z")
                 kwh_val = cv_map.get(iso_key, 0.0)
-                if kwh_val > 0.02 and not in_heat:
+                is_active = (kwh_val > 0.02) and (i not in spits_indices)
+                if is_active and not in_heat:
                     in_heat = True
                     start_h = i
-                elif kwh_val <= 0.02 and in_heat:
+                elif not is_active and in_heat:
                     in_heat = False
                     heating_ranges.append({
                         "start_idx": start_h,

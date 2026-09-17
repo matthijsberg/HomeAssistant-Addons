@@ -4424,7 +4424,8 @@
             try {
                 const rangeSelect = document.getElementById('pp-range-select');
                 const rangeVal = rangeSelect ? rangeSelect.value : '24h';
-                const res = await fetch('./api/analytics/dhw_history?range=' + encodeURIComponent(rangeVal) + '&resolution=15m');
+                const resVal = (typeof powerProducersResolution !== 'undefined' && powerProducersResolution) ? powerProducersResolution : '1h';
+                const res = await fetch('./api/analytics/dhw_history?range=' + encodeURIComponent(rangeVal) + '&resolution=' + encodeURIComponent(resVal));
                 const data = await res.json();
                 if (data.status !== 'success') {
                     console.error('DHW history error:', data.message);
@@ -4532,7 +4533,8 @@
             try {
                 const rangeSelect = document.getElementById('pp-range-select');
                 const rangeVal = rangeSelect ? rangeSelect.value : '24h';
-                const res = await fetch('./api/analytics/heating_history?range=' + encodeURIComponent(rangeVal) + '&resolution=15m');
+                const resVal = (typeof powerProducersResolution !== 'undefined' && powerProducersResolution) ? powerProducersResolution : '1h';
+                const res = await fetch('./api/analytics/heating_history?range=' + encodeURIComponent(rangeVal) + '&resolution=' + encodeURIComponent(resVal));
                 const data = await res.json();
                 if (data.status !== 'success') {
                     console.error('Heating history error:', data.message);
