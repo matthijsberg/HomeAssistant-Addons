@@ -1566,8 +1566,8 @@ def ensure_active_canonical_plan(force_refresh=False):
     cur_room = 20.0
     cur_target_room = 20.0
     last_hw_time = None
+    states_map = get_ha_states_map()
     try:
-        states_map = get_ha_states_map()
         t_tank = float(states_map.get("sensor.hc_dhw_temperature_r5t_dhw_tank", {}).get("state", 0.0))
         if 20.0 <= t_tank <= 75.0:
             cur_dhw = t_tank
@@ -1621,6 +1621,49 @@ def ensure_active_canonical_plan(force_refresh=False):
                         last_hw_time = datetime.now(ZoneInfo("Europe/Amsterdam"))
         except Exception:
             pass
+
+    # 3b. Local Microclimate Observation Nudging (Wittboy & Rooftop Inverter)
+    try:
+        from layer1_data_collection.nowcasting import ObservationNowcaster
+
+        # Live Outdoor Temp from Wittboy
+        live_t_out = None
+        for ent in ["sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature", "sensor.temperatuur_buiten"]:
+            st = states_map.get(ent, {}).get("state")
+            if st and st not in ["unavailable", "unknown"]:
+                try:
+                    live_t_out = float(st)
+                    break
+                except ValueError:
+                    pass
+
+        # Live Rooftop Solar Power
+        live_solar_kw = None
+        for ent in ["sensor.zonnepanelen_power_avg_5_minutes", "sensor.inepro_metering_pro_380_active_power"]:
+            st = states_map.get(ent, {}).get("state")
+            if st and st not in ["unavailable", "unknown"]:
+                try:
+                    v = float(st)
+                    live_solar_kw = round(abs(v) / 1000.0, 3)
+                    break
+                except ValueError:
+                    pass
+
+        # Nudge forward solar forecast
+        if raw_solar and live_solar_kw is not None:
+            raw_s_values = [s.get("solar_kw", 0.0) for s in raw_solar]
+            nudged_s = ObservationNowcaster.nudge_solar_forecast(raw_s_values, live_solar_kw)
+            for idx, n_val in enumerate(nudged_s):
+                raw_solar[idx]["solar_kw"] = n_val
+
+        # Nudge forward outdoor temperature forecast
+        if raw_weather and live_t_out is not None:
+            raw_t_values = [w.get("temperature", 15.0) for w in raw_weather]
+            nudged_t = ObservationNowcaster.nudge_temperature_forecast(raw_t_values, live_t_out)
+            for idx, n_val in enumerate(nudged_t):
+                raw_weather[idx]["temperature"] = n_val
+    except Exception as e_nowcast:
+        print(f"[Open HEMS Nowcasting] Error applying observation nudging: {e_nowcast}")
 
     # 4. Extract unallocated profile
     grid_96 = []
