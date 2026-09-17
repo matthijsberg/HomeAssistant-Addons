@@ -22,6 +22,30 @@ from layer3_scheduling.decision_audit import DecisionAuditLogger
 
 _weather_history_cache: Dict[str, Any] = {'ts': 0, 'rad': {}, 'temp': {}}
 
+def resolve_analytics_time_range(tf: str):
+    now_utc = datetime.now(timezone.utc)
+    if tf == "today":
+        now_ams = datetime.now(AMS_TZ)
+        midnight_ams = now_ams.replace(hour=0, minute=0, second=0, microsecond=0)
+        t_start = midnight_ams.astimezone(timezone.utc)
+        t_end = now_utc
+    elif tf == "1h":
+        t_start = now_utc - timedelta(hours=1)
+        t_end = now_utc
+    elif tf == "6h":
+        t_start = now_utc - timedelta(hours=6)
+        t_end = now_utc
+    elif tf == "48h":
+        t_start = now_utc - timedelta(hours=48)
+        t_end = now_utc
+    elif tf == "7d":
+        t_start = now_utc - timedelta(days=7)
+        t_end = now_utc
+    else:  # 24h default
+        t_start = now_utc - timedelta(hours=24)
+        t_end = now_utc
+    return t_start, t_end
+
 def get_today_history_kpis(cfg: dict, sec: dict) -> dict:
     active_conn = cfg.get("influxdb_connections", [{}])[0]
     db_name = active_conn.get("database", "openhems")
@@ -895,13 +919,12 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             tf = qp.get("range", ["24h"])[0]
             user_res = qp.get("resolution", ["15m"])[0]
 
-            days = 1 if tf == "24h" else (2 if tf == "48h" else 7)
             bucket_sz = "1h" if user_res == "1h" else "15m"
             interval_h = 1.0 if bucket_sz == "1h" else 0.25
 
-            now = datetime.now(timezone.utc)
-            t_start = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:00:00Z")
-            t_end = now.strftime("%Y-%m-%dT%H:00:00Z")
+            t_start_dt, t_end_dt = resolve_analytics_time_range(tf)
+            t_start = t_start_dt.strftime("%Y-%m-%dT%H:%M:00Z")
+            t_end = t_end_dt.strftime("%Y-%m-%dT%H:%M:00Z")
 
             sec = load_secrets()
             pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influx_password", "")
@@ -1005,14 +1028,11 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             tf = qp.get("range", ["24h"])[0]
             user_res = qp.get("resolution", ["15m"])[0]
 
-            days = 1 if tf == "24h" else (2 if tf == "48h" else 7)
             bucket_sz = "1h" if user_res == "1h" else "15m"
             interval_h = 1.0 if bucket_sz == "1h" else 0.25
             step_mins = int(interval_h * 60)
 
-            now = datetime.now(timezone.utc)
-            t_start = (now - timedelta(days=days)).replace(minute=0, second=0, microsecond=0)
-            t_end = now.replace(minute=0, second=0, microsecond=0)
+            t_start, t_end = resolve_analytics_time_range(tf)
 
             # Query HA history for indoor and outdoor temperatures
             base_url, token = get_ha_client_config()

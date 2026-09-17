@@ -320,13 +320,19 @@
                     btnLine.className = 'px-2 py-0.5 rounded transition font-medium bg-purple-600 text-white shadow';
                 }
             }
+            refreshAllHistoryCharts();
+        }
+
+        function refreshAllHistoryCharts() {
             loadPowerProducersChart();
+            loadDhwHistoryChart();
+            loadHeatingHistoryChart();
         }
 
         function setPowerProducersResolution(res) {
             powerProducersResolution = res;
             updatePowerProducersResButtons(res);
-            loadPowerProducersChart();
+            refreshAllHistoryCharts();
         }
 
         function updatePowerProducersResButtons(res) {
@@ -355,9 +361,7 @@
                 powerProducersResolution = '1h';
             }
             updatePowerProducersResButtons(powerProducersResolution);
-            loadPowerProducersChart();
-            loadDhwHistoryChart();
-            loadHeatingHistoryChart();
+            refreshAllHistoryCharts();
         }
 
         window.__simulateBattery = false;
@@ -4449,8 +4453,8 @@
                                 borderColor: '#F59E0B',
                                 backgroundColor: 'rgba(245, 158, 11, 0.08)',
                                 borderWidth: 2.5,
-                                pointRadius: data.labels.length > 50 ? 0 : 2,
-                                pointHoverRadius: 5,
+                                pointRadius: 0,
+                                pointHoverRadius: 4,
                                 fill: true,
                                 tension: 0.3,
                                 yAxisID: 'y'
@@ -4559,8 +4563,8 @@
                                 borderColor: '#F59E0B',
                                 backgroundColor: 'rgba(245, 158, 11, 0.08)',
                                 borderWidth: 2.5,
-                                pointRadius: data.labels.length > 50 ? 0 : 2,
-                                pointHoverRadius: 5,
+                                pointRadius: 0,
+                                pointHoverRadius: 4,
                                 fill: true,
                                 tension: 0.3,
                                 yAxisID: 'y'
