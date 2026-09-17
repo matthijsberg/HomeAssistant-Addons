@@ -1087,9 +1087,14 @@
             chart.data.datasets.forEach(ds => {
                 const v = ds.data[dataIndex];
                 if (!ds.label) return;
-                if (ds.label.includes('Afname') || ds.label.includes('All-in')) epexPrice = Number(v) || 0.0;
-                else if (ds.label.includes('Teruglever')) exportPrice = Number(v) || 0.0;
-                else if (ds.label.includes('Productie') || ds.label.includes('Zonnepanelen')) solarProd = Number(v) || 0.0;
+                const lbl = ds.label.toLowerCase();
+                if (lbl.includes('afname') || lbl.includes('all-in') || lbl.includes('buy') || lbl.includes('inkoop')) {
+                    epexPrice = Number(v) || 0.0;
+                } else if (lbl.includes('teruglever') || lbl.includes('export') || lbl.includes('feed-in')) {
+                    exportPrice = Number(v) || 0.0;
+                } else if (lbl.includes('zon') || lbl.includes('solar') || lbl.includes('productie') || lbl.includes('generation') || ds.yAxisID === 'y1') {
+                    solarProd = Number(v) || 0.0;
+                }
             });
 
             let html = `
