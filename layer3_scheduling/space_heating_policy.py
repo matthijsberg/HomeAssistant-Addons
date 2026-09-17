@@ -199,6 +199,8 @@ class SpaceHeatingPolicy:
         lockout_slots_count = 0
 
         for i in range(n_slots):
+            t_room_slot = t_room
+            t_floor_slot = t_floor
             t_out = outdoor_temps_c[i]
             cop = slot_cops[i]
             c_th = thermal_costs[i]
@@ -302,7 +304,12 @@ class SpaceHeatingPolicy:
             q_heat_th = heating_el * cop
 
             # Advance 2R1C model
-            q_floor_to_room = (t_floor - t_room) / cls.R_FLOOR_AIR_K_PER_KW
+            # Downward heat transfer (warm room air above cooler floor) is convection-suppressed (h ~ 2.5 W/m2K)
+            if t_floor >= t_room:
+                r_floor_air = cls.R_FLOOR_AIR_K_PER_KW
+            else:
+                r_floor_air = 2.75  # ~0.36 kW/K downward thermal resistance for ~145 m2
+            q_floor_to_room = (t_floor - t_room) / r_floor_air
             dt_floor = ((q_heat_th - q_floor_to_room) / cls.C_FLOOR_KWH_PER_K) * step_hours
             dt_room = ((q_floor_to_room + q_solar_gain - q_loss) / cls.C_AIR_KWH_PER_K) * step_hours
 
@@ -318,8 +325,8 @@ class SpaceHeatingPolicy:
                     heating_kw_el=heating_el,
                     heating_kw_th=round(q_heat_th, 2),
                     cop=cop,
-                    room_temp_c=t_room,
-                    floor_temp_c=t_floor,
+                    room_temp_c=round(t_room_slot, 2),
+                    floor_temp_c=round(t_floor_slot, 2),
                     heat_loss_kw=round(q_loss, 2),
                     mode_code=mode_code,
                     is_preheat_active=is_preheat,

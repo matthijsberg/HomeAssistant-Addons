@@ -1587,6 +1587,7 @@ def ensure_active_canonical_plan(force_refresh=False):
     # 3. Read current tank and room temperature
     cur_dhw = 48.0
     cur_room = 20.0
+    cur_floor = None
     cur_target_room = 20.0
     last_hw_time = None
     states_map = get_ha_states_map()
@@ -1626,6 +1627,21 @@ def ensure_active_canonical_plan(force_refresh=False):
                             break
                     except (ValueError, TypeError):
                         pass
+
+        # Read live floor temperature from underfloor heating sensors (sensors 1..7)
+        cur_floor = None
+        floor_vals = []
+        for i in range(1, 8):
+            st_f = states_map.get(f"sensor.warmtepomp_vloerverwarming_sensor_{i}", {}).get("state")
+            if st_f and st_f not in ["unavailable", "unknown"]:
+                try:
+                    floor_vals.append(float(st_f))
+                except ValueError:
+                    pass
+        if floor_vals:
+            cur_floor = round(sum(floor_vals) / len(floor_vals), 1)
+        else:
+            cur_floor = cur_room
     except Exception as e_st:
         print(f"Warning reading HA states in ensure_active_canonical_plan: {e_st}")
 
@@ -1703,6 +1719,7 @@ def ensure_active_canonical_plan(force_refresh=False):
         raw_unallocated_matrix=grid_96,
         current_dhw_temp=cur_dhw,
         current_room_temp=cur_room,
+        current_floor_temp=cur_floor,
         target_room_temp=cur_target_room,
         last_hardware_reading_time=last_hw_time,
         is_space_heating_enabled=is_cv_enabled,
