@@ -234,6 +234,50 @@ def check_live_api_contracts(base_url: str, errors: list):
     except Exception as e:
         log_fail(f"Failed live API verification: {e}", errors)
 
+def check_chart_contracts_and_overlays(errors: list):
+    """
+    Automated mathematical and visual invariant checks on chart overlays:
+    1. Range boundaries strictly within [0, total_slots - 1]
+    2. Zero overlap between forced_off (spitsblok) and active heating
+    3. Maximum duration invariants (no runaway blocks > 5 hours)
+    """
+    from models.canonical import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
+    from api.context import ensure_active_canonical_plan
+    plan = ensure_active_canonical_plan()
+    if not plan or not plan.slots:
+        log_fail("Cannot test chart overlays: plan is empty!", errors)
+        return
+
+    for is_15m in [True, False]:
+        res_label = "15m" if is_15m else "1h"
+        hist_count = 4 if is_15m else 1
+        total_slots = (len(plan.slots) if is_15m else len(plan.slots) // 4) + hist_count
+
+        spits = extract_plan_spitsblok_ranges(plan.slots, history_count=hist_count, is_15m=is_15m)
+        heats = extract_plan_heating_ranges(plan.slots, history_count=hist_count, is_15m=is_15m, domain="space_heating")
+
+        spits_set = set()
+        for s in spits:
+            s_idx, e_idx = s["start_idx"], s["end_idx"]
+            if not (0 <= s_idx <= e_idx < total_slots):
+                log_fail(f"Spitsblok range out of bounds ({res_label}): {s}", errors)
+            dur_slots = e_idx - s_idx + 1
+            max_dur = 20 if is_15m else 5
+            if dur_slots > max_dur:
+                log_fail(f"Spitsblok duration excessive ({res_label}): {dur_slots} slots exceeds {max_dur}!", errors)
+            for i in range(s_idx, e_idx + 1):
+                spits_set.add(i)
+
+        for h in heats:
+            s_idx, e_idx = h["start_idx"], h["end_idx"]
+            if not (0 <= s_idx <= e_idx < total_slots):
+                log_fail(f"Heating range out of bounds ({res_label}): {h}", errors)
+            for i in range(s_idx, e_idx + 1):
+                if i in spits_set:
+                    log_fail(f"ILLEGAL OVERLAP at slot {i} ({res_label}): active heating overlaps with spitsblok!", errors)
+
+    log_pass("Chart overlays invariant verified: strict bounds, zero overlap, and duration caps confirmed across 15m and 1h")
+
 def main():
     parser = argparse.ArgumentParser(description="Open HEMS Automated Data & API Integrity Verification Gate")
     parser.add_argument("--live", action="store_true", help="Run live API smoke tests against running instance")
@@ -257,6 +301,9 @@ def main():
 
     print("\n[Phase 3: Frontend Script Compilation & Design Tokens]")
     check_frontend_tokens_and_scripts(addon_path / "daemon.py", errors)
+
+    print("\n[Phase 4: Chart Overlay Invariants & Visual Sanity]")
+    check_chart_contracts_and_overlays(errors)
 
     if args.live:
         check_live_api_contracts(args.url, errors)

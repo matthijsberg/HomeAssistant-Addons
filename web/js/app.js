@@ -119,62 +119,46 @@
                 const slotWidth = totalSlots > 1 ? Math.abs(x.getPixelForValue(1) - x.getPixelForValue(0)) : 10;
                 const halfSlot = slotWidth / 2;
 
-                // 1. Spitsblok Ranges (Red)
-                const spitsRanges = (chart.options && chart.options.spitsblokRanges) || (chart.data && chart.data.spitsblokRanges) || [];
-                spitsRanges.forEach(r => {
-                    let sIdx = r.start_idx;
-                    let eIdx = r.end_idx;
-                    if (r.start_label && chart.data && chart.data.labels) {
-                        const labels = chart.data.labels;
-                        const matchStart = labels.findIndex(lbl => typeof lbl === 'string' && lbl.includes(r.start_label));
-                        const matchEnd = labels.findIndex(lbl => typeof lbl === 'string' && lbl.includes(r.end_label));
-                        if (matchStart !== -1 && matchEnd !== -1) {
-                            sIdx = matchStart;
-                            eIdx = matchEnd;
-                        }
-                    }
-                    if (sIdx === undefined || eIdx === undefined) return;
+                // Helper to validate and calculate pixel bounds strictly from integer indices
+                function getRangeBounds(r) {
+                    if (typeof r.start_idx !== 'number' || typeof r.end_idx !== 'number') return null;
+                    const sIdx = Math.max(0, Math.min(r.start_idx, totalSlots - 1));
+                    const eIdx = Math.max(0, Math.min(r.end_idx, totalSlots - 1));
+                    if (sIdx > eIdx) return null;
                     const xStart = x.getPixelForValue(sIdx);
                     const xEnd = x.getPixelForValue(eIdx);
-                    if (isNaN(xStart) || isNaN(xEnd)) return;
+                    if (isNaN(xStart) || isNaN(xEnd)) return null;
                     const left = Math.max(chartArea.left, Math.min(xStart, xEnd) - halfSlot);
                     const right = Math.min(chartArea.right, Math.max(xStart, xEnd) + halfSlot);
                     const width = Math.max(0, right - left);
-                    if (width <= 0) return;
+                    if (width <= 0) return null;
+                    return { left, width };
+                }
 
-                    ctx.fillStyle = 'rgba(239, 68, 68, 0.20)';
-                    ctx.fillRect(left, chartArea.top, width, chartArea.height);
-                    ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
-                    ctx.fillRect(left, chartArea.top, width, 3);
+                // 1. Spitsblok Ranges (Red)
+                const spitsRanges = (chart.options && chart.options.spitsblokRanges) || (chart.data && chart.data.spitsblokRanges) || [];
+                spitsRanges.forEach(r => {
+                    const bounds = getRangeBounds(r);
+                    if (!bounds) return;
+
+                    // Subtle background tint (0.12) + solid 3px top accent
+                    ctx.fillStyle = 'rgba(239, 68, 68, 0.12)';
+                    ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
+                    ctx.fillStyle = '#EF4444';
+                    ctx.fillRect(bounds.left, chartArea.top, bounds.width, 3);
                 });
 
                 // 2. Active Heating Ranges (Yellow / Amber)
                 const heatRanges = (chart.options && chart.options.heatingRanges) || (chart.data && chart.data.heatingRanges) || [];
                 heatRanges.forEach(r => {
-                    let sIdx = r.start_idx;
-                    let eIdx = r.end_idx;
-                    if (r.start_label && chart.data && chart.data.labels) {
-                        const labels = chart.data.labels;
-                        const matchStart = labels.findIndex(lbl => typeof lbl === 'string' && lbl.includes(r.start_label));
-                        const matchEnd = labels.findIndex(lbl => typeof lbl === 'string' && lbl.includes(r.end_label));
-                        if (matchStart !== -1 && matchEnd !== -1) {
-                            sIdx = matchStart;
-                            eIdx = matchEnd;
-                        }
-                    }
-                    if (sIdx === undefined || eIdx === undefined) return;
-                    const xStart = x.getPixelForValue(sIdx);
-                    const xEnd = x.getPixelForValue(eIdx);
-                    if (isNaN(xStart) || isNaN(xEnd)) return;
-                    const left = Math.max(chartArea.left, Math.min(xStart, xEnd) - halfSlot);
-                    const right = Math.min(chartArea.right, Math.max(xStart, xEnd) + halfSlot);
-                    const width = Math.max(0, right - left);
-                    if (width <= 0) return;
+                    const bounds = getRangeBounds(r);
+                    if (!bounds) return;
 
-                    ctx.fillStyle = 'rgba(245, 158, 11, 0.22)';
-                    ctx.fillRect(left, chartArea.top, width, chartArea.height);
-                    ctx.fillStyle = 'rgba(245, 158, 11, 0.85)';
-                    ctx.fillRect(left, chartArea.top, width, 3);
+                    // Subtle background tint (0.12) + solid 3px top accent
+                    ctx.fillStyle = 'rgba(245, 158, 11, 0.12)';
+                    ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
+                    ctx.fillStyle = '#F59E0B';
+                    ctx.fillRect(bounds.left, chartArea.top, bounds.width, 3);
                 });
 
                 ctx.restore();
