@@ -28,6 +28,7 @@ import urllib.request
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
+from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
 
 AMS_TZ = ZoneInfo("Europe/Amsterdam")
@@ -45,6 +46,19 @@ class DhwThermalModel:
     def __init__(self, profile_path: str = "/config/unallocated_load_profile.json"):
         self.profile_path = profile_path
         self.profile = self._load_profile()
+
+    @classmethod
+    def get_tank_ua(cls) -> float:
+        p_file = Path("/config/heatpump_model_parameters.json")
+        if p_file.exists():
+            try:
+                p = json.loads(p_file.read_text(encoding="utf-8"))
+                val = p.get("dhw_tank", {}).get("standby_loss_w_per_k")
+                if val is not None and float(val) > 0:
+                    return float(val)
+            except Exception:
+                pass
+        return UA_TANK_W_PER_K
 
     def _load_profile(self) -> Dict[str, Any]:
         for p in [self.profile_path, "/config/addons/open-hems/data/unallocated_load_profile.json", "/config/projects/energy-scheduler/data/unallocated_load_profile.json"]:
@@ -216,9 +230,10 @@ class DhwThermalModel:
             q_tap_p95 = q_tap_th * 1.50  # Heavy usage (multiple long showers)
 
             # Standby losses
-            dt_standby = ((UA_TANK_W_PER_K * max(0.0, current_temp - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
-            dt_standby_p05 = ((UA_TANK_W_PER_K * max(0.0, current_p05 - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
-            dt_standby_p95 = ((UA_TANK_W_PER_K * max(0.0, current_p95 - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
+            ua_tank = self.get_tank_ua()
+            dt_standby = ((ua_tank * max(0.0, current_temp - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
+            dt_standby_p05 = ((ua_tank * max(0.0, current_p05 - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
+            dt_standby_p95 = ((ua_tank * max(0.0, current_p95 - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
 
             # Usable heat above comfort minimum (40°C) for current slot
             q_usable = max(0.0, (current_temp - T_MIN_COMFORT_C) * C_TANK_KWH_PER_C)

@@ -520,6 +520,9 @@ def handle_post(handler, path: str, body: dict) -> bool:
             if GLOBAL_MODEL:
                 GLOBAL_MODEL.params = params
 
+            # Force immediate recalculation of canonical dispatch plan with newly accepted parameters
+            ensure_active_canonical_plan(force_refresh=True)
+
             handler._send_json({"status": "success", "message": "Aanbevelingen geaccepteerd en modelparameters geactiveerd!"})
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, 500)

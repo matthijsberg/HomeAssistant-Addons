@@ -22,6 +22,8 @@ Key Capabilities:
 
 from typing import List, Dict, Any, Tuple, Optional
 import math
+import json
+from pathlib import Path
 
 from models.canonical import SpaceHeatingSlotResult, SpaceHeatingPlanSummary
 
@@ -56,6 +58,29 @@ class SpaceHeatingPolicy:
     STARTUP_BOOST_SLOTS = 2         # Initial flow delta-T buildup phase: 2 slots = 30 mins
 
     @classmethod
+    def get_active_parameters(cls) -> Dict[str, Any]:
+        """Loads live calibrated parameters from heatpump_model_parameters.json with fallback to class constants."""
+        params_file = Path("/config/heatpump_model_parameters.json")
+        ua = cls.UA_BUILDING_KW_PER_K
+        reg_a = cls.REGRESSION_A
+        reg_b = cls.REGRESSION_B
+        if params_file.exists():
+            try:
+                p = json.loads(params_file.read_text(encoding="utf-8"))
+                ua_w = p.get("building", {}).get("ua_base_w_per_k")
+                if ua_w is not None and float(ua_w) > 0:
+                    ua = float(ua_w) / 1000.0  # W/K to kW/K
+                mod_curve = p.get("heat_pump", {}).get("modulation_curve", "")
+                if mod_curve and "-" in mod_curve:
+                    parts = mod_curve.split("-")
+                    reg_a = float(parts[0].strip())
+                    clean_b = parts[1].replace("·T", "").replace("*T", "").replace("·t", "").replace("*t", "").replace("W", "").strip()
+                    reg_b = float(clean_b)
+            except Exception:
+                pass
+        return {"ua_kw_per_k": ua, "reg_a": reg_a, "reg_b": reg_b}
+
+    @classmethod
     def calculate_modulating_power(
         cls,
         outdoor_temp_c: float,
@@ -66,7 +91,8 @@ class SpaceHeatingPolicy:
         Calculates realistic inverter compressor power (kW_el) based on outdoor temperature,
         run phase (startup burst vs steady modulation vs warm floor taper), and preheat status.
         """
-        p_raw_w = cls.REGRESSION_A - (cls.REGRESSION_B * outdoor_temp_c)
+        act_p = cls.get_active_parameters()
+        p_raw_w = act_p["reg_a"] - (act_p["reg_b"] * outdoor_temp_c)
         p_steady_kw = max(cls.MODULATION_FLOOR_KW_EL, min(cls.MODULATION_MAX_KW_EL, p_raw_w / 1000.0))
 
         if run_slot_idx <= cls.STARTUP_BOOST_SLOTS:
@@ -248,7 +274,8 @@ class SpaceHeatingPolicy:
 
             # Instantaneous building heat loss with wind infiltration correction
             v_wind = wind_speeds_ms[i] if (wind_speeds_ms and i < len(wind_speeds_ms)) else 0.0
-            effective_ua = cls.UA_BUILDING_KW_PER_K + cls.WIND_INFILTRATION_COEFF_KW_PER_K_PER_MS * max(0.0, v_wind - 2.0)
+            act_p = cls.get_active_parameters()
+            effective_ua = act_p["ua_kw_per_k"] + cls.WIND_INFILTRATION_COEFF_KW_PER_K_PER_MS * max(0.0, v_wind - 2.0)
             q_loss = effective_ua * max(0.0, t_room - t_out)
             # Passive window solar thermal gain
             q_solar_gain = cls.SOLAR_GAIN_COEFFICIENT * solar_kw[i]
@@ -417,7 +444,8 @@ class SpaceHeatingPolicy:
             for i in range(first_heat_idx, n_slots):
                 t_out = outdoor_temps_c[i]
                 v_wind = wind_speeds_ms[i] if (wind_speeds_ms and i < len(wind_speeds_ms)) else 0.0
-                eff_ua = cls.UA_BUILDING_KW_PER_K + cls.WIND_INFILTRATION_COEFF_KW_PER_K_PER_MS * max(0.0, v_wind - 2.0)
+                act_p = cls.get_active_parameters()
+                eff_ua = act_p["ua_kw_per_k"] + cls.WIND_INFILTRATION_COEFF_KW_PER_K_PER_MS * max(0.0, v_wind - 2.0)
                 q_loss = eff_ua * max(0.0, t_r_unh - t_out)
                 q_solar = cls.SOLAR_GAIN_COEFFICIENT * solar_kw[i]
                 r_fl = cls.R_FLOOR_AIR_K_PER_KW if t_f_unh >= t_r_unh else 2.75
