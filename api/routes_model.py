@@ -118,6 +118,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "unheated_temps_c": hist_indoor + (h_summary.unheated_room_temps_c if (h_summary and h_summary.unheated_room_temps_c) else in_temps),
             "indoor_temps_p05_c": hist_indoor + (h_summary.room_temps_p05_c if (h_summary and h_summary.room_temps_p05_c) else in_temps),
             "indoor_temps_p95_c": hist_indoor + (h_summary.room_temps_p95_c if (h_summary and h_summary.room_temps_p95_c) else in_temps),
+            "unheated_temps_p05_c": hist_indoor + (h_summary.unheated_temps_p05_c if (h_summary and h_summary.unheated_temps_p05_c) else in_temps),
+            "unheated_temps_p95_c": hist_indoor + (h_summary.unheated_temps_p95_c if (h_summary and h_summary.unheated_temps_p95_c) else in_temps),
             "floor_temps_c": hist_floor + floor_temps,
             "cops": hist_cops + cops,
             "thermal_loss_kw": hist_th_loss + th_loss_kw,

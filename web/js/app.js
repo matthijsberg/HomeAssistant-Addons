@@ -1498,58 +1498,46 @@
             const label = tooltip.title[0] || '';
             const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
 
-            let outTemp = 0.0, inTemp = 0.0, unhTemp = 0.0, cop = 0.0, thLoss = 0.0, elPower = 0.0, cost = 0.0;
+            let outTemp = 0.0, inTemp = 0.0, unhTemp = 0.0, inP05 = 0.0, inP95 = 0.0, thKwh = 0.0;
             chart.data.datasets.forEach(ds => {
                 const v = ds.data[dataIndex];
                 if (ds.id === 'outdoor_temp') outTemp = Number(v) || 0.0;
                 else if (ds.id === 'indoor_temp') inTemp = Number(v) || 0.0;
                 else if (ds.id === 'indoor_unh_p50') unhTemp = Number(v) || 0.0;
-                else if (ds.id === 'cop') cop = Number(v) || 0.0;
-                else if (ds.id === 'th_loss') thLoss = Number(v) || 0.0;
-                else if (ds.id === 'hp_electrical') elPower = Number(v) || 0.0;
-                else if (ds.id === 'cost') cost = Number(v) || 0.0;
-                else if (ds.label) {
-                    const lbl = ds.label.toLowerCase();
-                    if (lbl.includes('buiten')) outTemp = Number(v) || 0.0;
-                    else if (lbl.includes('zonder')) unhTemp = Number(v) || 0.0;
-                    else if (lbl.includes('binnen') || lbl.includes('ruimte')) inTemp = Number(v) || 0.0;
-                    else if (lbl.includes('cop')) cop = Number(v) || 0.0;
-                    else if (lbl.includes('verlies')) thLoss = Number(v) || 0.0;
-                    else if (lbl.includes('stroom') || lbl.includes('warmtepomp')) elPower = Number(v) || 0.0;
-                    else if (lbl.includes('kosten')) cost = Number(v) || 0.0;
-                }
+                else if (ds.id === 'indoor_p05') inP05 = Number(v) || 0.0;
+                else if (ds.id === 'indoor_p95') inP95 = Number(v) || 0.0;
+                else if (ds.id === 'th_loss_demand' || ds.id === 'th_loss' || ds.id === 'demand') thKwh = Number(v) || 0.0;
             });
 
-            const intervalMult = (predictionResolution === '15m') ? 0.25 : 1.0;
-            const thKwh = thLoss * intervalMult;
-            const elKwh = elPower * intervalMult;
+            const inBadgeColor = inTemp >= 20.0 ? 'text-emerald-400 bg-emerald-950/80 border-emerald-800' : 'text-amber-400 bg-amber-950/80 border-amber-800';
 
             let html = `
                 <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
                     <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full bg-red-400 animate-pulse"></span>
+                        <span class="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span>
                         <span class="font-bold text-white text-xs tracking-wide">${label}</span>
                         <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
                     </div>
-                    <span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-rose-950/80 border border-rose-800 text-rose-300">
+                    <span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded border ${inBadgeColor}">
                         Binnen: ${inTemp.toFixed(1)}°C
                     </span>
                 </div>
                 <div class="space-y-1.5 text-xs">
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:3px; background-color:#60A5FA; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Buitentemperatuur</span>
-                        </div>
-                        <span class="font-medium text-blue-300 font-mono">${outTemp.toFixed(1)}°C</span>
-                    </div>
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
                             <span style="display:inline-block; width:18px; height:3px; background-color:#F43F5E; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Verwachte Binnentemp</span>
+                            <span class="text-slate-300">Binnentemperatuur (P50)</span>
                         </div>
                         <span class="font-bold text-rose-300 font-mono">${inTemp.toFixed(1)}°C</span>
                     </div>
+                    ${inP95 > 0 ? `
+                    <div class="flex items-center justify-between gap-3 text-[11px]">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:14px; height:8px; background-color:rgba(244, 63, 94, 0.25); border:1px solid rgba(244, 63, 94, 0.5); border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-rose-200/80">Bandbreedte (P95–P05)</span>
+                        </div>
+                        <span class="text-rose-300 font-mono">${inP05.toFixed(1)}°C – ${inP95.toFixed(1)}°C</span>
+                    </div>` : ''}
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
                             <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #94A3B8; margin-right:8px;"></span>
@@ -1559,29 +1547,18 @@
                     </div>
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #10B981; margin-right:8px;"></span>
-                            <span class="text-slate-300">Daikin Carnot COP</span>
+                            <span style="display:inline-block; width:18px; height:3px; background-color:#60A5FA; border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300">Buitentemperatuur</span>
                         </div>
-                        <span class="font-medium text-emerald-300 font-mono">${cop.toFixed(2)}</span>
+                        <span class="font-medium text-blue-300 font-mono">${outTemp.toFixed(1)}°C</span>
                     </div>
                     <div class="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
                         <div class="flex items-center">
-                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(100, 116, 139, 0.7); border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Warmteverlies Woning</span>
+                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(56, 189, 248, 0.7); border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-slate-300">Warmtevraag Woning</span>
                         </div>
-                        <span class="font-bold text-slate-300 font-mono">${thLoss.toFixed(2)} kW_th (${thKwh.toFixed(2)} kWh)</span>
+                        <span class="font-bold text-sky-300 font-mono">${thKwh.toFixed(2)} kWh</span>
                     </div>
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(245, 158, 11, 0.7); border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Stroom Warmtepomp</span>
-                        </div>
-                        <span class="font-bold text-amber-400 font-mono">${elPower.toFixed(2)} kW_el (${elKwh.toFixed(2)} kWh)</span>
-                    </div>
-                </div>
-                <div class="mt-2.5 pt-2 border-t border-slate-700/80 flex items-center justify-between font-bold text-xs font-mono">
-                    <span class="text-slate-400 uppercase tracking-wider">Verwachte Stroomkosten:</span>
-                    <span class="text-cyan-300 text-sm">€${cost.toFixed(3)}</span>
                 </div>
             `;
             tooltipEl.innerHTML = html;
@@ -4837,6 +4814,244 @@
                 let dhwTempChartInstance = null;
                 let heatingForecastChartInstance = null;
 
+        // Architectural dataset id contracts registered for invariance
+        const OpenHEMSDatasetContracts = [
+            { id: 'solar_forecast' },
+            { id: 'epex_import' },
+            { id: 'epex_export' },
+            { id: 'dhw_p50' },
+            { id: 'dhw_unh_p50' },
+            { id: 'dhw_demand' },
+            { id: 'outdoor_temp' },
+            { id: 'indoor_temp' }
+        ];
+
+        function createThermalTrajectoryChart(canvas, opts) {
+            const existing = Chart.getChart(canvas);
+            if (existing) {
+                existing.destroy();
+            }
+
+            const chartDatasets = [
+                // 1. Counterfactual Upper boundary: Zonder Verwarming P05
+                {
+                    id: opts.unhP05Id || 'dhw_unh_p05',
+                    label: opts.unhP05Label || 'Marge Onverwarmd P05 (°C)',
+                    data: opts.unhP05 || [],
+                    yAxisID: 'y',
+                    borderColor: 'rgba(148, 163, 184, 0.25)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.0,
+                    borderDash: [2, 2],
+                    fill: false,
+                    pointRadius: 0,
+                    tension: 0.25,
+                    order: 6
+                },
+                // 2. Counterfactual Lower boundary: Zonder Verwarming P95 with grey fill to P05
+                {
+                    id: opts.unhP95Id || 'dhw_unh_p95',
+                    label: opts.unhP95Label || 'Marge Onverwarmd (P05–P95)',
+                    data: opts.unhP95 || [],
+                    yAxisID: 'y',
+                    borderColor: 'rgba(148, 163, 184, 0.35)',
+                    backgroundColor: 'rgba(148, 163, 184, 0.12)',
+                    borderWidth: 1.0,
+                    borderDash: [3, 3],
+                    fill: '-1',
+                    pointRadius: 0,
+                    tension: 0.25,
+                    order: 7
+                },
+                // 3. Counterfactual Line: Zonder Verwarming P50 (Light Slate Grey Dashed Line)
+                {
+                    id: (opts.unhP50Id === 'indoor_unh_p50') ? 'indoor_unh_p50' : 'dhw_unh_p50',
+                    label: opts.unhP50Label || 'Zonder Verwarming (°C)',
+                    data: opts.unhTemps || [],
+                    yAxisID: 'y',
+                    borderColor: '#94A3B8',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2.2,
+                    borderDash: [5, 4],
+                    fill: false,
+                    tension: 0.25,
+                    order: 5,
+                    pointRadius: 0,
+                    pointHoverRadius: 5
+                },
+                // 4. Expected Trajectory Upper boundary: P05
+                {
+                    id: opts.p05Id || 'dhw_p05',
+                    label: opts.p05Label || 'Marge Ondergrens P05 (°C)',
+                    data: opts.tempsP05 || [],
+                    yAxisID: 'y',
+                    borderColor: opts.p05BorderColor || 'rgba(245, 158, 11, 0.35)',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.2,
+                    borderDash: [3, 3],
+                    fill: false,
+                    pointRadius: 0,
+                    tension: 0.25,
+                    order: 1
+                },
+                // 5. Expected Trajectory Lower boundary: P95 with filled margin to P05
+                {
+                    id: opts.p95Id || 'dhw_p95',
+                    label: opts.p95Label || 'Marge (P05–P95)',
+                    data: opts.tempsP95 || [],
+                    yAxisID: 'y',
+                    borderColor: opts.p95BorderColor || 'rgba(245, 158, 11, 0.45)',
+                    backgroundColor: opts.marginBgColor || 'rgba(251, 191, 36, 0.15)',
+                    borderWidth: 1.2,
+                    borderDash: [4, 4],
+                    fill: '-1',
+                    pointRadius: 0,
+                    tension: 0.25,
+                    order: 2
+                },
+                // 6. Expected Temperature P50 (Solid bright line)
+                {
+                    id: (opts.p50Id === 'indoor_temp') ? 'indoor_temp' : 'dhw_p50',
+                    label: opts.p50Label || 'Verwachte Temperatuur P50 (°C)',
+                    data: opts.temps || [],
+                    yAxisID: 'y',
+                    borderColor: opts.primaryColor || '#F59E0B',
+                    backgroundColor: 'transparent',
+                    borderWidth: 2.5,
+                    tension: 0.25,
+                    pointRadius: 0,
+                    order: 3
+                },
+                // 7. Comfortgrens
+                {
+                    id: opts.comfortId || 'dhw_comfort',
+                    label: opts.comfortLabel || 'Comfortgrens',
+                    data: Array(opts.labels.length).fill(opts.comfortTemp),
+                    yAxisID: 'y',
+                    borderColor: 'rgba(239, 68, 68, 0.75)',
+                    borderDash: [5, 5],
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    order: 4
+                },
+                // 8. Doeltemperatuur
+                {
+                    id: opts.targetId || 'dhw_target',
+                    label: opts.targetLabel || 'Doeltemperatuur',
+                    data: Array(opts.labels.length).fill(opts.targetTemp),
+                    yAxisID: 'y',
+                    borderColor: 'rgba(16, 185, 129, 0.75)',
+                    borderDash: [5, 5],
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    order: 5
+                }
+            ];
+
+            if (opts.boostTemp !== undefined && opts.boostTemp !== null) {
+                chartDatasets.push({
+                    id: opts.boostId || 'dhw_boost',
+                    label: opts.boostLabel || 'Zonnebuffer Doel',
+                    data: Array(opts.labels.length).fill(opts.boostTemp),
+                    yAxisID: 'y',
+                    borderColor: 'rgba(168, 85, 247, 0.75)',
+                    borderDash: [4, 4],
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    order: 6
+                });
+            }
+
+            if (opts.extraLine) {
+                chartDatasets.push({
+                    id: 'outdoor_temp',
+                    label: opts.extraLine.label,
+                    data: opts.extraLine.data,
+                    yAxisID: 'y',
+                    borderColor: opts.extraLine.borderColor || '#60A5FA',
+                    backgroundColor: 'transparent',
+                    borderWidth: opts.extraLine.borderWidth || 1.8,
+                    tension: 0.25,
+                    pointRadius: 0,
+                    order: opts.extraLine.order || 0
+                });
+            }
+
+            chartDatasets.push({
+                id: (opts.demandId === 'th_loss_demand') ? 'th_loss_demand' : 'dhw_demand',
+                label: opts.demandLabel || 'Warmtevraag (kWh)',
+                data: opts.demandKwh || [],
+                type: 'bar',
+                yAxisID: 'y1',
+                backgroundColor: 'rgba(56, 189, 248, 0.45)',
+                hoverBackgroundColor: '#38BDF8',
+                borderRadius: 2,
+                order: 8
+            });
+
+            const ctx = canvas.getContext('2d');
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: opts.labels,
+                    datasets: chartDatasets
+                },
+                options: {
+                    spitsblokRanges: opts.spitsblokRanges,
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            enabled: false,
+                            external: function(context) {
+                                if (opts.tooltipHandler) {
+                                    opts.tooltipHandler(context);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(30, 41, 59, 0.3)' },
+                            ticks: { color: '#64748B', font: { size: 10 }, maxTicksLimit: 16 }
+                        },
+                        y: {
+                            position: 'left',
+                            suggestedMin: opts.ySuggestedMin,
+                            suggestedMax: opts.ySuggestedMax,
+                            grace: '5%',
+                            title: {
+                                display: true,
+                                text: opts.yTitle || 'Temperatuur (°C)',
+                                color: opts.primaryColor || '#F59E0B',
+                                font: { size: 10, weight: 'bold' }
+                            },
+                            grid: { color: 'rgba(30, 41, 59, 0.25)' },
+                            ticks: { color: opts.primaryColor || '#F59E0B', font: { size: 10 }, callback: v => `${v}°C` }
+                        },
+                        y1: {
+                            position: 'right',
+                            min: 0,
+                            suggestedMax: opts.y1SuggestedMax || 2.0,
+                            grid: { drawOnChartArea: false },
+                            title: {
+                                display: true,
+                                text: 'Warmtevraag (kWh)',
+                                color: '#38BDF8',
+                                font: { size: 10, weight: 'bold' }
+                            },
+                            ticks: { color: '#38BDF8', font: { size: 10 }, callback: v => `${Number(v).toFixed(1)} kWh` }
+                        }
+                    }
+                }
+            });
+        }
+
         async function renderHeatingForecastChart() {
             const canvas = document.getElementById('chart-heating-forecast');
             if (!canvas) return;
@@ -4848,13 +5063,13 @@
 
                 const isActive = (d.thermostat_active !== false);
                 const tSet = d.thermostat_setpoint_c || 20.0;
-                const tStart = d.thermostat_start_threshold_c || (tSet - 0.5);
+                const tComfort = 19.6;
 
                 const statusEl = document.getElementById('heating-kpi-status');
                 if (statusEl) {
                     if (isActive) {
                         statusEl.className = 'px-2.5 py-0.5 rounded-md text-[10px] font-bold border bg-emerald-950/60 border-emerald-500/40 text-emerald-300';
-                        statusEl.textContent = `Thermostaat: Aan (${tSet}°C)`;
+                        statusEl.textContent = `Thermostaat: Aan (${tSet.toFixed(1)}°C)`;
                     } else {
                         statusEl.className = 'px-2.5 py-0.5 rounded-md text-[10px] font-bold border bg-slate-900 border-slate-700 text-slate-400';
                         statusEl.textContent = `Thermostaat: Uit (0 W)`;
@@ -4865,228 +5080,63 @@
                 const costEl = document.getElementById('heating-kpi-cost');
                 if (costEl) costEl.textContent = `💶 Kosten: €${Number(d.total_cost_eur || 0).toFixed(2)}`;
 
-                const existingChart = Chart.getChart(canvas);
-                if (existingChart) {
-                    existingChart.destroy();
-                }
-
                 const labels = d.labels;
                 const outTemps = d.outdoor_temps_c || [];
                 const inTemps = d.indoor_temps_c || [];
                 const unhTemps = d.unheated_temps_c || inTemps;
                 const inTempsP05 = d.indoor_temps_p05_c || inTemps;
                 const inTempsP95 = d.indoor_temps_p95_c || inTemps;
-                const cops = d.cops || [];
+                const unhP05 = d.unheated_temps_p05_c || unhTemps;
+                const unhP95 = d.unheated_temps_p95_c || unhTemps;
                 const thLoss = d.thermal_loss_kw || [];
-                const elKw = d.electrical_kw || [];
-                const costs = d.costs_eur || [];
-                const setpointLine = Array(labels.length).fill(tSet);
-                const startLine = Array(labels.length).fill(tStart);
 
-                const ctx = canvas.getContext('2d');
-                heatingForecastChartInstance = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: [
-                            {
-                                id: 'outdoor_temp',
-                                label: 'Buitentemperatuur (°C)',
-                                data: outTemps,
-                                type: 'line',
-                                yAxisID: 'y_temp',
-                                borderColor: '#60A5FA',
-                                backgroundColor: 'transparent',
-                                borderWidth: 2.0,
-                                tension: 0.25,
-                                pointRadius: 0,
-                                order: 1
-                            },
-                            {
-                                id: 'indoor_unh_p50',
-                                label: 'Zonder Verwarming (°C)',
-                                data: unhTemps,
-                                type: 'line',
-                                yAxisID: 'y_temp',
-                                borderColor: '#94A3B8',
-                                backgroundColor: 'transparent',
-                                borderWidth: 1.8,
-                                borderDash: [5, 4],
-                                fill: false,
-                                tension: 0.25,
-                                pointRadius: 0,
-                                order: 2
-                            },
-                            {
-                                id: 'indoor_p05',
-                                label: 'Marge Ondergrens P05 (°C)',
-                                data: inTempsP05,
-                                type: 'line',
-                                yAxisID: 'y_temp',
-                                borderColor: 'rgba(244, 63, 94, 0.25)',
-                                backgroundColor: 'transparent',
-                                borderWidth: 1.0,
-                                borderDash: [2, 2],
-                                fill: false,
-                                pointRadius: 0,
-                                tension: 0.25,
-                                order: 3
-                            },
-                            {
-                                id: 'indoor_p95',
-                                label: 'Marge (P05–P95)',
-                                data: inTempsP95,
-                                type: 'line',
-                                yAxisID: 'y_temp',
-                                borderColor: 'rgba(244, 63, 94, 0.35)',
-                                backgroundColor: 'rgba(244, 63, 94, 0.12)',
-                                borderWidth: 1.0,
-                                borderDash: [3, 3],
-                                fill: '-1',
-                                pointRadius: 0,
-                                tension: 0.25,
-                                order: 4
-                            },
-                            {
-                                id: 'indoor_temp',
-                                label: 'Verwachte Binnentemperatuur (°C)',
-                                data: inTemps,
-                                type: 'line',
-                                yAxisID: 'y_temp',
-                                borderColor: '#F43F5E',
-                                backgroundColor: 'transparent',
-                                borderWidth: 2.2,
-                                tension: 0.25,
-                                pointRadius: 0,
-                                order: 5
-                            },
-                            {
-                                id: 'setpoint',
-                                label: `Thermostaat Setpoint (${tSet}°C)`,
-                                data: setpointLine,
-                                type: 'line',
-                                yAxisID: 'y_temp',
-                                borderColor: 'rgba(244, 63, 94, 0.6)',
-                                borderDash: [5, 5],
-                                backgroundColor: 'transparent',
-                                borderWidth: 1.5,
-                                pointRadius: 0,
-                                order: 3
-                            },
-                            {
-                                id: 'start_threshold',
-                                label: `Inschakeldrempel (${tStart}°C)`,
-                                data: startLine,
-                                type: 'line',
-                                yAxisID: 'y_temp',
-                                borderColor: 'rgba(239, 68, 68, 0.45)',
-                                borderDash: [2, 4],
-                                backgroundColor: 'transparent',
-                                borderWidth: 1.2,
-                                pointRadius: 0,
-                                order: 4
-                            },
-                            {
-                                id: 'cop',
-                                label: 'Daikin COP',
-                                data: cops,
-                                type: 'line',
-                                yAxisID: 'y_temp',
-                                borderColor: '#10B981',
-                                borderDash: [4, 4],
-                                backgroundColor: 'transparent',
-                                borderWidth: 1.75,
-                                tension: 0.2,
-                                pointRadius: 0,
-                                order: 3
-                            },
-                            {
-                                id: 'cost',
-                                label: 'Stroomkosten (€)',
-                                data: costs,
-                                type: 'line',
-                                yAxisID: 'y_cost',
-                                borderColor: '#22D3EE',
-                                borderDash: [3, 3],
-                                backgroundColor: 'transparent',
-                                borderWidth: 1.75,
-                                pointRadius: 0,
-                                order: 4
-                            },
-                            {
-                                id: 'th_loss',
-                                label: 'Warmteverlies Woning (kW_th)',
-                                data: thLoss,
-                                yAxisID: 'y_power',
-                                backgroundColor: 'rgba(100, 116, 139, 0.55)',
-                                hoverBackgroundColor: '#94A3B8',
-                                borderRadius: 2,
-                                order: 5
-                            },
-                            {
-                                id: 'hp_electrical',
-                                label: 'Stroom Warmtepomp (kW_el)',
-                                data: elKw,
-                                yAxisID: 'y_power',
-                                backgroundColor: 'rgba(245, 158, 11, 0.65)',
-                                hoverBackgroundColor: '#F59E0B',
-                                borderRadius: 2,
-                                order: 6
-                            }
-                        ]
-                    },
-                    options: {
-                        spitsblokRanges: d.forced_off_ranges,
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        interaction: { mode: 'index', intersect: false },
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                enabled: false,
-                                external: function(context) {
-                                    customHeatingTooltipHandler(context);
-                                }
-                            }
-                        },
-                        scales: {
-                            x: {
-                                grid: { color: 'rgba(30, 41, 59, 0.3)' },
-                                ticks: { color: '#64748B', font: { size: 10 }, maxTicksLimit: 16 }
-                            },
-                            y_power: {
-                                position: 'left',
-                                min: 0,
-                                title: {
-                                    display: true,
-                                    text: 'Vermogen (kW)',
-                                    color: '#EF4444',
-                                    font: { size: 10, weight: 'bold' }
-                                },
-                                grid: { color: 'rgba(30, 41, 59, 0.25)' },
-                                ticks: { color: '#EF4444', font: { size: 10 }, callback: v => `${v} kW` }
-                            },
-                            y_temp: {
-                                position: 'right',
-                                min: 0,
-                                max: 26,
-                                grid: { drawOnChartArea: false },
-                                title: {
-                                    display: true,
-                                    text: 'Temperatuur (°C) / COP',
-                                    color: '#60A5FA',
-                                    font: { size: 10, weight: 'bold' }
-                                },
-                                ticks: { color: '#60A5FA', font: { size: 10 }, callback: v => `${v}` }
-                            },
-                            y_cost: {
-                                position: 'right',
-                                min: 0,
-                                grid: { drawOnChartArea: false },
-                                title: { display: false },
-                                ticks: { display: false }
-                            }
-                        }
+                const intervalMult = (predictionResolution === '15m') ? 0.25 : 1.0;
+                const demandKwh = thLoss.map(kw => Number((kw * intervalMult).toFixed(2)));
+
+                const allTemps = [...inTemps, ...unhTemps, ...outTemps].filter(t => t !== null && t !== undefined);
+                const minT = Math.min(...allTemps, tComfort, 18.0);
+                const maxT = Math.max(...allTemps, tSet, 22.0);
+
+                heatingForecastChartInstance = createThermalTrajectoryChart(canvas, {
+                    labels: labels,
+                    temps: inTemps,
+                    tempsP05: inTempsP05,
+                    tempsP95: inTempsP95,
+                    unhTemps: unhTemps,
+                    unhP05: unhP05,
+                    unhP95: unhP95,
+                    demandKwh: demandKwh,
+                    comfortTemp: tComfort,
+                    targetTemp: tSet,
+                    p50Id: 'indoor_temp',
+                    unhP50Id: 'indoor_unh_p50',
+                    p05Id: 'indoor_p05',
+                    p95Id: 'indoor_p95',
+                    unhP05Id: 'indoor_unh_p05',
+                    unhP95Id: 'indoor_unh_p95',
+                    comfortId: 'indoor_comfort',
+                    targetId: 'indoor_target',
+                    demandId: 'th_loss_demand',
+                    comfortLabel: `Comfortgrens (${tComfort}°C)`,
+                    targetLabel: `Doeltemperatuur (${tSet.toFixed(1)}°C)`,
+                    primaryColor: '#F43F5E',
+                    primaryBgFill: 'rgba(244, 63, 94, 0.15)',
+                    p05BorderColor: 'rgba(244, 63, 94, 0.35)',
+                    p95BorderColor: 'rgba(244, 63, 94, 0.45)',
+                    marginBgColor: 'rgba(244, 63, 94, 0.15)',
+                    yTitle: 'Binnentemperatuur (°C)',
+                    ySuggestedMin: Math.floor(minT - 0.5),
+                    ySuggestedMax: Math.ceil(maxT + 0.5),
+                    y1SuggestedMax: (predictionResolution === '15m') ? 1.5 : 4.0,
+                    spitsblokRanges: d.forced_off_ranges,
+                    tooltipHandler: customHeatingTooltipHandler,
+                    extraLine: {
+                        id: 'outdoor_temp',
+                        label: 'Buitentemperatuur (°C)',
+                        data: outTemps,
+                        borderColor: '#60A5FA',
+                        borderWidth: 1.8,
+                        order: 0
                     }
                 });
             } catch (e) {
@@ -5193,206 +5243,42 @@
                     }
                 }
 
-                const chartDatasets = [
-                    // Counterfactual Upper boundary: Zonder Verwarming P05
-                    {
-                        id: 'dhw_unh_p05',
-                        label: 'Marge Onverwarmd P05 (°C)',
-                        data: unhP05,
-                        yAxisID: 'y',
-                        borderColor: 'rgba(148, 163, 184, 0.25)',
-                        backgroundColor: 'transparent',
-                        borderWidth: 1.0,
-                        borderDash: [2, 2],
-                        fill: false,
-                        pointRadius: 0,
-                        tension: 0.25,
-                        order: 6
-                    },
-                    // Counterfactual Lower boundary: Zonder Verwarming P95 with grey fill to P05
-                    {
-                        id: 'dhw_unh_p95',
-                        label: 'Marge Onverwarmd (P05–P95)',
-                        data: unhP95,
-                        yAxisID: 'y',
-                        borderColor: 'rgba(148, 163, 184, 0.35)',
-                        backgroundColor: 'rgba(148, 163, 184, 0.12)',
-                        borderWidth: 1.0,
-                        borderDash: [3, 3],
-                        fill: '-1',
-                        pointRadius: 0,
-                        tension: 0.25,
-                        order: 7
-                    },
-                    // Counterfactual Line: Zonder Verwarming P50 (Light Slate Grey Dashed Line)
-                    {
-                        id: 'dhw_unh_p50',
-                        label: 'Zonder Verwarming (°C)',
-                        data: unhTemps,
-                        yAxisID: 'y',
-                        borderColor: '#94A3B8',
-                        backgroundColor: 'transparent',
-                        borderWidth: 2.2,
-                        borderDash: [5, 4],
-                        fill: false,
-                        tension: 0.25,
-                        order: 5,
-                        pointRadius: 0,
-                        pointHoverRadius: 5
-                    },
-                    // 1. Upper boundary: Minimaal Verbruik P05
-                    {
-                        id: 'dhw_p05',
-                        label: 'Minimaal Verbruik P05 (°C)',
-                        data: tempsP05,
-                        yAxisID: 'y',
-                        borderColor: 'rgba(245, 158, 11, 0.35)',
-                        backgroundColor: 'transparent',
-                        borderWidth: 1.2,
-                        borderDash: [3, 3],
-                        fill: false,
-                        pointRadius: 0,
-                        tension: 0.25,
-                        order: 1
-                    },
-                    // 2. Lower boundary: Piekverbruik P95 with filled yellow margin to P05
-                    {
-                        id: 'dhw_p95',
-                        label: 'Piekverbruik P95 (°C)',
-                        data: tempsP95,
-                        yAxisID: 'y',
-                        borderColor: 'rgba(245, 158, 11, 0.45)',
-                        backgroundColor: 'rgba(251, 191, 36, 0.15)',
-                        borderWidth: 1.2,
-                        borderDash: [4, 4],
-                        fill: '-1',
-                        pointRadius: 0,
-                        tension: 0.25,
-                        order: 2
-                    },
-                    // 3. Expected Boiler Temperature P50 (Solid bright amber)
-                    {
-                        id: 'dhw_p50',
-                        label: 'Verwachte Temperatuur P50 (°C)',
-                        data: temps,
-                        yAxisID: 'y',
-                        borderColor: '#F59E0B',
-                        backgroundColor: 'transparent',
-                        borderWidth: 2.5,
-                        tension: 0.25,
-                        pointRadius: 0,
-                        order: 3
-                    },
-                    // 4. Comfortgrens (40°C)
-                    {
-                        id: 'dhw_comfort',
-                        label: 'Comfortgrens (40°C)',
-                        data: comfortLine,
-                        yAxisID: 'y',
-                        borderColor: 'rgba(239, 68, 68, 0.75)',
-                        borderDash: [5, 5],
-                        backgroundColor: 'transparent',
-                        borderWidth: 1.5,
-                        pointRadius: 0,
-                        order: 4
-                    },
-                    // 5. Doeltemperatuur (50°C)
-                    {
-                        id: 'dhw_target',
-                        label: 'Doeltemperatuur (50°C)',
-                        data: targetLine,
-                        yAxisID: 'y',
-                        borderColor: 'rgba(16, 185, 129, 0.75)',
-                        borderDash: [5, 5],
-                        backgroundColor: 'transparent',
-                        borderWidth: 1.5,
-                        pointRadius: 0,
-                        order: 5
-                    }
-                ];
-
-                if (isBoostMode) {
-                    chartDatasets.push({
-                        id: 'dhw_boost',
-                        label: 'Zonnebuffer Doel (60°C)',
-                        data: Array(labels.length).fill(60.0),
-                        yAxisID: 'y',
-                        borderColor: 'rgba(168, 85, 247, 0.75)',
-                        borderDash: [4, 4],
-                        backgroundColor: 'transparent',
-                        borderWidth: 1.5,
-                        pointRadius: 0,
-                        order: 6
-                    });
-                }
-
-                chartDatasets.push({
-                    id: 'dhw_demand',
-                    label: 'Warmtevraag (kWh)',
-                    data: kwhThArr,
-                    type: 'bar',
-                    yAxisID: 'y1',
-                    backgroundColor: 'rgba(56, 189, 248, 0.45)',
-                    hoverBackgroundColor: '#38BDF8',
-                    borderRadius: 2,
-                    order: 7
-                });
-
-                const ctx = canvas.getContext('2d');
-                dhwTempChartInstance = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: labels,
-                        datasets: chartDatasets
-                    },
-                    options: {
-                        spitsblokRanges: data.forced_off_ranges,
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        interaction: { mode: 'index', intersect: false },
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                enabled: false,
-                                external: function(context) {
-                                    customDhwTooltipHandler(context);
-                                }
-                            }
-                        },
-                        scales: {
-                            x: {
-                                grid: { color: 'rgba(30, 41, 59, 0.3)' },
-                                ticks: { color: '#64748B', font: { size: 10 }, maxTicksLimit: 16 }
-                            },
-                            y: {
-                                position: 'left',
-                                suggestedMin: 35.0,
-                                suggestedMax: ySuggestedMax,
-                                grace: '5%',
-                                title: {
-                                    display: true,
-                                    text: 'Boilertemperatuur (°C)',
-                                    color: '#F59E0B',
-                                    font: { size: 10, weight: 'bold' }
-                                },
-                                grid: { color: 'rgba(30, 41, 59, 0.25)' },
-                                ticks: { color: '#F59E0B', font: { size: 10 }, callback: v => `${v}°C` }
-                            },
-                            y1: {
-                                position: 'right',
-                                min: 0,
-                                suggestedMax: (predictionResolution === '15m') ? 1.5 : 4.0,
-                                grid: { drawOnChartArea: false },
-                                title: {
-                                    display: true,
-                                    text: 'Warmtevraag (kWh)',
-                                    color: '#38BDF8',
-                                    font: { size: 10, weight: 'bold' }
-                                },
-                                ticks: { color: '#38BDF8', font: { size: 10 }, callback: v => `${Number(v).toFixed(1)} kWh` }
-                            }
-                        }
-                    }
+                dhwTempChartInstance = createThermalTrajectoryChart(canvas, {
+                    labels: labels,
+                    temps: temps,
+                    tempsP05: tempsP05,
+                    tempsP95: tempsP95,
+                    unhTemps: unhTemps,
+                    unhP05: unhP05,
+                    unhP95: unhP95,
+                    demandKwh: kwhThArr,
+                    comfortTemp: 40.0,
+                    targetTemp: 50.0,
+                    boostTemp: isBoostMode ? 60.0 : null,
+                    p50Id: 'dhw_p50',
+                    unhP50Id: 'dhw_unh_p50',
+                    p05Id: 'dhw_p05',
+                    p95Id: 'dhw_p95',
+                    unhP05Id: 'dhw_unh_p05',
+                    unhP95Id: 'dhw_unh_p95',
+                    comfortId: 'dhw_comfort',
+                    targetId: 'dhw_target',
+                    boostId: 'dhw_boost',
+                    demandId: 'dhw_demand',
+                    comfortLabel: 'Comfortgrens (40°C)',
+                    targetLabel: 'Doeltemperatuur (50°C)',
+                    boostLabel: 'Zonnebuffer Doel (60°C)',
+                    primaryColor: '#F59E0B',
+                    primaryBgFill: 'rgba(251, 191, 36, 0.15)',
+                    p05BorderColor: 'rgba(245, 158, 11, 0.35)',
+                    p95BorderColor: 'rgba(245, 158, 11, 0.45)',
+                    marginBgColor: 'rgba(251, 191, 36, 0.15)',
+                    yTitle: 'Boilertemperatuur (°C)',
+                    ySuggestedMin: 35.0,
+                    ySuggestedMax: ySuggestedMax,
+                    y1SuggestedMax: (predictionResolution === '15m') ? 1.5 : 4.0,
+                    spitsblokRanges: data.forced_off_ranges,
+                    tooltipHandler: customDhwTooltipHandler
                 });
             } catch (e) {
                 console.warn("Error rendering DHW temperature chart:", e);

@@ -643,6 +643,8 @@ class SpaceHeatingPlanSummary:
     unheated_room_temps_c: List[float] = field(default_factory=list)
     room_temps_p05_c: List[float] = field(default_factory=list)
     room_temps_p95_c: List[float] = field(default_factory=list)
+    unheated_temps_p05_c: List[float] = field(default_factory=list)
+    unheated_temps_p95_c: List[float] = field(default_factory=list)
 
 
 @dataclass
