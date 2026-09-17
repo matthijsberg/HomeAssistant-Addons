@@ -367,7 +367,7 @@ class CentralPlanner:
                     heating_kw=round(heating_kw, 2),
                     dhw_kw=round(dhw_kw, 2),
                     net_import_kw=net_import,
-                    mode_code=meta["code"],
+                    mode_code=state,
                     mode_label=mode_lbl,
                     color_hex=meta["color_hex"],
                     tailwind_class=meta["tailwind_text"],

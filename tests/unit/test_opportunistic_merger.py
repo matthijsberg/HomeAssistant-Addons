@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime, timezone
-from models.canonical import CanonicalDispatchPlan, DispatchPlanSlot, DHWPlanSummary
+from models.canonical import CanonicalDispatchPlan, DispatchPlanSlot, DHWPlanSummary, StandardizedState
 from layer3_scheduling.opportunistic_merger import OpportunisticDHWMerger, OpportunisticMergeResult
 
 
@@ -19,7 +19,7 @@ def _make_dummy_plan(boost_slot_idx: int = 4, boost_price: float = 0.20) -> Cano
                 heating_kw=0.0,
                 dhw_kw=2.4 if is_boost else 0.0,
                 net_import_kw=-1.0 if is_boost else 0.1,
-                mode_code="max_on" if is_boost else "normal",
+                mode_code=StandardizedState.MAX_ON if is_boost else StandardizedState.NORMAL,
                 mode_label="Maximaal aan" if is_boost else "Normaal",
                 color_hex="#A855F7" if is_boost else "#1E293B",
                 tailwind_class="bg-purple-900" if is_boost else "bg-slate-800",

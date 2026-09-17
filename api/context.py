@@ -59,7 +59,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, "/addons/open-hems")
 sys.path.insert(0, "/opt/open-hems")
 from site_adapters.daikin_p1p2 import DaikinP1P2StateClassifier, HeatPumpDisaggregation
-from models.canonical import normalize_power_reading
+from models.canonical import normalize_power_reading, StandardizedState, get_state_metadata
 from layer3_scheduling.peak_detection import detect_dynamic_price_peaks, calc_percentile
 
 CONFIG_FILE = Path("/config/heatpump_config.json")
@@ -577,22 +577,18 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
         # Cancel the upcoming planned slots in the plan!
         for slot_idx in merge_res.cancelled_slots:
             if slot_idx < len(plan.slots):
-                plan.slots[slot_idx].mode_code = "normal"
+                plan.slots[slot_idx].mode_code = StandardizedState.NORMAL
                 plan.slots[slot_idx].mode_label = "Normaal (50°C)"
                 plan.slots[slot_idx].dhw_kw = 0.0
-                plan.slots[slot_idx].color_hex = "#1E293B"
-                plan.slots[slot_idx].tailwind_class = "bg-slate-800"
 
         run_pwr = max(1.8, round(wp_power / 1000.0, 2))
         # Reflect active run on current slot (slot 0) and next slots
         if plan and plan.slots:
             for run_i in range(min(4, len(plan.slots))):
-                plan.slots[run_i].mode_code = "max_on"
+                plan.slots[run_i].mode_code = StandardizedState.MAX_ON
                 plan.slots[run_i].mode_label = "Zonnebuffer (Fusie tot 60°C)"
                 plan.slots[run_i].dhw_kw = run_pwr
                 plan.slots[run_i].heating_kw = 0.0
-                plan.slots[run_i].color_hex = "#A855F7"
-                plan.slots[run_i].tailwind_class = "bg-purple-900"
 
         store = PlanStore.get_instance()
         store.publish_plan(plan)
@@ -636,17 +632,13 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
         if plan and plan.slots:
             for slot_idx in merge_res.cancelled_slots:
                 if slot_idx < len(plan.slots):
-                    plan.slots[slot_idx].mode_code = "normal"
+                    plan.slots[slot_idx].mode_code = StandardizedState.NORMAL
                     plan.slots[slot_idx].mode_label = "Normaal"
                     plan.slots[slot_idx].dhw_kw = 0.0
-                    plan.slots[slot_idx].color_hex = "#1E293B"
-                    plan.slots[slot_idx].tailwind_class = "bg-slate-800"
 
-            plan.slots[0].mode_code = "normal"
+            plan.slots[0].mode_code = StandardizedState.NORMAL
             plan.slots[0].mode_label = "Normaal (Standby)"
             plan.slots[0].dhw_kw = 0.0
-            plan.slots[0].color_hex = "#1E293B"
-            plan.slots[0].tailwind_class = "bg-slate-800"
 
             store = PlanStore.get_instance()
             store.publish_plan(plan)
@@ -685,20 +677,16 @@ def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
 
         run_pwr = max(1.8, round(wp_power / 1000.0, 2))
         for run_i in range(min(3, len(plan.slots))):
-            plan.slots[run_i].mode_code = "forced_on"
+            plan.slots[run_i].mode_code = StandardizedState.FORCED_ON
             plan.slots[run_i].mode_label = "Geforceerd aan (50°C)"
             plan.slots[run_i].dhw_kw = run_pwr
             plan.slots[run_i].heating_kw = 0.0
-            plan.slots[run_i].color_hex = "#10B981"
-            plan.slots[run_i].tailwind_class = "bg-emerald-900"
 
         for slot_idx in merge_res.cancelled_slots:
             if slot_idx < len(plan.slots):
-                plan.slots[slot_idx].mode_code = "normal"
+                plan.slots[slot_idx].mode_code = StandardizedState.NORMAL
                 plan.slots[slot_idx].mode_label = "Normaal"
                 plan.slots[slot_idx].dhw_kw = 0.0
-                plan.slots[slot_idx].color_hex = "#1E293B"
-                plan.slots[slot_idx].tailwind_class = "bg-slate-800"
 
         store = PlanStore.get_instance()
         store.publish_plan(plan)

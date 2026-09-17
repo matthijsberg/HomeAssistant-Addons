@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from integrations.homeassistant.sensor_pusher import HomeAssistantSensorPusher
-from models.canonical import CanonicalDispatchPlan, DispatchPlanSlot, DHWPlanSummary
+from models.canonical import CanonicalDispatchPlan, DispatchPlanSlot, DHWPlanSummary, StandardizedState
 
 
 def test_sensor_pusher_initialization():
@@ -34,7 +34,7 @@ def test_sensor_pusher_payload_generation():
             heating_kw=0.0,
             dhw_kw=1.0 if i == 0 else 0.0,
             net_import_kw=-0.5,
-            mode_code="normal",
+            mode_code=StandardizedState.NORMAL,
             mode_label="Normaal",
             color_hex="#10B981",
             tailwind_class="text-emerald-400",

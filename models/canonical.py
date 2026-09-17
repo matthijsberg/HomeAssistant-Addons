@@ -357,11 +357,33 @@ class DispatchPlanSlot:
     heating_kw: float
     dhw_kw: float
     net_import_kw: float
-    mode_code: str
+    mode_code: StandardizedState
     mode_label: str
-    color_hex: str
-    tailwind_class: str
-    description: str
+    color_hex: str = ""
+    tailwind_class: str = ""
+    description: str = ""
+
+    def __post_init__(self):
+        if not isinstance(self.mode_code, StandardizedState):
+            raw = str(self.mode_code)
+            legacy_map = {
+                "peak_lockout": StandardizedState.FORCED_OFF,
+                "peak_advice": StandardizedState.ADVISED_OFF,
+                "forced_standard_50": StandardizedState.FORCED_ON,
+                "forced_night_50": StandardizedState.FORCED_ON,
+                "forced_solar_boost_60": StandardizedState.MAX_ON,
+            }
+            if raw in legacy_map:
+                self.mode_code = legacy_map[raw]
+            else:
+                self.mode_code = StandardizedState(raw)
+
+        # Ensure color_hex and tailwind_class are strictly consistent with mode_code (Invariant #1)
+        meta = get_state_metadata(self.mode_code)
+        if not self.color_hex or self.color_hex != meta.get("color_hex"):
+            self.color_hex = meta.get("color_hex", "")
+        if not self.tailwind_class or self.tailwind_class != meta.get("tailwind_text"):
+            self.tailwind_class = meta.get("tailwind_text", "")
 
 
 @dataclass
