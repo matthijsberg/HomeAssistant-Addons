@@ -246,10 +246,15 @@ class SpaceHeatingPolicy:
                 if not is_running:
                     # Can we trigger a new run?
                     comfort_trigger = (t_room <= target_room - 0.35)
+                    # Pre-heat condition:
+                    # - Cold sunny day buffer: Strong solar (>=2.0 kW) on cold day (mean_outdoor < 10C) up to max_preheat_room
+                    # - Grid / mild buffer: only if room is actually below setpoint (t_room < target_room)
+                    is_solar_cold_buffer = (solar_kw[i] >= 2.0 and mean_outdoor < 10.0)
+                    preheat_allowed = (t_room < max_preheat_room) if is_solar_cold_buffer else (t_room < target_room)
                     preheat_trigger = (
                         i in preheat_candidate_slots and
                         t_floor < cls.MAX_FLOOR_TEMP_C and
-                        t_room < max_preheat_room
+                        preheat_allowed
                     )
 
                     if comfort_trigger or preheat_trigger:
