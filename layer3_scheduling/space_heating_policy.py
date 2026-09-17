@@ -42,10 +42,43 @@ class SpaceHeatingPolicy:
     SUMMER_LOCKOUT_OUTDOOR_C = 16.0
 
     # Heat pump parameters
-    MODULATION_FLOOR_KW_EL = 0.95
+    MODULATION_FLOOR_KW_EL = 0.85
+    MODULATION_MAX_KW_EL = 4.2
     PREHEAT_BOOST_KW_EL = 2.2
     FLOW_TEMP_CV_C = 35.0
     CARNOT_EFFICIENCY = 0.42
+
+    # Daikin Altherma 3 H HT 18kW Empirical Modulation (Fitted over 7,370 real historical 15m intervals)
+    REGRESSION_A = 2858.6           # Intercept at 0°C outdoor (~2,858 W)
+    REGRESSION_B = 136.8            # Slope: decreases 136.8 W per degree outdoor warming
+    MIN_RUN_SLOTS = 8               # Minimum run duration once started: 8 slots = 2.0 hours
+    STARTUP_BOOST_SLOTS = 2         # Initial flow delta-T buildup phase: 2 slots = 30 mins
+
+    @classmethod
+    def calculate_modulating_power(
+        cls,
+        outdoor_temp_c: float,
+        run_slot_idx: int = 1,
+        is_preheat: bool = False
+    ) -> float:
+        """
+        Calculates realistic inverter compressor power (kW_el) based on outdoor temperature,
+        run phase (startup burst vs steady modulation vs warm floor taper), and preheat status.
+        """
+        p_raw_w = cls.REGRESSION_A - (cls.REGRESSION_B * outdoor_temp_c)
+        p_steady_kw = max(cls.MODULATION_FLOOR_KW_EL, min(cls.MODULATION_MAX_KW_EL, p_raw_w / 1000.0))
+
+        if run_slot_idx <= cls.STARTUP_BOOST_SLOTS:
+            p_kw = min(3.2, p_steady_kw * 1.25)
+        elif is_preheat:
+            p_kw = min(2.8, max(p_steady_kw, 2.0))
+        elif run_slot_idx > 12:
+            taper_factor = max(0.65, 1.0 - 0.05 * (run_slot_idx - 12))
+            p_kw = max(cls.MODULATION_FLOOR_KW_EL, p_steady_kw * taper_factor)
+        else:
+            p_kw = p_steady_kw
+
+        return round(p_kw, 2)
 
     @classmethod
     def calculate_carnot_cop(cls, outdoor_temp_c: float, flow_temp_c: float = 35.0) -> float:
@@ -147,9 +180,14 @@ class SpaceHeatingPolicy:
                     if thermal_costs[idx] <= min_night_cost + 0.015:
                         preheat_candidate_slots.add(idx)
 
-        # 4. Simulate 2R1C thermal model slot by slot
+        # 4. Simulate 2R1C thermal model slot by slot with Inverter Run State Machine
         t_room = current_room_temp_c if current_room_temp_c is not None else target_room
         t_floor = current_floor_temp_c if current_floor_temp_c is not None else (t_room - 0.2 if not is_heating_season else t_room + 1.2)
+
+        # Inverter state machine
+        is_running = False
+        run_duration_slots = 0
+        is_preheat_active = False
 
         slot_results: List[SpaceHeatingSlotResult] = []
         total_kwh_el = 0.0
@@ -178,52 +216,80 @@ class SpaceHeatingPolicy:
             is_lockout = False
 
             if not is_heating_season:
-                # Summer mode: CV heating strictly locked out, temperatures drift freely
+                is_running = False
+                run_duration_slots = 0
                 heating_el = 0.0
                 mode_code = "normal"
             elif is_dhw_running:
                 # Hydraulic interlock: CV completely paused during DHW heating
+                is_running = False
+                run_duration_slots = 0
                 heating_el = 0.0
                 mode_code = "forced_on"  # DHW has precedence
             elif is_hard_lockout:
                 # Hard peak lockout: Compressor forced off for CV (SG1)
+                is_running = False
+                run_duration_slots = 0
                 heating_el = 0.0
                 mode_code = "forced_off"
                 is_lockout = True
                 lockout_slots_count += 1
-            elif peak_info and not is_hard_lockout:
-                # Soft peak advice: clamp to minimum modulation floor or idle if floor is warm
-                is_lockout = True
-                lockout_slots_count += 1
-                if t_floor >= t_room + 2.0 or t_room >= target_room + 0.5:
-                    # Floor is already sufficiently charged to coast
-                    heating_el = 0.0
-                    mode_code = "advised_off"
-                else:
-                    heating_el = cls.MODULATION_FLOOR_KW_EL
-                    mode_code = "advised_off"
-            elif i in preheat_candidate_slots and t_floor < cls.MAX_FLOOR_TEMP_C and t_room < max_preheat_room:
-                # Pre-heat / Floor Buffer Boost (SG3):
-                # We actively allow room overshoot up to max_preheat_room (e.g. 21.2°C)
-                # to charge the concrete screed before sunset/peak
-                heating_el = cls.PREHEAT_BOOST_KW_EL
-                mode_code = "advised_on"
-                is_preheat = True
-                preheat_slots_count += 1
             else:
-                # Normal modulating space heating: maintain target room temp
-                if t_room < target_room:
-                    q_recovery = (target_room - t_room) * 2.0
-                    needed_th = max(0.0, q_loss - q_solar_gain + q_recovery)
-                    needed_el = needed_th / cop
-                    heating_el = max(cls.MODULATION_FLOOR_KW_EL, min(2.5, round(needed_el, 2)))
-                    mode_code = "normal"
-                elif t_room < target_room + 0.3 and t_floor < target_room + 1.2:
-                    # Maintain gentle floor baseline modulation
-                    heating_el = cls.MODULATION_FLOOR_KW_EL
-                    mode_code = "normal"
+                # Normal or Pre-heat window: evaluate state transitions
+                if not is_running:
+                    # Can we trigger a new run?
+                    comfort_trigger = (t_room <= target_room - 0.35)
+                    preheat_trigger = (
+                        i in preheat_candidate_slots and
+                        t_floor < cls.MAX_FLOOR_TEMP_C and
+                        t_room < max_preheat_room
+                    )
+
+                    if comfort_trigger or preheat_trigger:
+                        is_running = True
+                        run_duration_slots = 1
+                        is_preheat_active = preheat_trigger and not comfort_trigger
                 else:
-                    # Floating standby: Solar or buffer is maintaining room temperature
+                    # We are currently running. Check if we should shut off:
+                    if run_duration_slots >= cls.MIN_RUN_SLOTS:
+                        # Minimum run commitment (2.0h) satisfied:
+                        if is_preheat_active:
+                            if t_room >= max_preheat_room or t_floor >= cls.MAX_FLOOR_TEMP_C:
+                                is_running = False
+                                run_duration_slots = 0
+                                is_preheat_active = False
+                            else:
+                                run_duration_slots += 1
+                        else:
+                            if t_room >= target_room:
+                                is_running = False
+                                run_duration_slots = 0
+                            else:
+                                run_duration_slots += 1
+                    else:
+                        run_duration_slots += 1
+
+                # If running, calculate modulating power
+                if is_running:
+                    if peak_info and not is_hard_lockout:
+                        # Soft peak: clamp to modulation floor
+                        heating_el = cls.MODULATION_FLOOR_KW_EL
+                        mode_code = "advised_off"
+                        is_lockout = True
+                        lockout_slots_count += 1
+                    else:
+                        heating_el = cls.calculate_modulating_power(
+                            t_out,
+                            run_slot_idx=run_duration_slots,
+                            is_preheat=is_preheat_active
+                        )
+                        if is_preheat_active:
+                            mode_code = "advised_on"
+                            is_preheat = True
+                            preheat_slots_count += 1
+                        else:
+                            mode_code = "normal"
+                else:
                     heating_el = 0.0
                     mode_code = "normal"
 
