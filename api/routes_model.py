@@ -339,16 +339,24 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                         act = p_active.get("building", {}).get("ua_base_w_per_k")
                         if act is not None:
                             r["current_value"] = act
+                            r["proposed_value"] = act
                             r["drift_pct"] = 0.0
+                    elif pid == "heating_modulation":
+                        act = p_active.get("heat_pump", {}).get("modulation_curve", "2840 - 92·T")
+                        r["current_value"] = act
+                        r["proposed_value"] = act
+                        r["drift_pct"] = 0.0
                     elif pid == "night_baseload":
                         act = p_active.get("unallocated", {}).get("night_baseload_floor_w")
                         if act is not None:
                             r["current_value"] = act
+                            r["proposed_value"] = act
                             r["drift_pct"] = 0.0
                     elif pid == "dhw_standby":
                         act = p_active.get("dhw_tank", {}).get("standby_loss_w_per_k")
                         if act is not None:
                             r["current_value"] = act
+                            r["proposed_value"] = act
                             r["drift_pct"] = 0.0
             handler._send_json(recs_dict)
         else:

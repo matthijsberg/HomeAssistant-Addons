@@ -6102,6 +6102,12 @@
                         statusBadge = `<button type="button" onclick="toggleInfoPopover(event, 'status_review')" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-950/70 text-amber-300 border border-amber-800 hover:bg-amber-900/60 transition focus:outline-none"><span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> <span>Ter Beoordeling</span></button>`;
                     }
 
+                    const isAcceptedOrZero = (d.status === 'accepted' || drift === 0);
+                    const activeCell = `<div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 font-bold font-mono text-xs shadow"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> <span>${r.current_value}</span> <span class="text-[10px] text-emerald-400/70 font-normal">${r.unit}</span></div>`;
+                    const proposedCell = isAcceptedOrZero
+                        ? `<span class="text-xs text-slate-500 font-mono italic">— (Reeds actief)</span>`
+                        : `<div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-amber-950/60 border border-amber-500/40 text-amber-300 font-bold font-mono text-xs"><span>${r.proposed_value}</span> <span class="text-[10px] text-amber-400/70 font-normal">${r.unit}</span></div>`;
+
                     return `
                         <tr class="hover:bg-slate-800/30 transition">
                             <td class="py-2.5 font-bold text-white">
@@ -6112,8 +6118,8 @@
                                     </button>
                                 </span>
                             </td>
-                            <td class="py-2.5 text-center text-slate-400 font-mono">${r.current_value} <span class="text-[10px] text-slate-500">${r.unit}</span></td>
-                            <td class="py-2.5 text-center font-bold text-white font-mono">${r.proposed_value} <span class="text-[10px] text-slate-500">${r.unit}</span></td>
+                            <td class="py-2.5 text-center">${activeCell}</td>
+                            <td class="py-2.5 text-center">${proposedCell}</td>
                             <td class="py-2.5 text-center font-bold ${driftColor} font-mono">${driftSign}${drift}%</td>
                             <td class="py-2.5 text-[11px] text-slate-400 font-sans">${r.evidence || '--'}</td>
                             <td class="py-2.5 text-right font-mono">${statusBadge}</td>
