@@ -579,6 +579,14 @@ def extract_plan_heating_ranges(slots: List[Any], history_count: int = 0, is_15m
             else:
                 is_h = any((getattr(slots[i * 4 + k], "dhw_kw", 0.0) > 0.05 or getattr(slots[i * 4 + k], "heating_kw", 0.0) > 0.05) for k in range(4) if (i * 4 + k) < len(slots))
 
+            # In 1-hour mode, enforce strict overlay non-overlap: Spitsblok (forced_off) takes priority over heating
+            is_locked_hour = any(
+                (slots[i * 4 + k].mode_code == "forced_off" or getattr(slots[i * 4 + k], "is_lockout", False))
+                for k in range(4) if (i * 4 + k) < len(slots)
+            )
+            if is_locked_hour:
+                is_h = False
+
         if is_h and not in_block:
             in_block = True
             start_idx = i
