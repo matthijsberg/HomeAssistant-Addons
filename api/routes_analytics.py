@@ -259,6 +259,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 hist_prices_base.append(p_base)
                 hist_solar.append(hp["solar_kw"])
 
+            forecast_export_prices = [round(b - 0.00605, 4) for b in prices_base]
+            max_export_p = max(forecast_export_prices) if forecast_export_prices else 0.0
+            max_export_time = labels[forecast_export_prices.index(max_export_p)] if forecast_export_prices else "--:--"
+
             full_export_prices = [round(b - 0.00605, 4) for b in (hist_prices_base + prices_base)]
             avg_export = (sum(full_export_prices) / len(full_export_prices)) if full_export_prices else 0.0
 
@@ -283,7 +287,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     "max_price": f"€{max_p:.4f}/kWh",
                     "max_time": max_time,
                     "avg_price": f"€{avg_p:.4f}/kWh",
-                    "solar_savings_avg": f"€{max(0.0, avg_p - avg_export):.4f}/kWh",
+                    "max_export_price": f"€{max_export_p:.4f}/kWh",
+                    "max_export_time": max_export_time,
+                    "solar_savings_avg": f"€{max_export_p:.4f}/kWh",
                     "avg_export_price": f"€{avg_export:.4f}/kWh",
                     "peak_solar_forecast": f"{peak_solar:.2f} kW"
                 }

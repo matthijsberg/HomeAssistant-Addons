@@ -3455,7 +3455,10 @@
                 document.getElementById('stat-epex-max').innerText = s.max_price || '--';
                 document.getElementById('stat-epex-max-time').innerText = `om ${s.max_time || '--:--'}`;
                 document.getElementById('stat-epex-solar-peak').innerText = s.peak_solar_forecast || '--';
-                document.getElementById('stat-epex-solar-margin').innerText = `+${s.solar_savings_avg || '--'}`;
+                const exportVal = s.max_export_price || s.solar_savings_avg || '--';
+                document.getElementById('stat-epex-solar-margin').innerText = `+${exportVal}`;
+                const elExpTime = document.getElementById('stat-epex-export-time');
+                if (elExpTime) elExpTime.innerText = `om ${s.max_export_time || '--:--'}`;
 
                 // Destroy old instance
                 if (electricityPricesChartInstance) electricityPricesChartInstance.destroy();
