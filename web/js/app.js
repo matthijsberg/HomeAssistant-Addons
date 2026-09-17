@@ -135,18 +135,9 @@
                     const width = Math.max(0, right - left);
                     if (width <= 0) return;
 
-                    // 1. Translucent red background (clean borderless fill, no dotted borders)
+                    // 1. Translucent red background (clean borderless fill, no dotted borders, no text or emoji)
                     ctx.fillStyle = 'rgba(239, 68, 68, 0.16)';
                     ctx.fillRect(left, chartArea.top, width, chartArea.height);
-
-                    // 2. Clean centered label
-                    ctx.fillStyle = 'rgba(248, 113, 113, 0.90)';
-                    ctx.font = 'bold 8.5px ui-sans-serif, system-ui, sans-serif';
-                    ctx.textAlign = 'center';
-                    const midX = left + width / 2;
-                    if (width > 35) {
-                        ctx.fillText('🔒 SPITSBLOK', midX, chartArea.top + 14);
-                    }
                 });
                 ctx.restore();
             }
@@ -1566,10 +1557,10 @@
                     </div>
                     <div class="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
                         <div class="flex items-center">
-                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(239, 68, 68, 0.6); border-radius:2px; margin-right:8px;"></span>
+                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(100, 116, 139, 0.7); border-radius:2px; margin-right:8px;"></span>
                             <span class="text-slate-300">Warmteverlies Woning</span>
                         </div>
-                        <span class="font-bold text-red-400 font-mono">${thLoss.toFixed(2)} kW_th (${thKwh.toFixed(2)} kWh)</span>
+                        <span class="font-bold text-slate-300 font-mono">${thLoss.toFixed(2)} kW_th (${thKwh.toFixed(2)} kWh)</span>
                     </div>
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
@@ -4970,8 +4961,8 @@
                                 label: 'Warmteverlies Woning (kW_th)',
                                 data: thLoss,
                                 yAxisID: 'y_power',
-                                backgroundColor: 'rgba(239, 68, 68, 0.45)',
-                                hoverBackgroundColor: '#EF4444',
+                                backgroundColor: 'rgba(100, 116, 139, 0.55)',
+                                hoverBackgroundColor: '#94A3B8',
                                 borderRadius: 2,
                                 order: 5
                             },
