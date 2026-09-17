@@ -1338,39 +1338,40 @@
             let tempC = 0.0, comfort = 40.0, target = 50.0, liters = 0, kwhVal = 0.0, p05 = 0.0, p95 = 0.0, unheatedC = 0.0;
             chart.data.datasets.forEach(ds => {
                 const v = ds.data[dataIndex];
-                if (!ds.label) return;
-                if (ds.label.includes('Temperatuur P50') || ds.label === 'Verwachte Temperatuur P50 (°C)' || ds.label === 'Boilertemperatuur (°C)') {
+                if (ds.id === 'dhw_p50') {
                     tempC = Number(v) || 0.0;
-                }
-                else if (ds.label.includes('Zonder Verwarming')) {
+                } else if (ds.id === 'dhw_unh_p50') {
                     unheatedC = Number(v) || 0.0;
-                }
-                else if (ds.label.includes('P05') || ds.label.includes('Minimaal')) {
+                } else if (ds.id === 'dhw_p05') {
                     p05 = Number(v) || 0.0;
-                }
-                else if (ds.label.includes('P95') || ds.label.includes('Piekverbruik')) {
+                } else if (ds.id === 'dhw_p95') {
                     p95 = Number(v) || 0.0;
-                }
-                else if (ds.label.includes('Comfort')) {
+                } else if (ds.id === 'dhw_comfort') {
                     comfort = Number(v) || 0.0;
-                }
-                else if (ds.label.includes('Doel')) {
+                } else if (ds.id === 'dhw_target') {
                     target = Number(v) || 0.0;
-                }
-                else if (ds.label.includes('Warmtevraag (kWh)')) {
+                } else if (ds.id === 'dhw_demand') {
                     kwhVal = Number(v) || 0.0;
-                    // V40 norm: V40 = (kwh * 3600) / (4.186 * (40 - 10)) = kwh * 28.66
                     liters = Math.round(kwhVal * 28.66);
-                }
-                else if (ds.label.includes('Tapvraag') || ds.label.includes('Liters') || ds.label.includes('Waterverbruik') || ds.label.includes('Warmtevraag')) {
-                    liters = Math.round(Number(v) || 0);
-                    kwhVal = (liters * 4.186 * (40 - 10)) / 3600;
+                } else if (ds.label) {
+                    // Graceful legacy fallback
+                    const lbl = ds.label.toLowerCase();
+                    if (lbl.includes('p50') || lbl.includes('boilertemperatuur')) tempC = Number(v) || 0.0;
+                    else if (lbl.includes('zonder')) unheatedC = Number(v) || 0.0;
+                    else if (lbl.includes('p05')) p05 = Number(v) || 0.0;
+                    else if (lbl.includes('p95')) p95 = Number(v) || 0.0;
+                    else if (lbl.includes('comfort')) comfort = Number(v) || 0.0;
+                    else if (lbl.includes('doel')) target = Number(v) || 0.0;
+                    else if (lbl.includes('warmtevraag')) {
+                        kwhVal = Number(v) || 0.0;
+                        liters = Math.round(kwhVal * 28.66);
+                    }
                 }
             });
 
             // Fallback if tempC is still 0
             if (tempC === 0.0) {
-                const p50Ds = chart.data.datasets.find(d => d.label && d.label.includes('Temperatuur P50'));
+                const p50Ds = chart.data.datasets.find(d => d.id === 'dhw_p50' || (d.label && d.label.toLowerCase().includes('p50')));
                 if (p50Ds && p50Ds.data[dataIndex] !== undefined) {
                     tempC = Number(p50Ds.data[dataIndex]) || 0.0;
                 }
@@ -1456,13 +1457,21 @@
             let outTemp = 0.0, inTemp = 0.0, cop = 0.0, thLoss = 0.0, elPower = 0.0, cost = 0.0;
             chart.data.datasets.forEach(ds => {
                 const v = ds.data[dataIndex];
-                if (!ds.label) return;
-                if (ds.label.includes('Buitentemperatuur')) outTemp = Number(v) || 0.0;
-                if (ds.label.includes('Binnentemperatuur') || ds.label.includes('Ruimtetemperatuur')) inTemp = Number(v) || 0.0;
-                if (ds.label.includes('COP')) cop = Number(v) || 0.0;
-                if (ds.label.includes('Warmteverlies')) thLoss = Number(v) || 0.0;
-                if (ds.label.includes('Stroom Warmtepomp')) elPower = Number(v) || 0.0;
-                if (ds.label.includes('Stroomkosten')) cost = Number(v) || 0.0;
+                if (ds.id === 'outdoor_temp') outTemp = Number(v) || 0.0;
+                else if (ds.id === 'indoor_temp') inTemp = Number(v) || 0.0;
+                else if (ds.id === 'cop') cop = Number(v) || 0.0;
+                else if (ds.id === 'th_loss') thLoss = Number(v) || 0.0;
+                else if (ds.id === 'hp_electrical') elPower = Number(v) || 0.0;
+                else if (ds.id === 'cost') cost = Number(v) || 0.0;
+                else if (ds.label) {
+                    const lbl = ds.label.toLowerCase();
+                    if (lbl.includes('buiten')) outTemp = Number(v) || 0.0;
+                    else if (lbl.includes('binnen') || lbl.includes('ruimte')) inTemp = Number(v) || 0.0;
+                    else if (lbl.includes('cop')) cop = Number(v) || 0.0;
+                    else if (lbl.includes('verlies')) thLoss = Number(v) || 0.0;
+                    else if (lbl.includes('stroom') || lbl.includes('warmtepomp')) elPower = Number(v) || 0.0;
+                    else if (lbl.includes('kosten')) cost = Number(v) || 0.0;
+                }
             });
 
             const intervalMult = (predictionResolution === '15m') ? 0.25 : 1.0;
@@ -1568,7 +1577,7 @@
             let exportPrice = 0.10;
 
             // Priority 1: Check if Stroomprijs dataset exists in the chart itself
-            const priceDataset = chart.data.datasets.find(ds => ds.label && ds.label.includes('Stroomprijs'));
+            const priceDataset = chart.data.datasets.find(ds => ds.id === 'epex_price' || (ds.label && ds.label.toLowerCase().includes('stroomprijs')));
             if (priceDataset && priceDataset.data && priceDataset.data[dataIndex] !== undefined) {
                 importPrice = Number(priceDataset.data[dataIndex]);
             } else if (isPrediction && window.__lastPredictionData?.datasets?.prices_eur) {
@@ -3387,6 +3396,7 @@
                 const isBarMode = (OpenHEMSChartEngine.getChartType() === 'bar');
 
                 const solarDataset = isBarMode ? {
+                    id: 'solar_forecast',
                     type: 'bar',
                     label: 'Verwachte Zonneproductie (kW)',
                     data: data.solar_forecast_kw || [],
@@ -3397,6 +3407,7 @@
                     borderRadius: 4,
                     order: 2
                 } : {
+                    id: 'solar_forecast',
                     type: 'line',
                     label: 'Verwachte Zonneproductie (kW)',
                     data: data.solar_forecast_kw || [],
@@ -3411,6 +3422,7 @@
                 };
 
                 const priceDataset = {
+                    id: 'epex_import',
                     type: 'line',
                     label: 'EPEX Inkoop All-in (€/kWh)',
                     data: data.epex_prices || [],
@@ -3426,6 +3438,7 @@
                 };
 
                 const exportDataset = {
+                    id: 'epex_export',
                     type: 'line',
                     label: 'EPEX Teruglevering (€/kWh)',
                     data: data.export_prices || [],
@@ -4815,6 +4828,7 @@
                         labels: labels,
                         datasets: [
                             {
+                                id: 'outdoor_temp',
                                 label: 'Buitentemperatuur (°C)',
                                 data: outTemps,
                                 type: 'line',
@@ -4827,6 +4841,7 @@
                                 order: 1
                             },
                             {
+                                id: 'indoor_temp',
                                 label: 'Verwachte Binnentemperatuur (°C)',
                                 data: inTemps,
                                 type: 'line',
@@ -4839,6 +4854,7 @@
                                 order: 2
                             },
                             {
+                                id: 'setpoint',
                                 label: `Thermostaat Setpoint (${tSet}°C)`,
                                 data: setpointLine,
                                 type: 'line',
@@ -4851,6 +4867,7 @@
                                 order: 3
                             },
                             {
+                                id: 'start_threshold',
                                 label: `Inschakeldrempel (${tStart}°C)`,
                                 data: startLine,
                                 type: 'line',
@@ -4863,6 +4880,7 @@
                                 order: 4
                             },
                             {
+                                id: 'cop',
                                 label: 'Daikin COP',
                                 data: cops,
                                 type: 'line',
@@ -4876,6 +4894,7 @@
                                 order: 3
                             },
                             {
+                                id: 'cost',
                                 label: 'Stroomkosten (€)',
                                 data: costs,
                                 type: 'line',
@@ -4888,6 +4907,7 @@
                                 order: 4
                             },
                             {
+                                id: 'th_loss',
                                 label: 'Warmteverlies Woning (kW_th)',
                                 data: thLoss,
                                 yAxisID: 'y_power',
@@ -4897,6 +4917,7 @@
                                 order: 5
                             },
                             {
+                                id: 'hp_electrical',
                                 label: 'Stroom Warmtepomp (kW_el)',
                                 data: elKw,
                                 yAxisID: 'y_power',
@@ -5067,6 +5088,7 @@
                 const chartDatasets = [
                     // Counterfactual Upper boundary: Zonder Verwarming P05
                     {
+                        id: 'dhw_unh_p05',
                         label: 'Marge Onverwarmd P05 (°C)',
                         data: unhP05,
                         yAxisID: 'y',
@@ -5081,6 +5103,7 @@
                     },
                     // Counterfactual Lower boundary: Zonder Verwarming P95 with grey fill to P05
                     {
+                        id: 'dhw_unh_p95',
                         label: 'Marge Onverwarmd (P05–P95)',
                         data: unhP95,
                         yAxisID: 'y',
@@ -5095,6 +5118,7 @@
                     },
                     // Counterfactual Line: Zonder Verwarming P50 (Light Slate Grey Dashed Line)
                     {
+                        id: 'dhw_unh_p50',
                         label: 'Zonder Verwarming (°C)',
                         data: unhTemps,
                         yAxisID: 'y',
@@ -5110,6 +5134,7 @@
                     },
                     // 1. Upper boundary: Minimaal Verbruik P05
                     {
+                        id: 'dhw_p05',
                         label: 'Minimaal Verbruik P05 (°C)',
                         data: tempsP05,
                         yAxisID: 'y',
@@ -5124,6 +5149,7 @@
                     },
                     // 2. Lower boundary: Piekverbruik P95 with filled yellow margin to P05
                     {
+                        id: 'dhw_p95',
                         label: 'Piekverbruik P95 (°C)',
                         data: tempsP95,
                         yAxisID: 'y',
@@ -5138,6 +5164,7 @@
                     },
                     // 3. Expected Boiler Temperature P50 (Solid bright amber)
                     {
+                        id: 'dhw_p50',
                         label: 'Verwachte Temperatuur P50 (°C)',
                         data: temps,
                         yAxisID: 'y',
@@ -5150,6 +5177,7 @@
                     },
                     // 4. Comfortgrens (40°C)
                     {
+                        id: 'dhw_comfort',
                         label: 'Comfortgrens (40°C)',
                         data: comfortLine,
                         yAxisID: 'y',
@@ -5162,6 +5190,7 @@
                     },
                     // 5. Doeltemperatuur (50°C)
                     {
+                        id: 'dhw_target',
                         label: 'Doeltemperatuur (50°C)',
                         data: targetLine,
                         yAxisID: 'y',
@@ -5176,6 +5205,7 @@
 
                 if (isBoostMode) {
                     chartDatasets.push({
+                        id: 'dhw_boost',
                         label: 'Zonnebuffer Doel (60°C)',
                         data: Array(labels.length).fill(60.0),
                         yAxisID: 'y',
@@ -5189,6 +5219,7 @@
                 }
 
                 chartDatasets.push({
+                    id: 'dhw_demand',
                     label: 'Warmtevraag (kWh)',
                     data: kwhThArr,
                     type: 'bar',

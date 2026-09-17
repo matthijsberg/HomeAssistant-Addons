@@ -160,6 +160,16 @@ def check_frontend_tokens_and_scripts(daemon_path: Path, errors: list):
         else:
             log_pass(f"Frontend <script> #{i+1} passed JavaScript syntax compilation")
 
+    # 5. Anti-Pattern Guard: Zero fragile label string matching in web/js/app.js
+    app_js_path = daemon_path.parent / "web" / "js" / "app.js"
+    if app_js_path.exists():
+        app_js = app_js_path.read_text(encoding="utf-8")
+        fragile_matches = re.findall(r'(\b\w+\.label\.(?:includes|indexOf)\b)', app_js)
+        if fragile_matches:
+            log_fail(f"Anti-pattern detected in web/js/app.js: Found fragile label matching: {fragile_matches}. Use immutable dataset.id instead.", errors)
+        else:
+            log_pass("Zero fragile dataset label-matching detected in web/js/app.js (100% typed ds.id contracts)")
+
 def check_live_api_contracts(base_url: str, errors: list):
     """Query the running daemon endpoints and verify cross-resolution & Single Source of Truth contracts."""
     import urllib.request
