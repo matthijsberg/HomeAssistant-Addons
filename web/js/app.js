@@ -4538,7 +4538,7 @@
                             },
                             {
                                 id: 'th_loss_demand',
-                                label: 'Warmtevraag (kWh)',
+                                label: 'Warmteverlies (kWh)',
                                 data: data.demand_kwh_th,
                                 type: 'bar',
                                 backgroundColor: 'rgba(56, 189, 248, 0.45)',
@@ -4589,7 +4589,7 @@
                             },
                             y1: {
                                 position: 'right',
-                                title: { display: true, text: 'Warmtevraag (kWh)', color: '#38BDF8', font: { size: 10, weight: 'bold' } },
+                                title: { display: true, text: 'Warmteverlies (kWh)', color: '#38BDF8', font: { size: 10, weight: 'bold' } },
                                 grid: { drawOnChartArea: false },
                                 ticks: {
                                     color: '#38BDF8',
@@ -5206,7 +5206,7 @@
                             grid: { drawOnChartArea: false },
                             title: {
                                 display: true,
-                                text: 'Warmtevraag (kWh)',
+                                text: opts.y1Title || 'Warmtevraag (kWh)',
                                 color: '#38BDF8',
                                 font: { size: 10, weight: 'bold' }
                             },
@@ -5282,6 +5282,7 @@
                     comfortId: 'indoor_comfort',
                     targetId: 'indoor_target',
                     demandId: 'th_loss_demand',
+                    demandLabel: 'Warmteverlies (kWh)',
                     comfortLabel: `Comfortgrens (${tComfort}°C)`,
                     targetLabel: `Doeltemperatuur (${tSet.toFixed(1)}°C)`,
                     primaryColor: '#F59E0B',
@@ -5290,6 +5291,7 @@
                     p95BorderColor: 'rgba(245, 158, 11, 0.45)',
                     marginBgColor: 'rgba(251, 191, 36, 0.15)',
                     yTitle: 'Binnentemperatuur (°C)',
+                    y1Title: 'Warmteverlies (kWh)',
                     ySuggestedMin: Math.floor(minT - 0.5),
                     ySuggestedMax: Math.ceil(maxT + 0.5),
                     y1SuggestedMax: (predictionResolution === '15m') ? 1.5 : 4.0,
