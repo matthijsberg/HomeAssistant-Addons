@@ -16,7 +16,7 @@ from api.context import (
     get_ha_states_map, calculate_poa_solar_kw, format_slot_label,
     fetch_recent_telemetry_history, ensure_active_canonical_plan,
     GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR, GLOBAL_CENTRAL_CACHE,
-    evaluate_and_apply_dhw_run_merger
+    evaluate_and_apply_dhw_run_merger, PARAMS_FILE
 )
 from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
 
