@@ -241,7 +241,7 @@ def check_chart_contracts_and_overlays(errors: list):
     2. Zero overlap between forced_off (spitsblok) and active heating
     3. Maximum duration invariants (no runaway blocks > 5 hours)
     """
-    from models.canonical import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
+    from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
     from api.context import ensure_active_canonical_plan
     plan = ensure_active_canonical_plan()
     if not plan or not plan.slots:

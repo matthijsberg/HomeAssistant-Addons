@@ -44,7 +44,7 @@ def test_mode_catalog_loading_and_fallback():
 
 def test_dynamic_peaks_macro_clustering_and_anti_cycling():
     """Verify macro-clustering of fragmented peak rungs and 120m dwell time enforcement."""
-    from models.canonical import detect_dynamic_price_peaks
+    from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
 

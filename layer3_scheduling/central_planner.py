@@ -21,6 +21,8 @@ from models.canonical import (
     DispatchPlanSlot,
     DHWPlanSummary,
     CanonicalDispatchPlan,
+)
+from layer3_scheduling.peak_detection import (
     calc_percentile,
     detect_dynamic_price_peaks
 )

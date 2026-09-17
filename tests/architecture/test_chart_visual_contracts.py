@@ -1,7 +1,7 @@
 # Open HEMS Architecture Test: Comprehensive Chart & Overlay Invariants Across All Pages
 import re
 from pathlib import Path
-from models.canonical import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
+from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
 from api.context import ensure_active_canonical_plan
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent

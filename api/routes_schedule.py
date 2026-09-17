@@ -21,7 +21,8 @@ from api.context import (
     evaluate_and_apply_dhw_run_merger, get_epex_tariffs_cached,
     GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
 )
-from models.canonical import StandardizedState, STATE_METADATA, detect_dynamic_price_peaks
+from models.canonical import StandardizedState, STATE_METADATA
+from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
 
 def handle_get(handler, path: str, qp: dict) -> bool:
     if path == "/api/control/status":
@@ -736,7 +737,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         all_advices = hist_advices + advices
         all_dhw_timeline = hist_dhw_timeline + dhw_mode_timeline
 
-        from models.canonical import extract_plan_spitsblok_ranges
+        from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges
         forced_off_ranges = extract_plan_spitsblok_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m)
 
         handler._send_json({

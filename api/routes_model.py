@@ -133,7 +133,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             t_status = "Stookseizoen Actief (Centrale PlanStore)"
 
         # Extract lockout and heating ranges for visual overlay (offset by history_count)
-        from models.canonical import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
+        from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
         forced_off_ranges = extract_plan_spitsblok_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m)
         heating_ranges = extract_plan_heating_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m, domain="space_heating")
 
@@ -353,7 +353,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 unheated_traj["temperatures_p05_c"] = hist_temps + unheated_traj.get("temperatures_p05_c", [])
                 unheated_traj["temperatures_p95_c"] = hist_temps + unheated_traj.get("temperatures_p95_c", [])
 
-            from models.canonical import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
+            from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
             forced_off_ranges = extract_plan_spitsblok_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m)
             heating_ranges = extract_plan_heating_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m, domain="dhw")
 

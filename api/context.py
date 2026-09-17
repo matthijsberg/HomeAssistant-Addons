@@ -59,7 +59,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, "/addons/open-hems")
 sys.path.insert(0, "/opt/open-hems")
 from site_adapters.daikin_p1p2 import DaikinP1P2StateClassifier, HeatPumpDisaggregation
-from models.canonical import normalize_power_reading, detect_dynamic_price_peaks, calc_percentile
+from models.canonical import normalize_power_reading
+from layer3_scheduling.peak_detection import detect_dynamic_price_peaks, calc_percentile
 
 CONFIG_FILE = Path("/config/heatpump_config.json")
 PARAMS_FILE = Path("/config/heatpump_model_parameters.json")

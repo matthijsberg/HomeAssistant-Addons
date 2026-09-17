@@ -291,7 +291,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             avg_export = (sum(full_export_prices) / len(full_export_prices)) if full_export_prices else 0.0
 
             hist_offset = len(hist_pts)
-            from models.canonical import extract_plan_spitsblok_ranges
+            from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges
             forced_off_ranges = extract_plan_spitsblok_ranges(plan.slots, history_count=hist_offset, is_15m=is_15m) if plan else []
 
             res = {
@@ -668,7 +668,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 }
             }
 
-            from models.canonical import detect_dynamic_price_peaks
+            from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
             hist_timeline = []
             for ts_s, p in zip(sorted_ts, series_prices):
                 dt_pt = datetime.fromisoformat(ts_s.replace("Z", "+00:00")).astimezone(AMS_TZ)
@@ -987,7 +987,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     last_t = round(float(t_val), 1)
                 temps.append(last_t)
 
-            from models.canonical import detect_dynamic_price_peaks
+            from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
             _, epex_prices_map, _ = get_epex_tariffs_cached(is_15m=(bucket_sz == "15m"))
             hist_timeline = []
             for ts_str in sorted_ts:
@@ -1121,7 +1121,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             demand_kwh_th = [round(UA * max(0.0, r - o) * interval_h, 2) for r, o in zip(r_sampled, o_sampled)]
 
             # Detect price peaks across historical timeline
-            from models.canonical import detect_dynamic_price_peaks
+            from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
             _, epex_prices_map, _ = get_epex_tariffs_cached(is_15m=(bucket_sz == "15m"))
             hist_timeline = []
             for s_dt in slots:
