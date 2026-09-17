@@ -54,6 +54,39 @@
     }
   ],
   "paths": {
+    "/api/system/push-sensors": {
+      "post": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Push 24h rolling forecast and dispatch sensors to Home Assistant Core",
+        "description": "Publishes 24h rolling energy cost, consumption, solar production, HEMS savings, heat pump dispatch, and boiler target sensors directly into Home Assistant.",
+        "responses": {
+          "200": {
+            "description": "Sensors successfully published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "success"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "results": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/status": {
       "get": {
         "tags": [

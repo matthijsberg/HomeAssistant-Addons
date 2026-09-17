@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.97.6
+Version: 0.98.0
 Generic Energy Management Platform:
   - Multi-Vector Telemetry & Optimization Daemon
   - Domain Router Dispatch to api/routes_*.py
@@ -353,6 +353,10 @@ class HemsBackgroundCollector(threading.Thread):
                     self.execute_live_dispatch()
                 except Exception as e_disp:
                     print(f"[Open HEMS Collector] Error in execute_live_dispatch: {e_disp}", flush=True)
+                try:
+                    self.push_ha_sensors()
+                except Exception as e_push:
+                    print(f"[Open HEMS Collector] Error in push_ha_sensors: {e_push}", flush=True)
             time.sleep(self.sample_interval)
 
     def execute_live_dispatch(self):
@@ -535,6 +539,20 @@ class HemsBackgroundCollector(threading.Thread):
         except Exception as e:
             print(f"[Open HEMS Dispatcher] Error executing live dispatch: {e}", flush=True)
             time.sleep(self.sample_interval)
+
+    def push_ha_sensors(self):
+        """Pushes 24h rolling forecast and dispatch sensors to Home Assistant Core."""
+        try:
+            plan = ensure_active_canonical_plan()
+            if not plan or not plan.slots:
+                return
+            ha_url, ha_tok = get_ha_client_config()
+            if ha_url and ha_tok:
+                from integrations.homeassistant.sensor_pusher import HomeAssistantSensorPusher
+                pusher = HomeAssistantSensorPusher(ha_url, ha_tok)
+                pusher.push_plan_sensors(plan)
+        except Exception as e:
+            print(f"[Open HEMS SensorPusher] Background push error: {e}", flush=True)
 
     def sample_devices(self):
         cfg = load_json(CONFIG_FILE)

@@ -409,6 +409,26 @@ def handle_post(handler, path: str, body: dict) -> bool:
         handler._send_json({"status": "success", "message": "Zonnepanelen configuratie opgeslagen", "solar": cfg["solar"]})
         return True
 
+    if path == "/api/system/push-sensors":
+        try:
+            plan = ensure_active_canonical_plan()
+            ha_base_url, ha_token = get_ha_client_config()
+            if not ha_token:
+                handler._send_json({"status": "error", "message": "Geen Home Assistant token beschikbaar"}, 400)
+                return True
+            from integrations.homeassistant.sensor_pusher import HomeAssistantSensorPusher
+            pusher = HomeAssistantSensorPusher(ha_base_url, ha_token)
+            results = pusher.push_plan_sensors(plan)
+            handler._send_json({
+                "status": "success",
+                "message": f"{sum(1 for v in results.values() if v)} sensoren succesvol bijgewerkt in Home Assistant",
+                "results": results
+            })
+            return True
+        except Exception as e:
+            handler._send_json({"status": "error", "message": str(e)}, 500)
+            return True
+
     if path == "/api/infrastructure/homeassistant/test":
         ha_sec = load_secrets()
         ha_base_url, ha_token = get_ha_client_config()
