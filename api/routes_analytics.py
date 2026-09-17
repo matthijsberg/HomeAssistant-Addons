@@ -102,49 +102,54 @@ def get_today_history_kpis(cfg: dict, sec: dict) -> dict:
     }
 
 
-def load_historical_dhw_planned_windows() -> List[Dict[str, Any]]:
-    """Loads historical planned DHW windows from the persistent decision audit log."""
-    hist_dhw_windows = []
+def load_historical_dhw_planned_windows(start_dt: datetime, end_dt: datetime) -> List[Dict[str, Any]]:
+    """Loads historical planned DHW windows from the persistent decision audit log and baseline schedule."""
+    day_runs = {}
+    night_runs = {}
     audit_file = Path("/config/open_hems_decisions.jsonl")
-    if not audit_file.exists():
-        return hist_dhw_windows
-    try:
-        for l in audit_file.read_text(encoding="utf-8").strip().split("\n"):
-            if not l: continue
-            rec = json.loads(l)
-            if rec.get("domain") != "dhw_boiler": continue
-            ts_str = rec.get("timestamp_iso")
-            if not ts_str: continue
-            rec_dt = datetime.fromisoformat(ts_str).astimezone(AMS_TZ)
-            d_str = rec_dt.strftime("%Y-%m-%d")
-            inputs = rec.get("inputs", {})
-            sel_path = inputs.get("selected_path")
-            paths = inputs.get("evaluated_paths", [])
-            chosen = next((x for x in paths if x.get("path_id") == sel_path), None) or (paths[0] if paths else None)
-            if chosen:
-                day_w = chosen.get("day_window_label", "")
-                if day_w and day_w != "Geen dagrun (Standby)" and "–" in day_w:
-                    s_t, e_t = day_w.split("–")
-                    hist_dhw_windows.append({
-                        "date": d_str,
-                        "start_time": s_t.replace("Nu (", "").replace(")", "").strip(),
-                        "end_time": e_t.replace("Nu (", "").replace(")", "").strip(),
-                        "power_kw": float(chosen.get("day_power_kw", 2.4) or 2.4)
-                    })
-                if chosen.get("night_run_required"):
-                    night_w = chosen.get("night_window_label", "")
-                    if night_w and "–" in night_w:
-                        s_t, e_t = night_w.split("–")
+    if audit_file.exists():
+        try:
+            for l in audit_file.read_text(encoding="utf-8").strip().split("\n"):
+                if not l: continue
+                rec = json.loads(l)
+                if rec.get("domain") != "dhw_boiler": continue
+                ts_str = rec.get("timestamp_iso")
+                if not ts_str: continue
+                rec_dt = datetime.fromisoformat(ts_str).astimezone(AMS_TZ)
+                d_str = rec_dt.strftime("%Y-%m-%d")
+                inputs = rec.get("inputs", {})
+                sel_path = inputs.get("selected_path")
+                paths = inputs.get("evaluated_paths", [])
+                chosen = next((x for x in paths if x.get("path_id") == sel_path), None) or (paths[0] if paths else None)
+                if chosen:
+                    # Daytime planned run
+                    dw = chosen.get("day_window_label", "")
+                    if dw and dw != "Geen dagrun (Standby)" and "–" in dw:
+                        s_t, e_t = dw.split("–")
+                        day_runs[d_str] = (s_t.replace("Nu (", "").replace(")", "").strip(), e_t.replace("Nu (", "").replace(")", "").strip(), float(chosen.get("day_power_kw", 2.4) or 2.4))
+                    # Nighttime planned run
+                    nw = chosen.get("night_window_label", "")
+                    if nw and nw != "N.v.t. (Ochtendcomfort gegarandeerd)" and "–" in nw:
+                        s_t, e_t = nw.split("–")
                         run_d = (rec_dt + timedelta(days=1)).strftime("%Y-%m-%d") if rec_dt.hour >= 12 else d_str
-                        hist_dhw_windows.append({
-                            "date": run_d,
-                            "start_time": s_t.strip(),
-                            "end_time": e_t.strip(),
-                            "power_kw": 1.8
-                        })
-    except Exception as e_dec:
-        print(f"Warning parsing audit log in validation_overlay: {e_dec}")
-    return hist_dhw_windows
+                        night_runs[run_d] = (s_t.strip(), e_t.strip(), 1.8)
+        except Exception as e_dec:
+            print(f"Warning parsing audit log in validation_overlay: {e_dec}")
+
+    windows = []
+    cur = start_dt
+    while cur <= end_dt:
+        d_str = cur.strftime("%Y-%m-%d")
+        if d_str in night_runs:
+            s_t, e_t, p_kw = night_runs[d_str]
+            windows.append({"date": d_str, "start_time": s_t, "end_time": e_t, "power_kw": p_kw})
+        else:
+            windows.append({"date": d_str, "start_time": "01:30", "end_time": "02:30", "power_kw": 1.8})
+        if d_str in day_runs:
+            s_t, e_t, p_kw = day_runs[d_str]
+            windows.append({"date": d_str, "start_time": s_t, "end_time": e_t, "power_kw": p_kw})
+        cur += timedelta(days=1)
+    return windows
 
 
 def handle_get(handler, path: str, qp: dict) -> bool:
@@ -695,7 +700,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                         pass
 
             # Load historical planned DHW windows from decision audit log
-            hist_dhw_windows = load_historical_dhw_planned_windows()
+            hist_dhw_windows = load_historical_dhw_planned_windows(now.astimezone(AMS_TZ) - timedelta(days=days + 1), now.astimezone(AMS_TZ))
 
             prev_dt = None
             for i, p in enumerate(gen_pts):
