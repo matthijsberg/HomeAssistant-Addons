@@ -4226,13 +4226,55 @@
                     // Update title with selected range
                     const titleEl = document.getElementById('cost-history-chart-title');
                     if (titleEl) {
-                        titleEl.innerText = `Kosten Historie (${rangeVal})`;
+                        const rangeNameMap = { 'today': 'Vandaag', '1h': '1 uur', '6h': '6 uur', '24h': '24h', '48h': '2 dagen', '7d': '7 dagen' };
+                        titleEl.innerText = `Kosten Historie (${rangeNameMap[rangeVal] || rangeVal})`;
                     }
                     if (document.getElementById('cost-history-total-net-kwh')) {
                         document.getElementById('cost-history-total-net-kwh').innerText = `Netto: ${totHistNetKwh >= 0 ? '+' : ''}${totHistNetKwh.toFixed(1)} kWh`;
                     }
                     if (document.getElementById('cost-history-netto')) {
                         document.getElementById('cost-history-netto').innerText = `Netto: ${totHistNetCostEur >= 0 ? '+€' : '-€'}${Math.abs(totHistNetCostEur).toFixed(2)}`;
+                    }
+
+                    // Synchronize Top 4 KPI cards with selected timeframe and dynamic calculations
+                    if (data.kpi_cards) {
+                        const kc = data.kpi_cards;
+                        const elCostsTitle = document.getElementById('hist-kpi-costs-title');
+                        const elCostsMain = document.getElementById('hist-kpi-costs-main');
+                        const elCostsSub = document.getElementById('hist-kpi-costs-sub');
+                        if (elCostsTitle) {
+                            elCostsTitle.innerText = kc.costs.title;
+                            elCostsTitle.dataset.dynamic = 'true';
+                        }
+                        if (elCostsMain) {
+                            elCostsMain.innerText = `${totHistNetCostEur >= 0 ? '€' : '-€'}${Math.abs(totHistNetCostEur).toFixed(2)}`;
+                        }
+                        if (elCostsSub) elCostsSub.innerText = kc.costs.sub;
+
+                        const elSolarTitle = document.getElementById('hist-kpi-solar-title');
+                        const elSolarMain = document.getElementById('hist-kpi-solar-main');
+                        const elSolarSub = document.getElementById('hist-kpi-solar-sub');
+                        if (elSolarTitle) elSolarTitle.innerText = kc.solar.title;
+                        if (elSolarMain) {
+                            elSolarMain.innerHTML = `${kc.solar.main} <span class="text-xs text-slate-400 font-normal">${kc.solar.main_extra || ''}</span>`;
+                        }
+                        if (elSolarSub) elSolarSub.innerText = kc.solar.sub;
+
+                        const elSavTitle = document.getElementById('hist-kpi-savings-title');
+                        const elSavMain = document.getElementById('hist-kpi-savings-main');
+                        const elSavSub = document.getElementById('hist-kpi-savings-sub');
+                        if (elSavTitle) elSavTitle.innerText = kc.savings.title;
+                        if (elSavMain) elSavMain.innerText = kc.savings.main;
+                        if (elSavSub) elSavSub.innerText = kc.savings.sub;
+
+                        const elHpTitle = document.getElementById('hist-kpi-hp-title');
+                        const elHpMain = document.getElementById('hist-kpi-hp-main');
+                        const elHpSub = document.getElementById('hist-kpi-hp-sub');
+                        if (elHpTitle) elHpTitle.innerText = kc.heatpump.title;
+                        if (elHpMain) {
+                            elHpMain.innerHTML = `${kc.heatpump.main} <span class="text-xs text-slate-400 font-normal">${kc.heatpump.main_extra || ''}</span>`;
+                        }
+                        if (elHpSub) elHpSub.innerText = kc.heatpump.sub;
                     }
 
                     // Symmetrical bounds
@@ -4613,7 +4655,8 @@
                 const d = await res.json();
                 
                 // Populate Top 4 History KPI cards (1: Costs Today, 2: Solar Today, 3: Savings Today, 4: Heat Pump Today)
-                if (d.history_kpis) {
+                const elCostsTitle = document.getElementById('hist-kpi-costs-title');
+                if (d.history_kpis && (!elCostsTitle || !elCostsTitle.dataset.dynamic)) {
                     const hk = d.history_kpis;
                     const elCostsMain = document.getElementById('hist-kpi-costs-main');
                     const elCostsSub = document.getElementById('hist-kpi-costs-sub');

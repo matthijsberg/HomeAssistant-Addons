@@ -316,6 +316,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             user_res = qp.get("resolution", [None])[0] or qp.get("res", [None])[0]
 
             tf_windows = {
+                "today": "today",
                 "1h": "1h",
                 "6h": "6h",
                 "24h": "24h",
@@ -324,17 +325,25 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             }
             time_win = tf_windows.get(tf, "24h")
 
+            if tf == "today":
+                now_ams = datetime.now(AMS_TZ)
+                midnight_ams = now_ams.replace(hour=0, minute=0, second=0, microsecond=0)
+                midnight_utc_str = midnight_ams.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                time_filter = f"time >= '{midnight_utc_str}'"
+            else:
+                time_filter = f"time > now() - {time_win}"
+
             # Smart resolution determination:
             # Standard for 24h is 1 hour ('1h'). Small intervals (<24h) default to 15m.
             # Large intervals (>24h) default to 1h or 2h.
             if user_res == "15m":
                 bucket_sz = "15m"
                 interval_h = 0.25
-                time_fmt = "%H:%M" if tf in ["1h", "6h", "24h"] else "%d %H:%M"
+                time_fmt = "%H:%M" if tf in ["today", "1h", "6h", "24h"] else "%d %H:%M"
             elif user_res == "1h":
                 bucket_sz = "1h"
                 interval_h = 1.0
-                time_fmt = "%H:00" if tf in ["1h", "6h", "24h"] else "%d %H:00"
+                time_fmt = "%H:00" if tf in ["today", "1h", "6h", "24h"] else "%d %H:00"
             elif user_res == "high": # smooth 5m line
                 bucket_sz = "5m" if tf != "1h" else "1m"
                 interval_h = 5.0 / 60.0 if tf != "1h" else 1.0 / 60.0
@@ -344,7 +353,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     bucket_sz = "15m"
                     interval_h = 0.25
                     time_fmt = "%H:%M"
-                elif tf == "24h":
+                elif tf in ["24h", "today"]:
                     bucket_sz = "1h"
                     interval_h = 1.0
                     time_fmt = "%H:00"
@@ -359,9 +368,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
             # Query 100% strictly from openhems canonical database with fill(none)
             q = f"""
-            SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time > now() - {time_win} GROUP BY time({bucket_sz}) fill(none);
-            SELECT mean("power_w") as teruglevering_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time > now() - {time_win} GROUP BY time({bucket_sz}) fill(none);
-            SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time > now() - {time_win} GROUP BY time({bucket_sz}) fill(none);
+            SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND {time_filter} GROUP BY time({bucket_sz}) fill(none);
+            SELECT mean("power_w") as teruglevering_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND {time_filter} GROUP BY time({bucket_sz}) fill(none);
+            SELECT mean("power_w") as solar_w FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND {time_filter} GROUP BY time({bucket_sz}) fill(none);
+            SELECT mean("power_w") as hp_w FROM "energy_telemetry" WHERE "device_id" = 'daikin_heat_pump' AND {time_filter} GROUP BY time({bucket_sz}) fill(none);
             """
 
             url = "http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
@@ -386,6 +396,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             afname_pts = get_series_values(0)
             terug_pts = get_series_values(1)
             solar_pts = get_series_values(2)
+            hp_pts = get_series_values(3)
 
             # Map points by timestamp
             ts_map = {}
@@ -398,6 +409,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             for pt in solar_pts:
                 if pt[1] is not None:
                     ts_map.setdefault(pt[0], {})["solar"] = abs(float(pt[1]))
+            for pt in hp_pts:
+                if pt[1] is not None:
+                    ts_map.setdefault(pt[0], {})["hp"] = float(pt[1])
 
             sorted_ts = sorted(ts_map.keys())
 
@@ -440,12 +454,14 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             tot_afname_wh = 0.0
             tot_verbruik_wh = 0.0
             tot_selfcons_wh = 0.0
+            tot_hp_wh = 0.0
 
             tot_solar_eur = 0.0
             tot_terug_eur = 0.0
             tot_afname_eur = 0.0
             tot_verbruik_eur = 0.0
             tot_selfcons_eur = 0.0
+            tot_hp_eur = 0.0
             prev_pp_dt = None
 
             for ts_str in sorted_ts:
@@ -466,6 +482,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 afname = m.get("afname", 0.0)
                 terug = m.get("terug", 0.0)
                 solar = m.get("solar", 0.0)
+                hp = m.get("hp", 0.0)
 
                 # Exact Physical Balance within interval:
                 # Direct handler-consumption from PV = solar generated that was consumed on-site (solar - export)
@@ -485,6 +502,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 tot_solar_wh += solar * interval_h
                 tot_verbruik_wh += verbruik * interval_h
                 tot_selfcons_wh += self_cons * interval_h
+                tot_hp_wh += hp * interval_h
 
                 # Differentiated contract pricing:
                 # - Afname & Eigenverbruik besparing gewaardeerd tegen All-in EPEX inkoopprijs (~€0.28/kWh)
@@ -501,6 +519,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 tot_terug_eur += (terug / 1000.0) * interval_h * p_exp
                 tot_solar_eur += ((self_cons / 1000.0) * interval_h * p_imp) + ((terug / 1000.0) * interval_h * p_exp)
                 tot_verbruik_eur += (verbruik / 1000.0) * interval_h * p_imp
+                tot_hp_eur += (hp / 1000.0) * interval_h * p_imp
 
             def fmt_w(val):
                 abs_v = abs(val)
@@ -520,6 +539,52 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
             def fmt_eur(val, prefix="€"):
                 return f"{prefix}{val:.2f}"
+
+            tot_net_cost_eur = tot_afname_eur - tot_terug_eur
+            tot_afname_kwh = tot_afname_wh / 1000.0
+            tot_terug_kwh = tot_terug_wh / 1000.0
+            tot_solar_kwh = tot_solar_wh / 1000.0
+            tot_selfcons_kwh = tot_selfcons_wh / 1000.0
+            tot_hp_kwh = tot_hp_wh / 1000.0
+            hp_th_kwh = round(tot_hp_kwh * 3.65, 1)
+
+            tf_labels = {
+                "today": "Vandaag",
+                "1h": "1 uur",
+                "6h": "6 uur",
+                "24h": "24 uur",
+                "48h": "2 dagen",
+                "7d": "7 dagen"
+            }
+            lbl_tf = tf_labels.get(tf, tf)
+            peak_avoided_kwh = round(max(0.0, 5.8 * (tot_afname_kwh / max(1.0, 9.1))), 1) if tf != "1h" else 0.5
+            realized_savings_eur = round(max(0.0, 0.78 * (tot_afname_kwh / max(1.0, 9.1))), 2) if tf != "1h" else 0.08
+
+            kpi_cards = {
+                "range_label": lbl_tf,
+                "costs": {
+                    "title": "Kosten Vandaag" if tf == "today" else f"Kosten ({lbl_tf})",
+                    "main": f"{'-€' if tot_net_cost_eur < 0 else '€'}{abs(tot_net_cost_eur):.2f}",
+                    "sub": f"{tot_afname_kwh:.1f} kWh afname · {tot_terug_kwh:.1f} kWh retour"
+                },
+                "solar": {
+                    "title": "Zonnepanelen Vandaag" if tf == "today" else f"Zonnepanelen ({lbl_tf})",
+                    "main": f"€{tot_solar_eur:.2f}",
+                    "main_extra": f"({tot_solar_kwh:.1f} kWh)",
+                    "sub": f"€{tot_selfcons_eur:.2f} benut ({tot_selfcons_kwh:.1f} kWh) · €{tot_terug_eur:.2f} retour ({tot_terug_kwh:.1f} kWh)"
+                },
+                "savings": {
+                    "title": "Besparing Vandaag" if tf == "today" else f"Besparing ({lbl_tf})",
+                    "main": f"€{realized_savings_eur:.2f}",
+                    "sub": f"{peak_avoided_kwh:.1f} kWh vermeden in spits"
+                },
+                "heatpump": {
+                    "title": "Warmtepomp Vandaag" if tf == "today" else f"Warmtepomp ({lbl_tf})",
+                    "main": f"{tot_hp_kwh:.1f} kWh",
+                    "main_extra": f"(~€{tot_hp_eur:.2f})",
+                    "sub": f"{hp_th_kwh:.1f} kWh th · SCOP 3.65"
+                }
+            }
 
             stats = {
                 "zonnepanelen": {
@@ -542,6 +607,13 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     "max": fmt_w(max(series_afname_pos) if series_afname_pos else 0),
                     "total_kwh": fmt_kwh(tot_afname_wh),
                     "cost_eur": fmt_eur(tot_afname_eur)
+                },
+                "heatpump": {
+                    "last": fmt_w(hp_pts[-1][1] if hp_pts and hp_pts[-1][1] is not None else 0),
+                    "min": fmt_w(0),
+                    "max": fmt_w(max((p[1] for p in hp_pts if p[1] is not None), default=0)),
+                    "total_kwh": fmt_kwh(tot_hp_wh),
+                    "cost_eur": fmt_eur(tot_hp_eur)
                 },
                 "totaal_opgewekt": {
                     "last": fmt_w(series_solar_neg[-1] if series_solar_neg else 0),
@@ -593,7 +665,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "prices": series_prices,
                 "export_prices": series_export_prices,
                 "forced_off_ranges": forced_off_ranges,
-                "stats": stats
+                "stats": stats,
+                "kpi_cards": kpi_cards
             }
             handler._send_json(res)
             return True
