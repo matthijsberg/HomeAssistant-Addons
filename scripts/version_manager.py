@@ -84,6 +84,7 @@ def bump(level: str) -> str:
     html_file = Path(__file__).resolve().parent.parent / "web" / "index.html"
     if html_file.exists():
         h_content = html_file.read_text()
+        h_content = re.sub(r'\?v=\d+\.\d+\.\d+[\-a-z\d\.]*', f'?v={new_v}', h_content)
         h_content = re.sub(r'v\d+\.\d+\.\d+[\-a-z\d\.]*', f'v{new_v}', h_content)
         html_file.write_text(h_content)
 

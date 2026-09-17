@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.97.3
+Version: 0.97.4
 Generic Energy Management Platform:
   - Multi-Vector Telemetry & Optimization Daemon
   - Domain Router Dispatch to api/routes_*.py
@@ -200,7 +200,8 @@ class HemsApiHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(content)))
-            self.send_header("Cache-Control", "public, max-age=3600")
+            cache_ctrl = "no-cache" if file_path.suffix in [".js", ".css", ".json"] else "public, max-age=3600"
+            self.send_header("Cache-Control", cache_ctrl)
             self.end_headers()
             self.wfile.write(content)
         except Exception as e:
