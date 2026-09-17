@@ -313,58 +313,36 @@ class StandardizedState(str, Enum):
     """
     Strict 6-state taxonomy for all HEMS devices, timeline bars, legends, and cards.
     """
-    FORCED_OFF = "forced_off"   # 1. Geforceerd uit (blok) - Rood (#EF4444)
-    ADVISED_OFF = "advised_off" # 2. Geadviseerd uit - Oranje (#F59E0B)
-    NORMAL = "normal"           # 3. Normaal - Grijs (#1E293B)
-    ADVISED_ON = "advised_on"   # 4. Geadviseerd aan - Lichtgroen gestreept (#4ADE80)
-    FORCED_ON = "forced_on"     # 5. Geforceerd aan (50°C) - Groen (#10B981)
-    MAX_ON = "max_on"           # 6. Maximaal aan (60°C) - Paars (#A855F7)
+    FORCED_OFF = "forced_off"   # 1. Geforceerd uit (blok)
+    ADVISED_OFF = "advised_off" # 2. Geadviseerd uit
+    NORMAL = "normal"           # 3. Normaal
+    ADVISED_ON = "advised_on"   # 4. Geadviseerd aan
+    FORCED_ON = "forced_on"     # 5. Geforceerd aan (50°C)
+    MAX_ON = "max_on"           # 6. Maximaal aan (60°C)
 
 
-STATE_METADATA = {
-    StandardizedState.FORCED_OFF: {
-        "code": "forced_off",
-        "label": "Geforceerd uit (blok)",
-        "color_hex": "#EF4444",
-        "tailwind_text": "text-red-400",
-        "description": "Harde spitsvergrendeling: compressor SG4 vergrendeld tegen piektarieven."
-    },
-    StandardizedState.ADVISED_OFF: {
-        "code": "advised_off",
-        "label": "Geadviseerd uit",
-        "color_hex": "#F59E0B",
-        "tailwind_text": "text-amber-400",
-        "description": "Schouderpiek / verhoogd tarief: uitstel van grote verbruikers aanbevolen."
-    },
-    StandardizedState.NORMAL: {
-        "code": "normal",
-        "label": "Normaal",
-        "color_hex": "#1E293B",
-        "tailwind_text": "text-slate-400",
-        "description": "Vrijloopvenster: warmtepomp en boiler in normale werking."
-    },
-    StandardizedState.ADVISED_ON: {
-        "code": "advised_on",
-        "label": "Geadviseerd aan",
-        "color_hex": "#4ADE80",
-        "tailwind_text": "text-emerald-300",
-        "description": "Voordelig venster: warmtepomp mag hoger doorverwarmen voor CV vloerbuffer."
-    },
-    StandardizedState.FORCED_ON: {
-        "code": "forced_on",
-        "label": "Geforceerd aan",
-        "color_hex": "#10B981",
-        "tailwind_text": "text-emerald-400",
-        "description": "Verwarmen naar setpoint (50°C): actieve stookrun voor boiler of CV."
-    },
-    StandardizedState.MAX_ON: {
-        "code": "max_on",
-        "label": "Maximaal aan (60°C)",
-        "color_hex": "#A855F7",
-        "tailwind_text": "text-purple-300",
-        "description": "Zonnebuffer doorverwarming naar 60°C bij hoge zonne-overschotten."
+def get_state_metadata(state: Optional[StandardizedState] = None) -> Any:
+    """
+    Returns presentation metadata dynamically loaded from config/mode_catalog.json.
+    Single Source of Truth: Invariant #1.
+    """
+    from models.mode_catalog import load_mode_catalog, get_mode_meta
+    catalog = load_mode_catalog()
+    tb = catalog.get("archetypes", {}).get("thermal_buffer", {})
+    if state is not None:
+        return tb.get(state.value, get_mode_meta(state.value, archetype="thermal_buffer"))
+
+    return {
+        st: tb.get(st.value, get_mode_meta(st.value, archetype="thermal_buffer"))
+        for st in StandardizedState
     }
-}
+
+
+def __getattr__(name: str) -> Any:
+    """Dynamic resolution for legacy STATE_METADATA access without hardcoded dictionary."""
+    if name == "STATE_METADATA":
+        return get_state_metadata()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 @dataclass

@@ -27,7 +27,7 @@ try:
     from layer3_scheduling.plan_store import get_plan_store, PlanStore
     from layer3_scheduling.tariff_provider import TariffProvider
     from models.mode_catalog import get_mode_meta, load_mode_catalog
-    from models.canonical import StandardizedState, STATE_METADATA, CanonicalDispatchPlan
+    from models.canonical import StandardizedState, get_state_metadata, CanonicalDispatchPlan
     GLOBAL_MODEL = HybridForecastingModel()
     GLOBAL_DHW_MODEL = DhwThermalModel()
 except Exception as _e_model:

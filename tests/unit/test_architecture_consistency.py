@@ -11,7 +11,7 @@ Verifies the Single Source of Truth architecture:
 
 import pytest
 from datetime import datetime, timezone, timedelta
-from models.canonical import StandardizedState, STATE_METADATA, Quality
+from models.canonical import StandardizedState, get_state_metadata, Quality
 from layer1_data_collection.sanitizer import TelemetrySanitizer
 from layer3_scheduling.central_planner import CentralPlanner
 from layer3_scheduling.plan_store import get_plan_store
@@ -76,13 +76,14 @@ def test_standardized_taxonomy_and_color_alignment():
     states = list(StandardizedState)
     assert len(states) == 6
 
-    # Verify every state exists in STATE_METADATA and has correct hex
-    assert STATE_METADATA[StandardizedState.FORCED_OFF]["color_hex"] == "#EF4444"
-    assert STATE_METADATA[StandardizedState.ADVISED_OFF]["color_hex"] == "#F59E0B"
-    assert STATE_METADATA[StandardizedState.NORMAL]["color_hex"] == "#1E293B"
-    assert STATE_METADATA[StandardizedState.ADVISED_ON]["color_hex"] == "#4ADE80"
-    assert STATE_METADATA[StandardizedState.FORCED_ON]["color_hex"] == "#10B981"
-    assert STATE_METADATA[StandardizedState.MAX_ON]["color_hex"] == "#A855F7"
+    # Verify every state exists in get_state_metadata() and has correct hex
+    meta = get_state_metadata()
+    assert meta[StandardizedState.FORCED_OFF]["color_hex"] == "#EF4444"
+    assert meta[StandardizedState.ADVISED_OFF]["color_hex"] == "#F59E0B"
+    assert meta[StandardizedState.NORMAL]["color_hex"] == "#1E293B"
+    assert meta[StandardizedState.ADVISED_ON]["color_hex"] == "#4ADE80"
+    assert meta[StandardizedState.FORCED_ON]["color_hex"] == "#10B981"
+    assert meta[StandardizedState.MAX_ON]["color_hex"] == "#A855F7"
 
 
 def test_dhw_daytime_priority_and_winter_cap():

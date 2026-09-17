@@ -10,7 +10,7 @@ Enforces the 4 invariant principles of Open HEMS:
 import pytest
 import re
 from pathlib import Path
-from models.canonical import StandardizedState, STATE_METADATA, Quality
+from models.canonical import StandardizedState, get_state_metadata, Quality
 
 
 def test_core_entity_isolation():
@@ -47,10 +47,11 @@ def test_core_entity_isolation():
 
 
 def test_standardized_taxonomy_completeness():
-    """Verify that every StandardizedState is fully mapped in STATE_METADATA."""
+    """Verify that every StandardizedState is fully mapped via get_state_metadata()."""
+    meta_all = get_state_metadata()
     for state in StandardizedState:
-        assert state in STATE_METADATA
-        meta = STATE_METADATA[state]
+        assert state in meta_all
+        meta = get_state_metadata(state)
         assert "code" in meta
         assert "label" in meta
         assert "color_hex" in meta
@@ -91,4 +92,40 @@ def test_unidirectional_layer_architecture():
                     )
 
     assert not violations, "Unidirectional architecture violations found:\n" + "\n".join(violations)
+
+
+def test_mode_color_hex_guardrail():
+    """
+    Ensure models/*.py has ZERO hardcoded hex color codes (all colors live in config/mode_catalog.json).
+    Ensure web/js/app.js does NOT contain standardized state mode hex codes outside OpenHEMSModeCatalog.
+    """
+    repo_root = Path(__file__).parent.parent.parent
+    hex_pattern = re.compile(r"#[0-9A-Fa-f]{6}")
+
+    # 1. Models layer must have ZERO hex literals
+    models_dir = repo_root / "models"
+    for py_file in models_dir.glob("*.py"):
+        text = py_file.read_text(encoding="utf-8")
+        matches = hex_pattern.findall(text)
+        assert not matches, f"{py_file.name} contains hardcoded hex colors: {matches}. Colors belong in config/mode_catalog.json."
+
+    # 2. web/js/app.js must not define mode hex codes outside OpenHEMSModeCatalog
+    app_js = repo_root / "web" / "js" / "app.js"
+    assert app_js.exists()
+    js_text = app_js.read_text(encoding="utf-8")
+
+    # Locate OpenHEMSModeCatalog
+    catalog_match = re.search(r"const\s+OpenHEMSModeCatalog\s*=\s*\{[\s\S]*?\n\s*\};\s*//\s*Auto-fetch", js_text)
+    assert catalog_match, "OpenHEMSModeCatalog definition not found in app.js"
+
+    outside_catalog = js_text[:catalog_match.start()] + js_text[catalog_match.end():]
+
+    # Mode background color assignments must come from OpenHEMSModeCatalog, not hardcoded strings
+    forbidden_mode_hexes = [
+        r"style\.backgroundColor\s*=\s*['\"]#(?:EF4444|F59E0B|10B981|A855F7|4ADE80|1E293B)['\"]",
+    ]
+    for pattern in forbidden_mode_hexes:
+        matches = re.findall(pattern, outside_catalog)
+        assert not matches, f"Hardcoded mode background colors found outside OpenHEMSModeCatalog: {matches}"
+
 

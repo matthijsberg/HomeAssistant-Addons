@@ -21,7 +21,7 @@ from api.context import (
     evaluate_and_apply_dhw_run_merger, get_epex_tariffs_cached,
     GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
 )
-from models.canonical import StandardizedState, STATE_METADATA
+from models.canonical import StandardizedState
 from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
 
 def handle_get(handler, path: str, qp: dict) -> bool:

@@ -1,10 +1,64 @@
         // =========================================================================
+        // OPEN HEMS MODE CATALOG & PRESENTATION LOOKUP (SINGLE SOURCE OF TRUTH)
+        // Invariant #1: All mode colors, patterns, and labels derive from config/mode_catalog.json
+        // =========================================================================
+        const OpenHEMSModeCatalog = {
+            _catalog: null,
+            _modes: {
+                forced_off: { code: 'forced_off', label: 'Geforceerd uit (blok)', color_hex: '#EF4444', css_pattern: 'repeating-linear-gradient(45deg, #EF4444, #EF4444 2px, #B91C1C 2px, #B91C1C 4px)', tailwind_text: 'text-red-400', badge_label: 'Harde Spitsblokkade 🔒' },
+                advised_off: { code: 'advised_off', label: 'Geadviseerd uit', color_hex: '#F59E0B', css_pattern: 'none', tailwind_text: 'text-amber-400', badge_label: 'Verhoogd Tarief ⚠️' },
+                normal: { code: 'normal', label: 'Normaal', color_hex: '#1E293B', css_pattern: 'none', tailwind_text: 'text-slate-400', badge_label: 'Vrijloop 🔓' },
+                advised_on: { code: 'advised_on', label: 'Geadviseerd aan', color_hex: '#4ADE80', css_pattern: 'repeating-linear-gradient(45deg, #10B981, #10B981 2px, #86EFAC 2px, #86EFAC 4px)', tailwind_text: 'text-emerald-300', badge_label: 'Doorverwarmen ♨️' },
+                forced_on: { code: 'forced_on', label: 'Geforceerd aan', color_hex: '#10B981', css_pattern: 'none', tailwind_text: 'text-emerald-400', badge_label: 'Actieve Run ⚡' },
+                max_on: { code: 'max_on', label: 'Maximaal aan (60°C)', color_hex: '#A855F7', css_pattern: 'none', tailwind_text: 'text-purple-300', badge_label: 'Zonnebuffer ☀️' }
+            },
+            async load() {
+                try {
+                    const res = await fetch('./api/system/mode-catalog');
+                    if (res.ok) {
+                        const data = await res.json();
+                        this._catalog = data;
+                        const tb = data.archetypes?.thermal_buffer || {};
+                        for (const [k, v] of Object.entries(tb)) {
+                            this._modes[k] = v;
+                        }
+                        const bs = data.archetypes?.battery_storage || {};
+                        for (const [k, v] of Object.entries(bs)) {
+                            if (!this._modes[k]) this._modes[k] = v;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[OpenHEMS] Mode catalog auto-sync warning:', e);
+                }
+            },
+            get(mode) {
+                if (this._modes[mode]) return this._modes[mode];
+                if (mode === 'peak_lockout') return this._modes['forced_off'];
+                if (mode === 'peak_advice') return this._modes['advised_off'];
+                if (mode === 'forced_standard_50' || mode === 'forced_night_50') return this._modes['forced_on'];
+                if (mode === 'forced_solar_boost_60') return this._modes['max_on'];
+                return this._modes['normal'] || { color_hex: '#1E293B', css_pattern: 'none', label: mode };
+            },
+            getColor(mode) {
+                return this.get(mode)?.color_hex || '#1E293B';
+            },
+            getPattern(mode) {
+                return this.get(mode)?.css_pattern || 'none';
+            },
+            getLabel(mode) {
+                return this.get(mode)?.label || mode;
+            }
+        };
+        // Auto-fetch mode catalog on boot
+        OpenHEMSModeCatalog.load();
+
+        // =========================================================================
         // OPEN HEMS UNIFIED CHARTING DESIGN SYSTEM & CONTROLLER
         // Single Source of Truth for Colors, Typography, Time Format & Sticky State
         // =========================================================================
         const OpenHEMSTokens = {
             colors: {
-                solar: '#F59E0B',              // Amber 500: Zon opwek & prognose
+                solar: OpenHEMSModeCatalog.getColor('advised_off'),              // Amber 500: Zon opwek & prognose
                 solarBg: 'rgba(245, 158, 11, 0.70)', // Amber bar fill
                 solarArea: 'rgba(245, 158, 11, 0.22)', // Amber line area fill
                 price: '#06B6D4',              // Cyan 500: EPEX Stroomtarief referentie
@@ -16,9 +70,9 @@
                 dhwBg: 'rgba(236, 72, 153, 0.80)',
                 heating: '#6366F1',            // Indigo 500: CV Vloerverwarming
                 heatingBg: 'rgba(99, 102, 241, 0.80)',
-                batteryCharge: '#10B981',      // Emerald 500: Thuisbatterij Laden
+                batteryCharge: OpenHEMSModeCatalog.getColor('forced_on'),      // Emerald 500: Thuisbatterij Laden
                 batteryDischarge: '#14B8A6',   // Teal 500: Thuisbatterij Ontladen
-                netto: '#EF4444',              // Red 500: Verwacht Netto
+                netto: OpenHEMSModeCatalog.getColor('forced_off'),              // Red 500: Verwacht Netto
                 solarCost: '#EAB308',          // Yellow 500: Zon Kostprijs (€0.06/kWh)
                 gridLine: 'rgba(30, 41, 59, 0.4)',
                 gridLineZero: 'rgba(255, 255, 255, 0.18)',
@@ -144,7 +198,7 @@
                     // Subtle background tint (0.12) + solid 3px top accent
                     ctx.fillStyle = 'rgba(239, 68, 68, 0.12)';
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
-                    ctx.fillStyle = '#EF4444';
+                    ctx.fillStyle = OpenHEMSModeCatalog.getColor('forced_off');
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, 3);
                 });
 
@@ -157,7 +211,7 @@
                     // Subtle background tint (0.12) + solid 3px top accent
                     ctx.fillStyle = 'rgba(245, 158, 11, 0.12)';
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
-                    ctx.fillStyle = '#F59E0B';
+                    ctx.fillStyle = OpenHEMSModeCatalog.getColor('advised_off');
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, 3);
                 });
 
@@ -1933,32 +1987,12 @@
                     data.dhw_mode_timeline.forEach(seg => {
                         const block = document.createElement('div');
                         block.className = 'flex-1 h-full rounded-sm transition-all duration-150 cursor-pointer relative group';
-                        block.style.backgroundColor = seg.color;
-                        if (seg.mode === 'forced_off' || seg.mode === 'peak_lockout') {
-                            block.style.backgroundColor = '#EF4444';
-                            block.style.backgroundImage = 'repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(0,0,0,0.35) 3px, rgba(0,0,0,0.35) 6px)';
-                        } else if (seg.mode === 'advised_off' || seg.mode === 'peak_advice') {
-                            block.style.backgroundColor = '#F59E0B';
-                            block.style.backgroundImage = 'none';
-                            block.style.border = 'none';
-                        } else if (seg.mode === 'advised_on') {
-                            block.style.backgroundColor = '#4ADE80';
-                            block.style.backgroundImage = 'repeating-linear-gradient(45deg, #10B981, #10B981 3px, #86EFAC 3px, #86EFAC 6px)';
-                        } else if (seg.mode === 'forced_on' || seg.mode === 'forced_standard_50' || seg.mode === 'forced_night_50') {
-                            block.style.backgroundColor = '#10B981';
-                            block.style.backgroundImage = 'none';
-                            block.style.border = 'none';
-                        } else if (seg.mode === 'max_on' || seg.mode === 'forced_solar_boost_60') {
-                            block.style.backgroundColor = '#A855F7';
-                            block.style.backgroundImage = 'none';
-                            block.style.border = 'none';
-                        } else {
-                            block.style.backgroundColor = '#1E293B';
-                            block.style.backgroundImage = 'none';
-                            block.style.border = 'none';
-                        }
+                        const meta = OpenHEMSModeCatalog.get(seg.mode);
+                        block.style.backgroundColor = meta.color_hex || seg.color || '#1E293B';
+                        block.style.backgroundImage = (meta.css_pattern && meta.css_pattern !== 'none') ? meta.css_pattern : 'none';
+                        block.style.border = 'none';
                         // Tooltip on hover
-                        block.title = `${seg.time} | ${seg.label}\n${seg.description}`;
+                        block.title = `${seg.time} | ${meta.label || seg.label}\n${meta.description || seg.description || ''}`;
                         tlContainer.appendChild(block);
                     });
                 }

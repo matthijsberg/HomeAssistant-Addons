@@ -49,10 +49,11 @@ def get_mode_meta(mode_code: str, archetype: str = "thermal_buffer") -> Dict[str
         if mode_code in a_dict:
             return a_dict[mode_code]
 
+    fallback_color = catalog.get("archetypes", {}).get("thermal_buffer", {}).get("normal", {}).get("color_hex", "")
     return {
         "code": mode_code,
         "label": mode_code.replace("_", " ").title(),
-        "color_hex": "#64748B",
+        "color_hex": fallback_color,
         "tailwind_text": "text-slate-400",
         "css_pattern": "none",
         "description": f"Mode: {mode_code}"

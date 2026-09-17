@@ -17,7 +17,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from models.canonical import (
     StandardizedState,
-    STATE_METADATA,
+    get_state_metadata,
     DispatchPlanSlot,
     DHWPlanSummary,
     CanonicalDispatchPlan,
@@ -353,7 +353,7 @@ class CentralPlanner:
                 mode_lbl = "Normaal (Standby)"
                 desc = f"Normaal ({s.label}): Vrijloopvenster (€{p_val:.3f}/kWh). Warmtepomp en boiler in normale werking."
 
-            meta = STATE_METADATA[state]
+            meta = get_state_metadata(state)
             net_import = round((unalloc_val + heating_kw + dhw_kw) - sol_val, 3)
 
             dispatch_slots.append(
@@ -381,10 +381,11 @@ class CentralPlanner:
         run_dur_min = len(final_dhw_slots) * step_mins
         total_kwh_stroom = round(len(final_dhw_slots) * step_hours * sww_power_kw, 1)
 
-        summary_meta = STATE_METADATA[
+        summary_mode = (
             StandardizedState.MAX_ON if planned_mode == "forced_solar_boost_60"
             else (StandardizedState.FORCED_ON if final_dhw_slots else StandardizedState.NORMAL)
-        ]
+        )
+        summary_meta = get_state_metadata(summary_mode)
 
         # Calculate dynamic spitslockout hours
         total_lockout_mins = sum(p.get("hard_duration_mins", 0) for p in dynamic_peaks if p.get("is_hard_lockout"))

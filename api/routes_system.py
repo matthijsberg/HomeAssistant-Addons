@@ -21,7 +21,7 @@ from api.context import (
     ensure_framework_defaults, test_influxdb_connection, test_mqtt_connection,
     fetch_ha_entities, GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
 )
-from models.canonical import StandardizedState, STATE_METADATA
+from models.canonical import StandardizedState, get_state_metadata
 from layer3_scheduling.plan_store import get_plan_store
 
 def handle_get(handler, path: str, qp: dict) -> bool:
@@ -143,10 +143,15 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "lockout_hours": plan.dhw_summary.spits_lockout_hours,
             "live_actuation": getattr(GLOBAL_COLLECTOR, "last_actuation", {}),
             "state_taxonomy": {
-                state.value: STATE_METADATA[state]["color_hex"] for state in StandardizedState
+                state.value: get_state_metadata(state)["color_hex"] for state in StandardizedState
             }
         }
         handler._send_json(report)
+        return True
+
+    if path == "/api/system/mode-catalog":
+        from models.mode_catalog import load_mode_catalog
+        handler._send_json(load_mode_catalog())
         return True
 
     if path == "/api/openapi.json":
