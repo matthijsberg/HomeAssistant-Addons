@@ -508,6 +508,104 @@ def detect_dynamic_price_peaks(
     return peak_objects, slot_lockout_map
 
 
+def extract_plan_spitsblok_ranges(slots: List[Any], history_count: int = 0, is_15m: bool = True) -> List[Dict[str, Any]]:
+    """
+    Unified Single Source of Truth builder for chart spitsblok overlays.
+    Extracts contiguous hard lockout windows (mode_code == 'forced_off') directly from canonical plan slots.
+    Guarantees 100% mathematical and visual alignment across ALL charts.
+    """
+    ranges = []
+    in_block = False
+    start_idx = 0
+    n = len(slots) if is_15m else len(slots) // 4
+    for i in range(n):
+        if is_15m:
+            is_locked = (slots[i].mode_code == "forced_off") or getattr(slots[i], "is_lockout", False)
+        else:
+            is_locked = any(
+                (slots[i * 4 + k].mode_code == "forced_off" or getattr(slots[i * 4 + k], "is_lockout", False))
+                for k in range(4) if (i * 4 + k) < len(slots)
+            )
+        if is_locked and not in_block:
+            in_block = True
+            start_idx = i
+        elif not is_locked and in_block:
+            in_block = False
+            s_lbl = slots[start_idx * 4 if not is_15m else start_idx].time_label
+            e_lbl = slots[(i - 1) * 4 if not is_15m else (i - 1)].time_label
+            ranges.append({
+                "start_idx": history_count + start_idx,
+                "end_idx": history_count + i - 1,
+                "start_label": s_lbl,
+                "end_label": e_lbl,
+                "name": "SPITSBLOK"
+            })
+    if in_block:
+        s_lbl = slots[start_idx * 4 if not is_15m else start_idx].time_label
+        e_lbl = slots[-1].time_label
+        ranges.append({
+            "start_idx": history_count + start_idx,
+            "end_idx": history_count + n - 1,
+            "start_label": s_lbl,
+            "end_label": e_lbl,
+            "name": "SPITSBLOK"
+        })
+    return ranges
+
+
+def extract_plan_heating_ranges(slots: List[Any], history_count: int = 0, is_15m: bool = True, domain: str = "both") -> List[Dict[str, Any]]:
+    """
+    Unified Single Source of Truth builder for chart active heating overlays.
+    Extracts contiguous heating windows (dhw_kw > 0 or heating_kw > 0) directly from canonical plan slots.
+    """
+    ranges = []
+    in_block = False
+    start_idx = 0
+    n = len(slots) if is_15m else len(slots) // 4
+    for i in range(n):
+        if is_15m:
+            s = slots[i]
+            if domain == "dhw":
+                is_h = getattr(s, "dhw_kw", 0.0) > 0.05
+            elif domain == "space_heating":
+                is_h = getattr(s, "heating_kw", 0.0) > 0.05
+            else:
+                is_h = (getattr(s, "dhw_kw", 0.0) > 0.05) or (getattr(s, "heating_kw", 0.0) > 0.05)
+        else:
+            if domain == "dhw":
+                is_h = any(getattr(slots[i * 4 + k], "dhw_kw", 0.0) > 0.05 for k in range(4) if (i * 4 + k) < len(slots))
+            elif domain == "space_heating":
+                is_h = any(getattr(slots[i * 4 + k], "heating_kw", 0.0) > 0.05 for k in range(4) if (i * 4 + k) < len(slots))
+            else:
+                is_h = any((getattr(slots[i * 4 + k], "dhw_kw", 0.0) > 0.05 or getattr(slots[i * 4 + k], "heating_kw", 0.0) > 0.05) for k in range(4) if (i * 4 + k) < len(slots))
+
+        if is_h and not in_block:
+            in_block = True
+            start_idx = i
+        elif not is_h and in_block:
+            in_block = False
+            s_lbl = slots[start_idx * 4 if not is_15m else start_idx].time_label
+            e_lbl = slots[(i - 1) * 4 if not is_15m else (i - 1)].time_label
+            ranges.append({
+                "start_idx": history_count + start_idx,
+                "end_idx": history_count + i - 1,
+                "start_label": s_lbl,
+                "end_label": e_lbl,
+                "name": "VERWARMT"
+            })
+    if in_block:
+        s_lbl = slots[start_idx * 4 if not is_15m else start_idx].time_label
+        e_lbl = slots[-1].time_label
+        ranges.append({
+            "start_idx": history_count + start_idx,
+            "end_idx": history_count + n - 1,
+            "start_label": s_lbl,
+            "end_label": e_lbl,
+            "name": "VERWARMT"
+        })
+    return ranges
+
+
 class StandardizedState(str, Enum):
     """
     Strict 6-state taxonomy for all HEMS devices, timeline bars, legends, and cards.

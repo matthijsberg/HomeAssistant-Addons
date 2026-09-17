@@ -211,20 +211,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             avg_export = (sum(full_export_prices) / len(full_export_prices)) if full_export_prices else 0.0
 
             hist_offset = len(hist_pts)
-            forced_off_ranges = []
-            if plan and hasattr(plan, "dynamic_peaks"):
-                for p in plan.dynamic_peaks:
-                    if p.get("is_hard_lockout"):
-                        s_i = p.get("start_idx", 0)
-                        e_i = p.get("end_idx", 0)
-                        if not is_15m:
-                            s_i = s_i // 4
-                            e_i = e_i // 4
-                        forced_off_ranges.append({
-                            "start_idx": hist_offset + s_i,
-                            "end_idx": hist_offset + e_i,
-                            "name": "SPITSBLOK"
-                        })
+            from models.canonical import extract_plan_spitsblok_ranges
+            forced_off_ranges = extract_plan_spitsblok_ranges(plan.slots, history_count=hist_offset, is_15m=is_15m) if plan else []
 
             res = {
                 "status": "success",

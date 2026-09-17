@@ -732,17 +732,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         all_advices = hist_advices + advices
         all_dhw_timeline = hist_dhw_timeline + dhw_mode_timeline
 
-        forced_off_ranges = []
-        h_cnt = len(hist_pts)
-        for p in dynamic_peaks:
-            if p.get("is_hard_lockout"):
-                s_i = p.get("start_idx", 0)
-                e_i = p.get("end_idx", 0)
-                forced_off_ranges.append({
-                    "start_idx": h_cnt + s_i,
-                    "end_idx": h_cnt + e_i,
-                    "name": "SPITSBLOK"
-                })
+        from models.canonical import extract_plan_spitsblok_ranges
+        forced_off_ranges = extract_plan_spitsblok_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m)
 
         handler._send_json({
             "hours": all_labels,

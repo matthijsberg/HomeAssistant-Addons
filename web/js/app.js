@@ -110,8 +110,6 @@
         const OpenHEMSSpitsblokPlugin = {
             id: 'openhemsSpitsblokPlugin',
             beforeDatasetsDraw(chart) {
-                const ranges = (chart.options && chart.options.spitsblokRanges) || (chart.data && chart.data.spitsblokRanges) || [];
-                if (!ranges || !ranges.length) return;
                 const { ctx, chartArea, scales } = chart;
                 const x = scales ? (scales.x || scales['x-axis-0']) : null;
                 if (!chartArea || !x) return;
@@ -121,24 +119,64 @@
                 const slotWidth = totalSlots > 1 ? Math.abs(x.getPixelForValue(1) - x.getPixelForValue(0)) : 10;
                 const halfSlot = slotWidth / 2;
 
-                ranges.forEach(r => {
-                    const sIdx = r.start_idx;
-                    const eIdx = r.end_idx;
+                // 1. Spitsblok Ranges (Red)
+                const spitsRanges = (chart.options && chart.options.spitsblokRanges) || (chart.data && chart.data.spitsblokRanges) || [];
+                spitsRanges.forEach(r => {
+                    let sIdx = r.start_idx;
+                    let eIdx = r.end_idx;
+                    if (r.start_label && chart.data && chart.data.labels) {
+                        const labels = chart.data.labels;
+                        const matchStart = labels.findIndex(lbl => typeof lbl === 'string' && lbl.includes(r.start_label));
+                        const matchEnd = labels.findIndex(lbl => typeof lbl === 'string' && lbl.includes(r.end_label));
+                        if (matchStart !== -1 && matchEnd !== -1) {
+                            sIdx = matchStart;
+                            eIdx = matchEnd;
+                        }
+                    }
                     if (sIdx === undefined || eIdx === undefined) return;
-
                     const xStart = x.getPixelForValue(sIdx);
                     const xEnd = x.getPixelForValue(eIdx);
                     if (isNaN(xStart) || isNaN(xEnd)) return;
-
                     const left = Math.max(chartArea.left, Math.min(xStart, xEnd) - halfSlot);
                     const right = Math.min(chartArea.right, Math.max(xStart, xEnd) + halfSlot);
                     const width = Math.max(0, right - left);
                     if (width <= 0) return;
 
-                    // 1. Translucent red background (clean borderless fill, no dotted borders, no text or emoji)
-                    ctx.fillStyle = 'rgba(239, 68, 68, 0.16)';
+                    ctx.fillStyle = 'rgba(239, 68, 68, 0.20)';
                     ctx.fillRect(left, chartArea.top, width, chartArea.height);
+                    ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
+                    ctx.fillRect(left, chartArea.top, width, 3);
                 });
+
+                // 2. Active Heating Ranges (Yellow / Amber)
+                const heatRanges = (chart.options && chart.options.heatingRanges) || (chart.data && chart.data.heatingRanges) || [];
+                heatRanges.forEach(r => {
+                    let sIdx = r.start_idx;
+                    let eIdx = r.end_idx;
+                    if (r.start_label && chart.data && chart.data.labels) {
+                        const labels = chart.data.labels;
+                        const matchStart = labels.findIndex(lbl => typeof lbl === 'string' && lbl.includes(r.start_label));
+                        const matchEnd = labels.findIndex(lbl => typeof lbl === 'string' && lbl.includes(r.end_label));
+                        if (matchStart !== -1 && matchEnd !== -1) {
+                            sIdx = matchStart;
+                            eIdx = matchEnd;
+                        }
+                    }
+                    if (sIdx === undefined || eIdx === undefined) return;
+                    const xStart = x.getPixelForValue(sIdx);
+                    const xEnd = x.getPixelForValue(eIdx);
+                    if (isNaN(xStart) || isNaN(xEnd)) return;
+                    const left = Math.max(chartArea.left, Math.min(xStart, xEnd) - halfSlot);
+                    const right = Math.min(chartArea.right, Math.max(xStart, xEnd) + halfSlot);
+                    const width = Math.max(0, right - left);
+                    if (width <= 0) return;
+
+                    ctx.fillStyle = 'rgba(245, 158, 11, 0.22)';
+                    ctx.fillRect(left, chartArea.top, width, chartArea.height);
+                    ctx.fillStyle = 'rgba(245, 158, 11, 0.85)';
+                    ctx.fillRect(left, chartArea.top, width, 3);
+                });
+
                 ctx.restore();
             }
         };
@@ -1514,7 +1552,7 @@
             let html = `
                 <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
                     <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span>
+                        <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
                         <span class="font-bold text-white text-xs tracking-wide">${label}</span>
                         <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
                     </div>
@@ -1525,18 +1563,18 @@
                 <div class="space-y-1.5 text-xs">
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:3px; background-color:#F43F5E; border-radius:2px; margin-right:8px;"></span>
+                            <span style="display:inline-block; width:18px; height:3px; background-color:#F59E0B; border-radius:2px; margin-right:8px;"></span>
                             <span class="text-slate-300">Binnentemperatuur (P50)</span>
                         </div>
-                        <span class="font-bold text-rose-300 font-mono">${inTemp.toFixed(1)}°C</span>
+                        <span class="font-bold text-amber-300 font-mono">${inTemp.toFixed(1)}°C</span>
                     </div>
                     ${inP95 > 0 ? `
                     <div class="flex items-center justify-between gap-3 text-[11px]">
                         <div class="flex items-center">
-                            <span style="display:inline-block; width:14px; height:8px; background-color:rgba(244, 63, 94, 0.25); border:1px solid rgba(244, 63, 94, 0.5); border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-rose-200/80">Bandbreedte (P95–P05)</span>
+                            <span style="display:inline-block; width:14px; height:8px; background-color:rgba(251, 191, 36, 0.25); border:1px solid rgba(245, 158, 11, 0.5); border-radius:2px; margin-right:8px;"></span>
+                            <span class="text-amber-200/80">Bandbreedte (P95–P05)</span>
                         </div>
-                        <span class="text-rose-300 font-mono">${inP05.toFixed(1)}°C – ${inP95.toFixed(1)}°C</span>
+                        <span class="text-amber-300 font-mono">${inP05.toFixed(1)}°C – ${inP95.toFixed(1)}°C</span>
                     </div>` : ''}
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
@@ -5001,6 +5039,7 @@
                 },
                 options: {
                     spitsblokRanges: opts.spitsblokRanges,
+                    heatingRanges: opts.heatingRanges,
                     responsive: true,
                     maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
@@ -5119,16 +5158,17 @@
                     demandId: 'th_loss_demand',
                     comfortLabel: `Comfortgrens (${tComfort}°C)`,
                     targetLabel: `Doeltemperatuur (${tSet.toFixed(1)}°C)`,
-                    primaryColor: '#F43F5E',
-                    primaryBgFill: 'rgba(244, 63, 94, 0.15)',
-                    p05BorderColor: 'rgba(244, 63, 94, 0.35)',
-                    p95BorderColor: 'rgba(244, 63, 94, 0.45)',
-                    marginBgColor: 'rgba(244, 63, 94, 0.15)',
+                    primaryColor: '#F59E0B',
+                    primaryBgFill: 'rgba(251, 191, 36, 0.15)',
+                    p05BorderColor: 'rgba(245, 158, 11, 0.35)',
+                    p95BorderColor: 'rgba(245, 158, 11, 0.45)',
+                    marginBgColor: 'rgba(251, 191, 36, 0.15)',
                     yTitle: 'Binnentemperatuur (°C)',
                     ySuggestedMin: Math.floor(minT - 0.5),
                     ySuggestedMax: Math.ceil(maxT + 0.5),
                     y1SuggestedMax: (predictionResolution === '15m') ? 1.5 : 4.0,
                     spitsblokRanges: d.forced_off_ranges,
+                    heatingRanges: d.heating_ranges,
                     tooltipHandler: customHeatingTooltipHandler,
                     extraLine: {
                         id: 'outdoor_temp',
@@ -5278,6 +5318,7 @@
                     ySuggestedMax: ySuggestedMax,
                     y1SuggestedMax: (predictionResolution === '15m') ? 1.5 : 4.0,
                     spitsblokRanges: data.forced_off_ranges,
+                    heatingRanges: data.heating_ranges,
                     tooltipHandler: customDhwTooltipHandler
                 });
             } catch (e) {
