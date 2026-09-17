@@ -114,6 +114,47 @@ class SpaceHeatingPolicy:
         return round(effective_price / max(1.0, cop), 4)
 
     @classmethod
+    def _is_buffer_needed_for_peak(
+        cls,
+        current_slot: int,
+        t_room_cur: float,
+        t_floor_cur: float,
+        outdoor_temps_c: List[float],
+        solar_kw: List[float],
+        dynamic_peaks: List[Dict[str, Any]],
+        min_comfort_room_c: float,
+        step_hours: float = 0.25
+    ) -> bool:
+        """
+        Model Predictive Control (MPC) check:
+        Simulates passive building coasting (zero heating) from current_slot through the upcoming peak.
+        Returns True if unheated passive temperature drops below min_comfort_room_c during the peak.
+        """
+        for peak in dynamic_peaks:
+            p_start = peak.get("start_idx", 0)
+            p_end = peak.get("end_idx", p_start)
+            # Only evaluate if we are in the preheat runway before this peak (up to 3.5h before)
+            if current_slot < p_start and (p_start - current_slot) <= int(3.5 / step_hours):
+                t_r = t_room_cur
+                t_f = t_floor_cur
+                for step_idx in range(current_slot, p_end + 1):
+                    if step_idx >= len(outdoor_temps_c):
+                        break
+                    t_out = outdoor_temps_c[step_idx]
+                    q_loss = cls.UA_BUILDING_KW_PER_K * max(0.0, t_r - t_out)
+                    q_solar = cls.SOLAR_GAIN_COEFFICIENT * solar_kw[step_idx]
+                    r_fl = cls.R_FLOOR_AIR_K_PER_KW if t_f >= t_r else 2.75
+                    q_fl = (t_f - t_r) / r_fl
+                    dt_f = ((-q_fl) / cls.C_FLOOR_KWH_PER_K) * step_hours
+                    dt_r = ((q_fl + q_solar - q_loss) / cls.C_AIR_KWH_PER_K) * step_hours
+                    t_f += dt_f
+                    t_r += dt_r
+                    # If temperature dips below comfort during the peak lockout:
+                    if step_idx >= p_start and t_r < min_comfort_room_c:
+                        return True
+        return False
+
+    @classmethod
     def plan_space_heating(
         cls,
         outdoor_temps_c: List[float],
@@ -246,11 +287,20 @@ class SpaceHeatingPolicy:
                 if not is_running:
                     # Can we trigger a new run?
                     comfort_trigger = (t_room <= target_room - 0.35)
-                    # Pre-heat condition:
-                    # - Cold sunny day buffer: Strong solar (>=2.0 kW) on cold day (mean_outdoor < 10C) up to max_preheat_room
-                    # - Grid / mild buffer: only if room is actually below setpoint (t_room < target_room)
-                    is_solar_cold_buffer = (solar_kw[i] >= 2.0 and mean_outdoor < 10.0)
-                    preheat_allowed = (t_room < max_preheat_room) if is_solar_cold_buffer else (t_room < target_room)
+                    # Model Predictive Control (MPC) Pre-heat condition:
+                    # 1. Deficit buffer: unheated coasting would violate comfort during upcoming peak
+                    # 2. Solar buffer: free solar surplus (>=1.5 kW)
+                    # 3. Valley buffer: cheap night valley only if room is below target setpoint
+                    needs_deficit_buffer = cls._is_buffer_needed_for_peak(
+                        i, t_room, t_floor, outdoor_temps_c, solar_kw, dynamic_peaks, min_comfort_room, step_hours
+                    )
+                    is_solar_surplus = (solar_kw[i] >= 1.5)
+
+                    if is_solar_surplus or needs_deficit_buffer:
+                        preheat_allowed = (t_room < max_preheat_room)
+                    else:
+                        preheat_allowed = (t_room < target_room)
+
                     preheat_trigger = (
                         i in preheat_candidate_slots and
                         t_floor < cls.MAX_FLOOR_TEMP_C and
