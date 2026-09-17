@@ -391,6 +391,32 @@ class SpaceHeatingPolicy:
                 )
             )
 
+        # Compute Counterfactual Unheated Trajectory (zero heating baseline)
+        t_r_unh = current_room_temp_c if current_room_temp_c is not None else target_room
+        t_f_unh = current_floor_temp_c if current_floor_temp_c is not None else (t_r_unh - 0.2 if not is_heating_season else t_r_unh + 1.2)
+        unheated_room_temps = []
+        for i in range(n_slots):
+            unheated_room_temps.append(round(t_r_unh, 2))
+            t_out = outdoor_temps_c[i]
+            v_wind = wind_speeds_ms[i] if (wind_speeds_ms and i < len(wind_speeds_ms)) else 0.0
+            eff_ua = cls.UA_BUILDING_KW_PER_K + cls.WIND_INFILTRATION_COEFF_KW_PER_K_PER_MS * max(0.0, v_wind - 2.0)
+            q_loss = eff_ua * max(0.0, t_r_unh - t_out)
+            q_solar = cls.SOLAR_GAIN_COEFFICIENT * solar_kw[i]
+            r_fl = cls.R_FLOOR_AIR_K_PER_KW if t_f_unh >= t_r_unh else 2.75
+            q_fl = (t_f_unh - t_r_unh) / r_fl
+            dt_f = ((-q_fl) / cls.C_FLOOR_KWH_PER_K) * step_hours
+            dt_r = ((q_fl + q_solar - q_loss) / cls.C_AIR_KWH_PER_K) * step_hours
+            t_f_unh = round(t_f_unh + dt_f, 2)
+            t_r_unh = round(t_r_unh + dt_r, 2)
+
+        # Compute Prediction Uncertainty Margin Funnel (P05 lower bound, P95 upper bound)
+        room_p05 = []
+        room_p95 = []
+        for i, s in enumerate(slot_results):
+            spread = 0.40 * (i / max(1, n_slots - 1)) ** 0.65
+            room_p05.append(round(s.room_temp_c - spread, 2))
+            room_p95.append(round(s.room_temp_c + spread, 2))
+
         all_r_temps = [s.room_temp_c for s in slot_results]
         if not is_heating_enabled:
             season_label = "Verwarming Uitgeschakeld (Thermostaat Uit)"
@@ -412,5 +438,8 @@ class SpaceHeatingPolicy:
             target_room_temp_c=target_room,
             min_comfort_room_c=min_comfort_room,
             max_preheat_room_c=max_preheat_room,
-            max_floor_temp_c=cls.MAX_FLOOR_TEMP_C
+            max_floor_temp_c=cls.MAX_FLOOR_TEMP_C,
+            unheated_room_temps_c=unheated_room_temps,
+            room_temps_p05_c=room_p05,
+            room_temps_p95_c=room_p95
         )

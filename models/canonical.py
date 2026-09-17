@@ -640,6 +640,9 @@ class SpaceHeatingPlanSummary:
     min_comfort_room_c: float = 19.6
     max_preheat_room_c: float = 21.2
     max_floor_temp_c: float = 28.0
+    unheated_room_temps_c: List[float] = field(default_factory=list)
+    room_temps_p05_c: List[float] = field(default_factory=list)
+    room_temps_p95_c: List[float] = field(default_factory=list)
 
 
 @dataclass

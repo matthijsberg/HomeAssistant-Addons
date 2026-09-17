@@ -1498,11 +1498,12 @@
             const label = tooltip.title[0] || '';
             const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
 
-            let outTemp = 0.0, inTemp = 0.0, cop = 0.0, thLoss = 0.0, elPower = 0.0, cost = 0.0;
+            let outTemp = 0.0, inTemp = 0.0, unhTemp = 0.0, cop = 0.0, thLoss = 0.0, elPower = 0.0, cost = 0.0;
             chart.data.datasets.forEach(ds => {
                 const v = ds.data[dataIndex];
                 if (ds.id === 'outdoor_temp') outTemp = Number(v) || 0.0;
                 else if (ds.id === 'indoor_temp') inTemp = Number(v) || 0.0;
+                else if (ds.id === 'indoor_unh_p50') unhTemp = Number(v) || 0.0;
                 else if (ds.id === 'cop') cop = Number(v) || 0.0;
                 else if (ds.id === 'th_loss') thLoss = Number(v) || 0.0;
                 else if (ds.id === 'hp_electrical') elPower = Number(v) || 0.0;
@@ -1510,6 +1511,7 @@
                 else if (ds.label) {
                     const lbl = ds.label.toLowerCase();
                     if (lbl.includes('buiten')) outTemp = Number(v) || 0.0;
+                    else if (lbl.includes('zonder')) unhTemp = Number(v) || 0.0;
                     else if (lbl.includes('binnen') || lbl.includes('ruimte')) inTemp = Number(v) || 0.0;
                     else if (lbl.includes('cop')) cop = Number(v) || 0.0;
                     else if (lbl.includes('verlies')) thLoss = Number(v) || 0.0;
@@ -1547,6 +1549,13 @@
                             <span class="text-slate-300">Verwachte Binnentemp</span>
                         </div>
                         <span class="font-bold text-rose-300 font-mono">${inTemp.toFixed(1)}°C</span>
+                    </div>
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center">
+                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #94A3B8; margin-right:8px;"></span>
+                            <span class="text-slate-400">Zonder Verwarming</span>
+                        </div>
+                        <span class="font-medium text-slate-300 font-mono">${unhTemp.toFixed(1)}°C</span>
                     </div>
                     <div class="flex items-center justify-between gap-3">
                         <div class="flex items-center">
@@ -4864,6 +4873,9 @@
                 const labels = d.labels;
                 const outTemps = d.outdoor_temps_c || [];
                 const inTemps = d.indoor_temps_c || [];
+                const unhTemps = d.unheated_temps_c || inTemps;
+                const inTempsP05 = d.indoor_temps_p05_c || inTemps;
+                const inTempsP95 = d.indoor_temps_p95_c || inTemps;
                 const cops = d.cops || [];
                 const thLoss = d.thermal_loss_kw || [];
                 const elKw = d.electrical_kw || [];
@@ -4891,6 +4903,51 @@
                                 order: 1
                             },
                             {
+                                id: 'indoor_unh_p50',
+                                label: 'Zonder Verwarming (°C)',
+                                data: unhTemps,
+                                type: 'line',
+                                yAxisID: 'y_temp',
+                                borderColor: '#94A3B8',
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.8,
+                                borderDash: [5, 4],
+                                fill: false,
+                                tension: 0.25,
+                                pointRadius: 0,
+                                order: 2
+                            },
+                            {
+                                id: 'indoor_p05',
+                                label: 'Marge Ondergrens P05 (°C)',
+                                data: inTempsP05,
+                                type: 'line',
+                                yAxisID: 'y_temp',
+                                borderColor: 'rgba(244, 63, 94, 0.25)',
+                                backgroundColor: 'transparent',
+                                borderWidth: 1.0,
+                                borderDash: [2, 2],
+                                fill: false,
+                                pointRadius: 0,
+                                tension: 0.25,
+                                order: 3
+                            },
+                            {
+                                id: 'indoor_p95',
+                                label: 'Marge (P05–P95)',
+                                data: inTempsP95,
+                                type: 'line',
+                                yAxisID: 'y_temp',
+                                borderColor: 'rgba(244, 63, 94, 0.35)',
+                                backgroundColor: 'rgba(244, 63, 94, 0.12)',
+                                borderWidth: 1.0,
+                                borderDash: [3, 3],
+                                fill: '-1',
+                                pointRadius: 0,
+                                tension: 0.25,
+                                order: 4
+                            },
+                            {
                                 id: 'indoor_temp',
                                 label: 'Verwachte Binnentemperatuur (°C)',
                                 data: inTemps,
@@ -4901,7 +4958,7 @@
                                 borderWidth: 2.2,
                                 tension: 0.25,
                                 pointRadius: 0,
-                                order: 2
+                                order: 5
                             },
                             {
                                 id: 'setpoint',
