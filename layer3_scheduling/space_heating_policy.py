@@ -109,16 +109,9 @@ class SpaceHeatingPolicy:
 
     @classmethod
     def calculate_carnot_cop(cls, outdoor_temp_c: float, flow_temp_c: float = 35.0) -> float:
-        """Calculates temperature-dependent Carnot COP with empirical scaling."""
-        t_flow_k = flow_temp_c + 273.15
-        t_source_k = outdoor_temp_c + 273.15
-        delta_t = max(8.0, t_flow_k - t_source_k)
-        theoretical_cop = t_flow_k / delta_t
-        cop = cls.CARNOT_EFFICIENCY * theoretical_cop
-        # Defrost penalty near freezing (-2°C to +4°C)
-        if -2.0 <= outdoor_temp_c <= 4.0:
-            cop *= 0.85
-        return round(max(2.2, min(6.8, cop)), 2)
+        """Calculates temperature-dependent Carnot COP with empirical scaling via models.physics."""
+        from models.physics import calculate_carnot_cop as _calc_cop
+        return _calc_cop(outdoor_temp_c, flow_temp_c=flow_temp_c, carnot_efficiency=cls.CARNOT_EFFICIENCY)
 
     @classmethod
     def calculate_thermal_cost(

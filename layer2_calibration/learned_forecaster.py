@@ -368,14 +368,14 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
             tout_days = {v[0]: v[1] for v in results[2]["series"][0].get("values", []) if v[1] is not None}
             common = sorted(set(cv_days.keys()) & set(tout_days.keys()))
             x_dt, y_th_kwh = [], []
-            from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
+            from models.physics import calculate_carnot_cop
 
             for ts in common:
                 t_out = tout_days[ts]
                 dt_k = 19.5 - t_out
                 kwh_el = cv_days[ts]
                 if dt_k > 1.0 and kwh_el > 1.5:
-                    cop_day = SpaceHeatingPolicy.calculate_carnot_cop(t_out)
+                    cop_day = calculate_carnot_cop(t_out)
                     kwh_th = kwh_el * cop_day
                     x_dt.append(dt_k)
                     y_th_kwh.append(kwh_th)

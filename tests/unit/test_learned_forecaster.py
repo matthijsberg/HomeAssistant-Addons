@@ -15,7 +15,7 @@ import pytest
 from layer2_calibration.learned_forecaster import HybridForecastingModel
 
 
-from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
+from models.physics import calculate_carnot_cop
 
 
 def _make_influx_response(unalloc_val: float, ua_slope_kwh_per_k: float, num_heating_days: int = 20) -> dict:
@@ -32,7 +32,7 @@ def _make_influx_response(unalloc_val: float, ua_slope_kwh_per_k: float, num_hea
         ts_day = base_ts + d * 86400
         tout = 5.0 + (d % 8) * 1.0  # tout varies 5.0C .. 12.0C -> dt_k varies 14.5 .. 7.5
         dt_k = 19.5 - tout
-        cop = SpaceHeatingPolicy.calculate_carnot_cop(tout)
+        cop = calculate_carnot_cop(tout)
         th_kwh = ua_slope_kwh_per_k * dt_k
         el_kwh = th_kwh / cop
         cv_values.append([ts_day, el_kwh])

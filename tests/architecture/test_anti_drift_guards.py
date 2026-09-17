@@ -56,3 +56,39 @@ def test_standardized_taxonomy_completeness():
         assert "color_hex" in meta
         assert meta["color_hex"].startswith("#")
         assert len(meta["color_hex"]) == 7
+
+
+def test_unidirectional_layer_architecture():
+    """
+    Enforce unidirectional architecture (Laag 1 -> 2 -> 3 -> 4/5):
+    - layer1_data_collection/ and layer2_calibration/ must NEVER import
+      from layer3_scheduling or layer4_control.
+    """
+    repo_root = Path(__file__).parent.parent.parent
+    prohibited_imports = [
+        r"from\s+layer3_scheduling",
+        r"import\s+layer3_scheduling",
+        r"from\s+layer4_control",
+        r"import\s+layer4_control",
+    ]
+
+    scanned_dirs = [
+        repo_root / "layer1_data_collection",
+        repo_root / "layer2_calibration",
+    ]
+
+    violations = []
+    for directory in scanned_dirs:
+        if not directory.exists():
+            continue
+        for py_file in directory.rglob("*.py"):
+            text = py_file.read_text(encoding="utf-8")
+            for pattern in prohibited_imports:
+                for match in re.finditer(pattern, text):
+                    line_no = text[:match.start()].count("\n") + 1
+                    violations.append(
+                        f"{py_file.relative_to(repo_root)}:{line_no} violates unidirectional architecture: matched '{pattern}'"
+                    )
+
+    assert not violations, "Unidirectional architecture violations found:\n" + "\n".join(violations)
+
