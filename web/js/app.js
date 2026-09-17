@@ -2412,9 +2412,12 @@
                         }
                     });
 
-                    // Summary statistics
-                    const totNetKwh = netKw.reduce((acc, kw) => acc + (kw * intervalH), 0);
-                    const totNetCostEur = netCostEurArr.reduce((acc, c) => acc + c, 0);
+                    // Summary statistics for 24h forecast (from forecast start index onward, excluding prepended history)
+                    const histCount = Number(data.history_count || 0);
+                    const forecastNetKw = netKw.slice(histCount);
+                    const forecastCostArr = netCostEurArr.slice(histCount);
+                    const totNetKwh = forecastNetKw.reduce((acc, kw) => acc + (kw * intervalH), 0);
+                    const totNetCostEur = (data.total_net_cost_eur !== undefined) ? Number(data.total_net_cost_eur) : forecastCostArr.reduce((acc, c) => acc + c, 0);
 
                     if (document.getElementById('cost-chart-total-net-kwh')) {
                         document.getElementById('cost-chart-total-net-kwh').innerText = `Netto: ${totNetKwh >= 0 ? '+' : ''}${totNetKwh.toFixed(1)} kWh`;
