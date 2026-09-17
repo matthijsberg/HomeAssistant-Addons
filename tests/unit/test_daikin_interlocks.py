@@ -27,8 +27,19 @@ def test_hydraulic_interlock_cv_master_off_during_dhw():
     assert cmd_max.s10s_relay_on is True
     assert cmd_max.s11s_relay_on is True
     assert cmd_max.cv_master_switch_on is False
+    assert cmd_max.dhw_master_switch_on is True
     assert cmd_max.effective_mode == "max_on"
     assert cmd_max.target_dhw_temp_c == 60.0
+
+
+def test_hydraulic_interlock_forced_space_heating_dhw_off():
+    """Verify that forced space heating engages SG4 with DHW turned OFF so 3-way valve routes to CV."""
+    cmd = DaikinInterlock.resolve_command(requested_mode="forced_space_heating", current_cv_switch_state=True)
+    assert cmd.s10s_relay_on is True
+    assert cmd.s11s_relay_on is True
+    assert cmd.cv_master_switch_on is True
+    assert cmd.dhw_master_switch_on is False
+    assert cmd.effective_mode == "forced_space_heating"
 
 
 def test_lossy_mapping_advised_off():
@@ -87,3 +98,23 @@ def test_daikin_reader_space_heating_enabled():
         "climate.woonkamer_climate_daikin": {"state": "heat"}
     }
     assert DaikinReader.is_space_heating_circuit_enabled(states_master_off) is False
+
+
+def test_daikin_reader_dhw_circuit_detection():
+    """Verify that DaikinReader correctly extracts DHW master enable/disable status."""
+    from integrations.daikin_altherma.reader import DaikinReader
+
+    # Case 1: DHW on
+    states_on = {
+        "climate.hc_dhw_dhw_setpoint": {"state": "heat"}
+    }
+    assert DaikinReader.is_dhw_circuit_enabled(states_on) is True
+
+    # Case 2: DHW off (e.g. vacation)
+    states_off = {
+        "climate.hc_dhw_dhw_setpoint": {"state": "off"}
+    }
+    assert DaikinReader.is_dhw_circuit_enabled(states_off) is False
+
+    # Case 3: Empty states map defaults to True
+    assert DaikinReader.is_dhw_circuit_enabled({}) is True

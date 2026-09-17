@@ -25,6 +25,7 @@ class DaikinHardwareCommand:
     s11s_relay_on: bool
     cv_master_switch_on: bool
     effective_mode: str
+    dhw_master_switch_on: bool = True
     target_dhw_temp_c: Optional[float] = None
     target_room_temp_c: Optional[float] = None
     downgrade_reason: Optional[str] = None
@@ -83,9 +84,22 @@ class DaikinInterlock:
             return DaikinHardwareCommand(
                 s10s_relay_on=True,
                 s11s_relay_on=True,
-                cv_master_switch_on=False,  # Enforce OFF
+                cv_master_switch_on=False,  # Enforce OFF so 3-way valve routes to DHW
+                dhw_master_switch_on=True,
                 effective_mode=requested_mode if requested_mode in ["forced_on", "max_on"] else "forced_on",
                 target_dhw_temp_c=target_dhw,
+                downgrade_reason=None
+            )
+
+        # 3b. Forced Space Heating (Vloerverwarming Boost): SG Stand 4 (S10S=ON, S11S=ON) with DHW turned OFF!
+        elif requested_mode == "forced_space_heating":
+            return DaikinHardwareCommand(
+                s10s_relay_on=True,
+                s11s_relay_on=True,
+                cv_master_switch_on=True,
+                dhw_master_switch_on=False,  # Enforce DHW OFF so 3-way valve stays on CV underfloor
+                effective_mode="forced_space_heating",
+                target_room_temp_c=target_temp,
                 downgrade_reason=None
             )
 

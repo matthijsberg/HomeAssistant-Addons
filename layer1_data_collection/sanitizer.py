@@ -43,6 +43,7 @@ class CleanTelemetryFrame:
     metadata: Dict[str, Any] = field(default_factory=dict)
     validation_errors: List[str] = field(default_factory=list)
     is_space_heating_enabled: bool = True
+    is_dhw_enabled: bool = True
 
     @property
     def prices(self) -> List[float]:
@@ -98,6 +99,7 @@ class TelemetrySanitizer:
         target_room_temp: Optional[float] = None,
         last_hardware_reading_time: Optional[datetime] = None,
         is_space_heating_enabled: bool = True,
+        is_dhw_enabled: bool = True,
         live_outdoor_temp_c: Optional[float] = None,
         live_solar_kw: Optional[float] = None,
         live_wind_speed_ms: Optional[float] = None,
@@ -339,5 +341,6 @@ class TelemetrySanitizer:
                 }
             },
             validation_errors=validation_errors + issues,
-            is_space_heating_enabled=is_space_heating_enabled
+            is_space_heating_enabled=is_space_heating_enabled,
+            is_dhw_enabled=is_dhw_enabled
         )

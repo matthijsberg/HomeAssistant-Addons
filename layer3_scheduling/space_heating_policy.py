@@ -163,11 +163,13 @@ class SpaceHeatingPolicy:
             if current_slot < p_start and (p_start - current_slot) <= int(3.5 / step_hours):
                 t_r = t_room_cur
                 t_f = t_floor_cur
+                act_p = cls.get_active_parameters()
+                ua_base = act_p["ua_kw_per_k"]
                 for step_idx in range(current_slot, p_end + 1):
                     if step_idx >= len(outdoor_temps_c):
                         break
                     t_out = outdoor_temps_c[step_idx]
-                    q_loss = cls.UA_BUILDING_KW_PER_K * max(0.0, t_r - t_out)
+                    q_loss = ua_base * max(0.0, t_r - t_out)
                     q_solar = cls.SOLAR_GAIN_COEFFICIENT * solar_kw[step_idx]
                     r_fl = cls.R_FLOOR_AIR_K_PER_KW if t_f >= t_r else 2.75
                     q_fl = (t_f - t_r) / r_fl

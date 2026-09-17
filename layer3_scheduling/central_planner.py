@@ -150,9 +150,17 @@ class CentralPlanner:
         sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
         daytime_arbitrage_audit = None
 
+        # Priority 0: DHW Circuit Disabled in Home Assistant (e.g. Vacation / Holiday / Off)
+        if not getattr(frame, "is_dhw_enabled", True):
+            planned_dhw_slots = []
+            planned_mode = "off"
+            planned_mode_label = "DHW Uitgeschakeld (Vakantie / Standby)"
+            sww_target_temp = 50.0
+            sww_power_kw = 0.0
+            daytime_arbitrage_audit = None
         # Priority 1: Morning comfort risk (<40°C) during night/evening -> Nachtverwarming (20:00 - 06:00)
         # Comfortzekerheid vóór 10:00u weegt zwaarder dan wachten op zon.
-        if (morning_comfort_risk or current_dhw_temp <= 41.0) and is_night_time:
+        elif (morning_comfort_risk or current_dhw_temp <= 41.0) and is_night_time:
             # 1. Thermal heat requirement to reach target setpoint
             # Factor in estimated cooldown until night run (~1.5K)
             est_tank_temp = max(35.0, current_dhw_temp - 1.5)

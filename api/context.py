@@ -1704,6 +1704,7 @@ def ensure_active_canonical_plan(force_refresh=False):
     # 4. Check if Space Heating (CV) is enabled via integration adapter
     from integrations.daikin_altherma.reader import DaikinReader
     is_cv_enabled = DaikinReader.is_space_heating_circuit_enabled(states_map)
+    is_dhw_enabled = DaikinReader.is_dhw_circuit_enabled(states_map)
 
     # 5. Extract unallocated profile
     grid_96 = []
@@ -1723,6 +1724,7 @@ def ensure_active_canonical_plan(force_refresh=False):
         target_room_temp=cur_target_room,
         last_hardware_reading_time=last_hw_time,
         is_space_heating_enabled=is_cv_enabled,
+        is_dhw_enabled=is_dhw_enabled,
         live_outdoor_temp_c=live_t_out,
         live_solar_kw=live_solar_kw,
         live_wind_speed_ms=live_wind_ms,
