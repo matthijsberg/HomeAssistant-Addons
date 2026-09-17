@@ -483,31 +483,34 @@ def handle_post(handler, path: str, body: dict) -> bool:
                 return True
             recs_data = load_json(recs_file)
             params = load_json(PARAMS_FILE) if PARAMS_FILE.exists() else {}
-            ewma = float(params.get("learning_rate_ewma", 0.05))
 
             for r in recs_data.get("recommendations", []):
                 r["auto_applied"] = True
                 p_id = r.get("id")
+                prop_v = r.get("proposed_value")
                 if p_id == "building_ua":
-                    old_v = float(params.get("building", {}).get("ua_base_w_per_k", 321.1))
-                    prop_v = float(r.get("proposed_value", old_v))
-                    new_v = round((1.0 - ewma) * old_v + ewma * prop_v, 1)
-                    params.setdefault("building", {})["ua_base_w_per_k"] = new_v
-                    r["current_value"] = new_v
+                    val = float(prop_v) if prop_v is not None else float(params.get("building", {}).get("ua_base_w_per_k", 292.5))
+                    params.setdefault("building", {})["ua_base_w_per_k"] = val
+                    r["current_value"] = val
+                    r["proposed_value"] = val
+                    r["drift_pct"] = 0.0
+                elif p_id == "heating_modulation":
+                    curve_str = str(prop_v) if prop_v is not None else "2840 - 92·T"
+                    params.setdefault("heat_pump", {})["modulation_curve"] = curve_str
+                    r["current_value"] = curve_str
+                    r["proposed_value"] = curve_str
                     r["drift_pct"] = 0.0
                 elif p_id == "night_baseload":
-                    old_v = float(params.get("unallocated", {}).get("night_baseload_floor_w", 265.0))
-                    prop_v = float(r.get("proposed_value", old_v))
-                    new_v = round((1.0 - ewma) * old_v + ewma * prop_v, 1)
-                    params.setdefault("unallocated", {})["night_baseload_floor_w"] = new_v
-                    r["current_value"] = new_v
+                    val = float(prop_v) if prop_v is not None else float(params.get("unallocated", {}).get("night_baseload_floor_w", 299.4))
+                    params.setdefault("unallocated", {})["night_baseload_floor_w"] = val
+                    r["current_value"] = val
+                    r["proposed_value"] = val
                     r["drift_pct"] = 0.0
                 elif p_id == "dhw_standby":
-                    old_v = float(params.get("dhw_tank", {}).get("standby_loss_w_per_k", 2.50))
-                    prop_v = float(r.get("proposed_value", old_v))
-                    new_v = round((1.0 - ewma) * old_v + ewma * prop_v, 2)
-                    params.setdefault("dhw_tank", {})["standby_loss_w_per_k"] = new_v
-                    r["current_value"] = new_v
+                    val = float(prop_v) if prop_v is not None else float(params.get("dhw_tank", {}).get("standby_loss_w_per_k", 2.38))
+                    params.setdefault("dhw_tank", {})["standby_loss_w_per_k"] = val
+                    r["current_value"] = val
+                    r["proposed_value"] = val
                     r["drift_pct"] = 0.0
 
             recs_data["status"] = "accepted"
