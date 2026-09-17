@@ -4829,8 +4829,66 @@
                 const startLine = Array(labels.length).fill(tStart);
 
                 const ctx = canvas.getContext('2d');
+                const forcedOffPlugin = {
+                    id: 'heatingForcedOffPlugin',
+                    beforeDraw: (chart) => {
+                        const ranges = d.forced_off_ranges || [];
+                        if (!ranges.length) return;
+                        const { ctx, chartArea, scales } = chart;
+                        const x = scales.x;
+                        if (!x || !chartArea) return;
+
+                        ctx.save();
+                        const totalSlots = labels.length;
+                        const slotWidth = totalSlots > 1 ? Math.abs(x.getPixelForValue(1) - x.getPixelForValue(0)) : 10;
+                        const halfSlot = slotWidth / 2;
+
+                        ranges.forEach(r => {
+                            const sIdx = r.start_idx;
+                            const eIdx = r.end_idx;
+                            if (sIdx === undefined || eIdx === undefined) return;
+
+                            const xStart = x.getPixelForValue(sIdx);
+                            const xEnd = x.getPixelForValue(eIdx);
+                            if (isNaN(xStart) || isNaN(xEnd)) return;
+
+                            const left = Math.max(chartArea.left, Math.min(xStart, xEnd) - halfSlot);
+                            const right = Math.min(chartArea.right, Math.max(xStart, xEnd) + halfSlot);
+                            const width = Math.max(0, right - left);
+                            if (width <= 0) return;
+
+                            // 1. Translucent red background
+                            ctx.fillStyle = 'rgba(239, 68, 68, 0.16)';
+                            ctx.fillRect(left, chartArea.top, width, chartArea.height);
+
+                            // 2. Subtle dashed red borders at vertical edges
+                            ctx.strokeStyle = 'rgba(239, 68, 68, 0.45)';
+                            ctx.lineWidth = 1.2;
+                            ctx.setLineDash([4, 4]);
+                            ctx.beginPath();
+                            ctx.moveTo(left, chartArea.top);
+                            ctx.lineTo(left, chartArea.bottom);
+                            ctx.moveTo(right, chartArea.top);
+                            ctx.lineTo(right, chartArea.bottom);
+                            ctx.stroke();
+
+                            // 3. Subtle top label
+                            ctx.setLineDash([]);
+                            ctx.fillStyle = 'rgba(248, 113, 113, 0.9)';
+                            ctx.font = 'bold 9px monospace';
+                            ctx.textAlign = 'center';
+                            const midX = left + width / 2;
+                            if (width > 30) {
+                                ctx.fillText('🔒 SPITSBLOK', midX, chartArea.top + 14);
+                            }
+                        });
+                        ctx.restore();
+                    }
+                };
+
                 heatingForecastChartInstance = new Chart(ctx, {
                     type: 'bar',
+                    plugins: [forcedOffPlugin],
                     data: {
                         labels: labels,
                         datasets: [

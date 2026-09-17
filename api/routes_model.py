@@ -76,6 +76,40 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             t_active = True
             t_status = "Stookseizoen Actief (Centrale PlanStore)"
 
+        # Extract lockout ranges for visual overlay (offset by history_count)
+        forced_off_ranges = []
+        in_block = False
+        start_b_idx = 0
+        h_cnt = len(hist_pts)
+        n_eval = len(plan.slots) if is_15m else min(24, len(plan.slots) // 4)
+        for h_idx in range(n_eval):
+            if is_15m:
+                slot_obj = plan.slots[h_idx]
+                is_forced = (slot_obj.mode_code == "forced_off") or getattr(slot_obj, "is_lockout", False)
+            else:
+                is_forced = any(
+                    (plan.slots[h_idx * 4 + k].mode_code == "forced_off" or getattr(plan.slots[h_idx * 4 + k], "is_lockout", False))
+                    for k in range(4) if (h_idx * 4 + k) < len(plan.slots)
+                )
+            if is_forced and not in_block:
+                in_block = True
+                start_b_idx = h_idx
+            elif not is_forced and in_block:
+                in_block = False
+                forced_off_ranges.append({
+                    "start_idx": h_cnt + start_b_idx,
+                    "end_idx": h_cnt + h_idx - 1,
+                    "start_label": plan.slots[start_b_idx * 4 if not is_15m else start_b_idx].time_label,
+                    "end_label": plan.slots[(h_idx - 1) * 4 if not is_15m else (h_idx - 1)].time_label
+                })
+        if in_block:
+            forced_off_ranges.append({
+                "start_idx": h_cnt + start_b_idx,
+                "end_idx": h_cnt + n_eval - 1,
+                "start_label": plan.slots[start_b_idx * 4 if not is_15m else start_b_idx].time_label,
+                "end_label": plan.slots[-1].time_label
+            })
+
         handler._send_json({
             "resolution": res_mode,
             "labels": hist_labels + labels,
@@ -87,6 +121,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "electrical_kw": hist_el_kw + el_power_kw,
             "costs_eur": hist_costs + costs_eur,
             "history_count": len(hist_pts),
+            "forced_off_ranges": forced_off_ranges,
             "total_thermal_kwh": tot_th,
             "total_electrical_kwh": tot_el,
             "total_cost_eur": tot_cost,
