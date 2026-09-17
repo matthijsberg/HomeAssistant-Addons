@@ -20,6 +20,8 @@ from api.context import (
 )
 from layer3_scheduling.decision_audit import DecisionAuditLogger
 
+_weather_history_cache: Dict[str, Any] = {'ts': 0, 'rad': {}, 'temp': {}}
+
 def get_today_history_kpis(cfg: dict, sec: dict) -> dict:
     active_conn = cfg.get("influxdb_connections", [{}])[0]
     db_name = active_conn.get("database", "openhems")
@@ -98,6 +100,51 @@ def get_today_history_kpis(cfg: dict, sec: dict) -> dict:
             "sub": f"{hp_th_kwh:.1f} kWh th · SCOP 3.65"
         }
     }
+
+
+def load_historical_dhw_planned_windows() -> List[Dict[str, Any]]:
+    """Loads historical planned DHW windows from the persistent decision audit log."""
+    hist_dhw_windows = []
+    audit_file = Path("/config/open_hems_decisions.jsonl")
+    if not audit_file.exists():
+        return hist_dhw_windows
+    try:
+        for l in audit_file.read_text(encoding="utf-8").strip().split("\n"):
+            if not l: continue
+            rec = json.loads(l)
+            if rec.get("domain") != "dhw_boiler": continue
+            ts_str = rec.get("timestamp_iso")
+            if not ts_str: continue
+            rec_dt = datetime.fromisoformat(ts_str).astimezone(AMS_TZ)
+            d_str = rec_dt.strftime("%Y-%m-%d")
+            inputs = rec.get("inputs", {})
+            sel_path = inputs.get("selected_path")
+            paths = inputs.get("evaluated_paths", [])
+            chosen = next((x for x in paths if x.get("path_id") == sel_path), None) or (paths[0] if paths else None)
+            if chosen:
+                day_w = chosen.get("day_window_label", "")
+                if day_w and day_w != "Geen dagrun (Standby)" and "–" in day_w:
+                    s_t, e_t = day_w.split("–")
+                    hist_dhw_windows.append({
+                        "date": d_str,
+                        "start_time": s_t.replace("Nu (", "").replace(")", "").strip(),
+                        "end_time": e_t.replace("Nu (", "").replace(")", "").strip(),
+                        "power_kw": float(chosen.get("day_power_kw", 2.4) or 2.4)
+                    })
+                if chosen.get("night_run_required"):
+                    night_w = chosen.get("night_window_label", "")
+                    if night_w and "–" in night_w:
+                        s_t, e_t = night_w.split("–")
+                        run_d = (rec_dt + timedelta(days=1)).strftime("%Y-%m-%d") if rec_dt.hour >= 12 else d_str
+                        hist_dhw_windows.append({
+                            "date": run_d,
+                            "start_time": s_t.strip(),
+                            "end_time": e_t.strip(),
+                            "power_kw": 1.8
+                        })
+    except Exception as e_dec:
+        print(f"Warning parsing audit log in validation_overlay: {e_dec}")
+    return hist_dhw_windows
 
 
 def handle_get(handler, path: str, qp: dict) -> bool:
@@ -647,6 +694,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     except Exception:
                         pass
 
+            # Load historical planned DHW windows from decision audit log
+            hist_dhw_windows = load_historical_dhw_planned_windows()
+
             prev_dt = None
             for i, p in enumerate(gen_pts):
                 ts_str = p[0]
@@ -691,10 +741,18 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     p_dhw_kw = plan_slot_map[slot_key].dhw_kw
                     p_cv_kw = plan_slot_map[slot_key].heating_kw
                 else:
-                    # Historical lockstep:
-                    # Night (20:00 - 06:00): only if tank dropped < 40C
-                    # Day (10:00 - 15:00): only if tank < 48C or (48 <= tank < 53 with solar surplus >= 3.0 kWh)
+                    # Look up from historical planned decision windows
+                    d_cur = dt_ams.strftime("%Y-%m-%d")
+                    t_cur = dt_ams.strftime("%H:%M")
                     p_dhw_kw = 0.0
+                    for w in hist_dhw_windows:
+                        if w["date"] == d_cur and w["start_time"] <= t_cur < w["end_time"]:
+                            p_dhw_kw = w["power_kw"]
+                            break
+                    # Baseline fallback: standard night charging window (01:30–02:30) if no specific decision window logged
+                    if p_dhw_kw == 0.0 and "01:30" <= t_cur < "02:30":
+                        p_dhw_kw = 1.8
+                    
                     p_cv_kw = 0.0
 
                 pred_dhw.append(p_dhw_kw)
