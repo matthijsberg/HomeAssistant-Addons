@@ -143,7 +143,7 @@
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.103.28</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.103.29</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -224,8 +224,8 @@
 
                             <!-- Interval / Resolutie Toggle -->
                             <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button onclick="setPredictionResolution('1h')" class="res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
-                                <button onclick="setPredictionResolution('15m')" class="res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
+                                <button id="btn-res-prediction-1h" data-res-group="prediction" data-res="1h" onclick="setPredictionResolution('1h')" class="res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
+                                <button id="btn-res-prediction-15m" data-res-group="prediction" data-res="15m" onclick="setPredictionResolution('15m')" class="res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
                             </div>
 
                             <button onclick="loadChartData(); loadElectricityPricesChart(); renderDhwTemperatureChart(); renderHeatingForecastChart();" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
@@ -828,8 +828,8 @@
 
                             <!-- Interval / Resolutie Toggle -->
                             <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button id="pp-btn-res-1h" onclick="setPowerProducersResolution('1h')" class="px-2.5 py-1 rounded transition font-medium bg-blue-600 text-white shadow">1 Uur</button>
-                                <button id="pp-btn-res-15m" onclick="setPowerProducersResolution('15m')" class="px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
+                                <button id="btn-res-history-1h" data-res-group="history" data-res="1h" onclick="setPowerProducersResolution('1h')" class="px-2.5 py-1 rounded transition font-medium bg-blue-600 text-white shadow">1 Uur</button>
+                                <button id="btn-res-history-15m" data-res-group="history" data-res="15m" onclick="setPowerProducersResolution('15m')" class="px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
                             </div>
 
                             <!-- Periode Selector -->
@@ -1626,8 +1626,8 @@
                         <div class="flex items-center gap-2">
                             <!-- Resolution -->
                             <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button onclick="setValidationResolution('15m')" id="val-res-15m" class="px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow">15 Min</button>
-                                <button onclick="setValidationResolution('1h')" id="val-res-1h" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">1 Uur</button>
+                                <button id="btn-res-validation-1h" data-res-group="validation" data-res="1h" onclick="setValidationResolution('1h')" class="px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200">1 Uur</button>
+                                <button id="btn-res-validation-15m" data-res-group="validation" data-res="15m" onclick="setValidationResolution('15m')" class="px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow">15 Min</button>
                             </div>
                             <!-- Timeframe -->
                             <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
@@ -2073,7 +2073,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                     <div class="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div class="space-y-1.5">
                             <div class="flex items-center gap-2.5">
-                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.103.28</span>
+                                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-emerald-950 text-emerald-300 border border-emerald-800">Kennisbank v0.103.29</span>
                                 <span class="text-xs text-slate-400 font-mono">OpenAPI 3.1.0 Compliant</span>
                             </div>
                             <h2 class="text-xl font-bold text-white tracking-wide">Open HEMS Systeemdocumentatie &amp; API Gids</h2>
@@ -3152,7 +3152,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
     </div>
 
     <!-- CLIENT CONTROLLER & CHART.JS ENGINE -->
-    <script src="./js/i18n.js?v=0.103.28"></script>
-    <script src="./js/app.js?v=0.103.28"></script>
+    <script src="./js/i18n.js?v=0.103.29"></script>
+    <script src="./js/app.js?v=0.103.29"></script>
 </body>
 </html>

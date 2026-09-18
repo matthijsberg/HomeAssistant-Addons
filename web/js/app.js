@@ -221,6 +221,25 @@
         Chart.register(OpenHEMSSpitsblokPlugin);
 
         const OpenHEMSChartEngine = {
+            _resolutionListeners: {},
+            _resolutions: {
+                prediction: '1h',
+                history: '1h',
+                validation: '15m'
+            },
+            _styles: {
+                prediction: { active: 'bg-purple-600 text-white shadow', inactive: 'text-slate-400 hover:text-slate-200' },
+                history:    { active: 'bg-blue-600 text-white shadow',   inactive: 'text-slate-400 hover:text-slate-200' },
+                validation: { active: 'bg-blue-600 text-white shadow',   inactive: 'text-slate-400 hover:text-slate-200' }
+            },
+
+            registerResolutionListener(pageId, callback) {
+                if (!this._resolutionListeners[pageId]) {
+                    this._resolutionListeners[pageId] = [];
+                }
+                this._resolutionListeners[pageId].push(callback);
+            },
+
             getChartType() {
                 return localStorage.getItem('openhems_chart_type') || window.predictionChartType || 'bar';
             },
@@ -230,14 +249,34 @@
                 this.syncTypeButtons(type);
                 this.refreshAllCharts();
             },
-            getResolution() {
-                return localStorage.getItem('openhems_resolution') || predictionResolution || '1h';
+            getResolution(pageId = 'prediction') {
+                if (pageId === 'prediction') {
+                    return localStorage.getItem('openhems_resolution') || this._resolutions.prediction || predictionResolution || '1h';
+                }
+                return this._resolutions[pageId] || (pageId === 'validation' ? '15m' : '1h');
             },
-            setResolution(res) {
-                predictionResolution = res;
-                localStorage.setItem('openhems_resolution', res);
-                this.syncResolutionButtons(res);
-                this.refreshAllCharts();
+            setResolution(res, pageId = 'prediction', triggerCallbacks = true) {
+                this._resolutions[pageId] = res;
+                if (pageId === 'prediction') {
+                    predictionResolution = res;
+                    localStorage.setItem('openhems_resolution', res);
+                } else if (pageId === 'history') {
+                    powerProducersResolution = res;
+                } else if (pageId === 'validation') {
+                    validationResolution = res;
+                }
+
+                this.syncResolutionButtons(pageId, res);
+
+                if (triggerCallbacks) {
+                    const listeners = this._resolutionListeners[pageId] || [];
+                    listeners.forEach(cb => {
+                        try { cb(res); } catch (e) { console.error('Error in resolution listener for ' + pageId, e); }
+                    });
+                    if (pageId === 'prediction') {
+                        this.refreshAllCharts();
+                    }
+                }
             },
             syncTypeButtons(type) {
                 const btnBar = document.getElementById('pred-btn-type-bar');
@@ -252,13 +291,56 @@
                     }
                 }
             },
-            syncResolutionButtons(res) {
-                document.querySelectorAll('.res-btn-1h').forEach(b => {
-                    b.className = (res === '1h') ? 'res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow' : 'res-btn-1h px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
+            syncResolutionButtons(pageId = 'prediction', activeRes = null) {
+                // If called with 1 argument that is a resolution ('1h' or '15m'), treat as (prediction, res)
+                if (pageId === '1h' || pageId === '15m') {
+                    activeRes = pageId;
+                    pageId = 'prediction';
+                }
+                if (!activeRes) activeRes = this.getResolution(pageId);
+                const style = this._styles[pageId] || this._styles.prediction;
+                const baseClasses = (pageId === 'validation') ? 'px-2 py-0.5 rounded transition font-medium' : 'px-2.5 py-1 rounded transition font-medium';
+
+                // Unified attribute selector: [data-res-group="pageId"]
+                const groupButtons = document.querySelectorAll(`[data-res-group="${pageId}"]`);
+                if (groupButtons && groupButtons.length > 0) {
+                    groupButtons.forEach(b => {
+                        const bRes = b.getAttribute('data-res');
+                        const isSelected = (bRes === activeRes);
+                        b.className = `${baseClasses} ${isSelected ? style.active : style.inactive}`;
+                    });
+                }
+
+                // Unified ID selector: btn-res-${pageId}-${res}
+                ['15m', '1h'].forEach(r => {
+                    const btn = document.getElementById(`btn-res-${pageId}-${r}`);
+                    if (btn) {
+                        const isSelected = (r === activeRes);
+                        btn.className = `${baseClasses} ${isSelected ? style.active : style.inactive}`;
+                    }
                 });
-                document.querySelectorAll('.res-btn-15m').forEach(b => {
-                    b.className = (res === '15m') ? 'res-btn-15m px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow' : 'res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
-                });
+
+                // Backwards-compatible updates for existing legacy selectors
+                if (pageId === 'prediction') {
+                    document.querySelectorAll('.res-btn-1h').forEach(b => {
+                        b.className = (activeRes === '1h') ? 'res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow' : 'res-btn-1h px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                    });
+                    document.querySelectorAll('.res-btn-15m').forEach(b => {
+                        b.className = (activeRes === '15m') ? 'res-btn-15m px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow' : 'res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                    });
+                } else if (pageId === 'history') {
+                    const btn1h = document.getElementById('pp-btn-res-1h');
+                    const btn15m = document.getElementById('pp-btn-res-15m');
+                    if (btn1h) btn1h.className = (activeRes === '1h') ? 'px-2.5 py-1 rounded transition font-medium bg-blue-600 text-white shadow' : 'px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                    if (btn15m) btn15m.className = (activeRes === '15m') ? 'px-2.5 py-1 rounded transition font-medium bg-blue-600 text-white shadow' : 'px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                } else if (pageId === 'validation') {
+                    ['15m', '1h'].forEach(r => {
+                        const btn = document.getElementById('val-res-' + r);
+                        if (btn) {
+                            btn.className = (r === activeRes) ? 'px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow' : 'px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
+                        }
+                    });
+                }
             },
             refreshAllCharts() {
                 if (typeof loadChartData === 'function') loadChartData();
@@ -273,11 +355,21 @@
                 window.predictionChartType = savedType;
                 this.syncTypeButtons(savedType);
 
-                const savedRes = this.getResolution();
+                const savedRes = this.getResolution('prediction');
                 predictionResolution = savedRes;
-                this.syncResolutionButtons(savedRes);
+                this._resolutions.prediction = savedRes;
+                this._resolutions.history = (typeof powerProducersResolution !== 'undefined' && powerProducersResolution) ? powerProducersResolution : '1h';
+                this._resolutions.validation = (typeof validationResolution !== 'undefined' && validationResolution) ? validationResolution : '15m';
+
+                this.syncResolutionButtons('prediction', savedRes);
+                this.syncResolutionButtons('history', this._resolutions.history);
+                this.syncResolutionButtons('validation', this._resolutions.validation);
             }
         };
+
+        function updateResolutionButtons(pageId, activeRes) {
+            OpenHEMSChartEngine.syncResolutionButtons(pageId, activeRes);
+        }
 
         var chartInstance = null;
         var analyticsChartInstance = null;
@@ -383,39 +475,27 @@
             loadHeatingHistoryChart();
         }
 
-        function setPowerProducersResolution(res) {
-            powerProducersResolution = res;
-            updatePowerProducersResButtons(res);
+        OpenHEMSChartEngine.registerResolutionListener('history', function(res) {
             refreshAllHistoryCharts();
+        });
+
+        function setPowerProducersResolution(res) {
+            OpenHEMSChartEngine.setResolution(res, 'history');
         }
 
         function updatePowerProducersResButtons(res) {
-            const btn1h = document.getElementById('pp-btn-res-1h');
-            const btn15m = document.getElementById('pp-btn-res-15m');
-            if (btn1h && btn15m) {
-                if (res === '1h') {
-                    btn1h.className = 'px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow';
-                    btn15m.className = 'px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
-                } else {
-                    btn1h.className = 'px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
-                    btn15m.className = 'px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow';
-                }
-            }
+            updateResolutionButtons('history', res);
         }
 
         function onPowerProducersRangeChange() {
             const rangeSelect = document.getElementById('pp-range-select');
             const rangeVal = rangeSelect ? rangeSelect.value : '24h';
             // Auto-adjust resolution based on range (Grafana style)
-            if (rangeVal === '24h') {
-                powerProducersResolution = '1h';
-            } else if (rangeVal === '1h' || rangeVal === '6h') {
-                powerProducersResolution = '15m';
-            } else {
-                powerProducersResolution = '1h';
+            let newRes = '1h';
+            if (rangeVal === '1h' || rangeVal === '6h') {
+                newRes = '15m';
             }
-            updatePowerProducersResButtons(powerProducersResolution);
-            refreshAllHistoryCharts();
+            OpenHEMSChartEngine.setResolution(newRes, 'history', true);
         }
 
         window.__simulateBattery = false;
@@ -3679,19 +3759,12 @@
             loadValidationOverlayChart();
         }
 
-        function setValidationResolution(res) {
-            validationResolution = res;
-            ['15m', '1h'].forEach(r => {
-                const btn = document.getElementById('val-res-' + r);
-                if (btn) {
-                    if (r === res) {
-                        btn.className = 'px-2 py-0.5 rounded transition font-medium bg-blue-600 text-white shadow';
-                    } else {
-                        btn.className = 'px-2 py-0.5 rounded transition font-medium text-slate-400 hover:text-slate-200';
-                    }
-                }
-            });
+        OpenHEMSChartEngine.registerResolutionListener('validation', function(res) {
             loadValidationOverlayChart();
+        });
+
+        function setValidationResolution(res) {
+            OpenHEMSChartEngine.setResolution(res, 'validation');
         }
 
         async function loadValidationOverlayChart() {
