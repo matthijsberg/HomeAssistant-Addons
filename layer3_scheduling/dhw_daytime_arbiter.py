@@ -377,19 +377,32 @@ class DhwDaytimeArbiter:
 
         # Comfort check across simulated horizon: detect any drop below comfort threshold (40.0°C)
         # Evaluated on expected median trajectory (P50); stochastic uncertainty is safeguarded via adaptive horizon margin
-        search_start_dip = max(day_slots) + 1 if day_slots else 0
-        dip_slots = [
+        # Dips occurring BEFORE the daytime run must be protected before they breach comfort
+        dips_before_day = [
             (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(sim_labels, sim_temps))
-            if t < spec.comfort_min_temp_c and idx >= search_start_dip
+            if t < spec.comfort_min_temp_c and idx < (min(day_slots) if day_slots else n_slots)
+        ]
+        dips_after_day = [
+            (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(sim_labels, sim_temps))
+            if t < spec.comfort_min_temp_c and idx >= (max(day_slots) + 1 if day_slots else 0)
         ]
 
         first_dip_idx = 0
-        if dip_slots:
-            first_dip_idx, first_dip_time, _ = dip_slots[0]
-            min_dip = min(dip_slots, key=lambda x: x[2])
+        is_pre_day = False
+        if dips_before_day:
+            first_dip_idx, first_dip_time, _ = dips_before_day[0]
+            min_dip = min(dips_before_day, key=lambda x: x[2])
             morn_dip_c = round(min_dip[2], 1)
             morn_dip_time = first_dip_time
             night_required = True
+            is_pre_day = True
+        elif dips_after_day:
+            first_dip_idx, first_dip_time, _ = dips_after_day[0]
+            min_dip = min(dips_after_day, key=lambda x: x[2])
+            morn_dip_c = round(min_dip[2], 1)
+            morn_dip_time = first_dip_time
+            night_required = True
+            is_pre_day = False
         else:
             first_dip_time = "08:30"
             morn_slots = [
@@ -404,6 +417,8 @@ class DhwDaytimeArbiter:
                 morn_dip_c = round(min(sim_temps[:36]), 1) if sim_temps else current_dhw_temp
                 morn_dip_time = "08:30"
             night_required = False
+            is_pre_day = False
+
         night_cost = 0.0
         night_el = 0.0
         night_slots = []
@@ -411,24 +426,34 @@ class DhwDaytimeArbiter:
 
         if night_required:
             # Plan recharge run to 50°C before comfort dip occurs
-            # Search from tonight 21:00 up to the first comfort breach (allows picking cheap morning solar over night)
-            night_start_idx = 0
-            for idx, s in enumerate(slots):
-                dt_val = getattr(s, "dt", None)
-                if dt_val is None:
-                    sl_iso = getattr(s, "dt_iso", "")
-                    dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
-                lbl = getattr(s, "label", getattr(s, "time_label", ""))
-                h = int(lbl.split(":")[0]) if ":" in lbl and not lbl.startswith("Nu") else dt_val.hour
-                if (h >= 21 or dt_val.hour >= 21) and night_start_idx == 0 and dt_val.date() == now_dt.date():
-                    night_start_idx = idx
-                    break
-
-            recharge_end_idx = min(n_slots, first_dip_idx) if dip_slots else min(n_slots, night_start_idx + 36)
-            if recharge_end_idx <= night_start_idx:
-                recharge_start_idx = max(0, recharge_end_idx - 8)
+            if is_pre_day:
+                # Pre-day dip: must recharge before the dip, ideally before morning starts (06:00)
+                morn_limit = first_dip_idx
+                for idx, s in enumerate(slots):
+                    dt_val = getattr(s, "dt", None)
+                    if dt_val is None:
+                        sl_iso = getattr(s, "dt_iso", "")
+                        dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
+                    if idx > 0 and ((dt_val.date() > now_dt.date() and dt_val.hour >= 6) or (now_dt.hour < 6 and dt_val.hour >= 6)):
+                        morn_limit = min(first_dip_idx, idx)
+                        break
+                recharge_start_idx = 0
+                recharge_end_idx = max(4, morn_limit)
             else:
+                night_start_idx = max(day_slots) + 1 if day_slots else 0
+                for idx in range(night_start_idx, n_slots):
+                    s = slots[idx]
+                    dt_val = getattr(s, "dt", None)
+                    if dt_val is None:
+                        sl_iso = getattr(s, "dt_iso", "")
+                        dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
+                    lbl = getattr(s, "label", getattr(s, "time_label", ""))
+                    h = int(lbl.split(":")[0]) if ":" in lbl and not lbl.startswith("Nu") else dt_val.hour
+                    if (h >= 21 or dt_val.hour >= 21) and dt_val.date() >= now_dt.date():
+                        night_start_idx = idx
+                        break
                 recharge_start_idx = night_start_idx
+                recharge_end_idx = min(n_slots, first_dip_idx)
 
             # Temperature before night/recharge run (estimate from simulation around run start)
             t_night_est = max(34.0, morn_dip_c - 1.5)
@@ -648,10 +673,29 @@ class DhwDaytimeArbiter:
 
         # 4. Pure Dynamic Search Window:
         # The daytime heating window is the dynamic valley between the morning peak and the evening peak
+        # Strictly bounded to the upcoming daytime on target_evening_date (Day 1)
         day_start_idx = morn_lockout_end_idx
         day_end_idx = eve_lockout_start_idx
 
-        # If no dynamic morning peak is present in horizon, find start of daytime (hour >= 9 or solar generation)
+        target_day_start = None
+        target_day_end = None
+        for idx, s in enumerate(slots):
+            dt_val = getattr(s, "dt", None)
+            if dt_val is None:
+                sl_iso = getattr(s, "dt_iso", "")
+                dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
+            if dt_val.date() == target_evening_date:
+                if (dt_val.hour >= 9 or getattr(s, "solar_kw", 0.0) > 0.2) and target_day_start is None:
+                    target_day_start = idx
+                if dt_val.hour >= 18 and target_day_end is None:
+                    target_day_end = idx
+
+        if target_day_start is not None:
+            day_start_idx = max(day_start_idx, target_day_start)
+        if target_day_end is not None:
+            day_end_idx = min(day_end_idx, target_day_end)
+
+        # Fallback if no specific target day bounds found
         if day_start_idx == 0:
             for idx, s in enumerate(slots):
                 dt_val = getattr(s, "dt", None)
@@ -662,9 +706,8 @@ class DhwDaytimeArbiter:
                     day_start_idx = idx
                     break
 
-        # If no dynamic evening peak is present in horizon, bound daytime before evening (hour >= 18)
-        if day_end_idx == n_slots:
-            for idx in range(day_start_idx, n_slots):
+        if day_end_idx == n_slots or day_end_idx > (day_start_idx + 48):
+            for idx in range(day_start_idx, min(n_slots, day_start_idx + 48)):
                 s = slots[idx]
                 dt_val = getattr(s, "dt", None)
                 if dt_val is None:
