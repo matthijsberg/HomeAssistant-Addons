@@ -239,6 +239,25 @@ class CentralPlanner:
         # Evaluates 24-hour all-in electricity cost comparing 50°C vs 60°C across the rolling horizon
         else:
             from layer3_scheduling.dhw_daytime_arbiter import DhwDaytimeArbiter
+
+            # Query previous plan from PlanStore for anti-cycling & run continuity
+            prev_path = None
+            prev_target = None
+            is_running = False
+            try:
+                prev_plan = get_plan_store().get_plan()
+                if prev_plan and prev_plan.slots:
+                    gen_dt = getattr(prev_plan, "generated_at", None)
+                    if isinstance(gen_dt, str):
+                        gen_dt = datetime.fromisoformat(gen_dt)
+                    if gen_dt is None or abs((now - gen_dt).total_seconds()) <= 2700:
+                        prev_audit = getattr(prev_plan, "metadata", {}).get("daytime_arbitrage_audit", {}) if getattr(prev_plan, "metadata", None) else {}
+                        prev_path = prev_audit.get("selected_path_id")
+                        prev_target = prev_audit.get("target_temp_c")
+                        is_running = bool(prev_plan.slots[0].dhw_kw > 0.0)
+            except Exception:
+                pass
+
             arbiter_res = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
                 slots=slots,
                 current_dhw_temp=current_dhw_temp,
@@ -247,7 +266,10 @@ class CentralPlanner:
                 now_dt=now,
                 step_hours=step_hours,
                 tariff_provider=tp,
-                tank_spec=spec
+                tank_spec=spec,
+                previous_selected_path=prev_path,
+                previous_target_temp_c=prev_target,
+                is_dhw_running=is_running,
             )
             planned_mode = arbiter_res.planned_mode
             planned_mode_label = arbiter_res.planned_mode_label

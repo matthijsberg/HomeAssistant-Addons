@@ -552,4 +552,110 @@ def test_p95_stochastic_comfort_risk_trigger_and_cost_invariance():
     assert arb_res_55.planned_mode == "normal"
 
 
+def test_dhw_anti_chattering_hysteresis_situation_1_and_2():
+    """
+    Verifies that economic hysteresis prevents rapid mode/target flipping:
+    1. In Situation 1: Pad A2 requires >= €0.03 savings over Pad A1 to trigger from cold start.
+    2. In Situation 2: Pad B2 requires >= €0.06 savings to trigger, but retains down to €0.03.
+    """
+    now_dt = datetime(2026, 9, 18, 12, 0, tzinfo=AMS_TZ)
+    model = DhwThermalModel()
+    spec = DhwTankSpec()
+
+    # Situation 1 test: Solar sequence in the deadband around solar_peak=2.55 kW
+    # When starting on Pad A1, Pad A1 is stably retained across cycles
+    prev_path = "PAD_A1_DAY_50"
+    decisions_a1 = []
+    for sol in [2.54, 2.56, 2.54, 2.56]:
+        slots = make_test_slots(now_dt, hours=24, base_price=0.28, solar_peak=sol)
+        res = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+            slots=slots,
+            current_dhw_temp=48.0,
+            dynamic_peaks=[],
+            dhw_model=model,
+            now_dt=now_dt,
+            tank_spec=spec,
+            previous_selected_path=prev_path
+        )
+        decisions_a1.append(res.selected_path.path_id)
+        prev_path = res.selected_path.path_id
+
+    assert set(decisions_a1) == {"PAD_A1_DAY_50"}
+
+    # When starting on Pad A2, Pad A2 is stably retained across cycles
+    prev_path = "PAD_A2_DAY_60"
+    decisions_a2 = []
+    for sol in [2.54, 2.56, 2.54, 2.56]:
+        slots = make_test_slots(now_dt, hours=24, base_price=0.28, solar_peak=sol)
+        res = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+            slots=slots,
+            current_dhw_temp=48.0,
+            dynamic_peaks=[],
+            dhw_model=model,
+            now_dt=now_dt,
+            tank_spec=spec,
+            previous_selected_path=prev_path
+        )
+        decisions_a2.append(res.selected_path.path_id)
+        prev_path = res.selected_path.path_id
+
+    assert set(decisions_a2) == {"PAD_A2_DAY_60"}
+
+    # Situation 2 test: Pad B2 threshold & retention
+    # At sol=0.74, b2_savings is ~€0.0504 (between 0.03 and 0.06)
+    slots_mid = []
+    for i in range(96):
+        s_dt = now_dt + timedelta(minutes=15 * i)
+        slots_mid.append(MockSlot(slot_idx=i, dt=s_dt, label=s_dt.strftime("%H:%M"), price_all_in=0.20, solar_kw=0.74, unallocated_kw=0.45, outdoor_temp_c=12.0))
+
+    # Without previous B2 state: savings < 0.06 -> Pad B1 (Standby)
+    res_b1 = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+        slots=slots_mid, current_dhw_temp=52.0, dynamic_peaks=[], dhw_model=model, now_dt=now_dt, tank_spec=spec, previous_selected_path=None
+    )
+    assert res_b1.selected_path.path_id == "PAD_B1_STANDBY"
+
+    # With previous B2 state: savings >= 0.03 -> Pad B2 is stably retained!
+    res_b2_retained = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+        slots=slots_mid, current_dhw_temp=52.0, dynamic_peaks=[], dhw_model=model, now_dt=now_dt, tank_spec=spec, previous_selected_path="PAD_B2_BUFFER_60"
+    )
+    assert res_b2_retained.selected_path.path_id == "PAD_B2_BUFFER_60"
+
+
+def test_dhw_commitment_lock_preserves_active_run():
+    """
+    Verifies that Commitment Lock / Run-in-Progress Guard prevents mid-stride abortion:
+    If heat pump is actively running towards 60°C and tank is at 52°C,
+    an updated plan keeps slot 0 active and target at 60°C even if a cold-start planner would pause.
+    """
+    now_dt = datetime(2026, 9, 18, 12, 0, tzinfo=AMS_TZ)
+    model = DhwThermalModel()
+    spec = DhwTankSpec()
+
+    # Flat prices, zero solar: cold start would stay on Standby (Pad B1)
+    slots = []
+    for i in range(96):
+        s_dt = now_dt + timedelta(minutes=15 * i)
+        p = 0.22 if (s_dt.hour < 6 or s_dt.hour >= 23) else 0.28
+        slots.append(MockSlot(slot_idx=i, dt=s_dt, label=s_dt.strftime("%H:%M"), price_all_in=p, solar_kw=0.0, unallocated_kw=0.45, outdoor_temp_c=12.0))
+
+    # Active run in progress towards 60.0°C (current temp 52.0°C < 59.5°C)
+    res = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+        slots=slots,
+        current_dhw_temp=52.0,
+        dynamic_peaks=[],
+        dhw_model=model,
+        now_dt=now_dt,
+        tank_spec=spec,
+        previous_selected_path="PAD_B2_BUFFER_60",
+        previous_target_temp_c=60.0,
+        is_dhw_running=True
+    )
+
+    # Must preserve slot 0 and target 60.0°C to finish the active heating cycle
+    assert 0 in res.planned_slots
+    assert res.target_temp_c == 60.0
+    assert "forced" in res.planned_mode
+
+
+
 

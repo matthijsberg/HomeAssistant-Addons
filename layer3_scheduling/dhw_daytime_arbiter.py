@@ -126,6 +126,11 @@ class DhwDaytimeArbiter:
     DHW_SAFETY_MARGIN_MIN_HOURS: float = 4.0    # Horizon threshold for minimum margin
     DHW_SAFETY_MARGIN_MAX_HOURS: float = 20.0   # Horizon threshold for maximum margin
 
+    # Economic hysteresis & Anti-chattering thresholds
+    DHW_PAD_A2_MIN_SAVINGS_EUR: float = 0.03        # Min savings (€0.03) for Pad A2 (60°C boost) to displace Pad A1
+    DHW_PAD_B2_TRIGGER_SAVINGS_EUR: float = 0.06   # Min savings (€0.06) to trigger Pad B2 (60°C buffer) from standby
+    DHW_PAD_B2_RETENTION_SAVINGS_EUR: float = 0.03 # Retention threshold (€0.03) if Pad B2 was already active
+
     @classmethod
     def calculate_horizon_safety_margin_c(
         cls,
@@ -539,7 +544,10 @@ class DhwDaytimeArbiter:
         now_dt: datetime,
         step_hours: float = 0.25,
         tariff_provider: Optional[TariffProvider] = None,
-        tank_spec: Optional[DhwTankSpec] = None
+        tank_spec: Optional[DhwTankSpec] = None,
+        previous_selected_path: Optional[str] = None,
+        previous_target_temp_c: Optional[float] = None,
+        is_dhw_running: bool = False,
     ) -> DaytimeArbitrationResult:
         """
         Executes complete 24-hour economic arbitration comparing Situation 1 and Situation 2.
@@ -763,10 +771,12 @@ class DhwDaytimeArbiter:
             )
             evaluated_paths.append(path_a2)
 
-            # Decision Situatie 1: Min(Kosten A1, Kosten A2)
-            if path_a2.total_24h_cost_eur < path_a1.total_24h_cost_eur:
+            # Decision Situatie 1: Min(Kosten A1, Kosten A2) with Symmetric Hysteresis Guard (±€0.03)
+            a2_savings = path_a1.total_24h_cost_eur - path_a2.total_24h_cost_eur
+            a2_required_savings = -cls.DHW_PAD_A2_MIN_SAVINGS_EUR if previous_selected_path == "PAD_A2_DAY_60" else cls.DHW_PAD_A2_MIN_SAVINGS_EUR
+            if a2_savings >= a2_required_savings:
                 selected_path = path_a2
-                savings = path_a1.total_24h_cost_eur - path_a2.total_24h_cost_eur
+                savings = a2_savings
                 planned_mode = "forced_solar_boost_60"
                 planned_mode_label = f"Maximaal aan (doorverwarming tot {spec.boost_setpoint_c:.0f}°C)"
                 explanation = (
@@ -906,9 +916,10 @@ class DhwDaytimeArbiter:
                 )
                 evaluated_paths.append(path_b2)
 
-                # Decision Situatie 2: Kies B2 alleen als Kosten B2 < Kosten B1 - €0,05 drempel
+                # Decision Situatie 2: Kies B2 met Hysterese Guard (trigger €0.06 / retention €0.03)
                 b2_savings = path_b1.total_24h_cost_eur - path_b2.total_24h_cost_eur
-                if b2_savings >= 0.05:
+                b2_threshold = cls.DHW_PAD_B2_RETENTION_SAVINGS_EUR if previous_selected_path == "PAD_B2_BUFFER_60" else cls.DHW_PAD_B2_TRIGGER_SAVINGS_EUR
+                if b2_savings >= b2_threshold:
                     selected_path = path_b2
                     savings = b2_savings
                     planned_mode = "forced_solar_boost_60"
@@ -944,6 +955,20 @@ class DhwDaytimeArbiter:
                 final_label = f"Normaal (Standby — Nachtlading gepland om {selected_path.night_window_label})"
                 final_target_c = spec.target_setpoint_c
                 final_power_kw = spec.heat_pump_electric_kw
+
+        # Commitment Lock / Run-in-Progress Guard:
+        # If the heat pump is already actively running DHW in the current slot, preserve the active run
+        # and do not prematurely abort or downgrade setpoint mid-stride unless a hard peak lockout occurs.
+        slot_0_locked = slot_lockout_map.get(0, {}).get("is_hard_lockout", False)
+        if is_dhw_running and not slot_0_locked and previous_target_temp_c and current_dhw_temp < (previous_target_temp_c - 0.5):
+            if 0 not in final_planned_slots:
+                final_planned_slots.insert(0, 0)
+                final_planned_slots.sort()
+            final_target_c = max(final_target_c, previous_target_temp_c)
+            final_power_kw = spec.solar_boost_electric_kw if final_target_c > 52.0 else spec.heat_pump_electric_kw
+            if final_mode == "normal":
+                final_mode = "forced_solar_boost_60" if final_target_c > 52.0 else "forced_on"
+                final_label = f"Actieve Lading Voortzetten (tot {final_target_c:.1f}°C)"
 
         # Multi-run 48h horizon support: if horizon extends beyond 24h (n_slots > 96),
         # simulate with Run 1 active and plan a 2nd recharge run for Day 2 if comfort dips below 40°C
