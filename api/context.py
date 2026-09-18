@@ -62,11 +62,10 @@ from site_adapters.daikin_p1p2 import DaikinP1P2StateClassifier, HeatPumpDisaggr
 from models.canonical import normalize_power_reading, StandardizedState, get_state_metadata
 from layer3_scheduling.peak_detection import detect_dynamic_price_peaks, calc_percentile
 
-CONFIG_FILE = Path("/config/heatpump_config.json")
-PARAMS_FILE = Path("/config/heatpump_model_parameters.json")
-CACHE_FILE = Path("/config/data/energy_feed_cache.json")
-HA_API_CONFIG = Path("/config/.ha_api_config.json")
-SECRETS_FILE = Path("/config/open_hems_secrets.json")
+from api.secrets_store import (
+    CONFIG_FILE, PARAMS_FILE, SECRETS_FILE, HA_API_CONFIG,
+    load_json, save_json, load_secrets, save_secret, get_secret, ensure_framework_defaults
+)
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 INDEX_HTML_PATH = WEB_DIR / "index.html"
 
@@ -133,29 +132,6 @@ def calculate_poa_solar_kw(
     p_dc = (poa_total / 1000.0) * kwp * eff
     return round(min(inverter_limit_kw, p_dc), 3)
 
-
-
-def load_secrets() -> dict:
-    """Loads private credentials from the 0600-permission vault."""
-    if SECRETS_FILE.exists():
-        try:
-            with open(SECRETS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Warning loading secrets: {e}")
-    return {"influxdb": {}, "mqtt": {}}
-
-
-def save_secret(domain: str, conn_id: str, secret: str):
-    """Saves a credential to the isolated private vault with 0600 permissions."""
-    if not secret:
-        return
-    sec = load_secrets()
-    sec.setdefault(domain, {})[conn_id] = secret
-    tmp = f"{SECRETS_FILE}.tmp.{os.getpid()}"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(sec, f, indent=2)
-    os.replace(tmp, SECRETS_FILE)
 
 
 _WORKING_HA_BASE_URL = None
@@ -339,35 +315,8 @@ def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
         pass
 
 
-def get_secret(domain: str, conn_id: str, default: str = "") -> str:
-    """Retrieves a credential from the private vault."""
-    sec = load_secrets()
-    return sec.get(domain, {}).get(conn_id, default)
-
-
 # Ensure module imports prioritize local add-on packages
 sys.path.insert(0, "/config/lib")
-
-
-def load_json(p: Path, default=None):
-    if default is None:
-        default = {}
-    try:
-        if p.exists():
-            with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception as e:
-        print(f"Warning loading {p}: {e}")
-    return default
-
-
-def save_json(p: Path, data: dict):
-    tmp = f"{p}.tmp.{os.getpid()}"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp, p)
-    os.chmod(p, 0o644)
 
 
 def fetch_ha_entities():
@@ -1178,214 +1127,6 @@ def test_mqtt_connection(host, port, username="", password="", client_id=""):
         return {"status": "error", "message": f"Verbinding geweigerd op {host}:{port}. Is de broker actief?", "latency_ms": round((time.time() - t0) * 1000, 1)}
     except Exception as e:
         return {"status": "error", "message": f"Fout: {str(e)}", "latency_ms": round((time.time() - t0) * 1000, 1)}
-
-
-def ensure_framework_defaults(cfg: dict):
-    """Initializes the generic framework defaults if config is fresh."""
-    dirty = False
-
-    # Multi-instance InfluxDB connections
-    if "influxdb_connections" not in cfg or not cfg["influxdb_connections"]:
-        cfg["influxdb_connections"] = [
-            {
-                "id": "local_ha_influxdb",
-                "name": "Lokale Open HEMS InfluxDB (1.8)",
-                "type": "influx_v1",
-                "url": cfg.get("influxdb", {}).get("url", "http://a0d7b954-influxdb:8086"),
-                "database": "openhems",
-                "read_database": "openhems",
-                "username": "openhems",
-                "password": "",
-                "retention_policy": "autogen",
-                "enabled": True,
-                "is_default": True
-            }
-        ]
-        dirty = True
-    else:
-        for c in cfg["influxdb_connections"]:
-            if c.get("id") == "local_ha_influxdb":
-                if c.get("database") in ["hermes", "hassio"]:
-                    c["database"] = "openhems"
-                    dirty = True
-                if c.get("username") == "hermes":
-                    c["username"] = "openhems"
-                    dirty = True
-
-    # Multi-instance MQTT connections
-    if "mqtt_connections" not in cfg or not cfg["mqtt_connections"]:
-        cfg["mqtt_connections"] = [
-            {
-                "id": "local_mosquitto",
-                "name": "Lokale Mosquitto Broker",
-                "type": "standard",
-                "host": cfg.get("mqtt", {}).get("host", "core-mosquitto"),
-                "port": cfg.get("mqtt", {}).get("port", 1883),
-                "base_topic": cfg.get("mqtt", {}).get("base_topic", "openhems"),
-                "client_id": cfg.get("mqtt", {}).get("client_id", "open-hems-collector"),
-                "username": cfg.get("mqtt", {}).get("username", ""),
-                "password": cfg.get("mqtt", {}).get("password", ""),
-                "tls": cfg.get("mqtt", {}).get("tls", False),
-                "enabled": True,
-                "is_default": True
-            }
-        ]
-        dirty = True
-
-    # Keep top-level influxdb and mqtt pointers synchronized
-    if "influxdb" not in cfg:
-        cfg["influxdb"] = cfg["influxdb_connections"][0]
-        dirty = True
-    if "mqtt" not in cfg:
-        cfg["mqtt"] = cfg["mqtt_connections"][0]
-        dirty = True
-
-    if "providers" not in cfg:
-        cfg["providers"] = {
-            "epex_spot": {
-                "id": "epex_spot",
-                "name": "EPEX Spot Day-Ahead & Quarter-Hourly Prices",
-                "type": "market_prices",
-                "url": "https://api.energyzero.net/v1/energyprices",
-                "enabled": True
-            },
-            "open_meteo": {
-                "id": "open_meteo",
-                "name": "Open-Meteo Solar & Weather Forecast",
-                "type": "weather_solar",
-                "url": "https://api.open-meteo.com/v1/forecast",
-                "enabled": True
-            }
-        }
-        dirty = True
-
-    if "tariffs_list" not in cfg:
-        cfg["tariffs_list"] = [
-            {
-                "id": "powerpeers_dynamic",
-                "name": "Powerpeers Dynamisch",
-                "provider": "epex_spot",
-                "import_markup_eur_kwh": 0.01210,
-                "export_markup_eur_kwh": 0.01210,
-                "electricity_tax_eur_kwh": 0.11085,
-                "fixed_monthly_fee_eur": 6.25,
-                "contract_start_date": "2026-09-25",
-                "interval": "15m",
-                "active": True
-            }
-        ]
-        dirty = True
-
-    # Decoupled Policies
-    if "policies" not in cfg or not cfg["policies"]:
-        cfg["policies"] = [
-            {
-                "id": "dhw_thermal_buffer_policy",
-                "name": "350L SWW Boiler Buffer Beleid",
-                "type": "thermal_buffer",
-                "target_devices": ["daikin_heat_pump", "dhw_tank"],
-                "parameters": {
-                    "storage_volume_liters": 350,
-                    "emergency_threshold_c": 38.0,
-                    "deadband_reheat_c": 46.0,
-                    "target_temperature_c": 50.0,
-                    "solar_boost_temperature_c": 60.0,
-                    "morning_peak_lockout": True,
-                    "evening_peak_lockout": True,
-                    "isolate_space_heating_during_dhw": True,
-                    "min_run_time_minutes": 20
-                }
-            },
-            {
-                "id": "deye_battery_arbitrage_policy",
-                "name": "Deye Accu Arbitrage & Zelfconsumptie",
-                "type": "battery_arbitrage",
-                "target_devices": ["deye_home_battery"],
-                "parameters": {
-                    "capacity_kwh": 10.0,
-                    "roundtrip_efficiency": 0.87,
-                    "lcos_depreciation_eur_kwh": 0.0741,
-                    "min_price_spread_eur_kwh": 0.115,
-                    "solar_surplus_priority": True,
-                    "min_soc_pct": 10.0,
-                    "max_soc_pct": 95.0,
-                    "peak_shaving_threshold_amps": 20.0
-                }
-            },
-            {
-                "id": "dishwasher_shiftable_policy",
-                "name": "Vaatwasser Dal- & Zonnestart",
-                "type": "shiftable_consumer",
-                "target_devices": [],
-                "parameters": {
-                    "duration_minutes": 90,
-                    "power_watts": 1200,
-                    "can_interrupt": False,
-                    "window_start_hour": 8,
-                    "window_end_hour": 20,
-                    "prefer_solar_surplus": True,
-                    "min_solar_surplus_watts": 1500
-                }
-            }
-        ]
-        dirty = True
-
-    # Devices (pure hardware)
-    if "devices" not in cfg or not cfg["devices"]:
-        cfg["devices"] = [
-            {
-                "id": "main_grid_meter",
-                "name": "Hoofdmeter (P1 DSMR)",
-                "type": "grid_meter",
-                "adapter": "p1_dsmr",
-                "capabilities": ["read_power", "read_energy"],
-                "ha_power_entity": "sensor.power_production_in_watt_avg",
-                "ha_energy_entity": "sensor.energy_consumed_tariff_1",
-                "parameters": {"phases": 3, "max_amps": 25.0}
-            },
-            {
-                "id": "rooftop_solar",
-                "name": "Zonnepanelen (SolarEdge)",
-                "type": "solar_inverter",
-                "adapter": "sunspec_modbus",
-                "capabilities": ["read_power", "read_energy", "curtail_production"],
-                "ha_power_entity": "sensor.zonnepanelen_power_avg_5_minutes",
-                "ha_energy_entity": "sensor.daily_energy_production_solar2",
-                "parameters": {"peak_power_kw": 5.5, "tilt_deg": 40.0, "azimuth_deg": 225.0}
-            },
-            {
-                "id": "daikin_heat_pump",
-                "name": "Daikin Altherma 3 H HT (18 kW)",
-                "type": "heat_pump",
-                "adapter": "smart_grid_relay",
-                "capabilities": ["set_mode", "read_power"],
-                "ha_power_entity": "sensor.warmtepomp_power",
-                "ha_control_entity": "switch.warmtepomp_smart_grid_1_s10s",
-                "parameters": {"compressor_power_kw": 3.0, "min_run_time_minutes": 20}
-            },
-            {
-                "id": "dhw_tank",
-                "name": "Warm Tapwatervat (OEG 350L SWW)",
-                "type": "thermal_storage",
-                "adapter": "temperature_sensor",
-                "capabilities": ["read_temperature", "read_energy"],
-                "ha_temp_entity": "sensor.hc_dhw_temperature_r5t_dhw_tank",
-                "parameters": {"volume_liters": 350}
-            },
-            {
-                "id": "deye_home_battery",
-                "name": "Deye Hybride Thuisaccu (10 kW / 10 kWh)",
-                "type": "home_battery",
-                "adapter": "deye_modbus_tcp",
-                "capabilities": ["read_power", "read_soc", "set_power_limit", "set_mode"],
-                "ha_power_entity": "sensor.battery_power",
-                "parameters": {"capacity_kwh": 10.0, "max_charge_power_w": 5000, "max_discharge_power_w": 5000}
-            }
-        ]
-        dirty = True
-
-    if dirty:
-        save_json(CONFIG_FILE, cfg)
 
 
 EPEX_CACHE_FILE = Path("/config/open_hems_epex_cache.json")
