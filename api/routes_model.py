@@ -16,8 +16,9 @@ from api.context import (
     get_ha_states_map, calculate_poa_solar_kw, format_slot_label,
     fetch_recent_telemetry_history, ensure_active_canonical_plan,
     GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR, GLOBAL_CENTRAL_CACHE,
-    evaluate_and_apply_dhw_run_merger, PARAMS_FILE, AMS_TZ
+    PARAMS_FILE, AMS_TZ
 )
+from layer3_scheduling.plan_decision_evaluator import evaluate_and_apply_dhw_run_merger
 from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
 
 def handle_get(handler, path: str, qp: dict) -> bool:

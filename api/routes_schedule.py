@@ -18,9 +18,10 @@ from api.context import (
     get_ha_states_map, calculate_poa_solar_kw, format_slot_label,
     fetch_recent_telemetry_history, ensure_active_canonical_plan,
     ensure_framework_defaults, DUTCH_DAYS_SHORT, GLOBAL_CENTRAL_CACHE,
-    evaluate_and_apply_dhw_run_merger, get_epex_tariffs_cached,
+    get_epex_tariffs_cached,
     GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
 )
+from layer3_scheduling.plan_decision_evaluator import evaluate_and_apply_dhw_run_merger
 from models.canonical import StandardizedState
 from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
 

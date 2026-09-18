@@ -39,14 +39,18 @@ from api.context import (
     GLOBAL_MODEL, INDEX_HTML_PATH, PARAMS_FILE, SECRETS_FILE, WEB_DIR,
     calculate_poa_solar_kw, call_ha_service, call_ha_service_detailed,
     ensure_active_canonical_plan, ensure_framework_defaults,
-    evaluate_and_apply_dhw_run_merger, evaluate_and_log_night_boiler_decision,
-    evaluate_and_log_planner_decisions, fetch_ha_entities,
+    fetch_ha_entities,
     fetch_recent_telemetry_history, format_slot_label,
     get_anchored_weather_forecast, get_epex_tariffs_cached,
     get_ha_client_config, get_ha_states_map, get_secret, load_json,
     load_secrets, log_technical_error, make_daikin_ha_actuator, save_json,
     save_secret, test_influxdb_connection, test_mqtt_connection,
     write_hems_annotation
+)
+from layer3_scheduling.plan_decision_evaluator import (
+    evaluate_and_apply_dhw_run_merger,
+    evaluate_and_log_night_boiler_decision,
+    evaluate_and_log_planner_decisions
 )
 
 class HemsApiHandler(BaseHTTPRequestHandler):

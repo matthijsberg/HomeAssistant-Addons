@@ -18,9 +18,7 @@ def _get_combined_backend_source():
         repo_root / "api" / "routes_system.py",
         repo_root / "api" / "routes_schedule.py",
         repo_root / "api" / "routes_analytics.py",
-        Path("/config/addons/open-hems/daemon.py"),
-        Path("/config/addons/open-hems/api/routes_model.py"),
-        Path("/config/addons/open-hems/api/routes_system.py"),
+        repo_root / "api" / "context.py",
     ]
     seen = set()
     text = ""
@@ -81,4 +79,33 @@ def test_heating_forecast_handler_is_pure_dumb_view():
     # Must NOT have raw climate entity queries
     assert "climate.woonkamer_climate_daikin" not in hf_block, (
         "/api/model/heating-forecast must NOT have raw HA entity strings!"
+    )
+
+
+def test_context_module_has_no_decision_or_actuation_logic():
+    """
+    Architecture Invariant #1: Dumb Views & Context Isolation.
+    api/context.py must remain a low-level I/O and telemetry context provider.
+    It must NOT contain business evaluation logic (e.g. 'evaluate_*' functions)
+    or direct actuation orchestration (which belongs in layer3_scheduling and layer4_control).
+    """
+    repo_root = Path(__file__).parent.parent.parent
+    context_file = repo_root / "api" / "context.py"
+    assert context_file.exists(), "api/context.py must exist"
+
+    tree = ast.parse(context_file.read_text(encoding="utf-8"), filename="api/context.py")
+
+    violations = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Disallow business evaluation functions
+            if node.name.startswith("evaluate_") or "decision" in node.name:
+                violations.append(
+                    f"api/context.py:{node.lineno} defines forbidden decision logic function '{node.name}()'"
+                )
+
+    assert not violations, (
+        "Architectural violations found in api/context.py:\n"
+        + "\n".join(violations)
+        + "\nDecision and evaluation logic belongs in layer3_scheduling or layer4_control."
     )
