@@ -25,7 +25,8 @@ from integrations.homeassistant.client import (
 )
 from api.energy_feed import (
     AMS_TZ, DUTCH_DAYS_SHORT, format_slot_label,
-    calculate_poa_solar_kw, fetch_recent_telemetry_history, get_epex_tariffs_cached
+    calculate_poa_solar_kw, fetch_recent_telemetry_history,
+    get_epex_tariffs_cached, get_tariff_sources_map
 )
 from layer3_scheduling.plan_decision_evaluator import evaluate_and_apply_dhw_run_merger
 from models.canonical import StandardizedState
@@ -91,6 +92,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
         # 1. Fetch EPEX prices from dedicated Day-Ahead cache
         _, prices_map, map_base = get_epex_tariffs_cached(is_15m=is_15m)
+        tariff_sources = get_tariff_sources_map()
 
         # 2. Fetch Calibrated Solar Forecast (Forecast.Solar) & Weather
         solar_map = {}
@@ -150,6 +152,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         # Build continuous solar map and temp map per 15-minute slot
         labels = []
         prices = []
+        price_sources = []
         export_prices = []
         solar = []
         unallocated = []
@@ -165,6 +168,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             k_full = dt_slot.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
             k_hour = dt_slot.strftime("%Y-%m-%d %H:00")
             k_next_hour = (dt_slot + timedelta(hours=1)).strftime("%Y-%m-%d %H:00")
+
+            src = tariff_sources.get(k_full, tariff_sources.get(k_hour, "epex"))
+            price_sources.append(src)
 
             if i == 0:
                 lbl = dt_slot.strftime("Nu (%H:%M)" if is_15m else "Nu (%H:00)")
@@ -733,6 +739,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         all_bat_discharge = hist_bat_discharge + battery_discharge
         all_prices = hist_prices + prices
         all_export_prices = hist_export_prices + export_prices
+        all_price_sources = ["epex"] * len(hist_pts) + price_sources
 
         all_solar_neg = [-round(s, 2) for s in all_solar]
         all_bat_discharge_neg = [-round(d, 2) for d in all_bat_discharge]
@@ -751,6 +758,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "hours": all_labels,
             "labels": all_labels,
             "interval_h": step_h,
+            "price_sources": all_price_sources,
             "battery_enabled": is_battery_active,
             "battery_simulated": bool(sim_battery_param and not battery_installed),
             "export_prices_eur": all_export_prices,

@@ -1399,22 +1399,56 @@
                 }
             });
 
+            const priceSources = (window.__lastElectricityPricesData && window.__lastElectricityPricesData.price_sources) || [];
+            const isStroomvoorspeller = (priceSources[dataIndex] === 'stroomvoorspeller');
             const taxOpslag = epexPrice - exportPrice;
 
-            renderCustomTooltip(context, {
-                dotColor: 'bg-blue-400',
-                headerBadge: `<span class="text-[10px] text-blue-300 font-mono font-semibold px-2 py-0.5 rounded bg-blue-950/80 border border-blue-800">Afname: €${epexPrice.toFixed(4)}/kWh</span>`,
-                rows: [
-                    { type: 'line', color: '#3B82F6', label: 'Stroom Afname (All-in)', val: `€${epexPrice.toFixed(4)}/kWh` },
-                    { type: 'dashed-line', color: '#38BDF8', label: 'Teruglevering (Export)', val: `€${exportPrice.toFixed(4)}/kWh`, valClass: 'font-medium text-cyan-300 font-mono' },
-                    { type: 'bar', color: 'rgba(234, 179, 8, 0.5)', label: 'Zonnepanelen Productie', val: `${solarProd.toFixed(2)} kW`, valClass: 'font-bold text-amber-400 font-mono' }
-                ],
-                footer: taxOpslag > 0 ? `
+            const dotColor = isStroomvoorspeller ? 'bg-indigo-400' : 'bg-blue-400';
+            const badgeClass = isStroomvoorspeller
+                ? 'text-indigo-300 bg-indigo-950/80 border-indigo-700'
+                : 'text-blue-300 bg-blue-950/80 border-blue-800';
+            const badgeLabel = isStroomvoorspeller ? 'Prognose:' : 'Afname:';
+
+            const importLabel = isStroomvoorspeller ? 'Stroom Afname (Stroomvoorspeller)' : 'Stroom Afname (All-in)';
+            const importIndicator = isStroomvoorspeller
+                ? { type: 'dashed-line', color: '#818CF8', label: importLabel, val: `€${epexPrice.toFixed(4)}/kWh`, valClass: 'font-bold text-indigo-300 font-mono' }
+                : { type: 'line', color: '#3B82F6', label: importLabel, val: `€${epexPrice.toFixed(4)}/kWh` };
+
+            const exportLabel = isStroomvoorspeller ? 'Teruglevering (Prognose)' : 'Teruglevering (Export)';
+            const exportIndicator = {
+                type: 'dashed-line',
+                color: isStroomvoorspeller ? '#67E8F9' : '#38BDF8',
+                label: exportLabel,
+                val: `€${exportPrice.toFixed(4)}/kWh`,
+                valClass: 'font-medium text-cyan-300 font-mono'
+            };
+
+            let footerHtml = '';
+            if (taxOpslag > 0) {
+                footerHtml += `
                     <div class="mt-2.5 pt-2 border-t border-slate-700/80 flex items-center justify-between font-bold text-xs font-mono">
                         <span class="text-slate-400">Belasting &amp; Opslag:</span>
                         <span class="text-slate-300">€${taxOpslag.toFixed(4)}/kWh</span>
                     </div>
-                ` : ''
+                `;
+            }
+            if (isStroomvoorspeller) {
+                footerHtml += `
+                    <div class="pt-1.5 text-[10px] text-indigo-300/80 text-right italic font-sans flex items-center justify-end gap-1">
+                        <span>🔮 Modelprognose Stroomvoorspeller.nl</span>
+                    </div>
+                `;
+            }
+
+            renderCustomTooltip(context, {
+                dotColor: dotColor,
+                headerBadge: `<span class="text-[10px] ${badgeClass} font-mono font-semibold px-2 py-0.5 rounded border">${badgeLabel} €${epexPrice.toFixed(4)}/kWh</span>`,
+                rows: [
+                    importIndicator,
+                    exportIndicator,
+                    { type: 'bar', color: 'rgba(234, 179, 8, 0.5)', label: 'Zonnepanelen Productie', val: `${solarProd.toFixed(2)} kW`, valClass: 'font-bold text-amber-400 font-mono' }
+                ],
+                footer: footerHtml
             });
         }
 
@@ -1642,13 +1676,18 @@
                 if (cleanLabel.includes('Zon Direct Benut')) return;
 
                 if (cleanLabel.includes('Stroomprijs') || cleanLabel.includes('Tarief') || cleanLabel.includes('Prijs')) {
+                    const priceSources = isPrediction
+                        ? (window.__lastPredictionData?.price_sources || [])
+                        : [];
+                    const isStroomvoorspeller = (priceSources[dataIndex] === 'stroomvoorspeller');
+                    const lblText = isStroomvoorspeller ? 'Stroomprijs (Stroomvoorspeller)' : (cleanLabel.includes('EPEX') ? cleanLabel : 'Stroomprijs (EPEX)');
                     dynamicRows.push({
                         type: 'dashed-line',
-                        color: color,
-                        label: cleanLabel,
+                        color: isStroomvoorspeller ? '#818CF8' : color,
+                        label: lblText,
                         labelClass: 'text-slate-300 truncate',
                         val: `€${Number(rawVal).toFixed(4)}/kWh`,
-                        valClass: 'font-bold text-cyan-300 font-mono'
+                        valClass: isStroomvoorspeller ? 'font-bold text-indigo-300 font-mono' : 'font-bold text-cyan-300 font-mono'
                     });
                     return;
                 }
@@ -3361,6 +3400,8 @@
                 if (electricityPricesChartInstance) electricityPricesChartInstance.destroy();
 
                 const isBarMode = (OpenHEMSChartEngine.getChartType() === 'bar');
+                const priceSources = data.price_sources || [];
+                const hasStroomvoorspeller = priceSources.includes('stroomvoorspeller');
 
                 const solarDataset = isBarMode ? {
                     id: 'solar_forecast',
@@ -3391,23 +3432,39 @@
                 const priceDataset = {
                     id: 'epex_import',
                     type: 'line',
-                    label: 'EPEX Inkoop All-in (€/kWh)',
+                    label: hasStroomvoorspeller ? 'Stroom Inkoop (EPEX / Stroomvoorspeller)' : 'EPEX Inkoop All-in (€/kWh)',
                     data: data.epex_prices || [],
                     yAxisID: 'y',
                     borderColor: '#3B82F6',
                     backgroundColor: 'transparent',
-                    borderWidth: 1.5,
+                    borderWidth: 2,
                     stepped: 'before',
                     pointRadius: 0,
                     pointHoverRadius: 4,
                     tension: 0,
-                    order: 1
+                    order: 1,
+                    segment: {
+                        borderColor: ctx => {
+                            const i = ctx.p0DataIndex;
+                            if (priceSources[i] === 'stroomvoorspeller' || priceSources[i + 1] === 'stroomvoorspeller') {
+                                return '#818CF8'; // Softer indigo for model forecast
+                            }
+                            return '#3B82F6'; // Solid blue for verified EPEX
+                        },
+                        borderDash: ctx => {
+                            const i = ctx.p0DataIndex;
+                            if (priceSources[i] === 'stroomvoorspeller' || priceSources[i + 1] === 'stroomvoorspeller') {
+                                return [5, 4]; // Dashed for Stroomvoorspeller!
+                            }
+                            return []; // Solid for EPEX!
+                        }
+                    }
                 };
 
                 const exportDataset = {
                     id: 'epex_export',
                     type: 'line',
-                    label: 'EPEX Teruglevering (€/kWh)',
+                    label: hasStroomvoorspeller ? 'Teruglevering (EPEX / Stroomvoorspeller)' : 'EPEX Teruglevering (€/kWh)',
                     data: data.export_prices || [],
                     yAxisID: 'y',
                     borderColor: '#06B6D4',
@@ -3419,7 +3476,23 @@
                     pointHoverRadius: 4,
                     tension: 0,
                     fill: false,
-                    order: 3
+                    order: 3,
+                    segment: {
+                        borderColor: ctx => {
+                            const i = ctx.p0DataIndex;
+                            if (priceSources[i] === 'stroomvoorspeller' || priceSources[i + 1] === 'stroomvoorspeller') {
+                                return '#67E8F9'; // Light cyan for forecast export
+                            }
+                            return '#06B6D4'; // Dark cyan for verified EPEX
+                        },
+                        borderDash: ctx => {
+                            const i = ctx.p0DataIndex;
+                            if (priceSources[i] === 'stroomvoorspeller' || priceSources[i + 1] === 'stroomvoorspeller') {
+                                return [2, 3]; // Fine dash for forecast
+                            }
+                            return [4, 4]; // Standard dash for EPEX
+                        }
+                    }
                 };
 
                 const ctx = canvas.getContext('2d');

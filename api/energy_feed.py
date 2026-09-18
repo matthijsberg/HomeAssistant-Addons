@@ -339,6 +339,89 @@ EPEX_CACHE_FILE = Path("/config/open_hems_epex_cache.json")
 _EPEX_CACHE_DATA: Dict[str, Any] = {}
 _LAST_EPEX_POLL_TS = 0.0
 
+STROOMVOORSPELLER_CACHE_FILE = Path("/config/open_hems_stroomvoorspeller_cache.json")
+_STROOMVOORSPELLER_CACHE_DATA: Dict[str, Any] = {}
+_LAST_STROOMVOORSPELLER_POLL_TS = 0.0
+_TARIFF_SOURCES_MAP: Dict[str, str] = {}
+
+
+def _load_stroomvoorspeller_cache() -> None:
+    global _STROOMVOORSPELLER_CACHE_DATA
+    if not _STROOMVOORSPELLER_CACHE_DATA and STROOMVOORSPELLER_CACHE_FILE.exists():
+        try:
+            with open(STROOMVOORSPELLER_CACHE_FILE, "r", encoding="utf-8") as f:
+                _STROOMVOORSPELLER_CACHE_DATA = json.load(f)
+        except Exception:
+            _STROOMVOORSPELLER_CACHE_DATA = {}
+
+
+def _save_stroomvoorspeller_cache() -> None:
+    try:
+        tmp = f"{STROOMVOORSPELLER_CACHE_FILE}.tmp.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_STROOMVOORSPELLER_CACHE_DATA, f, indent=2)
+        os.replace(tmp, STROOMVOORSPELLER_CACHE_FILE)
+    except Exception as e:
+        print(f"Warning saving Stroomvoorspeller cache: {e}")
+
+
+def fetch_stroomvoorspeller_tariffs_cached(force: bool = False) -> Dict[str, Any]:
+    """
+    Fetches and caches up to 7-day ahead hourly electricity price predictions from Stroomvoorspeller.nl.
+    Open Data JSON endpoint: https://stroomvoorspeller.nl/data/forecast.json
+    Refreshes at most once every 3 hours unless force=True.
+    """
+    global _LAST_STROOMVOORSPELLER_POLL_TS, _STROOMVOORSPELLER_CACHE_DATA
+    _load_stroomvoorspeller_cache()
+    now_ts = time.time()
+
+    need_poll = force or not _STROOMVOORSPELLER_CACHE_DATA or (now_ts - _LAST_STROOMVOORSPELLER_POLL_TS >= 10800.0)
+
+    if need_poll:
+        _LAST_STROOMVOORSPELLER_POLL_TS = now_ts
+        try:
+            url = "https://stroomvoorspeller.nl/data/forecast.json"
+            req = urllib.request.Request(url, headers={"User-Agent": "OpenHEMS/1.0"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                data = json.loads(r.read().decode())
+                forecasts = data.get("forecasts", [])
+                if forecasts:
+                    parsed_map = {}
+                    for fc in forecasts:
+                        t_str = fc.get("time")
+                        if not t_str:
+                            continue
+                        dt = datetime.fromisoformat(t_str).astimezone(ZoneInfo("Europe/Amsterdam"))
+                        k_h = dt.strftime("%Y-%m-%d %H:00")
+                        base_eur = round(float(fc.get("predicted", 0.0)) / 1000.0, 4)
+                        all_in_eur = round((base_eur + 0.0121 + 0.11085) * 1.21, 4)
+                        export_eur = round(max(0.0, base_eur - 0.00605), 4)
+                        parsed_map[k_h] = {
+                            "dt": dt.isoformat(),
+                            "base": base_eur,
+                            "all_in": all_in_eur,
+                            "export": export_eur,
+                            "regime": fc.get("regime", "normaal"),
+                            "p_negative": fc.get("P_negative", 0.0)
+                        }
+                    _STROOMVOORSPELLER_CACHE_DATA = {
+                        "generated_at": data.get("generated_at"),
+                        "horizon_end": data.get("horizon_end"),
+                        "hours": parsed_map
+                    }
+                    _save_stroomvoorspeller_cache()
+                    print(f"[Open HEMS] Stroomvoorspeller 7-daagse prijsprognose opgehaald ({len(parsed_map)} uren).")
+        except Exception as e:
+            print(f"[Open HEMS] Ophalen Stroomvoorspeller data gaf fout: {e}")
+
+    return _STROOMVOORSPELLER_CACHE_DATA
+
+
+def get_tariff_sources_map() -> Dict[str, str]:
+    """Returns the mapping of timestamp -> 'epex' | 'stroomvoorspeller'."""
+    global _TARIFF_SOURCES_MAP
+    return dict(_TARIFF_SOURCES_MAP)
+
 
 def _load_epex_cache() -> None:
     global _EPEX_CACHE_DATA
@@ -435,7 +518,24 @@ def get_epex_tariffs_cached(is_15m: bool = True, force: bool = False) -> Tuple[L
     raw_prices = []
     map_all_in = {}
     map_base = {}
+    _TARIFF_SOURCES_MAP.clear()
 
+    # 1. Base Layer (Tier 2): Stroomvoorspeller 7-day model predictions
+    sv_data = fetch_stroomvoorspeller_tariffs_cached()
+    sv_hours = sv_data.get("hours", {}) if isinstance(sv_data, dict) else {}
+    for k_h, it in sv_hours.items():
+        if is_15m:
+            for m in [0, 15, 30, 45]:
+                k_q = f"{k_h[:13]}:{m:02d}"
+                map_all_in[k_q] = it["all_in"]
+                map_base[k_q] = it["base"]
+                _TARIFF_SOURCES_MAP[k_q] = "stroomvoorspeller"
+        else:
+            map_all_in[k_h] = it["all_in"]
+            map_base[k_h] = it["base"]
+            _TARIFF_SOURCES_MAP[k_h] = "stroomvoorspeller"
+
+    # 2. Authoritative Top Layer (Tier 1): EPEX Day-Ahead ALWAYS overwrites Stroomvoorspeller
     for d_k in [today_key, tomorrow_key]:
         if d_k in _EPEX_CACHE_DATA and cache_type in _EPEX_CACHE_DATA[d_k]:
             blob = _EPEX_CACHE_DATA[d_k][cache_type]
@@ -444,7 +544,8 @@ def get_epex_tariffs_cached(is_15m: bool = True, force: bool = False) -> Tuple[L
                 k_dt = dt.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
                 p_val = round(it["val"], 4)
                 map_all_in[k_dt] = p_val
-                raw_prices.append({"dt": dt, "price": p_val})
+                _TARIFF_SOURCES_MAP[k_dt] = "epex"  # EPEX WINS!
+                raw_prices.append({"dt": dt, "price": p_val, "source": "epex"})
             for it in blob.get("base", []):
                 dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Amsterdam"))
                 k_dt = dt.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")

@@ -22,7 +22,8 @@ from integrations.homeassistant.client import (
 )
 from api.energy_feed import (
     AMS_TZ, DUTCH_DAYS_SHORT, format_slot_label,
-    calculate_poa_solar_kw, fetch_recent_telemetry_history, get_epex_tariffs_cached
+    calculate_poa_solar_kw, fetch_recent_telemetry_history,
+    get_epex_tariffs_cached, get_tariff_sources_map
 )
 from layer3_scheduling.decision_audit import DecisionAuditLogger
 
@@ -227,19 +228,25 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
             # 1. Fetch EPEX Spot Prices from dedicated Day-Ahead cache
             _, prices_map, prices_base_map = get_epex_tariffs_cached(is_15m=is_15m)
+            tariff_sources = get_tariff_sources_map()
 
             labels = []
             prices_all_in = []
             prices_base = []
+            price_sources = []
             solar_forecast_kw = []
 
             prev_ep_dt = None
             for i in range(total_slots):
                 dt_slot = base_dt + timedelta(minutes=step_mins * i)
                 k_full = dt_slot.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
+                k_hour = dt_slot.strftime("%Y-%m-%d %H:00")
                 lbl = format_slot_label(dt_slot, prev_ep_dt, i == 0, is_15m)
                 prev_ep_dt = dt_slot
                 labels.append(lbl)
+
+                src = tariff_sources.get(k_full, tariff_sources.get(k_hour, "epex"))
+                price_sources.append(src)
 
                 if is_15m:
                     plan_slot = plan.slots[i] if plan and i < len(plan.slots) else None
@@ -307,6 +314,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "epex_prices": hist_prices_all_in + prices_all_in,
                 "epex_base_prices": hist_prices_base + prices_base,
                 "export_prices": full_export_prices,
+                "price_sources": ["epex"] * len(hist_pts) + price_sources,
                 "solar_forecast_kw": hist_solar + solar_forecast_kw,
                 "solar_cost": solar_cost,
                 "history_count": len(hist_pts),
