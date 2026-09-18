@@ -332,6 +332,18 @@
                     if (sel && ['24h', '48h'].includes(activeHorizon) && sel.value !== activeHorizon) {
                         sel.value = activeHorizon;
                     }
+                } else if (pageId === 'prediction') {
+                    const badge = document.getElementById('prediction-horizon-badge');
+                    if (badge) badge.textContent = (activeHorizon === '48h') ? '48H FORECAST' : '24H FORECAST';
+
+                    const costTitle = document.getElementById('cost-forecast-title');
+                    if (costTitle) costTitle.textContent = (activeHorizon === '48h') ? 'Kosten Forecast (48h)' : 'Kosten Forecast (24h)';
+
+                    const dhwTitle = document.getElementById('dhw-forecast-title');
+                    if (dhwTitle) dhwTitle.textContent = (activeHorizon === '48h') ? 'Boilervat Temperatuurtraject & Verwachte Warmwatervraag (48 Uur Vooruit)' : 'Boilervat Temperatuurtraject & Verwachte Warmwatervraag (24 Uur Vooruit)';
+
+                    const heatingTitle = document.getElementById('heating-forecast-title');
+                    if (heatingTitle) heatingTitle.textContent = (activeHorizon === '48h') ? 'CV Ruimteverwarming: Temperatuurtraject & Verwacht Warmteverlies (48 Uur Vooruit)' : 'CV Ruimteverwarming: Temperatuurtraject & Verwacht Warmteverlies (24 Uur Vooruit)';
                 }
             },
             syncTypeButtons(type) {

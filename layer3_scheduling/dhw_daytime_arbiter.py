@@ -311,11 +311,12 @@ class DhwDaytimeArbiter:
         n_slots = len(slots)
         day_slots = list(range(day_window["start_idx"], day_window["end_idx"])) if day_window else []
 
-        # Run 24h simulation with scheduled daytime slots
+        # Run simulation across the full horizon with scheduled daytime slots
+        horizon_hours = max(24, int(round(n_slots * step_hours)))
         sim = dhw_model.simulate_trajectory(
             t_start_c=current_dhw_temp,
             start_dt=now_dt,
-            hours_ahead=24,
+            hours_ahead=horizon_hours,
             heat_pump_schedule_slots=day_slots,
             target_temp_c=day_target_c,
             heat_pump_power_kw=spec.solar_boost_electric_kw if day_target_c > 52.0 else spec.heat_pump_electric_kw
@@ -323,20 +324,32 @@ class DhwDaytimeArbiter:
         sim_temps = sim.get("temperatures_c", [])
         sim_labels = sim.get("labels", [])
 
-        # Morning comfort check (06:00 - 09:45 tomorrow)
-        morn_slots = [
+        # Comfort check across simulated horizon: detect any drop below comfort threshold (40.0°C)
+        search_start_dip = max(day_slots) + 1 if day_slots else 0
+        dip_slots = [
             (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(sim_labels, sim_temps))
-            if ("06:00" <= lbl <= "09:45" and idx >= 16)
+            if t < spec.comfort_min_temp_c and idx >= search_start_dip
         ]
-        if morn_slots:
-            min_morn = min(morn_slots, key=lambda x: x[2])
-            morn_dip_c = round(min_morn[2], 1)
-            morn_dip_time = min_morn[1]
-        else:
-            morn_dip_c = round(min(sim_temps[:36]), 1) if sim_temps else current_dhw_temp
-            morn_dip_time = "08:30"
 
-        night_required = (morn_dip_c < spec.comfort_min_temp_c)
+        if dip_slots:
+            first_dip_idx, first_dip_time, _ = dip_slots[0]
+            min_dip = min(dip_slots, key=lambda x: x[2])
+            morn_dip_c = round(min_dip[2], 1)
+            morn_dip_time = first_dip_time
+            night_required = True
+        else:
+            morn_slots = [
+                (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(sim_labels, sim_temps))
+                if ("06:00" <= lbl <= "09:45" and idx >= 16)
+            ]
+            if morn_slots:
+                min_morn = min(morn_slots, key=lambda x: x[2])
+                morn_dip_c = round(min_morn[2], 1)
+                morn_dip_time = min_morn[1]
+            else:
+                morn_dip_c = round(min(sim_temps[:36]), 1) if sim_temps else current_dhw_temp
+                morn_dip_time = "08:30"
+            night_required = False
         night_cost = 0.0
         night_el = 0.0
         night_slots = []
