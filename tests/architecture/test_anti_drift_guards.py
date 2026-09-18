@@ -129,3 +129,76 @@ def test_mode_color_hex_guardrail():
         assert not matches, f"Hardcoded mode background colors found outside OpenHEMSModeCatalog: {matches}"
 
 
+def test_dockerfile_and_requirements_dependency_parity():
+    """
+    Guardrail: Guarantee that all third-party imports in non-test runtime modules
+    are strictly present in Dockerfile's 'apk add' package list and requirements.txt.
+    Prevents silent packaging drift or missing binary dependencies at deployment.
+    """
+    import ast
+    import sys
+
+    repo_root = Path(__file__).parent.parent.parent
+    dockerfile = repo_root / "Dockerfile"
+    assert dockerfile.exists(), "Dockerfile must exist"
+    df_text = dockerfile.read_text(encoding="utf-8")
+
+    # Extract apk add packages
+    apk_lines = []
+    in_apk = False
+    for line in df_text.splitlines():
+        if "apk add" in line:
+            in_apk = True
+            apk_lines.append(line)
+        elif in_apk:
+            apk_lines.append(line)
+            if not line.strip().endswith("\\"):
+                in_apk = False
+
+    apk_block = " ".join(apk_lines)
+    apk_pkgs = set(re.findall(r"\b([a-zA-Z0-9_-]+)\b", apk_block)) - {"RUN", "apk", "add", "no", "cache"}
+
+    req_file = repo_root / "requirements.txt"
+    assert req_file.exists(), "requirements.txt must exist"
+    req_pkgs = {line.split(">=")[0].split("==")[0].strip().lower() for line in req_file.read_text().splitlines() if line.strip() and not line.startswith("#")}
+
+    pkg_map = {
+        "numpy": "py3-numpy",
+        "yaml": "py3-yaml",
+        "requests": "py3-requests",
+        "aiohttp": "py3-aiohttp",
+    }
+
+    stdlib = sys.stdlib_module_names if hasattr(sys, "stdlib_module_names") else set()
+    local_roots = {p.name for p in repo_root.iterdir() if p.is_dir()} | {p.stem for p in repo_root.glob("*.py")}
+
+    runtime_dirs = ["api", "models", "layer1_data_collection", "layer2_calibration", "layer3_scheduling", "integrations", "site_adapters"]
+    runtime_files = [repo_root / "daemon.py"]
+    for d in runtime_dirs:
+        dir_path = repo_root / d
+        if dir_path.exists():
+            runtime_files.extend(dir_path.rglob("*.py"))
+
+    third_party = set()
+    for py_file in runtime_files:
+        if any(part in py_file.parts for part in ["tests", ".git", "__pycache__"]):
+            continue
+        tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    pkg = a.name.split(".")[0]
+                    if pkg not in stdlib and pkg not in local_roots:
+                        third_party.add(pkg)
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                pkg = node.module.split(".")[0]
+                if pkg not in stdlib and pkg not in local_roots:
+                    third_party.add(pkg)
+
+    for pkg in third_party:
+        expected_apk = pkg_map.get(pkg, f"py3-{pkg}")
+        assert expected_apk in apk_pkgs, f"Third-party import '{pkg}' is missing from Dockerfile apk add ({expected_apk})"
+        assert pkg.lower() in req_pkgs or (pkg.lower() == "yaml" and "pyyaml" in req_pkgs), f"Third-party import '{pkg}' is missing from requirements.txt"
+
+
+

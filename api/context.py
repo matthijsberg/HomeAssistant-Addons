@@ -19,21 +19,18 @@ ROOT_DIR = str(Path(__file__).resolve().parent.parent)
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-try:
-    from layer2_calibration.learned_forecaster import HybridForecastingModel
-    from layer2_calibration.dhw_thermal_model import DhwThermalModel
-    from layer1_data_collection.sanitizer import TelemetrySanitizer, CleanTelemetryFrame
-    from layer3_scheduling.central_planner import CentralPlanner
-    from layer3_scheduling.plan_store import get_plan_store, PlanStore
-    from layer3_scheduling.tariff_provider import TariffProvider
-    from models.mode_catalog import get_mode_meta, load_mode_catalog
-    from models.canonical import StandardizedState, get_state_metadata, CanonicalDispatchPlan
-    GLOBAL_MODEL = HybridForecastingModel()
-    GLOBAL_DHW_MODEL = DhwThermalModel()
-except Exception as _e_model:
-    print(f"[WARN] Failed to initialize Forecasting Models: {_e_model}")
-    GLOBAL_MODEL = None
-    GLOBAL_DHW_MODEL = None
+from layer1_data_collection.sanitizer import TelemetrySanitizer, CleanTelemetryFrame
+from layer3_scheduling.central_planner import CentralPlanner
+from layer3_scheduling.plan_store import get_plan_store, PlanStore
+from layer3_scheduling.tariff_provider import TariffProvider
+from models.mode_catalog import get_mode_meta, load_mode_catalog
+from models.canonical import StandardizedState, get_state_metadata, CanonicalDispatchPlan
+
+from layer2_calibration.learned_forecaster import HybridForecastingModel
+from layer2_calibration.dhw_thermal_model import DhwThermalModel
+
+GLOBAL_MODEL = HybridForecastingModel()
+GLOBAL_DHW_MODEL = DhwThermalModel()
 
 GLOBAL_COLLECTOR = None
 

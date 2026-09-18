@@ -398,16 +398,3 @@ class ModelCalibrationEngine:
             return {v[0]: v[1] for v in series["values"] if v[0] is not None and v[1] is not None}
         except Exception:
             return {}
-
-
-if __name__ == "__main__":
-    sys.path.insert(0, "/config/lib")
-    from heatpump_core import HeatPumpCore
-    core = HeatPumpCore()
-    calibrator = ModelCalibrationEngine()
-    results = calibrator.run_full_calibration(core)
-    print("\nCalibration Results Summary:")
-    print(f"  Building Envelope UA_base: {results['ua_base']} kW/K")
-    print(f"  Wind Loss Factor c_wind:  {results['c_wind']}")
-    print(f"  Solar Shading & Tilt (15:00): {results['solar_hourly_tilt_profile'].get(15, 1.0)}x")
-    print(f"  DHW Daily Thermal Demand: {results['dhw_average_daily_kwh']} kWh (Standby: {results['dhw_standby_loss_kwh']} kWh)")
