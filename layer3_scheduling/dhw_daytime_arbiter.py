@@ -331,6 +331,7 @@ class DhwDaytimeArbiter:
             if t < spec.comfort_min_temp_c and idx >= search_start_dip
         ]
 
+        first_dip_idx = 0
         if dip_slots:
             first_dip_idx, first_dip_time, _ = dip_slots[0]
             min_dip = min(dip_slots, key=lambda x: x[2])
@@ -338,6 +339,7 @@ class DhwDaytimeArbiter:
             morn_dip_time = first_dip_time
             night_required = True
         else:
+            first_dip_time = "08:30"
             morn_slots = [
                 (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(sim_labels, sim_temps))
                 if ("06:00" <= lbl <= "09:45" and idx >= 16)
@@ -356,10 +358,9 @@ class DhwDaytimeArbiter:
         night_window_lbl = "N.v.t. (Ochtendcomfort gegarandeerd)"
 
         if night_required:
-            # Plan night run to 50°C between 20:00 and 06:00
-            # Find night search window (between 21:00 tonight and 06:00 tomorrow morning)
+            # Plan recharge run to 50°C before comfort dip occurs
+            # Search from tonight 21:00 up to the first comfort breach (allows picking cheap morning solar over night)
             night_start_idx = 0
-            morn_start_idx = n_slots
             for idx, s in enumerate(slots):
                 dt_val = getattr(s, "dt", None)
                 if dt_val is None:
@@ -369,11 +370,15 @@ class DhwDaytimeArbiter:
                 h = int(lbl.split(":")[0]) if ":" in lbl and not lbl.startswith("Nu") else dt_val.hour
                 if (h >= 21 or dt_val.hour >= 21) and night_start_idx == 0 and dt_val.date() == now_dt.date():
                     night_start_idx = idx
-                if idx > 0 and (h >= 6 or dt_val.hour >= 6) and (dt_val.date() > now_dt.date() or now_dt.hour < 6):
-                    morn_start_idx = idx
                     break
 
-            # Temperature before night run (estimate from simulation around 03:00)
+            recharge_end_idx = min(n_slots, first_dip_idx) if dip_slots else min(n_slots, night_start_idx + 36)
+            if recharge_end_idx <= night_start_idx:
+                recharge_start_idx = max(0, recharge_end_idx - 8)
+            else:
+                recharge_start_idx = night_start_idx
+
+            # Temperature before night/recharge run (estimate from simulation around run start)
             t_night_est = max(34.0, morn_dip_c - 1.5)
             n_night_slots = cls.calculate_required_slots(
                 current_temp=t_night_est,
@@ -388,13 +393,13 @@ class DhwDaytimeArbiter:
 
             opt_night = cls.find_optimal_heating_window(
                 slots=slots,
-                search_start_idx=night_start_idx,
-                search_end_idx=morn_start_idx,
+                search_start_idx=recharge_start_idx,
+                search_end_idx=recharge_end_idx,
                 n_req_slots=n_night_slots,
                 th_need_kwh=th_need_night,
                 slot_lockout_map=slot_lockout_map,
                 is_boost_60=False,
-                target_anchor_idx=morn_start_idx,
+                target_anchor_idx=recharge_end_idx,
                 step_hours=step_hours,
                 tariff_provider=tariff_provider,
                 tank_spec=spec
