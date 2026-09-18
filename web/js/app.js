@@ -1252,13 +1252,22 @@
         }
 
         
+                // =========================================================================
+        // UNIFIED CONSOLIDATED HTML TOOLTIP ENGINE (RENDERER & POSITIONING)
         // =========================================================================
-        // CUSTOM STYLED HTML TOOLTIP HANDLER (REAL LINES, BARS & EURO COSTS)
-        // =========================================================================
-        
-        // =========================================================================
-        // UNIFIED SMOOTH TOOLTIP POSITIONING HELPER (VIEWPORT BOUNDED)
-        // =========================================================================
+        function createOrGetTooltipEl(chart) {
+            let tooltipEl = document.getElementById('chartjs-custom-tooltip');
+            if (!tooltipEl) {
+                tooltipEl = document.createElement('div');
+                tooltipEl.id = 'chartjs-custom-tooltip';
+                tooltipEl.className = 'pointer-events-none fixed z-[9999] bg-[#0B0F17]/95 backdrop-blur-md border border-slate-700/90 rounded-2xl shadow-2xl p-3.5 text-xs font-mono transition-opacity duration-100 text-slate-200';
+                tooltipEl.style.minWidth = '250px';
+                tooltipEl.style.maxWidth = '320px';
+                document.body.appendChild(tooltipEl);
+            }
+            return tooltipEl;
+        }
+
         function positionTooltipCustom(chart, tooltip, tooltipEl) {
             const canvasRect = chart.canvas.getBoundingClientRect();
             let left = canvasRect.left + tooltip.caretX + 16;
@@ -1276,6 +1285,95 @@
             tooltipEl.style.opacity = '1';
         }
 
+        function renderCustomTooltip(context, config) {
+            const { chart, tooltip } = context;
+            const tooltipEl = createOrGetTooltipEl(chart);
+            if (tooltip.opacity === 0 || !tooltip.body || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
+                tooltipEl.style.opacity = '0';
+                tooltipEl.style.pointerEvents = 'none';
+                return;
+            }
+            tooltipEl.style.pointerEvents = 'none';
+            tooltipEl.style.opacity = '1';
+
+            const dataIndex = tooltip.dataPoints[0].dataIndex;
+            const label = tooltip.title ? (tooltip.title[0] || '') : '';
+            const intervalStr = config.intervalStr || ((typeof predictionResolution !== 'undefined' && predictionResolution === '15m') ? '15 min' : '1 uur');
+            const dotColor = config.dotColor || 'bg-cyan-400';
+            const headerBadgeHtml = config.headerBadge || '';
+
+            let html = `
+                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full ${dotColor} animate-pulse"></span>
+                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
+                        <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
+                    </div>
+                    ${headerBadgeHtml}
+                </div>
+                <div class="${config.spaceClass || 'space-y-1.5 text-xs'}">
+            `;
+
+            const rows = typeof config.rows === 'function' ? config.rows(dataIndex, context) : (config.rows || []);
+            rows.forEach(r => {
+                if (!r) return;
+                let indicatorHtml = '';
+                if (r.indicatorHtml) {
+                    indicatorHtml = r.indicatorHtml;
+                } else if (r.type === 'dashed-line') {
+                    indicatorHtml = `<span style="display:inline-block; width:18px; height:0; border-top:2px dashed ${r.color}; margin-right:8px; vertical-align:middle;"></span>`;
+                } else if (r.type === 'line') {
+                    const h = r.height || 3;
+                    const w = r.width || 18;
+                    indicatorHtml = `<span style="display:inline-block; width:${w}px; height:${h}px; background-color:${r.color}; border-radius:2px; margin-right:8px; vertical-align:middle;"></span>`;
+                } else if (r.type === 'band') {
+                    indicatorHtml = `<span style="display:inline-block; width:14px; height:8px; background-color:${r.bgColor}; border:1px solid ${r.borderColor}; border-radius:2px; margin-right:8px;"></span>`;
+                } else {
+                    const sz = r.size || 10;
+                    indicatorHtml = `<span style="display:inline-block; width:${sz}px; height:${sz}px; background-color:${r.color}; border-radius:2px; margin-right:8px; vertical-align:middle;"></span>`;
+                }
+
+                const labelText = r.label || '';
+                const labelClass = r.labelClass || 'text-slate-300';
+                const valClass = r.valClass || 'font-bold text-white font-mono';
+                const valText = r.val || '';
+                const extraVal = r.extraVal ? ` ${r.extraVal}` : '';
+                const extraClass = r.borderTop ? ' pt-1.5 border-t border-slate-800/80' : '';
+
+                html += `
+                    <div class="flex items-center justify-between gap-3 ${r.textClass || ''}${extraClass}">
+                        <div class="flex items-center truncate">
+                            ${indicatorHtml}
+                            <span class="${labelClass} truncate">${labelText}</span>
+                        </div>
+                        <div class="flex items-center gap-1.5 flex-shrink-0 font-mono">
+                            <span class="${valClass}">${valText}</span>${extraVal}
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+
+            if (config.footer) {
+                html += config.footer;
+            }
+
+            tooltipEl.innerHTML = html;
+            positionTooltipCustom(chart, tooltip, tooltipEl);
+        }
+
+        if (typeof window !== 'undefined') {
+            window.renderCustomTooltip = renderCustomTooltip;
+            window.createOrGetTooltipEl = createOrGetTooltipEl;
+            window.positionTooltipCustom = positionTooltipCustom;
+        }
+        if (typeof globalThis !== 'undefined') {
+            globalThis.renderCustomTooltip = renderCustomTooltip;
+            globalThis.createOrGetTooltipEl = createOrGetTooltipEl;
+            globalThis.positionTooltipCustom = positionTooltipCustom;
+        }
+
         // 1. EPEX & Solar Prices Chart Tooltip
         function customPricesTooltipHandler(context) {
             const { chart, tooltip } = context;
@@ -1286,69 +1384,38 @@
                 return;
             }
             const dataIndex = tooltip.dataPoints[0].dataIndex;
-            const label = tooltip.title[0] || '';
-            const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
 
             let epexPrice = 0.0, exportPrice = 0.0, solarProd = 0.0;
             chart.data.datasets.forEach(ds => {
                 const v = ds.data[dataIndex];
-                if (!ds.label) return;
-                const lbl = ds.label.toLowerCase();
-                if (lbl.includes('afname') || lbl.includes('all-in') || lbl.includes('buy') || lbl.includes('inkoop')) {
-                    epexPrice = Number(v) || 0.0;
-                } else if (lbl.includes('teruglever') || lbl.includes('export') || lbl.includes('feed-in')) {
-                    exportPrice = Number(v) || 0.0;
-                } else if (lbl.includes('zon') || lbl.includes('solar') || lbl.includes('productie') || lbl.includes('generation') || ds.yAxisID === 'y1') {
-                    solarProd = Number(v) || 0.0;
+                if (ds.id === 'epex_import') epexPrice = Number(v) || 0.0;
+                else if (ds.id === 'epex_export') exportPrice = Number(v) || 0.0;
+                else if (ds.id === 'solar_forecast' || ds.yAxisID === 'y1') solarProd = Number(v) || 0.0;
+                else if (ds.label) {
+                    const lbl = ds.label.toLowerCase();
+                    if (lbl.includes('afname') || lbl.includes('all-in') || lbl.includes('buy') || lbl.includes('inkoop')) epexPrice = Number(v) || 0.0;
+                    else if (lbl.includes('teruglever') || lbl.includes('export') || lbl.includes('feed-in')) exportPrice = Number(v) || 0.0;
+                    else if (lbl.includes('zon') || lbl.includes('solar') || lbl.includes('productie')) solarProd = Number(v) || 0.0;
                 }
             });
 
-            let html = `
-                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
-                    <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
-                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
-                        <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
-                    </div>
-                    <span class="text-[10px] text-blue-300 font-mono font-semibold px-2 py-0.5 rounded bg-blue-950/80 border border-blue-800">
-                        Afname: €${epexPrice.toFixed(4)}/kWh
-                    </span>
-                </div>
-                <div class="space-y-1.5 text-xs">
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:3px; background-color:#3B82F6; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Stroom Afname (All-in)</span>
-                        </div>
-                        <span class="font-bold text-white font-mono">€${epexPrice.toFixed(4)}/kWh</span>
-                    </div>
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #38BDF8; margin-right:8px;"></span>
-                            <span class="text-slate-300">Teruglevering (Export)</span>
-                        </div>
-                        <span class="font-medium text-cyan-300 font-mono">€${exportPrice.toFixed(4)}/kWh</span>
-                    </div>
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(234, 179, 8, 0.5); border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Zonnepanelen Productie</span>
-                        </div>
-                        <span class="font-bold text-amber-400 font-mono">${solarProd.toFixed(2)} kW</span>
-                    </div>
-                </div>
-            `;
             const taxOpslag = epexPrice - exportPrice;
-            if (taxOpslag > 0) {
-                html += `
+
+            renderCustomTooltip(context, {
+                dotColor: 'bg-blue-400',
+                headerBadge: `<span class="text-[10px] text-blue-300 font-mono font-semibold px-2 py-0.5 rounded bg-blue-950/80 border border-blue-800">Afname: €${epexPrice.toFixed(4)}/kWh</span>`,
+                rows: [
+                    { type: 'line', color: '#3B82F6', label: 'Stroom Afname (All-in)', val: `€${epexPrice.toFixed(4)}/kWh` },
+                    { type: 'dashed-line', color: '#38BDF8', label: 'Teruglevering (Export)', val: `€${exportPrice.toFixed(4)}/kWh`, valClass: 'font-medium text-cyan-300 font-mono' },
+                    { type: 'bar', color: 'rgba(234, 179, 8, 0.5)', label: 'Zonnepanelen Productie', val: `${solarProd.toFixed(2)} kW`, valClass: 'font-bold text-amber-400 font-mono' }
+                ],
+                footer: taxOpslag > 0 ? `
                     <div class="mt-2.5 pt-2 border-t border-slate-700/80 flex items-center justify-between font-bold text-xs font-mono">
                         <span class="text-slate-400">Belasting &amp; Opslag:</span>
                         <span class="text-slate-300">€${taxOpslag.toFixed(4)}/kWh</span>
                     </div>
-                `;
-            }
-            tooltipEl.innerHTML = html;
-            positionTooltipCustom(chart, tooltip, tooltipEl);
+                ` : ''
+            });
         }
 
         // 1.5. Net Lines Forecast Tooltip
@@ -1361,9 +1428,7 @@
                 return;
             }
 
-            tooltipEl.style.opacity = '1';
             const dataIndex = tooltip.dataPoints[0].dataIndex;
-            const label = tooltip.title[0] || '';
             const intervalH = window.__lastPredictionIntervalH || 1.0;
             const intervalStr = (intervalH === 0.25) ? '15 min' : '1 uur';
 
@@ -1377,72 +1442,21 @@
                 ? Number(window.__lastPredictionNetKw[dataIndex])
                 : 0.0;
             const netKwhVal = netKwVal * intervalH;
-
-            // Net cost: if >= 0 (import) -> kWh * inkoop. If < 0 (export) -> - (kWh * verkoop)
-            let netCostEur = 0;
-            if (netKwVal >= 0) {
-                netCostEur = netKwhVal * pBuy;
-            } else {
-                netCostEur = - (Math.abs(netKwhVal) * pSell);
-            }
+            const netCostEur = (netKwVal >= 0) ? (netKwhVal * pBuy) : -(Math.abs(netKwhVal) * pSell);
             const isProfit = netCostEur < 0;
 
-            let html = `
-                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
-                    <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
-                        <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
-                    </div>
-                    <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${!isProfit ? 'bg-red-950/80 border-red-800 text-red-300' : 'bg-emerald-950/80 border-emerald-800 text-emerald-300'}">
-                        ${!isProfit ? 'Netto Kosten: +€' : 'Netto Baten: -€'}${Math.abs(netCostEur).toFixed(2)}
-                    </span>
-                </div>
-                <div class="space-y-2 text-xs">
-                    <!-- 1. Netto Kosten (€) -->
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:10px; height:10px; background-color:#F59E0B; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300 font-medium">Netto Kosten</span>
-                        </div>
-                        <span class="font-bold font-mono ${!isProfit ? 'text-amber-400' : 'text-emerald-400'}">
-                            ${!isProfit ? '+€' : '-€'}${Math.abs(netCostEur).toFixed(2)}
-                        </span>
-                    </div>
-
-                    <!-- 2. Netto Verbruik (kW / kWh) -->
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:14px; height:2px; background-color:#EF4444; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300 font-medium">Netto Verbruik</span>
-                        </div>
-                        <div class="flex items-center gap-1.5 font-mono">
-                            <span class="${netKwVal >= 0 ? 'text-red-400' : 'text-emerald-400'} font-bold">${netKwVal >= 0 ? '+' : ''}${netKwVal.toFixed(2)} kW</span>
-                            <span class="text-slate-400 text-[10px]">(${netKwVal >= 0 ? '+' : ''}${netKwhVal.toFixed(2)} kWh)</span>
-                        </div>
-                    </div>
-
-                    <!-- 3. EPEX Inkoop (€/kWh) -->
-                    <div class="flex items-center justify-between gap-3 border-t border-slate-800/80 pt-1.5">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:14px; height:2px; background-color:#3B82F6; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-400">EPEX Inkoop</span>
-                        </div>
-                        <span class="font-bold text-blue-300 font-mono">€${pBuy.toFixed(4)}/kWh</span>
-                    </div>
-
-                    <!-- 4. EPEX Teruglevering (€/kWh) -->
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:14px; height:0; border-top:2px dashed #06B6D4; margin-right:8px;"></span>
-                            <span class="text-slate-400">EPEX Teruglevering</span>
-                        </div>
-                        <span class="font-bold text-cyan-300 font-mono">€${pSell.toFixed(4)}/kWh</span>
-                    </div>
-                </div>
-            `;
-            tooltipEl.innerHTML = html;
-            positionTooltipCustom(chart, tooltip, tooltipEl);
+            renderCustomTooltip(context, {
+                dotColor: 'bg-cyan-400',
+                intervalStr: intervalStr,
+                spaceClass: 'space-y-2 text-xs',
+                headerBadge: `<span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${!isProfit ? 'bg-red-950/80 border-red-800 text-red-300' : 'bg-emerald-950/80 border-emerald-800 text-emerald-300'}">${!isProfit ? 'Netto Kosten: +€' : 'Netto Baten: -€'}${Math.abs(netCostEur).toFixed(2)}</span>`,
+                rows: [
+                    { type: 'bar', color: '#F59E0B', label: 'Netto Kosten', labelClass: 'text-slate-300 font-medium', val: `${!isProfit ? '+€' : '-€'}${Math.abs(netCostEur).toFixed(2)}`, valClass: `font-bold font-mono ${!isProfit ? 'text-amber-400' : 'text-emerald-400'}` },
+                    { type: 'line', height: 2, width: 14, color: '#EF4444', label: 'Netto Verbruik', labelClass: 'text-slate-300 font-medium', val: `${netKwVal >= 0 ? '+' : ''}${netKwVal.toFixed(2)} kW`, valClass: `${netKwVal >= 0 ? 'text-red-400' : 'text-emerald-400'} font-bold`, extraVal: `<span class="text-slate-400 text-[10px]">(${netKwVal >= 0 ? '+' : ''}${netKwhVal.toFixed(2)} kWh)</span>` },
+                    { type: 'line', height: 2, width: 14, color: '#3B82F6', label: 'EPEX Inkoop', labelClass: 'text-slate-400', val: `€${pBuy.toFixed(4)}/kWh`, valClass: 'font-bold text-blue-300 font-mono', borderTop: true },
+                    { type: 'dashed-line', color: '#06B6D4', label: 'EPEX Teruglevering', labelClass: 'text-slate-400', val: `€${pSell.toFixed(4)}/kWh`, valClass: 'font-bold text-cyan-300 font-mono' }
+                ]
+            });
         }
 
         // 1.6. Cost History Tooltip
@@ -1455,9 +1469,7 @@
                 return;
             }
 
-            tooltipEl.style.opacity = '1';
             const dataIndex = tooltip.dataPoints[0].dataIndex;
-            const label = tooltip.title[0] || '';
             const intervalStr = (intervalH === 0.25) ? '15 min' : ((intervalH === 1.0) ? '1 uur' : `${intervalH}u`);
 
             const pBuy = (pricesArr && pricesArr[dataIndex] !== undefined) ? Number(pricesArr[dataIndex]) : 0.25;
@@ -1470,62 +1482,18 @@
             const netCostVal = (netCostArr && netCostArr[dataIndex] !== undefined) ? Number(netCostArr[dataIndex]) : 0.0;
             const isProfit = netCostVal < 0;
 
-            let html = `
-                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
-                    <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
-                        <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
-                    </div>
-                    <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${!isProfit ? 'bg-red-950/80 border-red-800 text-red-300' : 'bg-emerald-950/80 border-emerald-800 text-emerald-300'}">
-                        ${!isProfit ? 'Netto Kosten: +€' : 'Netto Baten: -€'}${Math.abs(netCostVal).toFixed(2)}
-                    </span>
-                </div>
-                <div class="space-y-2 text-xs">
-                    <!-- 1. Netto Kosten (€) -->
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:10px; height:10px; background-color:#F59E0B; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300 font-medium">Netto Kosten</span>
-                        </div>
-                        <span class="font-bold font-mono ${!isProfit ? 'text-amber-400' : 'text-emerald-400'}">
-                            ${!isProfit ? '+€' : '-€'}${Math.abs(netCostVal).toFixed(2)}
-                        </span>
-                    </div>
-
-                    <!-- 2. Netto Verbruik (kW / kWh) -->
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:14px; height:2px; background-color:#EF4444; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300 font-medium">Netto Verbruik</span>
-                        </div>
-                        <div class="flex items-center gap-1.5 font-mono">
-                            <span class="${netKwVal >= 0 ? 'text-red-400' : 'text-emerald-400'} font-bold">${netKwVal >= 0 ? '+' : ''}${netKwVal.toFixed(2)} kW</span>
-                            <span class="text-slate-400 text-[10px]">(${netKwVal >= 0 ? '+' : ''}${netKwhVal.toFixed(2)} kWh)</span>
-                        </div>
-                    </div>
-
-                    <!-- 3. EPEX Inkoop (€/kWh) -->
-                    <div class="flex items-center justify-between gap-3 border-t border-slate-800/80 pt-1.5">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:14px; height:2px; background-color:#3B82F6; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-400">EPEX Inkoop All-in</span>
-                        </div>
-                        <span class="font-bold text-blue-300 font-mono">€${pBuy.toFixed(4)}/kWh</span>
-                    </div>
-
-                    <!-- 4. EPEX Teruglevering (€/kWh) -->
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:14px; height:0; border-top:2px dashed #06B6D4; margin-right:8px;"></span>
-                            <span class="text-slate-400">EPEX Teruglevering</span>
-                        </div>
-                        <span class="font-bold text-cyan-300 font-mono">€${pSell.toFixed(4)}/kWh</span>
-                    </div>
-                </div>
-            `;
-            tooltipEl.innerHTML = html;
-            positionTooltipCustom(chart, tooltip, tooltipEl);
+            renderCustomTooltip(context, {
+                dotColor: 'bg-cyan-400',
+                intervalStr: intervalStr,
+                spaceClass: 'space-y-2 text-xs',
+                headerBadge: `<span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${!isProfit ? 'bg-red-950/80 border-red-800 text-red-300' : 'bg-emerald-950/80 border-emerald-800 text-emerald-300'}">${!isProfit ? 'Netto Kosten: +€' : 'Netto Baten: -€'}${Math.abs(netCostVal).toFixed(2)}</span>`,
+                rows: [
+                    { type: 'bar', color: '#F59E0B', label: 'Netto Kosten', labelClass: 'text-slate-300 font-medium', val: `${!isProfit ? '+€' : '-€'}${Math.abs(netCostVal).toFixed(2)}`, valClass: `font-bold font-mono ${!isProfit ? 'text-amber-400' : 'text-emerald-400'}` },
+                    { type: 'line', height: 2, width: 14, color: '#EF4444', label: 'Netto Verbruik', labelClass: 'text-slate-300 font-medium', val: `${netKwVal >= 0 ? '+' : ''}${netKwVal.toFixed(2)} kW`, valClass: `${netKwVal >= 0 ? 'text-red-400' : 'text-emerald-400'} font-bold`, extraVal: `<span class="text-slate-400 text-[10px]">(${netKwVal >= 0 ? '+' : ''}${netKwhVal.toFixed(2)} kWh)</span>` },
+                    { type: 'line', height: 2, width: 14, color: '#3B82F6', label: 'EPEX Inkoop All-in', labelClass: 'text-slate-400', val: `€${pBuy.toFixed(4)}/kWh`, valClass: 'font-bold text-blue-300 font-mono', borderTop: true },
+                    { type: 'dashed-line', color: '#06B6D4', label: 'EPEX Teruglevering', labelClass: 'text-slate-400', val: `€${pSell.toFixed(4)}/kWh`, valClass: 'font-bold text-cyan-300 font-mono' }
+                ]
+            });
         }
 
         // 2. DHW Boiler Temperature & Tap Demand Tooltip
@@ -1538,29 +1506,20 @@
                 return;
             }
             const dataIndex = tooltip.dataPoints[0].dataIndex;
-            const label = tooltip.title[0] || '';
-            const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
 
             let tempC = 0.0, comfort = 40.0, target = 50.0, liters = 0, kwhVal = 0.0, p05 = 0.0, p95 = 0.0, unheatedC = 0.0;
             chart.data.datasets.forEach(ds => {
                 const v = ds.data[dataIndex];
-                if (ds.id === 'dhw_p50') {
-                    tempC = Number(v) || 0.0;
-                } else if (ds.id === 'dhw_unh_p50') {
-                    unheatedC = Number(v) || 0.0;
-                } else if (ds.id === 'dhw_p05') {
-                    p05 = Number(v) || 0.0;
-                } else if (ds.id === 'dhw_p95') {
-                    p95 = Number(v) || 0.0;
-                } else if (ds.id === 'dhw_comfort') {
-                    comfort = Number(v) || 0.0;
-                } else if (ds.id === 'dhw_target') {
-                    target = Number(v) || 0.0;
-                } else if (ds.id === 'dhw_demand') {
+                if (ds.id === 'dhw_p50') tempC = Number(v) || 0.0;
+                else if (ds.id === 'dhw_unh_p50') unheatedC = Number(v) || 0.0;
+                else if (ds.id === 'dhw_p05') p05 = Number(v) || 0.0;
+                else if (ds.id === 'dhw_p95') p95 = Number(v) || 0.0;
+                else if (ds.id === 'dhw_comfort') comfort = Number(v) || 0.0;
+                else if (ds.id === 'dhw_target') target = Number(v) || 0.0;
+                else if (ds.id === 'dhw_demand') {
                     kwhVal = Number(v) || 0.0;
                     liters = Math.round(kwhVal * 28.66);
                 } else if (ds.label) {
-                    // Graceful legacy fallback
                     const lbl = ds.label.toLowerCase();
                     if (lbl.includes('p50') || lbl.includes('boilertemperatuur')) tempC = Number(v) || 0.0;
                     else if (lbl.includes('zonder')) unheatedC = Number(v) || 0.0;
@@ -1575,7 +1534,6 @@
                 }
             });
 
-            // Fallback if tempC is still 0
             if (tempC === 0.0) {
                 const p50Ds = chart.data.datasets.find(d => d.id === 'dhw_p50' || (d.label && d.label.toLowerCase().includes('p50')));
                 if (p50Ds && p50Ds.data[dataIndex] !== undefined) {
@@ -1585,66 +1543,18 @@
 
             const tempBadgeColor = tempC >= 45 ? 'text-emerald-400 bg-emerald-950/80 border-emerald-800' : (tempC >= 40 ? 'text-amber-400 bg-amber-950/80 border-amber-800' : 'text-red-400 bg-red-950/80 border-red-800');
 
-            let html = `
-                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
-                    <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
-                        <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
-                    </div>
-                    <span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded border ${tempBadgeColor}">
-                        Tank: ${tempC.toFixed(1)}°C
-                    </span>
-                </div>
-                <div class="space-y-1.5 text-xs">
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:3px; background-color:#F59E0B; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Boilertemperatuur (P50)</span>
-                        </div>
-                        <span class="font-bold text-amber-300 font-mono">${tempC.toFixed(1)}°C</span>
-                    </div>
-                    ${p95 > 0 ? `
-                    <div class="flex items-center justify-between gap-3 text-[11px]">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:14px; height:8px; background-color:rgba(251, 191, 36, 0.25); border:1px solid rgba(245, 158, 11, 0.5); border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-amber-200/80">Bandbreedte (P95–P05)</span>
-                        </div>
-                        <span class="font-mono text-amber-300/90">${p95.toFixed(1)}°C (veel) – ${p05.toFixed(1)}°C (weinig)</span>
-                    </div>` : ''}
-                    ${unheatedC > 0 ? `
-                    <div class="flex items-center justify-between gap-3 text-[11px]">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #94A3B8; margin-right:8px;"></span>
-                            <span class="text-slate-400">Zonder Verwarming</span>
-                        </div>
-                        <span class="text-slate-300 font-mono">${unheatedC.toFixed(1)}°C</span>
-                    </div>` : ''}
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #EF4444; margin-right:8px;"></span>
-                            <span class="text-slate-400">Comfortgrens</span>
-                        </div>
-                        <span class="text-red-400 font-mono">${comfort.toFixed(1)}°C</span>
-                    </div>
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #10B981; margin-right:8px;"></span>
-                            <span class="text-slate-400">Doeltemperatuur</span>
-                        </div>
-                        <span class="text-emerald-400 font-mono">${target.toFixed(1)}°C</span>
-                    </div>
-                    <div class="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(56, 189, 248, 0.6); border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Warmtevraag</span>
-                        </div>
-                        <span class="font-bold text-sky-400 font-mono">${kwhVal.toFixed(2)} kWh (≈ ${liters} L V₄₀)</span>
-                    </div>
-                </div>
-            `;
-            tooltipEl.innerHTML = html;
-            positionTooltipCustom(chart, tooltip, tooltipEl);
+            renderCustomTooltip(context, {
+                dotColor: 'bg-amber-400',
+                headerBadge: `<span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded border ${tempBadgeColor}">Tank: ${tempC.toFixed(1)}°C</span>`,
+                rows: [
+                    { type: 'line', color: '#F59E0B', label: 'Boilertemperatuur (P50)', val: `${tempC.toFixed(1)}°C`, valClass: 'font-bold text-amber-300 font-mono' },
+                    p95 > 0 ? { type: 'band', bgColor: 'rgba(251, 191, 36, 0.25)', borderColor: 'rgba(245, 158, 11, 0.5)', label: 'Bandbreedte (P95–P05)', labelClass: 'text-amber-200/80', val: `${p95.toFixed(1)}°C (veel) – ${p05.toFixed(1)}°C (weinig)`, valClass: 'font-mono text-amber-300/90', textClass: 'text-[11px]' } : null,
+                    unheatedC > 0 ? { type: 'dashed-line', color: '#94A3B8', label: 'Zonder Verwarming', labelClass: 'text-slate-400', val: `${unheatedC.toFixed(1)}°C`, valClass: 'text-slate-300 font-mono', textClass: 'text-[11px]' } : null,
+                    { type: 'dashed-line', color: '#EF4444', label: 'Comfortgrens', labelClass: 'text-slate-400', val: `${comfort.toFixed(1)}°C`, valClass: 'text-red-400 font-mono' },
+                    { type: 'dashed-line', color: '#10B981', label: 'Doeltemperatuur', labelClass: 'text-slate-400', val: `${target.toFixed(1)}°C`, valClass: 'text-emerald-400 font-mono' },
+                    { type: 'bar', color: 'rgba(56, 189, 248, 0.6)', label: 'Warmtevraag', labelClass: 'text-slate-300', val: `${kwhVal.toFixed(2)} kWh (≈ ${liters} L V₄₀)`, valClass: 'font-bold text-sky-400 font-mono', borderTop: true }
+                ]
+            });
         }
 
         // 3. CV Space Heating Forecast Tooltip
@@ -1657,8 +1567,6 @@
                 return;
             }
             const dataIndex = tooltip.dataPoints[0].dataIndex;
-            const label = tooltip.title[0] || '';
-            const intervalStr = (predictionResolution === '15m') ? '15 min' : '1 uur';
 
             let outTemp = 0.0, inTemp = 0.0, unhTemp = 0.0, inP05 = 0.0, inP95 = 0.0, thKwh = 0.0;
             chart.data.datasets.forEach(ds => {
@@ -1673,102 +1581,34 @@
 
             const inBadgeColor = inTemp >= 20.0 ? 'text-emerald-400 bg-emerald-950/80 border-emerald-800' : 'text-amber-400 bg-amber-950/80 border-amber-800';
 
-            let html = `
-                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
-                    <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
-                        <span class="text-[10px] text-slate-400 font-mono">(${intervalStr})</span>
-                    </div>
-                    <span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded border ${inBadgeColor}">
-                        Binnen: ${inTemp.toFixed(1)}°C
-                    </span>
-                </div>
-                <div class="space-y-1.5 text-xs">
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:3px; background-color:#F59E0B; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Binnentemperatuur (P50)</span>
-                        </div>
-                        <span class="font-bold text-amber-300 font-mono">${inTemp.toFixed(1)}°C</span>
-                    </div>
-                    ${inP95 > 0 ? `
-                    <div class="flex items-center justify-between gap-3 text-[11px]">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:14px; height:8px; background-color:rgba(251, 191, 36, 0.25); border:1px solid rgba(245, 158, 11, 0.5); border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-amber-200/80">Bandbreedte (P95–P05)</span>
-                        </div>
-                        <span class="text-amber-300 font-mono">${inP05.toFixed(1)}°C – ${inP95.toFixed(1)}°C</span>
-                    </div>` : ''}
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:0; border-top:2px dashed #94A3B8; margin-right:8px;"></span>
-                            <span class="text-slate-400">Zonder Verwarming</span>
-                        </div>
-                        <span class="font-medium text-slate-300 font-mono">${unhTemp.toFixed(1)}°C</span>
-                    </div>
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:18px; height:3px; background-color:#60A5FA; border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Buitentemperatuur</span>
-                        </div>
-                        <span class="font-medium text-blue-300 font-mono">${outTemp.toFixed(1)}°C</span>
-                    </div>
-                    <div class="flex items-center justify-between gap-3 pt-1 border-t border-slate-800">
-                        <div class="flex items-center">
-                            <span style="display:inline-block; width:10px; height:10px; background-color:rgba(56, 189, 248, 0.7); border-radius:2px; margin-right:8px;"></span>
-                            <span class="text-slate-300">Warmtevraag Woning</span>
-                        </div>
-                        <span class="font-bold text-sky-300 font-mono">${thKwh.toFixed(2)} kWh</span>
-                    </div>
-                </div>
-            `;
-            tooltipEl.innerHTML = html;
-            positionTooltipCustom(chart, tooltip, tooltipEl);
+            renderCustomTooltip(context, {
+                dotColor: 'bg-amber-400',
+                headerBadge: `<span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded border ${inBadgeColor}">Binnen: ${inTemp.toFixed(1)}°C</span>`,
+                rows: [
+                    { type: 'line', color: '#F59E0B', label: 'Binnentemperatuur (P50)', val: `${inTemp.toFixed(1)}°C`, valClass: 'font-bold text-amber-300 font-mono' },
+                    inP95 > 0 ? { type: 'band', bgColor: 'rgba(251, 191, 36, 0.25)', borderColor: 'rgba(245, 158, 11, 0.5)', label: 'Bandbreedte (P95–P05)', labelClass: 'text-amber-200/80', val: `${inP05.toFixed(1)}°C – ${inP95.toFixed(1)}°C`, valClass: 'text-amber-300 font-mono', textClass: 'text-[11px]' } : null,
+                    unhTemp > 0 ? { type: 'dashed-line', color: '#94A3B8', label: 'Zonder Verwarming', labelClass: 'text-slate-400', val: `${unhTemp.toFixed(1)}°C`, valClass: 'font-medium text-slate-300 font-mono' } : null,
+                    { type: 'line', color: '#60A5FA', label: 'Buitentemperatuur', labelClass: 'text-slate-300', val: `${outTemp.toFixed(1)}°C`, valClass: 'font-medium text-blue-300 font-mono' },
+                    { type: 'bar', color: 'rgba(56, 189, 248, 0.7)', label: 'Warmtevraag Woning', labelClass: 'text-slate-300', val: `${thKwh.toFixed(2)} kWh`, valClass: 'font-bold text-sky-300 font-mono', borderTop: true }
+                ]
+            });
         }
 
-        function createOrGetTooltipEl(chart) {
-            let tooltipEl = document.getElementById('chartjs-custom-tooltip');
-            if (!tooltipEl) {
-                tooltipEl = document.createElement('div');
-                tooltipEl.id = 'chartjs-custom-tooltip';
-                tooltipEl.className = 'pointer-events-none fixed z-[9999] bg-[#0B0F17]/95 backdrop-blur-md border border-slate-700/90 rounded-2xl shadow-2xl p-3.5 text-xs font-mono transition-opacity duration-100 text-slate-200';
-                tooltipEl.style.minWidth = '250px';
-                tooltipEl.style.maxWidth = '320px';
-                document.body.appendChild(tooltipEl);
-            }
-            return tooltipEl;
-        }
-
+        // 4. Multi-Vector HEMS Historical / Prediction Tooltip
         function customHemsTooltipHandler(context, isPrediction = false) {
             const { chart, tooltip } = context;
             const tooltipEl = createOrGetTooltipEl(chart);
-
-            // Hide immediately when cursor moves away or outside graph area
             if (tooltip.opacity === 0 || !tooltip.body || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
                 tooltipEl.style.opacity = '0';
                 tooltipEl.style.pointerEvents = 'none';
                 return;
             }
 
-            tooltipEl.style.opacity = '1';
-
             const dataIndex = tooltip.dataPoints[0].dataIndex;
-            const label = tooltip.title[0] || '';
-
-            // Extract EXACT interval duration (hours)
-            let intervalH = 1.0;
-            if (isPrediction) {
-                intervalH = window.__lastPredictionIntervalH || 1.0;
-            } else {
-                intervalH = window.__lastHistoricalIntervalH || (chart.data.labels.length > 50 ? 0.25 : 1.0);
-            }
-
-            // Extract EXACT prices directly from the dataset or data cache (NEVER use hardcoded defaults)
+            let intervalH = isPrediction ? (window.__lastPredictionIntervalH || 1.0) : (window.__lastHistoricalIntervalH || (chart.data.labels.length > 50 ? 0.25 : 1.0));
             let importPrice = 0.25;
             let exportPrice = 0.10;
 
-            // Priority 1: Check if Stroomprijs dataset exists in the chart itself
             const priceDataset = chart.data.datasets.find(ds => ds.id === 'epex_price' || (ds.label && ds.label.toLowerCase().includes('stroomprijs')));
             if (priceDataset && priceDataset.data && priceDataset.data[dataIndex] !== undefined) {
                 importPrice = Number(priceDataset.data[dataIndex]);
@@ -1778,32 +1618,17 @@
                 importPrice = Number(window.__lastHistoricalData.prices[dataIndex]);
             }
 
-            // Priority 2: Extract export price (Powerpeers dynamic: kale beurs min verkoopopslag)
             if (!isPrediction && window.__lastHistoricalData?.export_prices && window.__lastHistoricalData.export_prices[dataIndex] !== undefined) {
                 exportPrice = Number(window.__lastHistoricalData.export_prices[dataIndex]);
             } else if (isPrediction && window.__lastPredictionData?.export_prices_eur && window.__lastPredictionData.export_prices_eur[dataIndex] !== undefined) {
                 exportPrice = Number(window.__lastPredictionData.export_prices_eur[dataIndex]);
             } else {
-                // Approximate dynamic export: (All-in - BTW - Energiebelasting - Opslag)
                 exportPrice = Math.max(0.0, (importPrice / 1.21) - 0.11085 - 0.0121 - 0.00605);
             }
 
-            let html = `
-                <div class="flex items-center justify-between border-b border-slate-700/70 pb-2 mb-2">
-                    <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                        <span class="font-bold text-white text-xs tracking-wide">${label}</span>
-                        <span class="text-[10px] text-slate-400 font-mono">(${intervalH === 0.25 ? '15 min' : '1 uur'})</span>
-                    </div>
-                    <span class="text-[10px] text-cyan-300 font-mono font-semibold px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-800">
-                        Inkoop: €${importPrice.toFixed(4)}/kWh
-                    </span>
-                </div>
-                <div class="space-y-1.5">
-            `;
-
             let netCostVal = 0.0;
             let hasNetCost = false;
+            const dynamicRows = [];
 
             tooltip.dataPoints.forEach(dp => {
                 const ds = chart.data.datasets[dp.datasetIndex];
@@ -1812,41 +1637,28 @@
                 let dsLabel = ds.label || '';
                 const isLine = ds.type === 'line' || (ds.borderDash && ds.borderDash.length > 0);
                 const color = ds.borderColor || ds.backgroundColor;
-
-                // Strip "(kWh)" or "(kW)" from label for clean display
                 const cleanLabel = dsLabel.replace(/\s*\(kWh\)|\s*\(kW\)/g, '').trim();
 
-                // Skip mirror duplicate "Zon Direct Benut" in tooltip (Opgewekt Gebruikt already shows it!)
-                if (cleanLabel.includes('Zon Direct Benut')) {
-                    return;
-                }
+                if (cleanLabel.includes('Zon Direct Benut')) return;
 
-                // Handle Stroomprijs row
                 if (cleanLabel.includes('Stroomprijs') || cleanLabel.includes('Tarief') || cleanLabel.includes('Prijs')) {
-                    html += `
-                        <div class="flex items-center justify-between gap-3 text-xs">
-                            <div class="flex items-center truncate">
-                                <span style="display:inline-block; width:18px; height:0; border-top:2px dashed ${color}; margin-right:8px; vertical-align:middle;"></span>
-                                <span class="text-slate-300 truncate">${cleanLabel}</span>
-                            </div>
-                            <div class="flex items-center gap-1.5 flex-shrink-0">
-                                <span class="font-bold text-cyan-300 font-mono">€${Number(rawVal).toFixed(4)}/kWh</span>
-                            </div>
-                        </div>
-                    `;
+                    dynamicRows.push({
+                        type: 'dashed-line',
+                        color: color,
+                        label: cleanLabel,
+                        labelClass: 'text-slate-300 truncate',
+                        val: `€${Number(rawVal).toFixed(4)}/kWh`,
+                        valClass: 'font-bold text-cyan-300 font-mono'
+                    });
                     return;
                 }
 
-                // Format PURE POWER (kW) as primary and INTERVAL ENERGY (kWh) as secondary
                 const absKw = Math.abs(rawVal);
                 const kwhVal = Number((absKw * intervalH).toFixed(3));
                 const powerStr = `${absKw.toFixed(2)} kW`;
                 const energyStr = `${kwhVal >= 10.0 ? kwhVal.toFixed(1) : kwhVal.toFixed(2)} kWh`;
-                const intervalLabel = (intervalH === 0.25) ? 'kwartier' : 'uur';
 
-                // Calculate monetary cost / revenue per dataset type
                 let costBadge = '';
-
                 if (cleanLabel.includes('Afname')) {
                     const c = kwhVal * importPrice;
                     netCostVal += c;
@@ -1870,50 +1682,33 @@
                         costBadge = `<span class="text-emerald-400 font-bold ml-auto">-€${rev.toFixed(2)} opbr.</span>`;
                     }
                 } else if (cleanLabel.includes('Opgewekt Gebruikt')) {
-                    const sav = kwhVal * importPrice;
-                    costBadge = `<span class="text-cyan-400 font-medium ml-auto">€${sav.toFixed(2)} besp.</span>`;
+                    costBadge = `<span class="text-cyan-400 font-medium ml-auto">€${(kwhVal * importPrice).toFixed(2)} besp.</span>`;
                 } else if (cleanLabel.includes('Zon Productie')) {
-                    const rev = kwhVal * exportPrice;
-                    costBadge = `<span class="text-amber-400 font-medium ml-auto">€${rev.toFixed(2)} opbr.</span>`;
+                    costBadge = `<span class="text-amber-400 font-medium ml-auto">€${(kwhVal * exportPrice).toFixed(2)} opbr.</span>`;
                 } else if (cleanLabel.includes('Accu Ontladen')) {
-                    const sav = kwhVal * importPrice;
-                    costBadge = `<span class="text-teal-400 font-medium ml-auto">€${sav.toFixed(2)} besp.</span>`;
+                    costBadge = `<span class="text-teal-400 font-medium ml-auto">€${(kwhVal * importPrice).toFixed(2)} besp.</span>`;
                 } else if (cleanLabel.includes('Totaal Verbruik')) {
-                    const totC = kwhVal * importPrice;
-                    costBadge = `<span class="text-orange-400 font-bold ml-auto">€${totC.toFixed(2)}</span>`;
+                    costBadge = `<span class="text-orange-400 font-bold ml-auto">€${(kwhVal * importPrice).toFixed(2)}</span>`;
                 } else if (cleanLabel.includes('SWW') || cleanLabel.includes('CV') || cleanLabel.includes('Accu Laden') || cleanLabel.includes('Ongedefinieerd')) {
-                    const c = kwhVal * importPrice;
-                    costBadge = `<span class="text-slate-400 ml-auto">€${c.toFixed(2)}</span>`;
+                    costBadge = `<span class="text-slate-400 ml-auto">€${(kwhVal * importPrice).toFixed(2)}</span>`;
                 }
 
-                // Visual indicator: ACTUAL line for lines, rounded pill for bars
-                let indicatorHtml = '';
-                if (isLine) {
-                    indicatorHtml = `<span style="display:inline-block; width:18px; height:3px; background-color:${color}; border-radius:2px; margin-right:8px; vertical-align:middle;"></span>`;
-                } else {
-                    indicatorHtml = `<span style="display:inline-block; width:10px; height:10px; background-color:${color}; border-radius:2px; margin-right:8px; vertical-align:middle;"></span>`;
-                }
-
-                html += `
-                    <div class="flex items-center justify-between gap-3 text-xs">
-                        <div class="flex items-center truncate">
-                            ${indicatorHtml}
-                            <span class="text-slate-300 truncate">${cleanLabel}</span>
-                        </div>
-                        <div class="flex items-center gap-2 flex-shrink-0 font-mono">
-                            <span class="font-bold text-white">${rawVal < 0 ? '-' : ''}${powerStr}</span>
-                            <span class="text-[10px] text-slate-400 font-sans">(${energyStr})</span>
-                            ${costBadge}
-                        </div>
-                    </div>
-                `;
+                dynamicRows.push({
+                    type: isLine ? 'line' : 'bar',
+                    color: color,
+                    label: cleanLabel,
+                    val: `${rawVal < 0 ? '-' : ''}${powerStr}`,
+                    valClass: 'font-bold text-white',
+                    extraVal: `<span class="text-[10px] text-slate-400 font-sans">(${energyStr})</span> ${costBadge}`
+                });
             });
 
+            let footerHtml = '';
             if (hasNetCost) {
                 const isNetProfit = netCostVal < 0;
                 const netColor = isNetProfit ? 'text-emerald-400' : 'text-red-400';
                 const netLabel = isNetProfit ? 'Netto Opbrengst' : 'Netto Kosten';
-                html += `
+                footerHtml = `
                     <div class="mt-2.5 pt-2 border-t border-slate-700/80 flex items-center justify-between font-bold text-xs font-mono">
                         <span class="text-slate-400 uppercase tracking-wider">${netLabel}:</span>
                         <span class="${netColor} text-sm">${isNetProfit ? '+' : ''}€${Math.abs(netCostVal).toFixed(2)}</span>
@@ -1921,29 +1716,13 @@
                 `;
             }
 
-            html += `</div>`;
-            tooltipEl.innerHTML = html;
-
-            // Position tooltip smoothly relative to viewport
-            const canvasRect = chart.canvas.getBoundingClientRect();
-            let left = canvasRect.left + tooltip.caretX + 16;
-            let top = canvasRect.top + tooltip.caretY - 30;
-
-            // Prevent overflowing window right
-            if (left + 280 > window.innerWidth) {
-                left = canvasRect.left + tooltip.caretX - 290;
-            }
-            if (left < 10) left = 10;
-
-            // Prevent overflowing window bottom
-            if (top + 240 > window.innerHeight) {
-                top = window.innerHeight - 250;
-            }
-            if (top < 10) top = 10;
-
-            tooltipEl.style.left = `${left}px`;
-            tooltipEl.style.top = `${top}px`;
-            tooltipEl.style.opacity = '1';
+            renderCustomTooltip(context, {
+                dotColor: 'bg-cyan-400',
+                intervalStr: (intervalH === 0.25 ? '15 min' : '1 uur'),
+                headerBadge: `<span class="text-[10px] text-cyan-300 font-mono font-semibold px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-800">Inkoop: €${importPrice.toFixed(4)}/kWh</span>`,
+                rows: dynamicRows,
+                footer: footerHtml
+            });
         }
 
 

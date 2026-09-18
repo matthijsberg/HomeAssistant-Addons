@@ -30,7 +30,8 @@ def test_electricity_prices_tooltip_extraction():
     const fs = require('fs');
     const code = fs.readFileSync('{APP_JS_PATH}', 'utf8');
     
-    // Extract customPricesTooltipHandler function
+    // Extract renderCustomTooltip and customPricesTooltipHandler functions
+    eval(code.match(/function renderCustomTooltip\\(context, config\\) \\{{[\\s\\S]*?\\n        \\}}/)[0]);
     eval(code.match(/function customPricesTooltipHandler\\(context\\) \\{{[\\s\\S]*?\\n        \\}}/)[0]);
 
     // Test Case: Peak Solar at 12:00
