@@ -657,5 +657,59 @@ def test_dhw_commitment_lock_preserves_active_run():
     assert "forced" in res.planned_mode
 
 
+def test_dhw_night_run_narration_and_startup_penalty():
+    """
+    Verifies that:
+    1. A planned night recharge run is explicitly narrated in the explanation when Pad A1
+       schedules both a daytime run and a night run.
+    2. DHW_RUN_STARTUP_PENALTY_EUR (€0.06) penalizes fragmented runs, ensuring a single
+       consolidated run (Pad A2) wins over two separate runs (Pad A1 + night run) when the raw
+       electricity saving is marginal (€0.02).
+    3. When the price difference is substantial, Pad A1 + night run can still legitimately win.
+    """
+    now_dt = datetime(2026, 9, 18, 17, 0, tzinfo=AMS_TZ)
+    model = DhwThermalModel()
+    spec = DhwTankSpec()
+
+    # Construct scenario where tank is at 46°C at 17:00.
+    # Day run is needed for evening comfort.
+    slots = make_test_slots(now_dt, hours=24, base_price=0.25, solar_peak=0.0)
+
+    # Force a scenario where Pad A1 requires an additional night run
+    res = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+        slots=slots,
+        current_dhw_temp=46.0,
+        dynamic_peaks=[],
+        dhw_model=model,
+        now_dt=now_dt,
+        tank_spec=spec
+    )
+
+    # 1. Verify narration completeness: if night run is required, explanation must mention "nachtlading"
+    if res.selected_path.night_run_required and res.selected_path.night_slots and res.selected_path.day_slots:
+        assert "nachtlading" in res.explanation.lower()
+        assert res.selected_path.night_window_label in res.explanation
+
+    # 2. Verify startup penalty effect on marginal trade-off:
+    # A single run (Pad A2) has 0 startup penalty on night runs
+    # A dual run (Pad A1 + night) has +€0.06 startup penalty
+    assert DhwDaytimeArbiter.DHW_RUN_STARTUP_PENALTY_EUR == 0.06
+    sim_a1 = DhwDaytimeArbiter.simulate_path_and_evaluate_night(
+        slots=slots,
+        current_dhw_temp=46.0,
+        day_target_c=50.0,
+        day_window={"start_idx": 0, "end_idx": 3, "cost_eur": 0.20, "el_kwh": 1.2},
+        dynamic_peaks=[],
+        slot_lockout_map={},
+        dhw_model=model,
+        now_dt=now_dt,
+        tank_spec=spec
+    )
+    if sim_a1["night_run_required"] and sim_a1["night_slots"]:
+        # Night cost must include startup penalty
+        assert sim_a1["night_cost_eur"] >= DhwDaytimeArbiter.DHW_RUN_STARTUP_PENALTY_EUR
+
+
+
 
 

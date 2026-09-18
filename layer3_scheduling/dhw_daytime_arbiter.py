@@ -131,6 +131,13 @@ class DhwDaytimeArbiter:
     DHW_PAD_B2_TRIGGER_SAVINGS_EUR: float = 0.06   # Min savings (€0.06) to trigger Pad B2 (60°C buffer) from standby
     DHW_PAD_B2_RETENTION_SAVINGS_EUR: float = 0.03 # Retention threshold (€0.03) if Pad B2 was already active
 
+    # Compressor startup loss penalty:
+    # Models the thermodynamic transient penalty (~5-8 min pressure equalization & oil circulation,
+    # ~30% COP degradation during startup, piping warm-up, and mechanical wear) when an additional
+    # separate heating run is initiated (equivalent to ~0.35 kWh_th / ~€0.06 at dynamic retail prices).
+    # Prevents the planner from splitting heating into multiple fragmented runs for marginal (1-2 cent) gains.
+    DHW_RUN_STARTUP_PENALTY_EUR: float = 0.06
+
     @classmethod
     def calculate_horizon_safety_margin_c(
         cls,
@@ -443,7 +450,9 @@ class DhwDaytimeArbiter:
             )
 
             if opt_night:
-                night_cost = opt_night["cost_eur"]
+                # Add compressor startup penalty if this is an additional separate run (day run already planned)
+                startup_penalty = cls.DHW_RUN_STARTUP_PENALTY_EUR if day_slots else 0.0
+                night_cost = opt_night["cost_eur"] + startup_penalty
                 night_el = opt_night["el_kwh"]
                 night_slots = list(range(opt_night["start_idx"], opt_night["end_idx"]))
                 start_lbl = getattr(slots[opt_night["start_idx"]], "label", getattr(slots[opt_night["start_idx"]], "time_label", ""))
@@ -955,6 +964,14 @@ class DhwDaytimeArbiter:
                 final_label = f"Normaal (Standby — Nachtlading gepland om {selected_path.night_window_label})"
                 final_target_c = spec.target_setpoint_c
                 final_power_kw = spec.heat_pump_electric_kw
+            else:
+                # Explicitly narrate the planned night recharge run in the explanation
+                dip_c = selected_path.simulated_morning_dip_c
+                dip_time = selected_path.simulated_morning_dip_time
+                explanation += (
+                    f" Om het ochtendcomfort te waarborgen (vat daalt anders naar {dip_c:.1f}°C rond {dip_time}) "
+                    f"is vannacht een aanvullende nachtlading gepland om {selected_path.night_window_label} tot {spec.target_setpoint_c:.0f}°C (kosten: ~€{selected_path.night_cost_eur:.2f})."
+                )
 
         # Commitment Lock / Run-in-Progress Guard:
         # If the heat pump is already actively running DHW in the current slot, preserve the active run
@@ -1017,7 +1034,8 @@ class DhwDaytimeArbiter:
                     final_planned_slots.sort()
                     s2_lbl = getattr(slots[opt_run_2["start_idx"]], "label", getattr(slots[opt_run_2["start_idx"]], "time_label", ""))
                     e2_lbl = getattr(slots[min(n_slots - 1, opt_run_2["end_idx"])], "label", getattr(slots[min(n_slots - 1, opt_run_2["end_idx"])], "time_label", ""))
-                    explanation += f" Daarnaast is voor morgen een 2e lading gepland om {s2_lbl}–{e2_lbl} (op voordelige zonne-/dagstroom à €{opt_run_2['cost_eur']:.2f}) om ook de avond en 2e nacht comfortabel te overbruggen."
+                    run_num_str = "3e" if (selected_path.night_run_required and selected_path.night_slots and selected_path.day_slots) else "2e"
+                    explanation += f" Daarnaast is voor morgen een {run_num_str} lading gepland om {s2_lbl}–{e2_lbl} (op voordelige zonne-/dagstroom à €{opt_run_2['cost_eur']:.2f}) om ook de avond en 2e nacht comfortabel te overbruggen."
 
         return DaytimeArbitrationResult(
             situation=situation,
