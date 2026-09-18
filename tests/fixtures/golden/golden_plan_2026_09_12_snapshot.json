@@ -1,12 +1,12 @@
 {
   "generated_at": "2026-09-12T09:00:00+02:00",
   "horizon_hours": 24.0,
-  "dhw_planned_mode": "forced_on",
-  "dhw_target_temp_c": 54.0,
-  "dhw_run_start": "10:00",
-  "dhw_run_end": "11:00",
-  "dhw_power_kw": 1.8,
-  "spits_lockout_hours": 0.0,
+  "dhw_planned_mode": "max_on",
+  "dhw_target_temp_c": 52.2,
+  "dhw_run_start": "Nu (09:00)",
+  "dhw_run_end": "09:45",
+  "dhw_power_kw": 2.4,
+  "spits_lockout_hours": 0,
   "dynamic_peaks_count": 1,
-  "total_active_dhw_slots": 8
+  "total_active_dhw_slots": 6
 }

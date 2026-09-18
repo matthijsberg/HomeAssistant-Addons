@@ -54,6 +54,7 @@ Open HEMS enforces a contract-first, unidirectional architecture:
 
 3. **Layer 3: Central Planning & Plan Store (`layer3_scheduling/`)**
    * Solves multi-device energy dispatch over a 24–48 hour horizon based on dynamic wholesale tariffs.
+   * **DHW Dynamic Programming Optimizer (`dhw_optimizer.py`):** Solves exact 2D backwards DP over tank temperature and compressor run state, minimizing electricity costs, start costs, and terminal replacement value while strictly enforcing comfort bounds and physical heat pump constraints (ADR-004).
    * Identifies economic price spikes and enforces anti-hunting and comfort caps (max 2.5h winter lockout).
    * Emits an immutable, versioned `CanonicalDispatchPlan`.
    * Publishes to `PlanStore` (thread-safe in-memory singleton + persistent disk snapshot + InfluxDB audit log).

@@ -6,7 +6,16 @@ and defrost penalties.
 """
 
 import pytest
-from models.physics import calculate_carnot_cop
+from datetime import datetime, timezone
+from models.physics import (
+    calculate_carnot_cop,
+    dhw_cop,
+    dhw_heat_delivered_kwh,
+    dhw_step,
+    calculate_dhw_cop,
+    calculate_dhw_thermal_output_kw,
+)
+from layer2_calibration.dhw_thermal_model import DhwThermalModel
 
 
 def test_calculate_carnot_cop_standard():
@@ -33,3 +42,98 @@ def test_calculate_carnot_cop_bounds():
 
     cop_extreme_mild = calculate_carnot_cop(outdoor_temp_c=25.0, flow_temp_c=28.0)
     assert cop_extreme_mild == 6.8
+
+
+def test_dhw_cop_monotonic_decrease_with_tank_temp():
+    """COP must decrease monotonically as tank temperature rises (higher condensing temp)."""
+    t_out = 10.0
+    tank_temps = [35.0, 40.0, 45.0, 50.0, 55.0, 60.0]
+    cops = [dhw_cop(t, t_out) for t in tank_temps]
+
+    for i in range(len(cops) - 1):
+        assert cops[i] > cops[i + 1], f"COP should decrease: {cops[i]} > {cops[i+1]} at {tank_temps[i]} vs {tank_temps[i+1]}"
+
+    # Check nominal points
+    assert dhw_cop(50.0, 10.0) == 2.85
+    assert dhw_cop(60.0, 10.0) == 2.15
+
+
+def test_dhw_cop_monotonic_increase_with_outdoor_temp():
+    """COP must increase monotonically as outdoor temperature rises (higher evaporating temp)."""
+    t_tank = 50.0
+    out_temps = [-5.0, 0.0, 5.0, 10.0, 15.0, 20.0]
+    cops = [dhw_cop(t_tank, t) for t in out_temps]
+
+    for i in range(len(cops) - 1):
+        assert cops[i] < cops[i + 1], f"COP should increase: {cops[i]} < {cops[i+1]} at {out_temps[i]} vs {out_temps[i+1]}"
+
+
+def test_dhw_cop_clamping():
+    """Verify that extreme cold/hot or extreme tank temps are clamped to [COP_min, COP_max]."""
+    # Extremely cold outdoor temp and hot tank -> clamped to min (1.6)
+    cop_low = dhw_cop(t_tank_c=70.0, t_outdoor_c=-20.0)
+    assert cop_low == 1.6
+
+    # Mild outdoor temp and very cold tank -> clamped to max (3.6)
+    cop_high = dhw_cop(t_tank_c=20.0, t_outdoor_c=35.0)
+    assert cop_high == 3.6
+
+
+def test_dhw_step_energy_conservation():
+    """
+    Verify First Law energy conservation:
+    A heating run of n quarter-hours with zero standby loss (or UA=0) and zero tapping
+    must yield an exact temperature rise of Delta_T = Q_delivered_total / C.
+    """
+    c_tank = 0.407  # kWh / K
+    spec = {
+        "thermal_capacity_kwh_per_k": c_tank,
+        "ua_w_per_k": 0.0,  # Zero standing loss to test pure thermal accumulation
+        "heat_pump_power_kw": 1.8,
+        "target_temp_c": 60.0,
+    }
+
+    t_curr = 40.0
+    total_q_delivered = 0.0
+    n_slots = 4
+    dt_h = 0.25
+
+    for _ in range(n_slots):
+        # Calculate expected heat delivered in this slot
+        q_slot = dhw_heat_delivered_kwh(t_curr, t_outdoor_c=10.0, p_el_kw=1.8, dt_h=dt_h)
+        total_q_delivered += q_slot
+        t_next = dhw_step(
+            t_tank_c=t_curr,
+            u=1.0,
+            q_tap_kwh=0.0,
+            t_outdoor_c=10.0,
+            dt_h=dt_h,
+            spec=spec,
+            t_max_c=60.0,
+        )
+        t_curr = t_next
+
+    expected_delta_t = total_q_delivered / c_tank
+    actual_delta_t = t_curr - 40.0
+    assert abs(actual_delta_t - expected_delta_t) < 1e-6, (
+        f"Energy balance violation: actual delta_T={actual_delta_t:.6f}, expected={expected_delta_t:.6f}"
+    )
+
+
+def test_simulate_trajectory_monotonic_idle_cooling():
+    """When u = 0 for all slots, simulate_trajectory must produce a strictly monotonically non-increasing temperature trajectory."""
+    model = DhwThermalModel()
+    start_dt = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+    res = model.simulate_trajectory(
+        t_start_c=55.0,
+        start_dt=start_dt,
+        hours_ahead=24,
+        heat_pump_schedule_slots=[],  # u = 0 for all slots
+        target_temp_c=50.0,
+    )
+
+    temps = res["temperatures_c"]
+    assert len(temps) == 96
+    for i in range(len(temps) - 1):
+        assert temps[i] >= temps[i + 1], f"Trajectory must not increase at slot {i}: {temps[i]} < {temps[i+1]}"
+    assert temps[-1] < temps[0]

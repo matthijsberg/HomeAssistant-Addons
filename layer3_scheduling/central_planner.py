@@ -13,6 +13,7 @@ Strictly preserves all operational and physical directives:
 """
 
 import math
+import time
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from models.canonical import (
@@ -30,6 +31,9 @@ from layer1_data_collection.sanitizer import CleanTelemetryFrame
 from layer3_scheduling.plan_store import get_plan_store, PlanStore
 from layer3_scheduling.tariff_provider import TariffProvider
 from layer3_scheduling.dhw_specs import DhwTankSpec
+from layer3_scheduling.dhw_shadow_logger import get_dhw_planner_mode, run_dhw_shadow_comparison
+from layer3_scheduling.dhw_optimizer import solve
+from layer3_scheduling.dhw_plan_adapter import adapt_optimizer_to_dhw_summary
 from models.physics import calculate_dhw_cop
 
 
@@ -143,6 +147,7 @@ class CentralPlanner:
         sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
         daytime_arbitrage_audit = None
         arbiter_res = None
+        dhw_summary_override = None
 
         # Priority 0: DHW Circuit Disabled in Home Assistant (e.g. Vacation / Holiday / Off)
         if not getattr(frame, "is_dhw_enabled", True):
@@ -152,100 +157,29 @@ class CentralPlanner:
             sww_target_temp = 50.0
             sww_power_kw = 0.0
             daytime_arbitrage_audit = None
-            arbiter_res = None
-        # Priority 1: Morning comfort risk (<40°C) during night/evening -> Nachtverwarming (20:00 - 06:00)
-        # Comfortzekerheid vóór ochtendspits weegt zwaarder dan wachten op zon.
-        elif (morning_comfort_risk or current_dhw_temp <= 41.0) and is_night_time:
-            # 1. Thermal heat requirement to reach target setpoint
-            # Factor in estimated cooldown until night run (~1.5K)
-            est_tank_temp = max(35.0, current_dhw_temp - 1.5)
-            delta_t = max(1.0, spec.target_setpoint_c - est_tank_temp)
-            th_need_kwh = delta_t * spec.thermal_capacity_kwh_per_k
-
-            # Calibrated duration using DhwThermalModel empirical opwarmtijd (including 5 min startup transient)
-            if dhw_model is not None:
-                n_req_slots = max(2, min(8, dhw_model.calculate_required_slots(start_temp_c=est_tank_temp, target_temp_c=spec.target_setpoint_c, slot_minutes=int(step_hours * 60))))
-            else:
-                th_per_slot = spec.thermal_output_kw * step_hours
-                n_req_slots = max(2, min(8, math.ceil(th_need_kwh / th_per_slot)))
-
-            # 2. Find morning peak start slot or first slot with hour >= 6
-            morn_start_idx = n_slots
-            for idx, s in enumerate(slots):
-                if idx > 0 and ((s.dt.hour >= 6 and (s.dt.date() > now.date() or now.hour < 6)) or (slot_lockout_map.get(idx, {}).get("is_hard_lockout") and s.dt.hour < 11)):
-                    morn_start_idx = idx
-                    break
-
-            candidate_windows = []
-            for start_idx in range(n_slots - n_req_slots + 1):
-                end_idx = start_idx + n_req_slots
-                if end_idx > morn_start_idx:
-                    continue
-
-                window_slots = slots[start_idx:end_idx]
-                s_start = window_slots[0]
-                # Start must be after evening peak / >= 20:00, or early morning < 06:00
-                is_night_window = (s_start.dt.hour >= 20 or s_start.dt.hour < 6)
-                if not is_night_window:
-                    continue
-
-                # Must not intersect any hard peak lockout
-                has_lockout = any(slot_lockout_map.get(k, {}).get("is_hard_lockout") for k in range(start_idx, end_idx))
-                if has_lockout:
-                    continue
-
-                # Calculate window cost:
-                # a. COP per quarter based on predicted outdoor temperature: COP = 2.55 + 0.075 * T_outdoor
-                total_window_cost_eur = 0.0
-                total_el_kwh = 0.0
-                cops = []
-                for k_idx, s_k in enumerate(window_slots):
-                    t_out = s_k.outdoor_temp_c
-                    cop_slot = calculate_dhw_cop(target_temp_c=50.0, outdoor_temp_c=t_out)
-                    cops.append(cop_slot)
-                    el_slot_kwh = (th_need_kwh / n_req_slots) / cop_slot
-                    total_el_kwh += el_slot_kwh
-
-                    p_in = s_k.price_all_in
-                    p_exp = tp.calculate_export_value_from_import(p_in)
-                    surplus_kw = max(0.0, s_k.solar_kw - s_k.unallocated_kw)
-                    surplus_kwh = surplus_kw * step_hours
-                    self_kwh = min(el_slot_kwh, surplus_kwh)
-                    grid_kwh = max(0.0, el_slot_kwh - self_kwh)
-
-                    total_window_cost_eur += (grid_kwh * p_in) + (self_kwh * p_exp)
-
-                # b. Standing loss from end of run until morning peak start
-                mean_cop = sum(cops) / len(cops) if cops else 2.8
-                hours_until_morn = max(0.0, (morn_start_idx - end_idx) * step_hours)
-                extra_th_loss_kwh = hours_until_morn * spec.standby_loss_50_kw
-                extra_el_loss_kwh = extra_th_loss_kwh / mean_cop
-                mean_price = sum(s_k.price_all_in for s_k in window_slots) / len(window_slots)
-                total_window_cost_eur += extra_el_loss_kwh * mean_price
-
-                candidate_windows.append((total_window_cost_eur, start_idx, n_req_slots, total_el_kwh, mean_cop))
-
-            if candidate_windows:
-                candidate_windows.sort(key=lambda x: x[0])
-                best_cost, best_start, best_len, best_el, best_cop = candidate_windows[0]
-                planned_mode = "forced_night_50"
-                planned_mode_label = f"Geforceerd aan (Nachtlading tot {spec.target_setpoint_c:.0f}°C)"
-                sww_target_temp = spec.target_setpoint_c
-                sww_power_kw = spec.heat_pump_electric_kw
-                planned_dhw_slots = list(range(best_start, best_start + best_len))
-            else:
-                planned_mode = "normal"
-                planned_mode_label = "Normaal (Standby — Geen nachtvenster)"
-                planned_dhw_slots = []
-
-        # Priority 2: Dynamic Daytime Economic Arbitration (DhwDaytimeArbiter)
-        # Evaluates 24-hour all-in electricity cost comparing 50°C vs 60°C across the rolling horizon
+            dhw_summary = DHWPlanSummary(
+                planned_mode="off",
+                planned_mode_label="DHW Uitgeschakeld",
+                color_hex="#64748B",
+                tailwind_class="text-slate-500",
+                target_temp_c=50.0,
+                run_start="Geen run",
+                run_end="Geen run",
+                run_duration_min=0,
+                power_kw=0.0,
+                total_stroom_kwh=0.0,
+                spits_lockout_hours=round(sum(p.get("hard_duration_mins", 0) for p in dynamic_peaks if p.get("is_hard_lockout")) / 60.0, 1),
+                dynamic_peaks=dynamic_peaks,
+                unheated_trajectory=[],
+                counterfactual_reason="DHW circuit is uitgeschakeld in instellingen.",
+                arbitrage_saving_eur=0.0,
+                decision_details={"status": "OFF", "planned_mode": "off"}
+            )
         else:
-            from layer3_scheduling.dhw_daytime_arbiter import DhwDaytimeArbiter
+            # Check DHW Planner mode: 'optimizer' (default) or 'shadow' (diagnostic)
+            planner_mode = get_dhw_planner_mode(model_parameters)
 
             # Query previous plan from PlanStore for anti-cycling & run continuity
-            prev_path = None
-            prev_target = None
             is_running = False
             try:
                 prev_plan = get_plan_store().get_plan()
@@ -254,9 +188,6 @@ class CentralPlanner:
                     if isinstance(gen_dt, str):
                         gen_dt = datetime.fromisoformat(gen_dt)
                     if gen_dt is None or abs((now - gen_dt).total_seconds()) <= 2700:
-                        prev_audit = getattr(prev_plan, "metadata", {}).get("daytime_arbitrage_audit", {}) if getattr(prev_plan, "metadata", None) else {}
-                        prev_path = prev_audit.get("selected_path_id")
-                        prev_target = prev_audit.get("target_temp_c")
                         matching = []
                         for s in prev_plan.slots:
                             s_dt = getattr(s, "dt", None)
@@ -271,25 +202,49 @@ class CentralPlanner:
             except Exception:
                 pass
 
-            arbiter_res = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+            run_state0 = ("ON_FREE", 0) if is_running else ("OFF_FREE", 0)
+
+            res_opt = solve(
                 slots=slots,
-                current_dhw_temp=current_dhw_temp,
-                dynamic_peaks=dynamic_peaks,
+                t0_c=current_dhw_temp,
+                run_state0=run_state0,
                 dhw_model=dhw_model,
-                now_dt=now,
-                step_hours=step_hours,
                 tariff_provider=tp,
-                tank_spec=spec,
-                previous_selected_path=prev_path,
-                previous_target_temp_c=prev_target,
-                is_dhw_running=is_running,
+                spec=spec,
+                dynamic_peaks=dynamic_peaks
             )
-            planned_mode = arbiter_res.planned_mode
-            planned_mode_label = arbiter_res.planned_mode_label
-            sww_target_temp = arbiter_res.target_temp_c
-            sww_power_kw = arbiter_res.power_kw
-            planned_dhw_slots = arbiter_res.planned_slots
-            daytime_arbitrage_audit = arbiter_res.to_audit_dict()
+
+            dhw_summary = adapt_optimizer_to_dhw_summary(
+                opt_result=res_opt,
+                slots=slots,
+                t0_c=current_dhw_temp,
+                run_state0=run_state0,
+                dhw_model=dhw_model,
+                tariff_provider=tp,
+                spec=spec,
+                dynamic_peaks=dynamic_peaks
+            )
+
+            planned_mode = dhw_summary.planned_mode
+            planned_mode_label = dhw_summary.planned_mode_label
+            sww_target_temp = dhw_summary.target_temp_c
+            sww_power_kw = dhw_summary.power_kw
+            planned_dhw_slots = res_opt.planned_slots
+            daytime_arbitrage_audit = dhw_summary.decision_details or {}
+
+            if planner_mode == "shadow":
+                shadow_record = run_dhw_shadow_comparison(
+                    slots=slots,
+                    current_dhw_temp=current_dhw_temp,
+                    dynamic_peaks=dynamic_peaks,
+                    arbiter_planned_slots=planned_dhw_slots,
+                    dhw_model=dhw_model,
+                    tariff_provider=tp,
+                    spec=spec,
+                    now_dt=now,
+                    run_state0=run_state0
+                )
+                daytime_arbitrage_audit["shadow_comparison"] = shadow_record
 
         # Avoid hard peak lockout for DHW runs
         final_dhw_slots = []
@@ -399,293 +354,6 @@ class CentralPlanner:
                 )
             )
 
-        # 5. Assemble DHW Plan Summary
-        # Extract contiguous run blocks (e.g. Run 1: 03:15-04:45, Run 2: 14:00-15:15)
-        run_blocks = []
-        if final_dhw_slots:
-            current_block = [final_dhw_slots[0]]
-            for s_idx in final_dhw_slots[1:]:
-                if s_idx == current_block[-1] + 1:
-                    current_block.append(s_idx)
-                else:
-                    run_blocks.append(current_block)
-                    current_block = [s_idx]
-            run_blocks.append(current_block)
-
-        if run_blocks:
-            first_block = run_blocks[0]
-            run_start = slots[first_block[0]].dt.strftime("%H:%M")
-            run_end = (slots[first_block[-1]].dt + timedelta(minutes=step_mins)).strftime("%H:%M")
-            if len(run_blocks) > 1:
-                second_block = run_blocks[1]
-                s2_start = slots[second_block[0]].dt.strftime("%H:%M")
-                s2_end = (slots[second_block[-1]].dt + timedelta(minutes=step_mins)).strftime("%H:%M")
-                runs_window_str = f"{run_start}–{run_end} & {s2_start}–{s2_end}"
-            else:
-                runs_window_str = f"{run_start}–{run_end}"
-        else:
-            run_start = "N.v.t."
-            run_end = "N.v.t."
-            runs_window_str = "N.v.t."
-
-        run_dur_min = len(final_dhw_slots) * step_mins
-        total_kwh_stroom = round(len(final_dhw_slots) * step_hours * sww_power_kw, 1)
-
-        summary_mode = (
-            StandardizedState.MAX_ON if planned_mode == "forced_solar_boost_60"
-            else (StandardizedState.FORCED_ON if final_dhw_slots else StandardizedState.NORMAL)
-        )
-        summary_meta = get_state_metadata(summary_mode)
-
-        # Calculate dynamic spitslockout hours
-        total_lockout_mins = sum(p.get("hard_duration_mins", 0) for p in dynamic_peaks if p.get("is_hard_lockout"))
-        spits_lockout_hours = round(total_lockout_mins / 60.0, 1)
-
-        # Build centralized decision details contract (Single Source of Truth)
-        cur_h = now.hour
-        is_daytime = (6 <= cur_h < 20)
-        s0 = slots[0] if slots else None
-        p_now = round(s0.price_all_in, 4) if s0 else 0.235
-        sol_now = round(s0.solar_kw, 2) if s0 else 0.0
-        unalloc_now = round(s0.unallocated_kw, 2) if s0 else 0.35
-        surplus_now = max(0.0, sol_now - unalloc_now)
-        is_solar_surplus = (surplus_now >= 0.8)
-
-        spot_now = tp.calculate_spot_from_import(p_now)
-        export_now = tp.calculate_export_value_from_import(p_now)
-
-        run_pwr = sww_power_kw or 2.4
-        sol_used = min(run_pwr, surplus_now)
-        sol_share = (sol_used / run_pwr) if run_pwr > 0 else 0.0
-        eff_price = round((sol_share * export_now) + ((1.0 - sol_share) * p_now), 4)
-
-        kwh_e_run = total_kwh_stroom if total_kwh_stroom > 0 else 2.4
-        # Calculate actual cost of scheduled DHW slots if planned, otherwise estimate based on current rate
-        if final_dhw_slots:
-            cost_actual_run = round(sum(slots[s_idx].price_all_in * step_hours * sww_power_kw for s_idx in final_dhw_slots), 2)
-        else:
-            cost_actual_run = 0.0
-        cost_now_run = cost_actual_run if final_dhw_slots else round(kwh_e_run * eff_price, 2)
-
-        night_slots = [
-            s for s in slots
-            if (21 <= s.dt.hour <= 23 or 0 <= s.dt.hour <= 6)
-            and not slot_lockout_map.get(s.slot_idx, {}).get("is_hard_lockout")
-        ]
-        later_price = min((s.price_all_in for s in night_slots), default=0.26)
-        cost_later = round(kwh_e_run * later_price, 2)
-        calc_savings = round(max(0.0, cost_later - cost_now_run), 2)
-        if daytime_arbitrage_audit and daytime_arbitrage_audit.get("savings_eur"):
-            calc_savings = round(daytime_arbitrage_audit["savings_eur"], 2)
-
-        # Today's evening peak dip: strictly evaluate slots belonging to TODAY'S evening peak (do not look at tomorrow evening!)
-        eve_peak_slots = []
-        for p in dynamic_peaks:
-            if "avond" in p.get("name", "").lower() or "spits" in p.get("name", "").lower():
-                s_idx = p.get("start_idx", 0)
-                e_idx = p.get("end_idx", 0)
-                if s_idx < 32:  # Only today's peak
-                    for k in range(s_idx, min(e_idx, len(sim_temps))):
-                        eve_peak_slots.append(sim_temps[k])
-                break
-
-        if eve_peak_slots:
-            unh_spits = round(min(eve_peak_slots), 1)
-        else:
-            today_eve = [
-                sim_temps[k] for k in range(min(28, len(sim_temps)))
-                if 17 <= (now.hour + k * step_mins // 60) % 24 <= 22
-            ]
-            unh_spits = round(min(today_eve), 1) if today_eve else round(current_dhw_temp - 4.5, 1)
-
-        # Time headroom until evening peak lockout
-        mins_until_peak = 999.0
-        peak_start_lbl = "18:45"
-        for p in dynamic_peaks:
-            if p.get("is_hard_lockout") and ("avond" in p.get("name", "").lower() or "spits" in p.get("name", "").lower()):
-                p_s = p.get("hard_start_time") or p.get("start_time")
-                if p_s:
-                    peak_start_lbl = p_s
-                s_idx = p.get("start_idx", 999)
-                mins_until_peak = max(0.0, s_idx * step_mins)
-                break
-
-        th_need_60 = max(2.5, spec.boost_setpoint_c - current_dhw_temp) * spec.thermal_capacity_kwh_per_k
-        n_slots_60 = max(3, min(8, math.ceil(th_need_60 / (spec.thermal_output_kw * step_hours))))
-        est_duration_60_mins = n_slots_60 * step_mins
-        buffer_60_feasible = (mins_until_peak >= est_duration_60_mins)
-
-        if is_solar_surplus:
-            sol_pct = int(round(sol_share * 100))
-            blend_str = f"~€{cost_now_run:.2f} ({sol_pct}% zon @ €{export_now:.3f} + {100-sol_pct}% net @ €{p_now:.3f})"
-        else:
-            blend_str = f"~€{cost_now_run:.2f} tegen actueel tarief (€{p_now:.3f}/kWh)"
-
-        box_title = "Buffer Efficiëntie: Optimale Boilertemperatuur & Horizon-Dekking"
-        comfort_card_title = "Dispatch-Redenering: Waarom & Tot Welke Temperatuur?"
-        finance_card_title = ""
-        finance_text = ""
-
-        if arbiter_res:
-            sel_path = arbiter_res.selected_path
-            calc_savings = round(arbiter_res.savings_eur, 2)
-            is_night_run = bool(sel_path.night_run_required and sel_path.night_slots and not sel_path.day_slots)
-
-            if arbiter_res.situation == "SITUATION_1_EVENING_COMFORT_RISK":
-                spits_qualifier = "(comfortrisico)" if unh_spits < 40.0 else "(comfortabel gewaarborgd)"
-                vat_verloop = (
-                    f"Het vat is nu <strong>{current_dhw_temp:.1f}°C</strong>. "
-                    f"Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat tijdens de avondspits naar <strong>{unh_spits:.1f}°C</strong> {spits_qualifier}."
-                )
-                bullet_1 = f"Vatverloop: Zonder lading daalt vat naar {unh_spits:.1f}°C in spits {spits_qualifier}"
-            else:
-                vat_verloop = (
-                    f"Het vat is nu <strong>{current_dhw_temp:.1f}°C</strong>. "
-                    f"Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) blijft het vat tijdens zowel de avondspits ({unh_spits:.1f}°C) als morgenochtend ({morning_dip_c:.1f}°C) ruim boven de 40°C comfortgrens."
-                )
-                bullet_1 = f"Vatverloop: Spits {unh_spits:.1f}°C, ochtenddip {morning_dip_c:.1f}°C (comfort gegarandeerd)"
-
-            comfort_text = (
-                f"{vat_verloop}<br><br>"
-                f"<strong>Besluit &amp; Doeltemperatuur:</strong> {arbiter_res.explanation}"
-            )
-
-            # Bullet 2 & Badge afleiden van het geselecteerde pad
-            if sel_path.path_id == "PAD_A2_DAY_60":
-                bullet_2 = f"Geplande actie: Doortrekken naar {sww_target_temp:.1f}°C om {run_start}–{run_end} (bespaart ~€{calc_savings:.2f} t.o.v. nachtlading)"
-                badge_html = f'<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Buffer Lading ({sww_target_temp:.1f}°C)</span>'
-            elif sel_path.path_id == "PAD_B2_BUFFER_60":
-                bullet_2 = f"Geplande actie: Preventieve buffer naar {sww_target_temp:.1f}°C om {run_start}–{run_end} (bespaart ~€{calc_savings:.2f} t.o.v. nacht)"
-                badge_html = f'<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Buffer Lading ({sww_target_temp:.1f}°C)</span>'
-            elif sel_path.path_id == "PAD_A1_DAY_50":
-                if sww_target_temp >= (spec.boost_setpoint_c - 0.1):
-                    bullet_2 = f"Geplande actie: Lading naar {sww_target_temp:.1f}°C om {run_start}–{run_end} (volledige horizon-dekking)"
-                    badge_html = f'<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Volledige Lading ({sww_target_temp:.1f}°C)</span>'
-                else:
-                    savings_str = f" (bespaart ~€{calc_savings:.2f} t.o.v. 60°C)" if calc_savings > 0 else ""
-                    bullet_2 = f"Geplande actie: Lading naar {sww_target_temp:.1f}°C om {run_start}–{run_end}{savings_str}"
-                    badge_html = f'<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Optimale Lading ({sww_target_temp:.1f}°C)</span>'
-            else:
-                # Standby / Geen dagrun vandaag
-                if sel_path.night_run_required and sel_path.night_slots:
-                    action_label = "2 ladingen" if len(run_blocks) > 1 else "Nachtlading"
-                    bullet_2 = f"Geplande actie: {action_label} naar {sww_target_temp:.1f}°C om {runs_window_str} (~€{cost_now_run:.2f} op daltarief)"
-                    badge_title = "Nacht- &amp; Zonnebuffer Gepland" if len(run_blocks) > 1 else "Nachtlading Gepland"
-                    badge_html = f'<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> {badge_title} ({runs_window_str} tot {sww_target_temp:.1f}°C)</span>'
-                else:
-                    bullet_2 = "Geplande actie: Standby (0 kWh verbruik, wachten op volgend venster)"
-                    badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-700"><span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Afwachten (Vat dekt horizon)</span>'
-
-            # Financiële padvergelijking opbouwen op basis van de geëvalueerde paden van de arbiter
-            if len(arbiter_res.evaluated_paths) > 1:
-                finance_card_title = "Financiële Padvergelijking (24-uurs Horizon)"
-                path_rows = []
-                for p in arbiter_res.evaluated_paths:
-                    is_chosen = (p.path_id == sel_path.path_id)
-                    marker = "✓ " if is_chosen else "• "
-                    cost_disp = f"€{p.total_24h_cost_eur:.2f}" if p.total_24h_cost_eur < 900 else "Niet rendabel"
-                    path_rows.append(f"{marker}<strong>{p.name}</strong>: 24u-kosten {cost_disp} ({p.day_window_label})")
-                if calc_savings > 0:
-                    savings_summary = f"<br><br><strong>Besparing:</strong> Gekozen pad levert ~€{calc_savings:.2f} financieel voordeel op."
-                else:
-                    savings_summary = ""
-                finance_text = "<br>".join(path_rows) + savings_summary
-
-        else:
-            is_night_run = False
-            if final_dhw_slots:
-                is_night_run = any(slots[s_idx].dt.hour < 7 or slots[s_idx].dt.hour >= 21 for s_idx in final_dhw_slots)
-                if is_night_run:
-                    avoid_clause = " Overdag forceren naar 60°C is niet nodig en vermeden: dit bespaart stroom door de veel hogere COP en 55% minder stilstandsverlies." if sww_target_temp < (spec.boost_setpoint_c - 0.1) else ""
-                    comfort_text = (
-                        f"Het vat is nu <strong>{current_dhw_temp:.1f}°C</strong>. Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat vanavond door de avondspits naar <strong>{unh_spits:.1f}°C</strong> (comfortabel gewaarborgd), maar koelt vannacht met ochtenddouches door naar <strong class='text-amber-300'>{morning_dip_c:.1f}°C</strong> (onder de 40°C comfortgrens).<br><br>"
-                        f"<strong>Besluit &amp; Doeltemperatuur:</strong> Om het ochtendcomfort te garanderen is een nachtlading naar <strong>{sww_target_temp:.1f}°C</strong> gepland om <strong>{run_start}–{run_end}</strong> in het goedkoopste nachtdal (~€{cost_now_run:.2f} tegen daltarief, COP ~3.30)."
-                        f"{avoid_clause}"
-                    )
-                    bullet_1 = f"Vatverloop: Spitsdip {unh_spits:.1f}°C (veilig), ochtenddip zonder lading {morning_dip_c:.1f}°C (comfortrisico)"
-                    bullet_2 = f"Geplande actie: Nachtlading naar {sww_target_temp:.1f}°C om {run_start}–{run_end} (~€{cost_now_run:.2f} op daltarief)"
-                    badge_html = f'<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Nachtlading Gepland ({run_start}–{run_end} tot {sww_target_temp:.1f}°C)</span>'
-                else:
-                    if sww_target_temp >= (spec.boost_setpoint_c - 0.1):
-                        avoid_sentence = f"Volledige lading naar {spec.boost_setpoint_c:.0f}°C noodzakelijk om horizon te overbruggen."
-                        bullet_save = ""
-                    else:
-                        avoid_sentence = f"Doortrekken naar 60°C is vermeden wegens lagere COP (2.05) en extra stilstandsverlies (besparing: ~€{calc_savings:.2f})."
-                        bullet_save = f" (bespaart ~€{calc_savings:.2f} t.o.v. 60°C)"
-                    comfort_text = (
-                        f"Het vat is nu <strong>{current_dhw_temp:.1f}°C</strong>. Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat tijdens de avondspits naar <strong>{unh_spits:.1f}°C</strong> (richting de comfortdrempel).<br><br>"
-                        f"<strong>Besluit &amp; Doeltemperatuur:</strong> Een gerichte lading naar <strong>{sww_target_temp:.1f}°C</strong> is gepland om <strong>{run_start}–{run_end}</strong> ({blend_str}). "
-                        f"Deze berekende doeltemperatuur dekt de warmtevraag en stilstand ruim af tot het volgende laadvenster zonder nachtrun. "
-                        f"{avoid_sentence}"
-                    )
-                    bullet_1 = f"Vatverloop: Zonder lading daalt vat naar {unh_spits:.1f}°C in spits"
-                    bullet_2 = f"Geplande actie: Lading naar {sww_target_temp:.1f}°C om {run_start}–{run_end}{bullet_save}"
-                    badge_html = f'<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Optimale Lading ({sww_target_temp:.1f}°C)</span>'
-            else:
-                comfort_text = (
-                    f"Het vat is nu <strong>{current_dhw_temp:.1f}°C</strong>. Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) blijft het vat tijdens zowel de avondspits ({unh_spits:.1f}°C) als morgenochtend ({morning_dip_c:.1f}°C) ruim boven de 40°C comfortgrens.<br><br>"
-                    f"<strong>Besluit &amp; Doeltemperatuur:</strong> Standby behouden (geen lading). Het vat dekt de volledige horizon tot het volgende goedkope laadvenster op eigen buffer."
-                )
-                bullet_1 = f"Vatverloop: Spits {unh_spits:.1f}°C, ochtenddip {morning_dip_c:.1f}°C (comfort gegarandeerd)"
-                bullet_2 = f"Geplande actie: Standby (0 kWh verbruik, wachten op volgend venster)"
-                badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-700"><span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Afwachten (Vat dekt horizon)</span>'
-
-        decision_type = "night_run" if (final_dhw_slots and is_night_run) else ("day_run" if final_dhw_slots else "standby")
-        template_params = {
-            "decision_type": decision_type,
-            "current_temp": f"{current_dhw_temp:.1f}",
-            "evening_dip": f"{unh_spits:.1f}",
-            "morning_dip": f"{morning_dip_c:.1f}",
-            "target_temp": f"{sww_target_temp:.1f}",
-            "temp": f"{sww_target_temp:.1f}",
-            "start": run_start,
-            "end": run_end,
-            "cost": f"{cost_now_run:.2f}",
-            "blend": blend_str,
-            "savings": f"{calc_savings:.2f}"
-        }
-
-        decision_details = {
-            "status": "SCHEDULE_NIGHT_CHARGE" if (not is_daytime and morning_comfort_risk) else ("DAYTIME_BUFFER_60" if planned_mode in ["forced_solar_boost_60", "max_on"] else "STANDBY"),
-            "planned_mode": summary_meta["code"],
-            "box_title": box_title,
-            "badge_html": badge_html,
-            "comfort_card_title": comfort_card_title,
-            "comfort_text": comfort_text,
-            "finance_card_title": finance_card_title,
-            "finance_text": finance_text,
-            "bullet_1": bullet_1,
-            "bullet_2": bullet_2,
-            "morning_dip_c": morning_dip_c,
-            "morning_dip_time": morning_dip_time,
-            "dynamic_peaks": dynamic_peaks,
-            "savings_eur": calc_savings,
-            "cost_now_eur": cost_now_run,
-            "cost_later_eur": cost_later,
-            "template_params": template_params
-        }
-
-        dhw_summary = DHWPlanSummary(
-            planned_mode=summary_meta["code"],
-            planned_mode_label=planned_mode_label,
-            color_hex=summary_meta["color_hex"],
-            tailwind_class=summary_meta["tailwind_text"],
-            target_temp_c=sww_target_temp,
-            run_start=run_start,
-            run_end=run_end,
-            run_duration_min=run_dur_min,
-            power_kw=sww_power_kw,
-            total_stroom_kwh=total_kwh_stroom,
-            spits_lockout_hours=spits_lockout_hours,
-            dynamic_peaks=dynamic_peaks,
-            unheated_trajectory=unheated_trajectory,
-            counterfactual_reason=(
-                f"Zonder geplande run daalt de boilertemperatuur naar {morning_dip_c:.1f}°C rond {morning_dip_time}. "
-                f"Tijdens de ochtendspits ({spits_lockout_hours}u vergrendeling) kan de warmtepomp niet meer bijverwarmen."
-            ),
-            arbitrage_saving_eur=calc_savings,
-            decision_details=decision_details
-        )
 
         plan = CanonicalDispatchPlan(
             generated_at=now.isoformat(),

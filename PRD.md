@@ -120,7 +120,14 @@ Detailed in authoritative companion document `docs/PRD_CHARTING_AND_VISUALIZATIO
 * **Standardized Tokens (`OpenHEMSTokens`):** Strict shared color palette: Solar (`#F59E0B`), Unallocated (`#3B82F6`), DHW (`#EC4899`), Space Heating (`#6366F1`), Battery Charge (`#10B981`), Netto (`#EF4444`), Price Line (`#38BDF8`).
 * **Uniform Time Contract:** Slot labels always anchor to `Nu (HH:MM)` for current slot, `Za 00:00`/`Zo 00:00` for midnight boundaries, and enforce $0.00\text{ kW}$ solar production at night.
 
-### 2.5 Opportunistic In-Flight Run Merger (Smart Grid 60°C Promotion)
+### 2.5 Domestic Hot Water (DHW) Exact Dynamic Programming Optimization
+Detailed in ADR-004:
+* **Mathematical Optimization:** Replaces heuristic rule arbitration and fixed temperature anchors with exact 2D Dynamic Programming over water tank temperature ($T \in [40.0^\circ\text{C}, 60.0^\circ\text{C}]$ in $0.25^\circ\text{C}$ steps) and compressor operational state $r \in \{\text{OFF\_FREE}, \text{OFF\_DWELL}(d), \text{ON\_MANDATORY}(l), \text{ON\_FREE}\}$.
+* **Cost Function ($J$):** Minimizes total electricity cost + ignition penalty ($c_{\text{start}} = €0.05$) minus terminal heat salvage value ($C \cdot (T_N - T_{\text{comf}}) \cdot \frac{\hat{p}}{\widehat{\text{COP}}}$) across a rolling 48-hour horizon ($N=192$ slots).
+* **Comfort & Safety Invariants:** Enforces $T_k \ge T_{\text{comf}} + m_k$ across all slots with P95 stochastic tap risk buffer ($m_k$), minimum run length ($L_{\min}=3$ slots), minimum dwell time ($D_{\min}=4$ slots), and hard peak lockout compliance ($u_k = 0$).
+* **Deterministic Explainability:** All presentation explanations and financial bullets are derived strictly from formal counterfactuals ($J_{\text{none}}$ unheated curve, $J_{\text{cap50}}$ capping difference, $J_{\text{delay}}$ commitment difference) with exactly one explanatory sentence per scheduled run.
+
+### 2.6 Opportunistic In-Flight Run Merger (Smart Grid 60°C Promotion)
 When an unscheduled draw-off (e.g. an afternoon shower) causes the DHW tank to dip below reheat threshold and triggers autonomous heat pump operation:
 * Open HEMS evaluates whether an upcoming 60°C thermal storage / solar boost run (`max_on`) is already scheduled within the lookahead window ($\le 2\text{ hours}$).
 * If cost-effective (current wholesale price is within $+€0.05/\text{kWh}$ or active solar surplus $\ge 1.0\text{ kW}$ is present, and no hard peak lockout is active):

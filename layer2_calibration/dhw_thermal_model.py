@@ -30,7 +30,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
-from models.physics import calculate_dhw_cop
+from models.physics import calculate_dhw_cop, dhw_step
 
 AMS_TZ = ZoneInfo("Europe/Amsterdam")
 
@@ -266,28 +266,13 @@ class DhwThermalModel:
             dow = slot_dt.weekday()
             q_idx = slot_dt.hour * 4 + slot_dt.minute // 15
 
-            # Heat pump addition (only if active AND tank has not yet reached target_temp_c!)
-            q_hp_th = 0.0
-            dt_hp = 0.0
-            if i in heat_pump_schedule_slots and current_temp < (target_temp_c - 0.1):
-                cop_run = calculate_dhw_cop(target_temp_c)
-                q_hp_th = heat_pump_power_kw * cop_run * 0.25
-                max_dt = max(0.0, target_temp_c - current_temp)
-                dt_hp = min(q_hp_th / C_TANK_KWH_PER_C, max_dt)
-
-            dt_hp_p05 = min(dt_hp, max(0.0, target_temp_c - current_p05)) if i in heat_pump_schedule_slots else 0.0
-            dt_hp_p95 = min(dt_hp, max(0.0, target_temp_c - current_p95)) if i in heat_pump_schedule_slots else 0.0
+            # Heat pump active in this slot?
+            u_hp = 1.0 if i in heat_pump_schedule_slots else 0.0
 
             # Tap draw-off demand: Normal (P50), Minimal (P05), Heavy (P95)
             q_tap_th = self.get_learned_tap_kwh_th(dow, q_idx)
             q_tap_p05 = q_tap_th * 0.25  # Light usage
             q_tap_p95 = q_tap_th * 1.50  # Heavy usage (multiple long showers)
-
-            # Standby losses
-            ua_tank = self.get_tank_ua()
-            dt_standby = ((ua_tank * max(0.0, current_temp - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
-            dt_standby_p05 = ((ua_tank * max(0.0, current_p05 - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
-            dt_standby_p95 = ((ua_tank * max(0.0, current_p95 - ambient_temp) * 0.25) / 1000.0) / C_TANK_KWH_PER_C
 
             # Usable heat above comfort minimum (40°C) for current slot
             q_usable = max(0.0, (current_temp - T_MIN_COMFORT_C) * C_TANK_KWH_PER_C)
@@ -300,10 +285,40 @@ class DhwThermalModel:
             energy_usable_kwh.append(round(q_usable, 2))
             demand_kwh_th.append(round(q_tap_th, 3))
 
-            # Advance temperatures for next slot i+1: strictly physical bounded
-            current_temp = max(15.0, min(75.0, current_temp - dt_standby - (q_tap_th / C_TANK_KWH_PER_C) + dt_hp))
-            current_p05 = max(15.0, min(75.0, current_p05 - dt_standby_p05 - (q_tap_p05 / C_TANK_KWH_PER_C) + dt_hp_p05))
-            current_p95 = max(15.0, min(75.0, current_p95 - dt_standby_p95 - (q_tap_p95 / C_TANK_KWH_PER_C) + dt_hp_p95))
+            # Advance temperatures for next slot i+1: strictly physical bounded via canonical dhw_step
+            tank_spec_dict = {
+                "thermal_capacity_kwh_per_k": C_TANK_KWH_PER_C,
+                "ua_w_per_k": self.get_tank_ua(),
+                "heat_pump_power_kw": heat_pump_power_kw,
+                "target_temp_c": target_temp_c
+            }
+            current_temp = dhw_step(
+                t_tank_c=current_temp,
+                u=u_hp,
+                q_tap_kwh=q_tap_th,
+                t_outdoor_c=None,
+                dt_h=0.25,
+                spec=tank_spec_dict,
+                t_max_c=target_temp_c
+            )
+            current_p05 = dhw_step(
+                t_tank_c=current_p05,
+                u=u_hp,
+                q_tap_kwh=q_tap_p05,
+                t_outdoor_c=None,
+                dt_h=0.25,
+                spec=tank_spec_dict,
+                t_max_c=target_temp_c
+            )
+            current_p95 = dhw_step(
+                t_tank_c=current_p95,
+                u=u_hp,
+                q_tap_kwh=q_tap_p95,
+                t_outdoor_c=None,
+                dt_h=0.25,
+                spec=tank_spec_dict,
+                t_max_c=target_temp_c
+            )
 
             if current_temp < min_projected_temp:
                 min_projected_temp = current_temp

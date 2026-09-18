@@ -71,7 +71,7 @@ def test_solar_valuation_opportunity_cost_scenario():
     1000W baseload, 2000W solar production, 2500W heat pump demand.
     Expects 1000W at net export opportunity value + 1500W at all-in consumer import price.
     """
-    from layer3_scheduling.dhw_daytime_arbiter import DhwDaytimeArbiter
+    from layer3_scheduling.dhw_financials import calculate_slot_financials
 
     config_dict = {
         "dynamic_tariffs": {
@@ -88,7 +88,7 @@ def test_solar_valuation_opportunity_cost_scenario():
     p_export = tp.calculate_export_value_from_import(price_all_in)  # 0.10605 €/kWh
 
     # Slot financials for 15-minute slot (0.25h)
-    cost_eur, self_kwh, grid_kwh, p_eff = DhwDaytimeArbiter.calculate_slot_financials(
+    cost_eur, self_kwh, grid_kwh, p_eff = calculate_slot_financials(
         solar_kw=2.0,       # 2000W PV
         unalloc_kw=1.0,     # 1000W Baseload -> 1000W surplus
         el_demand_kw=2.5,   # 2500W Heat Pump demand

@@ -7,7 +7,7 @@ without violating unidirectional architecture (Laag 1 -> 2 -> 3 -> 4/5).
 """
 
 import math
-from typing import Optional
+from typing import Optional, Any, Dict, Tuple
 
 
 def calculate_carnot_cop(
@@ -43,27 +43,178 @@ def calculate_carnot_cop(
     return round(max(min_cop, min(max_cop, cop)), 2)
 
 
+def get_dhw_cop_params(params: Optional[dict] = None) -> tuple:
+    """Extracts DHW COP parameters from params dict with canonical defaults."""
+    p = params or {}
+    if "dhw_cop" in p and isinstance(p["dhw_cop"], dict):
+        p = p["dhw_cop"]
+    elif "dhw_tank" in p and isinstance(p["dhw_tank"], dict) and ("cop_50" in p["dhw_tank"] or "COP_50" in p["dhw_tank"]):
+        p = p["dhw_tank"]
+
+    cop_50 = float(p.get("cop_50", p.get("COP_50", 2.85)))
+    k_t = float(p.get("k_t", p.get("k_T", 0.07)))
+    k_out = float(p.get("k_out", p.get("k_OUT", 0.05)))
+    cop_min = float(p.get("cop_min", p.get("COP_min", 1.6)))
+    cop_max = float(p.get("cop_max", p.get("COP_max", 3.6)))
+    return cop_50, k_t, k_out, cop_min, cop_max
+
+
+def dhw_cop(
+    t_tank_c: float,
+    t_outdoor_c: Optional[float] = None,
+    params: Optional[dict] = None
+) -> float:
+    """
+    Pure function: empirical tank-temperature and outdoor-temperature-dependent DHW COP.
+    Formula:
+        dhw_cop(t_tank_c, t_outdoor_c, params) = clamp(
+            COP_50 - k_T * (t_tank_c - 50.0) + k_out * (t_outdoor_c - 10.0),
+            COP_min,
+            COP_max
+        )
+    Baseline start values:
+        COP_50 = 2.85
+        k_T = 0.07 per K (yields 2.15 at 60°C)
+        k_out = 0.05 per K
+        clamp: [1.6, 3.6]
+    All five values come from params dict (e.g. heatpump_model_parameters.json).
+    If t_outdoor_c is None, nominal 10.0°C reference condition is assumed.
+    """
+    cop_50, k_t, k_out, cop_min, cop_max = get_dhw_cop_params(params)
+    t_out = 10.0 if t_outdoor_c is None else float(t_outdoor_c)
+    raw_cop = cop_50 - (k_t * (float(t_tank_c) - 50.0)) + (k_out * (t_out - 10.0))
+    clamped = max(cop_min, min(cop_max, raw_cop))
+    return round(clamped, 4)
+
+
+def dhw_heat_delivered_kwh(
+    t_tank_c: float,
+    t_outdoor_c: Optional[float],
+    p_el_kw: float,
+    dt_h: float = 0.25,
+    params: Optional[dict] = None
+) -> float:
+    """
+    Pure function: Delivered thermal energy (kWh_th) during time window dt_h.
+    q_geleverd = p_el_kw * dhw_cop(t_tank_c, t_outdoor_c, params) * dt_h
+    """
+    cop = dhw_cop(t_tank_c, t_outdoor_c, params=params)
+    return p_el_kw * cop * dt_h
+
+
+def dhw_step(
+    t_tank_c: float,
+    u: float,
+    q_tap_kwh: float,
+    t_outdoor_c: Optional[float] = None,
+    dt_h: float = 0.25,
+    spec: Any = None,
+    params: Optional[dict] = None,
+    t_max_c: Optional[float] = None,
+    t_amb_c: float = 18.0,
+) -> float:
+    """
+    Pure function: 1D lumped-capacitance DHW tank energy balance step.
+    t_next = t + ( u * q_geleverd - UA * (t - T_amb) * dt_h / 1000 - q_tap_kwh ) / C
+    Bounded on [15.0, T_max]; above T_max no heat is added.
+    """
+    # 1. Thermal capacity C (kWh / K)
+    c_tank = 0.407
+    if spec is not None:
+        if hasattr(spec, "thermal_capacity_kwh_per_k"):
+            c_tank = float(spec.thermal_capacity_kwh_per_k)
+        elif isinstance(spec, dict) and "thermal_capacity_kwh_per_k" in spec:
+            c_tank = float(spec["thermal_capacity_kwh_per_k"])
+        elif hasattr(spec, "c_tank_kwh_per_c"):
+            c_tank = float(spec.c_tank_kwh_per_c)
+
+    # 2. Standby loss UA (W / K)
+    ua = 2.5
+    if spec is not None:
+        if hasattr(spec, "ua_w_per_k") and getattr(spec, "ua_w_per_k") is not None:
+            ua = float(spec.ua_w_per_k)
+        elif hasattr(spec, "standby_loss_w_per_k") and getattr(spec, "standby_loss_w_per_k") is not None:
+            ua = float(spec.standby_loss_w_per_k)
+        elif isinstance(spec, dict):
+            if "ua_w_per_k" in spec:
+                ua = float(spec["ua_w_per_k"])
+            elif "standby_loss_w_per_k" in spec:
+                ua = float(spec["standby_loss_w_per_k"])
+    elif params is not None:
+        p_tank = params.get("dhw_tank", {})
+        if isinstance(p_tank, dict) and "standby_loss_w_per_k" in p_tank:
+            ua = float(p_tank["standby_loss_w_per_k"])
+        elif "standby_loss_w_per_k" in params:
+            ua = float(params["standby_loss_w_per_k"])
+
+    # 3. Cutoff / maximum temperature T_max (°C)
+    t_max = 60.0
+    if t_max_c is not None:
+        t_max = float(t_max_c)
+    elif spec is not None:
+        if hasattr(spec, "target_temp_c") and getattr(spec, "target_temp_c") is not None:
+            t_max = float(spec.target_temp_c)
+        elif hasattr(spec, "boost_setpoint_c") and getattr(spec, "boost_setpoint_c") is not None:
+            t_max = float(spec.boost_setpoint_c)
+        elif hasattr(spec, "target_setpoint_c") and getattr(spec, "target_setpoint_c") is not None:
+            t_max = float(spec.target_setpoint_c)
+        elif hasattr(spec, "t_max_c") and getattr(spec, "t_max_c") is not None:
+            t_max = float(spec.t_max_c)
+        elif isinstance(spec, dict):
+            if "target_temp_c" in spec:
+                t_max = float(spec["target_temp_c"])
+            elif "t_max_c" in spec:
+                t_max = float(spec["t_max_c"])
+
+    # 4. Compressor electric power P_el (kW)
+    p_el_kw = 1.8
+    if spec is not None:
+        if hasattr(spec, "get_electric_power_kw"):
+            p_el_kw = float(spec.get_electric_power_kw(t_tank_c))
+        elif hasattr(spec, "heat_pump_power_kw") and getattr(spec, "heat_pump_power_kw") is not None:
+            p_el_kw = float(spec.heat_pump_power_kw)
+        elif hasattr(spec, "heat_pump_electric_kw") and getattr(spec, "heat_pump_electric_kw") is not None:
+            p_el_kw = float(spec.heat_pump_electric_kw)
+            if t_tank_c > 52.0 and hasattr(spec, "solar_boost_electric_kw"):
+                p_el_kw = float(spec.solar_boost_electric_kw)
+        elif isinstance(spec, dict):
+            p_el_kw = float(spec.get("heat_pump_power_kw", spec.get("heat_pump_electric_kw", spec.get("p_el_kw", 1.8))))
+
+    # 5. Delivered heat q_geleverd
+    # Above T_max no heat is added; heat addition cannot exceed T_max
+    if u > 0 and t_tank_c < t_max:
+        raw_heat = dhw_heat_delivered_kwh(t_tank_c, t_outdoor_c, p_el_kw, dt_h, params)
+        max_heat_possible = max(0.0, (t_max - t_tank_c) * c_tank)
+        q_delivered = min(u * raw_heat, max_heat_possible)
+    else:
+        q_delivered = 0.0
+
+    # 6. Standby heat loss
+    q_standby = (ua * max(0.0, t_tank_c - t_amb_c) * dt_h) / 1000.0
+
+    # 7. Energy balance & bounding
+    t_next_raw = t_tank_c + (q_delivered - q_standby - float(q_tap_kwh)) / c_tank
+    max_bound = max(t_tank_c, t_max)
+    t_next = max(15.0, min(max_bound, t_next_raw))
+    return t_next
+
+
 def calculate_dhw_cop(
     target_temp_c: float,
     outdoor_temp_c: Optional[float] = None,
     min_cop: float = 1.8,
     max_cop: float = 4.5,
+    params: Optional[dict] = None,
 ) -> float:
     """
-    Empirical COP for DHW tank heating (Daikin Altherma air-to-water baseline).
-    If outdoor_temp_c is None, assumes nominal A4/W50 rating condition (T_out = 4.0°C):
-      - Nominal 50°C cycle: COP 2.85
-      - Boost 60°C cycle: COP 2.15 (high condensing temperature degradation ~25%)
-    When outdoor_temp_c is provided, models ambient temperature lift:
-      base_cop = max(min_cop, min(max_cop, 2.55 + (0.075 * outdoor_temp_c)))
-      If target_temp_c > 52.0°C: cop = base_cop * 0.75
+    Thin wrapper around canonical dhw_cop for backward compatibility with existing callers.
     """
-    if outdoor_temp_c is None:
-        return 2.85 if target_temp_c <= 52.0 else 2.15
-
-    base_cop = max(min_cop, min(max_cop, 2.55 + (0.075 * outdoor_temp_c)))
-    cop = base_cop * 0.75 if target_temp_c > 52.0 else base_cop
-    return round(cop, 2)
+    cop = dhw_cop(
+        t_tank_c=target_temp_c,
+        t_outdoor_c=outdoor_temp_c,
+        params=params,
+    )
+    return round(max(min_cop, min(max_cop, cop)), 2)
 
 
 def calculate_dhw_thermal_output_kw(
@@ -71,13 +222,12 @@ def calculate_dhw_thermal_output_kw(
     heat_pump_electric_kw: float = 1.8,
     solar_boost_electric_kw: float = 2.4,
     outdoor_temp_c: Optional[float] = None,
+    params: Optional[dict] = None,
 ) -> float:
     """
     Thermodynamically consistent thermal output (kW_th) delivered by heat pump for DHW heating.
-    P_th = P_el * COP(target, outdoor_temp_c).
-    - For target <= 52°C at nominal 4°C: 1.8 kW * 2.85 COP = 5.13 kW_th.
-    - For target > 52°C at nominal 4°C:  2.4 kW * 2.15 COP = 5.16 kW_th.
+    P_th = P_el * dhw_cop(target, outdoor_temp_c).
     """
     p_el = solar_boost_electric_kw if target_temp_c > 52.0 else heat_pump_electric_kw
-    cop = calculate_dhw_cop(target_temp_c, outdoor_temp_c=outdoor_temp_c)
+    cop = dhw_cop(t_tank_c=target_temp_c, t_outdoor_c=outdoor_temp_c, params=params)
     return round(p_el * cop, 3)

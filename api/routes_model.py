@@ -205,32 +205,80 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
         now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
         plan = ensure_active_canonical_plan()
+        planner_name = "arbiter"
+        if plan and plan.dhw_summary and plan.dhw_summary.decision_details:
+            planner_name = str(plan.dhw_summary.decision_details.get("planner", "arbiter"))
+
         if GLOBAL_DHW_MODEL:
-            # Retrieve planned slots & dispatch parameters directly from authoritative CanonicalDispatchPlan
-            cached_slots = [i for i, s in enumerate(plan.slots) if s.dhw_kw > 0]
-            planned_mode = plan.dhw_summary.planned_mode if plan.dhw_summary else "normal"
-            planned_reason = plan.dhw_summary.planned_mode_label if plan.dhw_summary else "Centrale dispatch planning"
-            cached_dyn_peaks = plan.dynamic_peaks
-            c_power = plan.dhw_summary.power_kw if plan.dhw_summary else 1.8
-            c_target = plan.dhw_summary.target_temp_c if plan.dhw_summary else 50.0
+            # Safe defaults for plan metadata
+            planned_mode = plan.dhw_summary.planned_mode if (plan and plan.dhw_summary) else "normal"
+            planned_reason = plan.dhw_summary.planned_mode_label if (plan and plan.dhw_summary) else "Centrale dispatch planning"
+            cached_dyn_peaks = plan.dynamic_peaks if plan else []
+            plan_details = plan.dhw_summary.decision_details if (plan and plan.dhw_summary and plan.dhw_summary.decision_details) else {}
 
-            base_sim_dt = now_ams
-            traj = GLOBAL_DHW_MODEL.simulate_trajectory(
-                t_live,
-                base_sim_dt,
-                hours_ahead=hours_sim,
-                heat_pump_schedule_slots=cached_slots,
-                target_temp_c=c_target,
-                heat_pump_power_kw=c_power
+            # Check if plan already carries authoritative trajectory from optimizer adapter (Dumb View Invariant #1)
+            has_optimizer_traj = (
+                planner_name == "optimizer"
+                and bool(plan_details)
+                and "trajectory" in plan_details
             )
 
-            # Counterfactual trajectory WITHOUT night recharge (pure passive standby & tap demand)
-            unheated_traj = GLOBAL_DHW_MODEL.simulate_trajectory(
-                t_live,
-                base_sim_dt,
-                hours_ahead=hours_sim,
-                heat_pump_schedule_slots=[]
-            )
+            if has_optimizer_traj:
+                opt_traj = plan_details["trajectory"]
+                opt_unh_traj = plan_details.get("unheated_trajectory", {})
+                raw_temps = opt_traj.get("temperatures_c", [])
+                raw_p05 = opt_traj.get("temperatures_p05_c", raw_temps)
+                raw_p95 = opt_traj.get("temperatures_p95_c", raw_temps)
+                raw_dem = [0.0] * len(raw_temps)
+
+                raw_unh_temps = opt_unh_traj.get("temperatures_c", [])
+                raw_unh_p05 = opt_unh_traj.get("temperatures_p05_c", raw_unh_temps)
+                raw_unh_p95 = opt_unh_traj.get("temperatures_p95_c", raw_unh_temps)
+
+                base_sim_dt = now_ams
+                raw_lbls = [
+                    format_slot_label(base_sim_dt + timedelta(minutes=15 * i), None, i == 0, True)
+                    for i in range(len(raw_temps))
+                ]
+                traj = {
+                    "labels": raw_lbls,
+                    "temperatures_c": raw_temps,
+                    "temperatures_p05_c": raw_p05,
+                    "temperatures_p95_c": raw_p95,
+                    "demand_kwh_th": raw_dem,
+                    "morning_dip_temp_c": plan_details.get("morning_dip_c", 40.0),
+                    "morning_dip_time": plan_details.get("morning_dip_time", "09:30"),
+                }
+                unheated_traj = {
+                    "temperatures_c": raw_unh_temps,
+                    "temperatures_p05_c": raw_unh_p05,
+                    "temperatures_p95_c": raw_unh_p95,
+                    "morning_dip_temp_c": plan_details.get("morning_dip_c", 40.0),
+                    "morning_dip_time": plan_details.get("morning_dip_time", "09:30"),
+                }
+            else:
+                # Retrieve planned slots & dispatch parameters directly from authoritative CanonicalDispatchPlan
+                cached_slots = [i for i, s in enumerate(plan.slots) if s.dhw_kw > 0]
+                c_power = plan.dhw_summary.power_kw if plan.dhw_summary else 1.8
+                c_target = plan.dhw_summary.target_temp_c if plan.dhw_summary else 50.0
+
+                base_sim_dt = now_ams
+                traj = GLOBAL_DHW_MODEL.simulate_trajectory(
+                    t_live,
+                    base_sim_dt,
+                    hours_ahead=hours_sim,
+                    heat_pump_schedule_slots=cached_slots,
+                    target_temp_c=c_target,
+                    heat_pump_power_kw=c_power
+                )
+
+                # Counterfactual trajectory WITHOUT night recharge (pure passive standby & tap demand)
+                unheated_traj = GLOBAL_DHW_MODEL.simulate_trajectory(
+                    t_live,
+                    base_sim_dt,
+                    hours_ahead=hours_sim,
+                    heat_pump_schedule_slots=[]
+                )
 
             if traj and "labels" in traj:
                 raw_lbls = traj.get("labels", [])
@@ -375,6 +423,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
             handler._send_json({
                 "status": "online",
+                "planner": planner_name,
                 "resolution": res_mode,
                 "decision": decision,
                 "trajectory": traj,
