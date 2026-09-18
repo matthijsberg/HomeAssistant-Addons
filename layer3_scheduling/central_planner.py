@@ -254,7 +254,17 @@ class CentralPlanner:
                         prev_audit = getattr(prev_plan, "metadata", {}).get("daytime_arbitrage_audit", {}) if getattr(prev_plan, "metadata", None) else {}
                         prev_path = prev_audit.get("selected_path_id")
                         prev_target = prev_audit.get("target_temp_c")
-                        is_running = bool(prev_plan.slots[0].dhw_kw > 0.0)
+                        matching = []
+                        for s in prev_plan.slots:
+                            s_dt = getattr(s, "dt", None)
+                            if s_dt is None and getattr(s, "dt_iso", ""):
+                                try:
+                                    s_dt = datetime.fromisoformat(s.dt_iso)
+                                except Exception:
+                                    pass
+                            if s_dt and s_dt <= now < (s_dt + timedelta(minutes=step_mins)):
+                                matching.append(s)
+                        is_running = any(s.dhw_kw > 0.0 for s in matching) if matching else bool(prev_plan.slots[0].dhw_kw > 0.0)
             except Exception:
                 pass
 
