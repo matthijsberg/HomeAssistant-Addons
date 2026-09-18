@@ -600,7 +600,11 @@ class DhwDaytimeArbiter:
                     eve_lockout_start_idx = min(eve_lockout_start_idx, s_i)
 
         # 3. Dynamic Comfort Risk Assessment
-        # Inspect temperature dip before/during the upcoming evening peak in the 24h rolling horizon
+        # Inspect temperature dip before/during the upcoming evening peak in the rolling horizon.
+        # If hour < 21, the upcoming evening peak is today.
+        # If hour >= 21, tonight's peak is already past/in progress; target is tomorrow's evening peak.
+        target_evening_date = now_dt.date() if now_dt.hour < 21 else (now_dt.date() + timedelta(days=1))
+
         evening_slots = []
         evening_slots_p95 = []
         for i, (lbl, t) in enumerate(zip(unheated_labels, unheated_temps)):
@@ -609,7 +613,7 @@ class DhwDaytimeArbiter:
                 if sl_dt is None:
                     sl_iso = getattr(slots[i], "dt_iso", "")
                     sl_dt = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * i))
-                if 17 <= sl_dt.hour <= 22:
+                if sl_dt.date() == target_evening_date and 17 <= sl_dt.hour <= 22:
                     evening_slots.append((i, lbl, t))
                     t_p95 = unheated_temps_p95[i] if i < len(unheated_temps_p95) else t
                     evening_slots_p95.append((i, lbl, t_p95))
@@ -619,17 +623,19 @@ class DhwDaytimeArbiter:
             unheated_evening_dip = round(min_eve[2], 1)
             evening_dip_time = min_eve[1]
         else:
-            unheated_evening_dip = round(min(unheated_temps), 1) if unheated_temps else current_dhw_temp
-            evening_dip_time = "19:30"
+            unheated_evening_dip = current_dhw_temp
+            evening_dip_time = "Voorbij (vanavond veilig)"
 
         if evening_slots_p95:
             min_eve_p95 = min(evening_slots_p95, key=lambda x: x[2])
             unheated_evening_dip_p95 = round(min_eve_p95[2], 1)
         else:
-            unheated_evening_dip_p95 = round(min(unheated_temps_p95), 1) if unheated_temps_p95 else unheated_evening_dip
+            unheated_evening_dip_p95 = current_dhw_temp
 
         # Determine situation: evening comfort at risk if unheated tank dips below comfort threshold under P95 heavy usage
-        evening_comfort_risk = (unheated_evening_dip_p95 < spec.comfort_min_temp_c or current_dhw_temp <= 43.5)
+        # Only evaluate evening comfort risk if today's evening peak is still ahead
+        has_evening_ahead = bool(evening_slots and any(idx >= 0 for idx, _, _ in evening_slots))
+        evening_comfort_risk = has_evening_ahead and (unheated_evening_dip_p95 < spec.comfort_min_temp_c or current_dhw_temp <= 43.5)
 
         # 4. Pure Dynamic Search Window:
         # The daytime heating window is the dynamic valley between the morning peak and the evening peak

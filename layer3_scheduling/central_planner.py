@@ -529,11 +529,12 @@ class CentralPlanner:
             is_night_run = bool(sel_path.night_run_required and sel_path.night_slots and not sel_path.day_slots)
 
             if arbiter_res.situation == "SITUATION_1_EVENING_COMFORT_RISK":
+                spits_qualifier = "(comfortrisico)" if unh_spits < 40.0 else "(comfortabel gewaarborgd)"
                 vat_verloop = (
                     f"Het vat is nu <strong>{current_dhw_temp:.1f}°C</strong>. "
-                    f"Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat tijdens de avondspits naar <strong>{unh_spits:.1f}°C</strong> (comfortrisico)."
+                    f"Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat tijdens de avondspits naar <strong>{unh_spits:.1f}°C</strong> {spits_qualifier}."
                 )
-                bullet_1 = f"Vatverloop: Zonder lading daalt vat naar {unh_spits:.1f}°C in spits (comfortrisico)"
+                bullet_1 = f"Vatverloop: Zonder lading daalt vat naar {unh_spits:.1f}°C in spits {spits_qualifier}"
             else:
                 vat_verloop = (
                     f"Het vat is nu <strong>{current_dhw_temp:.1f}°C</strong>. "
