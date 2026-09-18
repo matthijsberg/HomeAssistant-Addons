@@ -427,18 +427,9 @@ class DhwDaytimeArbiter:
         if night_required:
             # Plan recharge run to 50°C before comfort dip occurs
             if is_pre_day:
-                # Pre-day dip: must recharge before the dip, ideally before morning starts (06:00)
-                morn_limit = first_dip_idx
-                for idx, s in enumerate(slots):
-                    dt_val = getattr(s, "dt", None)
-                    if dt_val is None:
-                        sl_iso = getattr(s, "dt_iso", "")
-                        dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
-                    if idx > 0 and ((dt_val.date() > now_dt.date() and dt_val.hour >= 6) or (now_dt.hour < 6 and dt_val.hour >= 6)):
-                        morn_limit = min(first_dip_idx, idx)
-                        break
+                # Pre-day dip: recharge in lowest-cost window before comfort dip occurs
                 recharge_start_idx = 0
-                recharge_end_idx = max(4, morn_limit)
+                recharge_end_idx = min(n_slots, first_dip_idx)
             else:
                 night_start_idx = max(day_slots) + 1 if day_slots else 0
                 for idx in range(night_start_idx, n_slots):
@@ -1064,39 +1055,51 @@ class DhwDaytimeArbiter:
             sim_1_labels = sim_with_run1.get("labels", [])
             last_run1_slot = max(final_planned_slots) if final_planned_slots else 0
 
-            # Find second dip in day 2 (at least 4 quarters after Run 1)
-            dips_2 = [
-                (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(sim_1_labels, sim_1_temps))
-                if t < spec.comfort_min_temp_c and idx > (last_run1_slot + 4)
-            ]
-            if dips_2:
-                second_dip_idx = dips_2[0][0]
-                # Search for optimal daytime solar window on Day 2 before second dip
-                search_s2 = max(last_run1_slot + 4, 68)  # around 09:00 tomorrow
-                search_e2 = min(n_slots, max(search_s2 + 8, second_dip_idx))
+            # Day 2 search: must be strictly on Day 2 (date >= target_evening_date + 1 day)
+            day2_date = target_evening_date + timedelta(days=1)
+            day2_start_idx = None
+            for idx in range(last_run1_slot + 8, n_slots):
+                s = slots[idx]
+                dt_val = getattr(s, "dt", None)
+                if dt_val is None:
+                    sl_iso = getattr(s, "dt_iso", "")
+                    dt_val = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * idx))
+                if dt_val.date() >= day2_date and (dt_val.hour >= 9 or getattr(s, "solar_kw", 0.0) > 0.2):
+                    day2_start_idx = idx
+                    break
 
-                opt_run_2 = cls.find_optimal_heating_window(
-                    slots=slots,
-                    search_start_idx=search_s2,
-                    search_end_idx=search_e2,
-                    n_req_slots=5,
-                    th_need_kwh=3.2,
-                    slot_lockout_map=slot_lockout_map,
-                    is_boost_60=False,
-                    step_hours=step_hours,
-                    tariff_provider=tp,
-                    tank_spec=spec
-                )
-                if opt_run_2:
-                    run2_slots = list(range(opt_run_2["start_idx"], opt_run_2["end_idx"]))
-                    for s2 in run2_slots:
-                        if s2 not in final_planned_slots:
-                            final_planned_slots.append(s2)
-                    final_planned_slots.sort()
-                    s2_lbl = getattr(slots[opt_run_2["start_idx"]], "label", getattr(slots[opt_run_2["start_idx"]], "time_label", ""))
-                    e2_lbl = getattr(slots[min(n_slots - 1, opt_run_2["end_idx"])], "label", getattr(slots[min(n_slots - 1, opt_run_2["end_idx"])], "time_label", ""))
-                    run_num_str = "3e" if (selected_path.night_run_required and selected_path.night_slots and selected_path.day_slots) else "2e"
-                    explanation += f" Daarnaast is voor morgen een {run_num_str} lading gepland om {s2_lbl}–{e2_lbl} (op voordelige zonne-/dagstroom à €{opt_run_2['cost_eur']:.2f}) om ook de avond en 2e nacht comfortabel te overbruggen."
+            if day2_start_idx is not None:
+                dips_2 = [
+                    (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(sim_1_labels, sim_1_temps))
+                    if t < spec.comfort_min_temp_c and idx >= day2_start_idx
+                ]
+                if dips_2:
+                    second_dip_idx = dips_2[0][0]
+                    search_s2 = day2_start_idx
+                    search_e2 = min(n_slots, max(search_s2 + 8, second_dip_idx))
+
+                    opt_run_2 = cls.find_optimal_heating_window(
+                        slots=slots,
+                        search_start_idx=search_s2,
+                        search_end_idx=search_e2,
+                        n_req_slots=5,
+                        th_need_kwh=3.2,
+                        slot_lockout_map=slot_lockout_map,
+                        is_boost_60=False,
+                        step_hours=step_hours,
+                        tariff_provider=tp,
+                        tank_spec=spec
+                    )
+                    if opt_run_2:
+                        run2_slots = list(range(opt_run_2["start_idx"], opt_run_2["end_idx"]))
+                        for s2 in run2_slots:
+                            if s2 not in final_planned_slots:
+                                final_planned_slots.append(s2)
+                        final_planned_slots.sort()
+                        s2_lbl = getattr(slots[opt_run_2["start_idx"]], "label", getattr(slots[opt_run_2["start_idx"]], "time_label", ""))
+                        e2_lbl = getattr(slots[min(n_slots - 1, opt_run_2["end_idx"])], "label", getattr(slots[min(n_slots - 1, opt_run_2["end_idx"])], "time_label", ""))
+                        run_num_str = "3e" if (selected_path.night_run_required and selected_path.night_slots and selected_path.day_slots) else "2e"
+                        explanation += f" Daarnaast is voor morgen een {run_num_str} lading gepland om {s2_lbl}–{e2_lbl} (op voordelige zonne-/dagstroom à €{opt_run_2['cost_eur']:.2f}) om ook de avond en 2e nacht comfortabel te overbruggen."
 
         return DaytimeArbitrationResult(
             situation=situation,
