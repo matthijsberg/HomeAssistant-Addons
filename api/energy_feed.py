@@ -530,12 +530,18 @@ def get_epex_tariffs_cached(is_15m: bool = True, force: bool = False) -> Tuple[L
                 map_all_in[k_q] = it["all_in"]
                 map_base[k_q] = it["base"]
                 _TARIFF_SOURCES_MAP[k_q] = "stroomvoorspeller"
+                dt_q = datetime.fromisoformat(it["dt"]).replace(minute=m)
+                raw_prices.append({"dt": dt_q, "price": it["all_in"], "source": "stroomvoorspeller"})
         else:
             map_all_in[k_h] = it["all_in"]
             map_base[k_h] = it["base"]
             _TARIFF_SOURCES_MAP[k_h] = "stroomvoorspeller"
+            dt_h = datetime.fromisoformat(it["dt"])
+            raw_prices.append({"dt": dt_h, "price": it["all_in"], "source": "stroomvoorspeller"})
 
     # 2. Authoritative Top Layer (Tier 1): EPEX Day-Ahead ALWAYS overwrites Stroomvoorspeller
+    epex_keys = set()
+    epex_prices = []
     for d_k in [today_key, tomorrow_key]:
         if d_k in _EPEX_CACHE_DATA and cache_type in _EPEX_CACHE_DATA[d_k]:
             blob = _EPEX_CACHE_DATA[d_k][cache_type]
@@ -545,10 +551,15 @@ def get_epex_tariffs_cached(is_15m: bool = True, force: bool = False) -> Tuple[L
                 p_val = round(it["val"], 4)
                 map_all_in[k_dt] = p_val
                 _TARIFF_SOURCES_MAP[k_dt] = "epex"  # EPEX WINS!
-                raw_prices.append({"dt": dt, "price": p_val, "source": "epex"})
+                epex_keys.add(dt)
+                epex_prices.append({"dt": dt, "price": p_val, "source": "epex"})
             for it in blob.get("base", []):
                 dt = datetime.fromisoformat(it["start"].replace("Z", "+00:00")).astimezone(ZoneInfo("Europe/Amsterdam"))
                 k_dt = dt.strftime("%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00")
                 map_base[k_dt] = round(it["val"], 4)
+
+    # Filter out Stroomvoorspeller for slots covered by EPEX, then append EPEX
+    raw_prices = [p for p in raw_prices if p["dt"] not in epex_keys] + epex_prices
+    raw_prices.sort(key=lambda x: x["dt"])
 
     return raw_prices, map_all_in, map_base

@@ -135,8 +135,9 @@ class ForecastSolarProvider:
                 # Find interval [p0, p1]
                 if slot_dt <= parsed_points[0][0]:
                     w_val = parsed_points[0][1] if (parsed_points[0][0] - slot_dt).total_seconds() < 1800 else 0.0
-                elif slot_dt >= parsed_points[-1][0]:
-                    w_val = parsed_points[-1][1] if (slot_dt - parsed_points[-1][0]).total_seconds() < 1800 else 0.0
+                elif slot_dt > parsed_points[-1][0]:
+                    # Beyond Forecast.Solar coverage: break so Open-Meteo fallback cleanly covers remaining slots
+                    break
                 else:
                     for j in range(len(parsed_points) - 1):
                         p0 = parsed_points[j]
