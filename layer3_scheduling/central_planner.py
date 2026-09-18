@@ -364,8 +364,34 @@ class CentralPlanner:
             )
 
         # 5. Assemble DHW Plan Summary
-        run_start = slots[final_dhw_slots[0]].dt.strftime("%H:%M") if final_dhw_slots else "N.v.t."
-        run_end = (slots[final_dhw_slots[-1]].dt + timedelta(minutes=step_mins)).strftime("%H:%M") if final_dhw_slots else "N.v.t."
+        # Extract contiguous run blocks (e.g. Run 1: 03:15-04:45, Run 2: 14:00-15:15)
+        run_blocks = []
+        if final_dhw_slots:
+            current_block = [final_dhw_slots[0]]
+            for s_idx in final_dhw_slots[1:]:
+                if s_idx == current_block[-1] + 1:
+                    current_block.append(s_idx)
+                else:
+                    run_blocks.append(current_block)
+                    current_block = [s_idx]
+            run_blocks.append(current_block)
+
+        if run_blocks:
+            first_block = run_blocks[0]
+            run_start = slots[first_block[0]].dt.strftime("%H:%M")
+            run_end = (slots[first_block[-1]].dt + timedelta(minutes=step_mins)).strftime("%H:%M")
+            if len(run_blocks) > 1:
+                second_block = run_blocks[1]
+                s2_start = slots[second_block[0]].dt.strftime("%H:%M")
+                s2_end = (slots[second_block[-1]].dt + timedelta(minutes=step_mins)).strftime("%H:%M")
+                runs_window_str = f"{run_start}–{run_end} & {s2_start}–{s2_end}"
+            else:
+                runs_window_str = f"{run_start}–{run_end}"
+        else:
+            run_start = "N.v.t."
+            run_end = "N.v.t."
+            runs_window_str = "N.v.t."
+
         run_dur_min = len(final_dhw_slots) * step_mins
         total_kwh_stroom = round(len(final_dhw_slots) * step_hours * sww_power_kw, 1)
 
@@ -398,7 +424,12 @@ class CentralPlanner:
         eff_price = round((sol_share * export_now) + ((1.0 - sol_share) * p_now), 4)
 
         kwh_e_run = total_kwh_stroom if total_kwh_stroom > 0 else 2.4
-        cost_now_run = round(kwh_e_run * eff_price, 2)
+        # Calculate actual cost of scheduled DHW slots if planned, otherwise estimate based on current rate
+        if final_dhw_slots:
+            cost_actual_run = round(sum(slots[s_idx].price_all_in * step_hours * sww_power_kw for s_idx in final_dhw_slots), 2)
+        else:
+            cost_actual_run = 0.0
+        cost_now_run = cost_actual_run if final_dhw_slots else round(kwh_e_run * eff_price, 2)
 
         night_slots = [
             s for s in slots
@@ -498,10 +529,12 @@ class CentralPlanner:
                     bullet_2 = f"Geplande actie: Lading naar {sww_target_temp:.1f}°C om {run_start}–{run_end}{savings_str}"
                     badge_html = f'<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/80"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Optimale Lading ({sww_target_temp:.1f}°C)</span>'
             else:
-                # Standby / Geen dagrun
+                # Standby / Geen dagrun vandaag
                 if sel_path.night_run_required and sel_path.night_slots:
-                    bullet_2 = f"Geplande actie: Nachtlading naar {sww_target_temp:.1f}°C om {run_start}–{run_end} (~€{cost_now_run:.2f} op daltarief)"
-                    badge_html = f'<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Nachtlading Gepland ({run_start}–{run_end} tot {sww_target_temp:.1f}°C)</span>'
+                    action_label = "2 ladingen" if len(run_blocks) > 1 else "Nachtlading"
+                    bullet_2 = f"Geplande actie: {action_label} naar {sww_target_temp:.1f}°C om {runs_window_str} (~€{cost_now_run:.2f} op daltarief)"
+                    badge_title = "Nacht- &amp; Zonnebuffer Gepland" if len(run_blocks) > 1 else "Nachtlading Gepland"
+                    badge_html = f'<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800/80"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> {badge_title} ({runs_window_str} tot {sww_target_temp:.1f}°C)</span>'
                 else:
                     bullet_2 = "Geplande actie: Standby (0 kWh verbruik, wachten op volgend venster)"
                     badge_html = '<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-900 text-slate-300 border border-slate-700"><span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Afwachten (Vat dekt horizon)</span>'
@@ -567,6 +600,7 @@ class CentralPlanner:
             "evening_dip": f"{unh_spits:.1f}",
             "morning_dip": f"{morning_dip_c:.1f}",
             "target_temp": f"{sww_target_temp:.1f}",
+            "temp": f"{sww_target_temp:.1f}",
             "start": run_start,
             "end": run_end,
             "cost": f"{cost_now_run:.2f}",

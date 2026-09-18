@@ -897,6 +897,55 @@ class DhwDaytimeArbiter:
                 final_target_c = spec.target_setpoint_c
                 final_power_kw = spec.heat_pump_electric_kw
 
+        # Multi-run 48h horizon support: if horizon extends beyond 24h (n_slots > 96),
+        # simulate with Run 1 active and plan a 2nd recharge run for Day 2 if comfort dips below 40°C
+        if n_slots > 96:
+            horizon_h = int(round(n_slots * step_hours))
+            sim_with_run1 = dhw_model.simulate_trajectory(
+                t_start_c=current_dhw_temp,
+                start_dt=now_dt,
+                hours_ahead=horizon_h,
+                heat_pump_schedule_slots=final_planned_slots,
+                target_temp_c=final_target_c,
+                heat_pump_power_kw=final_power_kw
+            )
+            sim_1_temps = sim_with_run1.get("temperatures_c", [])
+            sim_1_labels = sim_with_run1.get("labels", [])
+            last_run1_slot = max(final_planned_slots) if final_planned_slots else 0
+
+            # Find second dip in day 2 (at least 4 quarters after Run 1)
+            dips_2 = [
+                (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(sim_1_labels, sim_1_temps))
+                if t < spec.comfort_min_temp_c and idx > (last_run1_slot + 4)
+            ]
+            if dips_2:
+                second_dip_idx = dips_2[0][0]
+                # Search for optimal daytime solar window on Day 2 before second dip
+                search_s2 = max(last_run1_slot + 4, 68)  # around 09:00 tomorrow
+                search_e2 = min(n_slots, max(search_s2 + 8, second_dip_idx))
+
+                opt_run_2 = cls.find_optimal_heating_window(
+                    slots=slots,
+                    search_start_idx=search_s2,
+                    search_end_idx=search_e2,
+                    n_req_slots=5,
+                    th_need_kwh=3.2,
+                    slot_lockout_map=slot_lockout_map,
+                    is_boost_60=False,
+                    step_hours=step_hours,
+                    tariff_provider=tp,
+                    tank_spec=spec
+                )
+                if opt_run_2:
+                    run2_slots = list(range(opt_run_2["start_idx"], opt_run_2["end_idx"]))
+                    for s2 in run2_slots:
+                        if s2 not in final_planned_slots:
+                            final_planned_slots.append(s2)
+                    final_planned_slots.sort()
+                    s2_lbl = getattr(slots[opt_run_2["start_idx"]], "label", getattr(slots[opt_run_2["start_idx"]], "time_label", ""))
+                    e2_lbl = getattr(slots[min(n_slots - 1, opt_run_2["end_idx"])], "label", getattr(slots[min(n_slots - 1, opt_run_2["end_idx"])], "time_label", ""))
+                    explanation += f" Daarnaast is voor morgen een 2e lading gepland om {s2_lbl}–{e2_lbl} (op voordelige zonne-/dagstroom à €{opt_run_2['cost_eur']:.2f}) om ook de avond en 2e nacht comfortabel te overbruggen."
+
         return DaytimeArbitrationResult(
             situation=situation,
             unheated_evening_dip_c=unheated_evening_dip,
