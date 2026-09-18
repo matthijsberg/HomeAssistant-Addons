@@ -718,9 +718,13 @@ class DhwDaytimeArbiter:
                 savings = round(diff, 2)
                 planned_mode = "forced_on"
                 planned_mode_label = f"Geforceerd aan (optimaal tot {t_target_opt:.1f}°C)"
+                if t_target_opt >= (spec.boost_setpoint_c - 0.1):
+                    savings_phrase = f"volledige lading naar {spec.boost_setpoint_c:.0f}°C is noodzakelijk om de horizon te overbruggen."
+                else:
+                    savings_phrase = f"bespaart €{diff:.2f} t.o.v. onnodig doorkoken naar {spec.boost_setpoint_c:.0f}°C (hogere COP en minder stilstand)."
                 explanation = (
                     f"Opwarmen naar de berekende optimale doeltemperatuur van {t_target_opt:.1f}°C om {path_a1.day_window_label} is de voordeligste keuze (€{path_a1.total_24h_cost_eur:.2f} totaal). "
-                    f"Dit dekt alle aftap en stilstand ({q_needed:.1f} kWh_th) voor de komende {hours_to_anchor:.1f} uur tot het volgende laadvenster en bespaart €{diff:.2f} t.o.v. onnodig doorkoken naar 60°C."
+                    f"Dit dekt alle aftap en stilstand ({q_needed:.1f} kWh_th) voor de komende {hours_to_anchor:.1f} uur tot het volgende laadvenster en {savings_phrase}"
                 )
 
         else:
