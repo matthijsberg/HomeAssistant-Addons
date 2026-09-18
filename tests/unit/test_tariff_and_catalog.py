@@ -25,6 +25,89 @@ def test_tariff_provider_calculations():
     assert abs(p_zero - expected_zero) < 0.0001
 
 
+def test_tariff_provider_fallback_markup_export_ingestion():
+    """
+    Verifies that TariffProvider.from_dict() properly ingests fallback_markup_export
+    and that changes in this configuration directly propagate into calculate_export_value_from_import().
+    """
+    config_dict_standard = {
+        "dynamic_tariffs": {
+            "fallback_markup_import": 0.0121,
+            "fallback_markup_export": 0.0121,
+            "fallback_tax_electricity": 0.11085,
+            "fallback_fixed_monthly_fee": 6.25
+        }
+    }
+    tp_standard = TariffProvider.from_dict(config_dict_standard)
+    assert tp_standard.config.export_fixed_markup_eur == 0.0121
+
+    # Price all-in for spot=0.10
+    p_all_in = (0.10 + 0.0121 + 0.11085) * 1.21  # 0.2697695
+    p_export_standard = tp_standard.calculate_export_value_from_import(p_all_in)
+    # Expected: spot (0.10) - penalty (0.00605) + markup_export (0.0121) = 0.10605
+    assert abs(p_export_standard - 0.10605) < 0.00001
+
+    # Modified configuration with higher export markup (e.g. 0.0250)
+    config_dict_modified = {
+        "dynamic_tariffs": {
+            "fallback_markup_import": 0.0121,
+            "fallback_markup_export": 0.0250,
+            "fallback_tax_electricity": 0.11085,
+            "fallback_fixed_monthly_fee": 6.25
+        }
+    }
+    tp_modified = TariffProvider.from_dict(config_dict_modified)
+    assert tp_modified.config.export_fixed_markup_eur == 0.0250
+
+    p_export_modified = tp_modified.calculate_export_value_from_import(p_all_in)
+    # Expected: spot (0.10) - penalty (0.00605) + markup_export (0.0250) = 0.11895
+    assert abs(p_export_modified - 0.11895) < 0.00001
+    assert abs((p_export_modified - p_export_standard) - (0.0250 - 0.0121)) < 0.00001
+
+
+def test_solar_valuation_opportunity_cost_scenario():
+    """
+    Verifies dispatch valuation scenario:
+    1000W baseload, 2000W solar production, 2500W heat pump demand.
+    Expects 1000W at net export opportunity value + 1500W at all-in consumer import price.
+    """
+    from layer3_scheduling.dhw_daytime_arbiter import DhwDaytimeArbiter
+
+    config_dict = {
+        "dynamic_tariffs": {
+            "fallback_markup_import": 0.0121,
+            "fallback_markup_export": 0.0121,
+            "fallback_tax_electricity": 0.11085,
+            "fallback_fixed_monthly_fee": 6.25
+        }
+    }
+    tp = TariffProvider.from_dict(config_dict)
+
+    # Spot = 0.10 €/kWh
+    price_all_in = (0.10 + 0.0121 + 0.11085) * 1.21  # 0.2697695 €/kWh
+    p_export = tp.calculate_export_value_from_import(price_all_in)  # 0.10605 €/kWh
+
+    # Slot financials for 15-minute slot (0.25h)
+    cost_eur, self_kwh, grid_kwh, p_eff = DhwDaytimeArbiter.calculate_slot_financials(
+        solar_kw=2.0,       # 2000W PV
+        unalloc_kw=1.0,     # 1000W Baseload -> 1000W surplus
+        el_demand_kw=2.5,   # 2500W Heat Pump demand
+        price_all_in=price_all_in,
+        step_hours=0.25,
+        tariff_provider=tp
+    )
+
+    # 1000W surplus for 15m = 0.25 kWh
+    assert abs(self_kwh - 0.25) < 0.0001
+    # 2500W total - 1000W solar = 1500W grid import for 15m = 0.375 kWh
+    assert abs(grid_kwh - 0.375) < 0.0001
+
+    # Valuation: 1000W (0.25 kWh) @ p_export (€0.10605) + 1500W (0.375 kWh) @ price_all_in (€0.26977)
+    expected_cost = (0.375 * price_all_in) + (0.25 * p_export)
+    assert abs(cost_eur - expected_cost) < 0.00001
+    assert abs(cost_eur - 0.127676) < 0.0001
+
+
 def test_mode_catalog_loading_and_fallback():
     # Verify standard modes exist
     meta_off = get_mode_meta("forced_off", "thermal_buffer")
