@@ -7,6 +7,7 @@ without violating unidirectional architecture (Laag 1 -> 2 -> 3 -> 4/5).
 """
 
 import math
+from typing import Optional
 
 
 def calculate_carnot_cop(
@@ -42,26 +43,41 @@ def calculate_carnot_cop(
     return round(max(min_cop, min(max_cop, cop)), 2)
 
 
-def calculate_dhw_cop(target_temp_c: float) -> float:
+def calculate_dhw_cop(
+    target_temp_c: float,
+    outdoor_temp_c: Optional[float] = None,
+    min_cop: float = 1.8,
+    max_cop: float = 4.5,
+) -> float:
     """
-    Empirical COP for DHW tank heating:
-    - Nominal 50°C cycle: COP 2.85
-    - Boost 60°C cycle: COP 2.15 (high condensing temperature degradation)
+    Empirical COP for DHW tank heating (Daikin Altherma air-to-water baseline).
+    If outdoor_temp_c is None, assumes nominal A4/W50 rating condition (T_out = 4.0°C):
+      - Nominal 50°C cycle: COP 2.85
+      - Boost 60°C cycle: COP 2.15 (high condensing temperature degradation ~25%)
+    When outdoor_temp_c is provided, models ambient temperature lift:
+      base_cop = max(min_cop, min(max_cop, 2.55 + (0.075 * outdoor_temp_c)))
+      If target_temp_c > 52.0°C: cop = base_cop * 0.75
     """
-    return 2.85 if target_temp_c <= 52.0 else 2.15
+    if outdoor_temp_c is None:
+        return 2.85 if target_temp_c <= 52.0 else 2.15
+
+    base_cop = max(min_cop, min(max_cop, 2.55 + (0.075 * outdoor_temp_c)))
+    cop = base_cop * 0.75 if target_temp_c > 52.0 else base_cop
+    return round(cop, 2)
 
 
 def calculate_dhw_thermal_output_kw(
     target_temp_c: float,
     heat_pump_electric_kw: float = 1.8,
     solar_boost_electric_kw: float = 2.4,
+    outdoor_temp_c: Optional[float] = None,
 ) -> float:
     """
     Thermodynamically consistent thermal output (kW_th) delivered by heat pump for DHW heating.
-    P_th = P_el * COP(target).
-    - For target <= 52°C: 1.8 kW * 2.85 COP = 5.13 kW_th.
-    - For target > 52°C:  2.4 kW * 2.15 COP = 5.16 kW_th.
+    P_th = P_el * COP(target, outdoor_temp_c).
+    - For target <= 52°C at nominal 4°C: 1.8 kW * 2.85 COP = 5.13 kW_th.
+    - For target > 52°C at nominal 4°C:  2.4 kW * 2.15 COP = 5.16 kW_th.
     """
     p_el = solar_boost_electric_kw if target_temp_c > 52.0 else heat_pump_electric_kw
-    cop = calculate_dhw_cop(target_temp_c)
+    cop = calculate_dhw_cop(target_temp_c, outdoor_temp_c=outdoor_temp_c)
     return round(p_el * cop, 3)

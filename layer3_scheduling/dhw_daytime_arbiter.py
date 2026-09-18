@@ -20,6 +20,7 @@ import math
 from layer2_calibration.dhw_thermal_model import DhwThermalModel
 from layer3_scheduling.tariff_provider import TariffProvider
 from layer3_scheduling.dhw_specs import DhwTankSpec
+from models.physics import calculate_dhw_cop
 
 
 @dataclass
@@ -117,6 +118,33 @@ class DhwDaytimeArbiter:
     # plus minor tap draw-offs, ensuring math.ceil does not leave the tank 0.2-0.5°C short of setpoint.
     RUN_THERMAL_BUFFER_KWH = 0.15
 
+    # Horizon-adaptive safety margin constants
+    DHW_SAFETY_MARGIN_MIN_C: float = 0.5        # Minimum safety margin for short horizons (<= 4h)
+    DHW_SAFETY_MARGIN_MAX_C: float = 2.0        # Maximum safety margin for long horizons (>= 20h)
+    DHW_SAFETY_MARGIN_MIN_HOURS: float = 4.0    # Horizon threshold for minimum margin
+    DHW_SAFETY_MARGIN_MAX_HOURS: float = 20.0   # Horizon threshold for maximum margin
+
+    @classmethod
+    def calculate_horizon_safety_margin_c(
+        cls,
+        hours_to_anchor: float,
+        min_margin_c: float = DHW_SAFETY_MARGIN_MIN_C,
+        max_margin_c: float = DHW_SAFETY_MARGIN_MAX_C,
+        min_hours: float = DHW_SAFETY_MARGIN_MIN_HOURS,
+        max_hours: float = DHW_SAFETY_MARGIN_MAX_HOURS,
+    ) -> float:
+        """
+        Calculates horizon-adaptive safety margin (delta-T in °C).
+        Interpolates linearly between min_margin_c (for short, highly predictable horizons <= 4h)
+        and max_margin_c (for long horizons >= 20h dependent on distant weather & tap variances).
+        """
+        if hours_to_anchor <= min_hours:
+            return min_margin_c
+        if hours_to_anchor >= max_hours:
+            return max_margin_c
+        ratio = (hours_to_anchor - min_hours) / (max_hours - min_hours)
+        return round(min_margin_c + ratio * (max_margin_c - min_margin_c), 2)
+
     @classmethod
     def calculate_required_slots(
         cls,
@@ -127,14 +155,15 @@ class DhwDaytimeArbiter:
         min_slots: int = 2,
         max_slots: int = 8,
         min_delta_c: float = 1.0,
+        outdoor_temp_c: Optional[float] = None,
     ) -> int:
         """
         Calculates the required number of quarter-hour heating slots using the
-        canonical thermodynamic thermal output: P_th = P_el * COP(target).
+        canonical thermodynamic thermal output: P_th = P_el * COP(target, outdoor_temp_c).
         Includes a small thermal safety buffer (0.15 kWh_th / ~0.37°C) to compensate for
         concomitant tank standby heat loss and minor tap draw-offs during the run.
         """
-        th_output_kw = spec.get_thermal_output_kw(target_temp)
+        th_output_kw = spec.get_thermal_output_kw(target_temp, outdoor_temp_c=outdoor_temp_c)
         delta_t = max(min_delta_c, target_temp - current_temp)
         th_need = (delta_t * spec.thermal_capacity_kwh_per_k) + cls.RUN_THERMAL_BUFFER_KWH
         slot_kwh_th = th_output_kw * step_hours
@@ -206,11 +235,10 @@ class DhwDaytimeArbiter:
 
         th_per_slot = th_need_kwh / max(1, n_req_slots)
 
+        target_t = 60.0 if is_boost_60 else 50.0
         for s in window_slots:
             t_out = getattr(s, "outdoor_temp_c", 10.0)
-            base_cop = max(1.8, min(4.5, 2.55 + (0.075 * t_out)))
-            # COP is ~25% lower for high-temperature boost (50->60°C)
-            cop_slot = base_cop * 0.75 if is_boost_60 else base_cop
+            cop_slot = calculate_dhw_cop(target_t, outdoor_temp_c=t_out)
             cops.append(cop_slot)
 
             el_slot_kwh = th_per_slot / cop_slot
@@ -490,8 +518,9 @@ class DhwDaytimeArbiter:
         q_needed = q_draw + q_loss
 
         # 3. Calculate target temperature from 40°C comfort floor
-        # T_target = T_min + (Q_needed / C_vat) + safety_margin (1.0°C)
-        t_target_raw = spec.comfort_min_temp_c + (q_needed / spec.thermal_capacity_kwh_per_k) + 1.0
+        # Safety margin scales dynamically with distance to anchor window
+        safety_margin_c = cls.calculate_horizon_safety_margin_c(hours_to_anchor)
+        t_target_raw = spec.comfort_min_temp_c + (q_needed / spec.thermal_capacity_kwh_per_k) + safety_margin_c
         t_target_opt = max(spec.target_setpoint_c, min(spec.boost_setpoint_c, round(t_target_raw * 2.0) / 2.0))
 
         return t_target_opt, next_anchor_idx, hours_to_anchor, q_needed, q_draw, q_loss

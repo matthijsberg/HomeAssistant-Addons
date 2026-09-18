@@ -30,6 +30,7 @@ from layer1_data_collection.sanitizer import CleanTelemetryFrame
 from layer3_scheduling.plan_store import get_plan_store, PlanStore
 from layer3_scheduling.tariff_provider import TariffProvider
 from layer3_scheduling.dhw_specs import DhwTankSpec
+from models.physics import calculate_dhw_cop
 
 
 class CentralPlanner:
@@ -197,7 +198,7 @@ class CentralPlanner:
                 cops = []
                 for k_idx, s_k in enumerate(window_slots):
                     t_out = s_k.outdoor_temp_c
-                    cop_slot = max(1.8, min(4.5, 2.55 + 0.075 * t_out))
+                    cop_slot = calculate_dhw_cop(target_temp_c=50.0, outdoor_temp_c=t_out)
                     cops.append(cop_slot)
                     el_slot_kwh = (th_need_kwh / n_req_slots) / cop_slot
                     total_el_kwh += el_slot_kwh

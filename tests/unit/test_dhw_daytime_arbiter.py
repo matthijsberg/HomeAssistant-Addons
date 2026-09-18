@@ -12,6 +12,7 @@ from typing import List
 
 from layer3_scheduling.dhw_daytime_arbiter import DhwDaytimeArbiter, EvaluatedPath, DaytimeArbitrationResult
 from layer2_calibration.dhw_thermal_model import DhwThermalModel
+from layer3_scheduling.dhw_specs import DhwTankSpec
 
 
 AMS_TZ = ZoneInfo("Europe/Amsterdam")
@@ -387,4 +388,105 @@ def test_dhw_boost_60_slot_calculation_and_trajectory_alignment():
     # Verify tank reaches within 0.3°C of 60.0°C
     assert end_temp >= 59.7, f"Tank ended at {end_temp}°C, failing to reach 60.0°C target within 0.3°C tolerance"
     assert end_temp <= 60.0, f"Tank overheated beyond target: {end_temp}°C"
+
+
+def test_dhw_horizon_adaptive_safety_margin_scaling():
+    """
+    Verifies that the DHW safety margin scales dynamically with hours_to_anchor:
+    - Korte horizon (<= 4h): min_margin_c (0.5°C)
+    - Middellange horizon (12h): 1.25°C
+    - Lange horizon (>= 20h): max_margin_c (2.0°C)
+    - Verifies compute_optimal_horizon_target_temp behavior for short vs long anchor.
+    """
+    # 1. Direct helper checks
+    assert DhwDaytimeArbiter.calculate_horizon_safety_margin_c(2.0) == 0.5
+    assert DhwDaytimeArbiter.calculate_horizon_safety_margin_c(4.0) == 0.5
+    assert DhwDaytimeArbiter.calculate_horizon_safety_margin_c(12.0) == 1.25
+    assert DhwDaytimeArbiter.calculate_horizon_safety_margin_c(20.0) == 2.0
+    assert DhwDaytimeArbiter.calculate_horizon_safety_margin_c(28.0) == 2.0
+
+    # 2. Backwards horizon solver comparison: short horizon vs long horizon
+    spec = DhwTankSpec()
+    dhw_model = DhwThermalModel()
+    start_dt = datetime(2026, 9, 18, 12, 0, tzinfo=AMS_TZ)
+
+    # Construct slots where anchor is forced at slot 16 (4 hours ahead)
+    slots_short = make_test_slots(start_dt, hours=24, solar_peak=0.0)
+    for i in range(16, 20):
+        slots_short[i].solar_kw = 2.5
+        slots_short[i].dt = slots_short[i].dt + timedelta(days=1)  # tomorrow
+
+    # Construct slots where anchor is forced at slot 80 (20 hours ahead)
+    slots_long = make_test_slots(start_dt, hours=24, solar_peak=0.0)
+    for i in range(80, 84):
+        slots_long[i].solar_kw = 2.5
+        slots_long[i].dt = slots_long[i].dt + timedelta(days=1)  # tomorrow
+
+    t_opt_short, anchor_short, h_short, q_need_s, _, _ = DhwDaytimeArbiter.compute_optimal_horizon_target_temp(
+        slots_short, current_dhw_temp=48.0, dhw_model=dhw_model, now_dt=start_dt, tank_spec=spec
+    )
+    t_opt_long, anchor_long, h_long, q_need_l, _, _ = DhwDaytimeArbiter.compute_optimal_horizon_target_temp(
+        slots_long, current_dhw_temp=48.0, dhw_model=dhw_model, now_dt=start_dt, tank_spec=spec
+    )
+
+    # Short horizon (4h) has 0.5°C margin, long horizon (20h) has 2.0°C margin
+    assert h_short == 4.0
+    assert h_long == 20.0
+    assert t_opt_long >= t_opt_short
+    assert 50.0 <= t_opt_short <= 60.0
+    assert 50.0 <= t_opt_long <= 60.0
+
+
+def test_cop_consistency_between_evaluate_window_cost_and_required_slots():
+    """
+    Verifies that evaluate_window_cost() and calculate_required_slots() derive
+    from the single source of truth in models/physics.py::calculate_dhw_cop.
+    """
+    from models.physics import calculate_dhw_cop
+    spec = DhwTankSpec()
+
+    temps = [-5.0, 0.0, 4.0, 10.0, 15.0, 22.0]
+    for t_out in temps:
+        # Check 50°C setpoint
+        cop_canon_50 = calculate_dhw_cop(target_temp_c=50.0, outdoor_temp_c=t_out)
+        assert spec.get_cop(50.0, outdoor_temp_c=t_out) == cop_canon_50
+
+        # Check 60°C setpoint
+        cop_canon_60 = calculate_dhw_cop(target_temp_c=60.0, outdoor_temp_c=t_out)
+        assert spec.get_cop(60.0, outdoor_temp_c=t_out) == cop_canon_60
+
+        # Check evaluate_window_cost COP return value
+        dummy_slot = MockSlot(
+            slot_idx=0,
+            dt=datetime(2026, 9, 18, 12, 0, tzinfo=AMS_TZ),
+            label="12:00",
+            price_all_in=0.20,
+            solar_kw=0.0,
+            unallocated_kw=0.35,
+            outdoor_temp_c=t_out
+        )
+        _, _, cop_window_50 = DhwDaytimeArbiter.evaluate_window_cost(
+            slots=[dummy_slot],
+            start_idx=0,
+            n_req_slots=1,
+            th_need_kwh=2.0,
+            is_boost_60=False,
+            hours_until_target=0.0,
+            step_hours=0.25,
+            tank_spec=spec
+        )
+        assert round(cop_window_50, 2) == cop_canon_50
+
+        _, _, cop_window_60 = DhwDaytimeArbiter.evaluate_window_cost(
+            slots=[dummy_slot],
+            start_idx=0,
+            n_req_slots=1,
+            th_need_kwh=2.0,
+            is_boost_60=True,
+            hours_until_target=0.0,
+            step_hours=0.25,
+            tank_spec=spec
+        )
+        assert round(cop_window_60, 2) == cop_canon_60
+
 
