@@ -360,12 +360,13 @@ def _save_epex_cache() -> None:
         print(f"Warning saving EPEX cache: {e}")
 
 
-def get_epex_tariffs_cached(is_15m: bool = True) -> Tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, float]]:
+def get_epex_tariffs_cached(is_15m: bool = True, force: bool = False) -> Tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, float]]:
     """
     Authoritative EPEX Day-Ahead price caching & polling manager:
     - Today's prices are served instantly from disk/memory cache.
-    - Tomorrow's prices are polled strictly between 13:00 and 15:00 every 15 minutes.
-    - Once tomorrow's prices are retrieved, polling stops completely until tomorrow 13:00.
+    - Tomorrow's prices are polled every 5 minutes between 12:30 and 14:00 (active auction release window).
+    - Fallback: polls every 15 minutes between 14:00 and 16:00, then hourly after 16:00.
+    - Once tomorrow's prices are retrieved, polling stops completely until tomorrow 12:30.
     - Returns (raw_price_list, map_all_in, map_base).
     """
     global _LAST_EPEX_POLL_TS, _EPEX_CACHE_DATA
@@ -382,16 +383,23 @@ def get_epex_tariffs_cached(is_15m: bool = True) -> Tuple[List[Dict[str, Any]], 
 
     now_ts = time.time()
     hour = now_ams.hour
+    minute = now_ams.minute
+    time_float = hour + minute / 60.0  # e.g. 12:30 = 12.5, 14:00 = 14.0
 
     need_today = (today_key not in _EPEX_CACHE_DATA or cache_type not in _EPEX_CACHE_DATA[today_key])
     has_tomorrow = (tomorrow_key in _EPEX_CACHE_DATA and cache_type in _EPEX_CACHE_DATA[tomorrow_key] and len(_EPEX_CACHE_DATA[tomorrow_key][cache_type].get("all_in", [])) >= (96 if is_15m else 24))
     need_tomorrow = False
-    if not has_tomorrow:
-        if 13 <= hour < 15:
-            if (now_ts - _LAST_EPEX_POLL_TS) >= 900.0:  # Every 15 min between 13:00 and 15:00
+    if force or not has_tomorrow:
+        if force:
+            need_tomorrow = True
+        elif 12.5 <= time_float < 14.0:
+            if (now_ts - _LAST_EPEX_POLL_TS) >= 300.0:  # Every 5 min between 12:30 and 14:00
                 need_tomorrow = True
-        elif hour >= 15:
-            if (now_ts - _LAST_EPEX_POLL_TS) >= 3600.0: # Every 60 min after 15:00 until published
+        elif 14.0 <= time_float < 16.0:
+            if (now_ts - _LAST_EPEX_POLL_TS) >= 900.0:  # Every 15 min between 14:00 and 16:00
+                need_tomorrow = True
+        elif time_float >= 16.0:
+            if (now_ts - _LAST_EPEX_POLL_TS) >= 3600.0: # Every 60 min after 16:00 until published
                 need_tomorrow = True
 
     dates_to_fetch = []
@@ -418,7 +426,7 @@ def get_epex_tariffs_cached(is_15m: bool = True) -> Tuple[List[Dict[str, Any]], 
                         }
                         dirty = True
                         if date_key == tomorrow_key:
-                            print(f"[Open HEMS] EPEX Day-Ahead prijzen voor morgen ({tomorrow_key}) binnengehaald ({len(all_in_items)} slots). Polling stopt tot morgen 13:00.")
+                            print(f"[Open HEMS] EPEX Day-Ahead prijzen voor morgen ({tomorrow_key}) binnengehaald ({len(all_in_items)} slots). Polling stopt tot morgen 12:30.")
             except Exception as e:
                 print(f"[Open HEMS] Polling EPEX tarieven voor {d_str} gaf nog geen data: {e}")
         if dirty:
