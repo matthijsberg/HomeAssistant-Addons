@@ -12,11 +12,17 @@ from typing import Dict, Any, List, Optional
 
 from api.i18n import localize_dhw_decision
 from api.context import (
-    load_json, save_json, load_secrets, get_ha_client_config,
-    get_ha_states_map, calculate_poa_solar_kw, format_slot_label,
-    fetch_recent_telemetry_history, ensure_active_canonical_plan,
-    GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR, GLOBAL_CENTRAL_CACHE,
-    PARAMS_FILE, AMS_TZ
+    ensure_active_canonical_plan, GLOBAL_CENTRAL_CACHE,
+    GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
+)
+from api.secrets_store import (
+    PARAMS_FILE, load_json, save_json, load_secrets
+)
+from integrations.homeassistant.client import (
+    get_ha_client_config, get_ha_states_map
+)
+from api.energy_feed import (
+    AMS_TZ, format_slot_label, calculate_poa_solar_kw, fetch_recent_telemetry_history
 )
 from layer3_scheduling.plan_decision_evaluator import evaluate_and_apply_dhw_run_merger
 from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy

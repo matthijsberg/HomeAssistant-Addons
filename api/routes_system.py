@@ -14,12 +14,20 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from api.context import (
-    AMS_TZ, SECRETS_FILE, PARAMS_FILE, CONFIG_FILE,
-    load_json, save_json, load_secrets, get_secret, save_secret, get_ha_client_config,
-    get_ha_states_map, calculate_poa_solar_kw, format_slot_label,
-    fetch_recent_telemetry_history, ensure_active_canonical_plan,
-    ensure_framework_defaults, test_influxdb_connection, test_mqtt_connection,
-    fetch_ha_entities, GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
+    ensure_active_canonical_plan, GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
+)
+from api.secrets_store import (
+    CONFIG_FILE, PARAMS_FILE, SECRETS_FILE,
+    load_json, save_json, load_secrets, save_secret, get_secret, ensure_framework_defaults
+)
+from integrations.homeassistant.client import (
+    get_ha_client_config, get_ha_states_map, fetch_ha_entities
+)
+from api.infra_diagnostics import (
+    test_influxdb_connection, test_mqtt_connection
+)
+from api.energy_feed import (
+    AMS_TZ, format_slot_label, calculate_poa_solar_kw, fetch_recent_telemetry_history
 )
 from models.canonical import StandardizedState, get_state_metadata
 from layer3_scheduling.plan_store import get_plan_store

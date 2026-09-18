@@ -12,11 +12,17 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from api.context import (
-    AMS_TZ, SECRETS_FILE, PARAMS_FILE, CONFIG_FILE,
-    load_json, save_json, load_secrets, get_ha_client_config,
-    get_ha_states_map, calculate_poa_solar_kw, format_slot_label,
-    fetch_recent_telemetry_history, ensure_active_canonical_plan,
-    DUTCH_DAYS_SHORT, GLOBAL_DHW_MODEL, get_epex_tariffs_cached
+    ensure_active_canonical_plan, GLOBAL_DHW_MODEL
+)
+from api.secrets_store import (
+    CONFIG_FILE, PARAMS_FILE, SECRETS_FILE, load_json, save_json, load_secrets
+)
+from integrations.homeassistant.client import (
+    get_ha_client_config, get_ha_states_map
+)
+from api.energy_feed import (
+    AMS_TZ, DUTCH_DAYS_SHORT, format_slot_label,
+    calculate_poa_solar_kw, fetch_recent_telemetry_history, get_epex_tariffs_cached
 )
 from layer3_scheduling.decision_audit import DecisionAuditLogger
 

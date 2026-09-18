@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.103.26
+Version: 0.103.27
 Generic Energy Management Platform:
   - Multi-Vector Telemetry & Optimization Daemon
   - Domain Router Dispatch to api/routes_*.py
@@ -35,17 +35,25 @@ from models.canonical import normalize_power_reading
 from site_adapters.daikin_p1p2 import DaikinP1P2StateClassifier
 from layer3_scheduling.decision_audit import DecisionAuditLogger
 from api.context import (
-    AMS_TZ, CONFIG_FILE, DUTCH_DAYS_SHORT, GLOBAL_COLLECTOR, GLOBAL_DHW_MODEL,
-    GLOBAL_MODEL, INDEX_HTML_PATH, PARAMS_FILE, SECRETS_FILE, WEB_DIR,
-    calculate_poa_solar_kw, call_ha_service, call_ha_service_detailed,
-    ensure_active_canonical_plan, ensure_framework_defaults,
-    fetch_ha_entities,
-    fetch_recent_telemetry_history, format_slot_label,
-    get_anchored_weather_forecast, get_epex_tariffs_cached,
-    get_ha_client_config, get_ha_states_map, get_secret, load_json,
-    load_secrets, log_technical_error, make_daikin_ha_actuator, save_json,
-    save_secret, test_influxdb_connection, test_mqtt_connection,
-    write_hems_annotation
+    GLOBAL_COLLECTOR, GLOBAL_DHW_MODEL, GLOBAL_MODEL,
+    ensure_active_canonical_plan, INDEX_HTML_PATH, WEB_DIR
+)
+from api.secrets_store import (
+    CONFIG_FILE, PARAMS_FILE, SECRETS_FILE,
+    load_json, save_json, load_secrets, save_secret, get_secret, ensure_framework_defaults
+)
+from integrations.homeassistant.client import (
+    get_ha_client_config, get_ha_states_map, fetch_ha_entities,
+    call_ha_service, call_ha_service_detailed, make_daikin_ha_actuator
+)
+from api.infra_diagnostics import (
+    write_hems_annotation, log_technical_error,
+    test_influxdb_connection, test_mqtt_connection
+)
+from api.energy_feed import (
+    AMS_TZ, DUTCH_DAYS_SHORT, format_slot_label,
+    calculate_poa_solar_kw, get_anchored_weather_forecast,
+    fetch_recent_telemetry_history, get_epex_tariffs_cached
 )
 from layer3_scheduling.plan_decision_evaluator import (
     evaluate_and_apply_dhw_run_merger,
