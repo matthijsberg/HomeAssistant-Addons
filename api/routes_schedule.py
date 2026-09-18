@@ -85,7 +85,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         today_str = now_ams.strftime("%d-%m-%Y")
         tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
 
-        total_slots = 96 if is_15m else 24
+        qp = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
+        horizon_mode = qp.get("horizon", ["24h"])[0]
+        is_48h = (horizon_mode == "48h")
+        total_slots = (192 if is_15m else 48) if is_48h else (96 if is_15m else 24)
         step_mins = 15 if is_15m else 60
         start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
         base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
@@ -123,7 +126,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         try:
             from layer1_data_collection.geo_location import get_geo_coordinates
             geo_lat, geo_lon = get_geo_coordinates(cfg)
-            url_m = f"https://api.open-meteo.com/v1/forecast?latitude={geo_lat}&longitude={geo_lon}&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
+            url_m = f"https://api.open-meteo.com/v1/forecast?latitude={geo_lat}&longitude={geo_lon}&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=3"
             req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
             with urllib.request.urlopen(req_m, timeout=5) as r_m:
                 m_data = json.loads(r_m.read().decode())
@@ -134,7 +137,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 m_rhs = m_data.get("hourly", {}).get("relative_humidity_2m", [])
                 for t, rad, tmp, wnd, rh in zip(m_times, m_rads, m_temps, m_winds, m_rhs):
                     k_t = t.replace('T', ' ')[:13] + ':00'
-                    if not has_solar_chart:
+                    if not has_solar_chart or k_t not in solar_map:
                         dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
                         solar_map[k_t] = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
                     temp_map[k_t] = round(float(tmp), 1)

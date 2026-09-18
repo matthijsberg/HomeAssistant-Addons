@@ -83,7 +83,7 @@ from layer1_data_collection.geo_location import get_geo_coordinates
 _LAST_CANONICAL_PLAN_TIME = None
 _PLAN_LOCK = threading.Lock()
 
-def ensure_active_canonical_plan(force_refresh=False):
+def ensure_active_canonical_plan(force_refresh=False, horizon_hours=48.0):
     """
     Ensures an authoritative, synchronized CanonicalDispatchPlan is cached in PlanStore.
     Re-plans every 60 seconds or when explicitly forced. Thread-safe with double-checked locking.
@@ -103,10 +103,11 @@ def ensure_active_canonical_plan(force_refresh=False):
             if (now_ams - _LAST_CANONICAL_PLAN_TIME).total_seconds() < 60:
                 return current_plan
 
-    # 1. Fetch EPEX prices from dedicated 24h Day-Ahead cache
+    # 1. Fetch EPEX prices from dedicated Day-Ahead cache
     raw_prices, _, _ = get_epex_tariffs_cached(is_15m=True)
 
-    # 2. Fetch Solar & Weather Forecast for Culemborg
+    # 2. Fetch Solar & Weather Forecast for Culemborg (48-hour rolling horizon)
+    horizon_slots = int(horizon_hours * 4)
     cfg = load_json(CONFIG_FILE)
     s_cfg = cfg.get("solar", {})
     s_kwp = float(s_cfg.get("kwp", 5.76))
@@ -127,7 +128,7 @@ def ensure_active_canonical_plan(force_refresh=False):
                 kwp=s_kwp, inverter_max_kw=s_inv,
                 calibration_factor=s_cal
             )
-            raw_solar = fs_prov.get_calibrated_quarter_slots(now_ams, horizon_slots=96, step_mins=15)
+            raw_solar = fs_prov.get_calibrated_quarter_slots(now_ams, horizon_slots=horizon_slots, step_mins=15)
         except Exception as e_fs:
             print(f"Warning fetching Forecast.Solar: {e_fs}")
 
@@ -137,7 +138,7 @@ def ensure_active_canonical_plan(force_refresh=False):
 
     raw_weather = []
     try:
-        url_m = f"https://api.open-meteo.com/v1/forecast?latitude={geo_lat}&longitude={geo_lon}&hourly=temperature_2m,shortwave_radiation,wind_speed_10m&timezone=Europe%2FAmsterdam&forecast_days=2"
+        url_m = f"https://api.open-meteo.com/v1/forecast?latitude={geo_lat}&longitude={geo_lon}&hourly=temperature_2m,shortwave_radiation,wind_speed_10m&timezone=Europe%2FAmsterdam&forecast_days=3"
         req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
         with urllib.request.urlopen(req_m, timeout=5) as r_m:
             m_data = json.loads(r_m.read().decode())
@@ -147,10 +148,12 @@ def ensure_active_canonical_plan(force_refresh=False):
             m_winds = m_data.get("hourly", {}).get("wind_speed_10m", [])
             s_eff = float(s_cfg.get("efficiency_factor", 0.88))
 
+            existing_solar_times = {s["dt"].strftime("%Y-%m-%d %H:00") for s in raw_solar}
             for idx_m, (t, rad, tmp) in enumerate(zip(m_times, m_rads, m_temps)):
                 k_t = t.replace('T', ' ')[:13] + ':00'
                 dt_h = datetime.strptime(k_t, "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Europe/Amsterdam"))
-                if not has_solar_plan:
+                # If Forecast.Solar has no entries for this hour, fill with Open-Meteo POA solar model
+                if not has_solar_plan or dt_h.strftime("%Y-%m-%d %H:00") not in existing_solar_times:
                     poa_kw = calculate_poa_solar_kw(dt_h, float(rad), kwp=s_kwp, tilt_deg=s_tilt, azimuth_deg=s_az, inverter_limit_kw=s_inv, eff=s_eff)
                     raw_solar.append({"dt": dt_h, "solar_kw": poa_kw})
                 w_kmh = float(m_winds[idx_m]) if (idx_m < len(m_winds) and m_winds[idx_m] is not None) else 0.0
@@ -309,7 +312,7 @@ def ensure_active_canonical_plan(force_refresh=False):
         live_outdoor_temp_c=live_t_out,
         live_solar_kw=live_solar_kw,
         live_wind_speed_ms=live_wind_ms,
-        horizon_slots=96,
+        horizon_slots=horizon_slots,
         step_mins=15
     )
 

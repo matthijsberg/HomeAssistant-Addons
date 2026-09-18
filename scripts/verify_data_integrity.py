@@ -76,10 +76,10 @@ def check_canonical_plan_invariants(errors: list):
         return
 
     slots = plan.slots
-    if len(slots) != 96:
-        log_fail(f"Canonical plan has {len(slots)} slots, expected exactly 96 (24h @ 15m)!", errors)
+    if len(slots) not in (96, 192):
+        log_fail(f"Canonical plan has {len(slots)} slots, expected 96 (24h) or 192 (48h @ 15m)!", errors)
     else:
-        log_pass("Canonical plan has exactly 96 quarter-hour slots (24-hour rolling horizon)")
+        log_pass(f"Canonical plan has exactly {len(slots)} quarter-hour slots ({len(slots)//4}-hour rolling horizon)")
 
     slot_dts = [datetime.fromisoformat(s.dt_iso) for s in slots]
 

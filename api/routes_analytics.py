@@ -213,6 +213,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             parsed_url = urllib.parse.urlparse(handler.path)
             qp = urllib.parse.parse_qs(parsed_url.query)
             res_mode = qp.get("resolution", ["15m"])[0]
+            horizon_mode = qp.get("horizon", ["24h"])[0]
+            is_48h = (horizon_mode == "48h")
             interval_api = "INTERVAL_QUARTER" if res_mode == "15m" else "INTERVAL_HOUR"
 
             now_ams = datetime.now(AMS_TZ)
@@ -221,7 +223,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             tomorrow_str = (now_ams + timedelta(days=1)).strftime("%d-%m-%Y")
 
             is_15m = (res_mode == "15m")
-            total_slots = 96 if is_15m else 24
+            total_slots = (192 if is_15m else 48) if is_48h else (96 if is_15m else 24)
             step_mins = 15 if is_15m else 60
             start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
             base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)

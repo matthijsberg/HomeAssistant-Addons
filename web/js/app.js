@@ -222,10 +222,15 @@
 
         const OpenHEMSChartEngine = {
             _resolutionListeners: {},
+            _horizonListeners: {},
             _resolutions: {
                 prediction: '1h',
                 history: '1h',
                 validation: '15m'
+            },
+            _horizons: {
+                prediction: '24h',
+                history: '24h'
             },
             _styles: {
                 prediction: { active: 'bg-purple-600 text-white shadow', inactive: 'text-slate-400 hover:text-slate-200' },
@@ -238,6 +243,12 @@
                     this._resolutionListeners[pageId] = [];
                 }
                 this._resolutionListeners[pageId].push(callback);
+            },
+            registerHorizonListener(pageId, callback) {
+                if (!this._horizonListeners[pageId]) {
+                    this._horizonListeners[pageId] = [];
+                }
+                this._horizonListeners[pageId].push(callback);
             },
 
             getChartType() {
@@ -275,6 +286,51 @@
                     });
                     if (pageId === 'prediction') {
                         this.refreshAllCharts();
+                    }
+                }
+            },
+            getHorizon(pageId = 'prediction') {
+                return localStorage.getItem('openhems_horizon_' + pageId) || this._horizons[pageId] || '24h';
+            },
+            setHorizon(horizon, pageId = 'prediction', triggerCallbacks = true) {
+                this._horizons[pageId] = horizon;
+                localStorage.setItem('openhems_horizon_' + pageId, horizon);
+                this.syncHorizonButtons(pageId, horizon);
+
+                // Auto-adjust resolution if switching to 48h to maintain readability
+                if (horizon === '48h' && this.getResolution(pageId) === '15m') {
+                    this.setResolution('1h', pageId, false);
+                }
+
+                if (triggerCallbacks) {
+                    const listeners = this._horizonListeners[pageId] || [];
+                    listeners.forEach(cb => {
+                        try { cb(horizon); } catch (e) { console.error('Error in horizon listener for ' + pageId, e); }
+                    });
+                    if (pageId === 'prediction') {
+                        this.refreshAllCharts();
+                    } else if (pageId === 'history') {
+                        if (typeof refreshAllHistoryCharts === 'function') refreshAllHistoryCharts();
+                    }
+                }
+            },
+            syncHorizonButtons(pageId = 'prediction', activeHorizon = null) {
+                if (!activeHorizon) activeHorizon = this.getHorizon(pageId);
+                const style = this._styles[pageId] || this._styles.prediction;
+                const baseClasses = 'px-2.5 py-1 rounded transition font-medium';
+
+                ['24h', '48h'].forEach(h => {
+                    const btn = document.getElementById(`btn-horizon-${pageId}-${h}`);
+                    if (btn) {
+                        const isSelected = (h === activeHorizon);
+                        btn.className = `${baseClasses} ${isSelected ? style.active : style.inactive}`;
+                    }
+                });
+
+                if (pageId === 'history') {
+                    const sel = document.getElementById('pp-range-select');
+                    if (sel && ['24h', '48h'].includes(activeHorizon) && sel.value !== activeHorizon) {
+                        sel.value = activeHorizon;
                     }
                 }
             },
@@ -364,8 +420,22 @@
                 this.syncResolutionButtons('prediction', savedRes);
                 this.syncResolutionButtons('history', this._resolutions.history);
                 this.syncResolutionButtons('validation', this._resolutions.validation);
+
+                const savedHorizon = this.getHorizon('prediction');
+                this._horizons.prediction = savedHorizon;
+                this._horizons.history = this.getHorizon('history');
+                this.syncHorizonButtons('prediction', savedHorizon);
+                this.syncHorizonButtons('history', this._horizons.history);
             }
         };
+
+        function setPredictionHorizon(horizon) {
+            OpenHEMSChartEngine.setHorizon(horizon, 'prediction');
+        }
+
+        function setHistoryHorizon(horizon) {
+            OpenHEMSChartEngine.setHorizon(horizon, 'history');
+        }
 
         function updateResolutionButtons(pageId, activeRes) {
             OpenHEMSChartEngine.syncResolutionButtons(pageId, activeRes);
@@ -490,6 +560,9 @@
         function onPowerProducersRangeChange() {
             const rangeSelect = document.getElementById('pp-range-select');
             const rangeVal = rangeSelect ? rangeSelect.value : '24h';
+            if (['24h', '48h'].includes(rangeVal)) {
+                OpenHEMSChartEngine.syncHorizonButtons('history', rangeVal);
+            }
             // Auto-adjust resolution based on range (Grafana style)
             let newRes = '1h';
             if (rangeVal === '1h' || rangeVal === '6h') {
@@ -1768,7 +1841,8 @@
         async function loadChartData() {
             try {
                 const simParam = window.__simulateBattery ? '&simulate_battery=1' : '';
-                const res = await fetch('./api/schedule/chart-data?resolution=' + encodeURIComponent(predictionResolution) + simParam);
+                const horizonVal = OpenHEMSChartEngine.getHorizon('prediction');
+                const res = await fetch('./api/schedule/chart-data?resolution=' + encodeURIComponent(predictionResolution) + '&horizon=' + encodeURIComponent(horizonVal) + simParam);
                 const data = await res.json();
                 window.__lastPredictionData = data;
                 window.__lastPredictionIntervalH = data.interval_h || (predictionResolution === '15m' ? 0.25 : 1.0);
@@ -3370,7 +3444,8 @@
 
             try {
                 const resVal = predictionResolution || '15m';
-                const res = await fetch('./api/analytics/electricity_prices?resolution=' + encodeURIComponent(resVal));
+                const horizonVal = OpenHEMSChartEngine.getHorizon('prediction');
+                const res = await fetch('./api/analytics/electricity_prices?resolution=' + encodeURIComponent(resVal) + '&horizon=' + encodeURIComponent(horizonVal));
                 const data = await res.json();
                 window.__lastElectricityPricesData = data;
                 if (data.status !== 'success') {
@@ -5136,7 +5211,8 @@
             const canvas = document.getElementById('chart-heating-forecast');
             if (!canvas) return;
             try {
-                const res = await fetch('./api/model/heating-forecast?resolution=' + encodeURIComponent(predictionResolution));
+                const horizonVal = OpenHEMSChartEngine.getHorizon('prediction');
+                const res = await fetch('./api/model/heating-forecast?resolution=' + encodeURIComponent(predictionResolution) + '&horizon=' + encodeURIComponent(horizonVal));
                 if (!res.ok) return;
                 const d = await res.json();
                 if (!d.labels || d.labels.length === 0) return;
@@ -5232,7 +5308,8 @@
             if (!canvas) return;
             try {
                 const lang = window.OpenHEMSi18n ? window.OpenHEMSi18n.getLang() : 'nl';
-                const res = await fetch('./api/model/dhw-status?resolution=' + encodeURIComponent(predictionResolution) + '&lang=' + encodeURIComponent(lang));
+                const horizonVal = OpenHEMSChartEngine.getHorizon('prediction');
+                const res = await fetch('./api/model/dhw-status?resolution=' + encodeURIComponent(predictionResolution) + '&horizon=' + encodeURIComponent(horizonVal) + '&lang=' + encodeURIComponent(lang));
                 if (!res.ok) return;
                 const data = await res.json();
                 const traj = data.trajectory || {};

@@ -152,7 +152,7 @@ def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
         if _GLOBAL_WEATHER_FORECAST_CACHE.get("m_data") and (time.time() - _GLOBAL_WEATHER_FORECAST_CACHE.get("ts", 0)) < 900.0:
             m_data = _GLOBAL_WEATHER_FORECAST_CACHE["m_data"]
         else:
-            w_url = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=2"
+            w_url = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=3"
             req_m = urllib.request.Request(w_url, headers={"User-Agent": "OpenHEMS/1.0"})
             with urllib.request.urlopen(req_m, timeout=4) as r_m:
                 m_data = json.loads(r_m.read().decode())

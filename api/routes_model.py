@@ -31,9 +31,12 @@ def handle_get(handler, path: str, qp: dict) -> bool:
     if path.startswith("/api/model/heating-forecast"):
         qp = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
         res_mode = qp.get("resolution", ["15m"])[0]
+        horizon_mode = qp.get("horizon", ["24h"])[0]
+        is_48h = (horizon_mode == "48h")
         is_15m = (res_mode == "15m")
         step_mins = 15 if is_15m else 60
         interval_h = step_mins / 60.0
+        n_future_slots = (192 if is_15m else 48) if is_48h else (96 if is_15m else 24)
 
         now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
         start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
@@ -56,23 +59,23 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         h_summary = plan.heating_summary
 
         if h_summary and h_summary.slots:
-            n_sim = len(h_summary.slots)
+            n_sim = min(len(h_summary.slots), n_future_slots * (4 if not is_15m else 1))
             raw_labels = [plan.slots[i].time_label for i in range(n_sim)] if plan.slots else [f"T+{i}" for i in range(n_sim)]
-            raw_out_temps = [round(s.outdoor_temp_c, 1) for s in h_summary.slots]
-            raw_in_temps = [round(s.room_temp_c, 1) for s in h_summary.slots]
-            raw_floor_temps = [round(s.floor_temp_c, 1) for s in h_summary.slots]
-            raw_cops = [round(s.cop, 2) for s in h_summary.slots]
-            raw_th_loss_kw = [round(s.heat_loss_kw, 2) for s in h_summary.slots]
-            raw_el_power_kw = [round(s.heating_kw_el, 2) for s in h_summary.slots]
+            raw_out_temps = [round(s.outdoor_temp_c, 1) for s in h_summary.slots[:n_sim]]
+            raw_in_temps = [round(s.room_temp_c, 1) for s in h_summary.slots[:n_sim]]
+            raw_floor_temps = [round(s.floor_temp_c, 1) for s in h_summary.slots[:n_sim]]
+            raw_cops = [round(s.cop, 2) for s in h_summary.slots[:n_sim]]
+            raw_th_loss_kw = [round(s.heat_loss_kw, 2) for s in h_summary.slots[:n_sim]]
+            raw_el_power_kw = [round(s.heating_kw_el, 2) for s in h_summary.slots[:n_sim]]
             raw_costs_eur = [
                 round(s.heating_kw_el * 0.25 * (plan.slots[i].price_eur if i < len(plan.slots) else 0.25), 3)
-                for i, s in enumerate(h_summary.slots)
+                for i, s in enumerate(h_summary.slots[:n_sim])
             ]
-            raw_unh = (h_summary.unheated_room_temps_c if (h_summary and h_summary.unheated_room_temps_c) else raw_in_temps)
-            raw_in_p05 = (h_summary.room_temps_p05_c if (h_summary and h_summary.room_temps_p05_c) else raw_in_temps)
-            raw_in_p95 = (h_summary.room_temps_p95_c if (h_summary and h_summary.room_temps_p95_c) else raw_in_temps)
-            raw_unh_p05 = (h_summary.unheated_temps_p05_c if (h_summary and h_summary.unheated_temps_p05_c) else raw_in_temps)
-            raw_unh_p95 = (h_summary.unheated_temps_p95_c if (h_summary and h_summary.unheated_temps_p95_c) else raw_in_temps)
+            raw_unh = (h_summary.unheated_room_temps_c[:n_sim] if (h_summary and h_summary.unheated_room_temps_c) else raw_in_temps)
+            raw_in_p05 = (h_summary.room_temps_p05_c[:n_sim] if (h_summary and h_summary.room_temps_p05_c) else raw_in_temps)
+            raw_in_p95 = (h_summary.room_temps_p95_c[:n_sim] if (h_summary and h_summary.room_temps_p95_c) else raw_in_temps)
+            raw_unh_p05 = (h_summary.unheated_temps_p05_c[:n_sim] if (h_summary and h_summary.unheated_temps_p05_c) else raw_in_temps)
+            raw_unh_p95 = (h_summary.unheated_temps_p95_c[:n_sim] if (h_summary and h_summary.unheated_temps_p95_c) else raw_in_temps)
 
             tot_th = h_summary.total_heating_kwh_th
             tot_el = h_summary.total_heating_kwh_el
@@ -83,7 +86,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             t_status = h_summary.season_status_label
 
             if not is_15m:
-                # Aggregate 96 quarter-hour slots to 24 1-hour slots
+                # Aggregate to 1-hour slots
                 labels = []
                 out_temps = []
                 in_temps = []
@@ -98,7 +101,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 el_power_kw = []
                 costs_eur = []
                 prev_h_dt = None
-                for h_i in range(min(24, n_sim // 4)):
+                for h_i in range(min(n_future_slots, n_sim // 4)):
                     idx = h_i * 4
                     h_dt = base_dt + timedelta(hours=h_i)
                     labels.append(format_slot_label(h_dt, prev_h_dt, h_i == 0, False))
@@ -117,20 +120,21 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     el_power_kw.append(round(sum(raw_el_power_kw[idx:idx+4]) / 4.0, 2))
                     costs_eur.append(round(sum(raw_costs_eur[idx:idx+4]), 3))
             else:
-                labels = raw_labels
-                out_temps = raw_out_temps
-                in_temps = raw_in_temps
-                unheated_temps = raw_unh
-                in_p05 = raw_in_p05
-                in_p95 = raw_in_p95
-                unh_p05 = raw_unh_p05
-                unh_p95 = raw_unh_p95
-                floor_temps = raw_floor_temps
-                cops = raw_cops
-                th_loss_kw = raw_th_loss_kw
-                el_power_kw = raw_el_power_kw
-                costs_eur = raw_costs_eur
+                labels = raw_labels[:n_future_slots]
+                out_temps = raw_out_temps[:n_future_slots]
+                in_temps = raw_in_temps[:n_future_slots]
+                unheated_temps = raw_unh[:n_future_slots]
+                in_p05 = raw_in_p05[:n_future_slots]
+                in_p95 = raw_in_p95[:n_future_slots]
+                unh_p05 = raw_unh_p05[:n_future_slots]
+                unh_p95 = raw_unh_p95[:n_future_slots]
+                floor_temps = raw_floor_temps[:n_future_slots]
+                cops = raw_cops[:n_future_slots]
+                th_loss_kw = raw_th_loss_kw[:n_future_slots]
+                el_power_kw = raw_el_power_kw[:n_future_slots]
+                costs_eur = raw_costs_eur[:n_future_slots]
         else:
+            n_sim = 0
             labels, out_temps, in_temps, floor_temps, cops, th_loss_kw, el_power_kw, costs_eur = [], [], [], [], [], [], [], []
             unheated_temps, in_p05, in_p95, unh_p05, unh_p95 = [], [], [], [], []
             tot_th, tot_el, tot_cost = 0.0, 0.0, 0.0
@@ -141,8 +145,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
         # Extract lockout and heating ranges for visual overlay (offset by history_count)
         from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
-        forced_off_ranges = extract_plan_spitsblok_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m)
-        heating_ranges = extract_plan_heating_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m, domain="space_heating")
+        future_slots_for_overlay = plan.slots[:n_sim] if (plan and plan.slots) else []
+        forced_off_ranges = extract_plan_spitsblok_ranges(future_slots_for_overlay, history_count=len(hist_pts), is_15m=is_15m)
+        heating_ranges = extract_plan_heating_ranges(future_slots_for_overlay, history_count=len(hist_pts), is_15m=is_15m, domain="space_heating")
 
         handler._send_json({
             "resolution": res_mode,
@@ -175,6 +180,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
     if path.startswith("/api/model/dhw-status"):
         qp = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
         res_mode = qp.get("resolution", ["15m"])[0]
+        horizon_mode = qp.get("horizon", ["24h"])[0]
+        is_48h = (horizon_mode == "48h")
+        hours_sim = 48 if is_48h else 24
         is_15m = (res_mode == "15m")
         t_live = 49.2
         try:
@@ -210,7 +218,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             traj = GLOBAL_DHW_MODEL.simulate_trajectory(
                 t_live,
                 base_sim_dt,
-                hours_ahead=24,
+                hours_ahead=hours_sim,
                 heat_pump_schedule_slots=cached_slots,
                 target_temp_c=c_target,
                 heat_pump_power_kw=c_power
@@ -220,7 +228,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             unheated_traj = GLOBAL_DHW_MODEL.simulate_trajectory(
                 t_live,
                 base_sim_dt,
-                hours_ahead=24,
+                hours_ahead=hours_sim,
                 heat_pump_schedule_slots=[]
             )
 
@@ -240,7 +248,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     h_labels, h_temps, h_p05, h_p95, h_demand = [], [], [], [], []
                     h_unh_temps, h_unh_p05, h_unh_p95 = [], [], []
                     prev_h_dt = None
-                    for h_i in range(min(24, len(raw_lbls) // 4)):
+                    for h_i in range(min(hours_sim, len(raw_lbls) // 4)):
                         idx = h_i * 4
                         h_dt = base_sim_dt + timedelta(hours=h_i)
                         h_labels.append(format_slot_label(h_dt, prev_h_dt, h_i == 0, False))
@@ -361,8 +369,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 unheated_traj["temperatures_p95_c"] = hist_temps + unheated_traj.get("temperatures_p95_c", [])
 
             from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
-            forced_off_ranges = extract_plan_spitsblok_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m)
-            heating_ranges = extract_plan_heating_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m, domain="dhw")
+            dhw_plan_slots = plan.slots[:int(hours_sim*4)] if (plan and plan.slots) else []
+            forced_off_ranges = extract_plan_spitsblok_ranges(dhw_plan_slots, history_count=len(hist_pts), is_15m=is_15m)
+            heating_ranges = extract_plan_heating_ranges(dhw_plan_slots, history_count=len(hist_pts), is_15m=is_15m, domain="dhw")
 
             handler._send_json({
                 "status": "online",
