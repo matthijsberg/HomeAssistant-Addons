@@ -66,6 +66,10 @@ from api.secrets_store import (
     CONFIG_FILE, PARAMS_FILE, SECRETS_FILE, HA_API_CONFIG,
     load_json, save_json, load_secrets, save_secret, get_secret, ensure_framework_defaults
 )
+from integrations.homeassistant.client import (
+    get_ha_client_config, fetch_ha_entities, get_ha_states_map,
+    call_ha_service, call_ha_service_detailed, make_daikin_ha_actuator
+)
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 INDEX_HTML_PATH = WEB_DIR / "index.html"
 
@@ -132,71 +136,6 @@ def calculate_poa_solar_kw(
     p_dc = (poa_total / 1000.0) * kwp * eff
     return round(min(inverter_limit_kw, p_dc), 3)
 
-
-
-_WORKING_HA_BASE_URL = None
-
-def get_ha_client_config() -> Tuple[str, str]:
-    """
-    Returns (ha_url, token) for Home Assistant Core REST API.
-    Auto-discovers and caches the responsive endpoint among:
-      - Direct internal HA Docker bridge: https://172.30.32.1:8123
-      - Direct internal Docker service name: https://homeassistant:8123
-      - User-configured URL in secrets
-      - http://supervisor/core
-    """
-    global _WORKING_HA_BASE_URL
-    sec = load_secrets()
-    ha_sec = sec.get("homeassistant", {})
-    token = ha_sec.get("token") or os.environ.get("HASS_TOKEN", "")
-    
-    if not token and HA_API_CONFIG.exists():
-        cfg = load_json(HA_API_CONFIG)
-        token = cfg.get("HASS_TOKEN")
-
-    if not token and os.path.exists("/data/options.json"):
-        try:
-            with open("/data/options.json") as f:
-                opts = json.load(f)
-                token = opts.get("homeassistant_token") or token
-        except Exception:
-            pass
-
-    if _WORKING_HA_BASE_URL:
-        return _WORKING_HA_BASE_URL, token
-
-    configured_url = ha_sec.get("url") or os.environ.get("HASS_URL")
-    candidates = [
-        "https://172.30.32.1:8123",
-        "https://homeassistant:8123",
-        configured_url,
-        "http://supervisor/core",
-        "https://hass.b3rg.nl:8123"
-    ]
-    seen = set()
-    uniq_candidates = []
-    for c in candidates:
-        if c and c not in seen:
-            seen.add(c)
-            uniq_candidates.append(c)
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-    for candidate in uniq_candidates:
-        try:
-            req = urllib.request.Request(f"{candidate}/api/states/zone.home", headers=headers)
-            with urllib.request.urlopen(req, timeout=1.5, context=ctx) as r:
-                if r.status in [200, 201]:
-                    _WORKING_HA_BASE_URL = candidate
-                    return _WORKING_HA_BASE_URL, token
-        except Exception:
-            continue
-
-    default_url = configured_url or "https://172.30.32.1:8123"
-    return default_url, token
 
 
 _GLOBAL_WEATHER_FORECAST_CACHE: Dict[str, Any] = {}
@@ -319,45 +258,6 @@ def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
 sys.path.insert(0, "/config/lib")
 
 
-def fetch_ha_entities():
-    """Queries Home Assistant Core REST API for available entities for dropdown selection."""
-    ha_url, token = get_ha_client_config()
-    if not token:
-        return []
-
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    try:
-        req = urllib.request.Request(f"{ha_url}/api/states", headers=headers)
-        with urllib.request.urlopen(req, timeout=5, context=ctx) as r:
-            states = json.loads(r.read().decode("utf-8"))
-            filtered = []
-            for s in states:
-                eid = s.get("entity_id", "")
-                domain = eid.split(".")[0]
-                if domain in ["sensor", "switch", "climate", "binary_sensor", "input_boolean", "weather"]:
-                    fname = s.get("attributes", {}).get("friendly_name") or eid
-                    filtered.append({
-                        "entity_id": eid,
-                        "friendly_name": fname,
-                        "domain": domain,
-                        "unit": s.get("attributes", {}).get("unit_of_measurement"),
-                        "state": s.get("state")
-                    })
-            return sorted(filtered, key=lambda x: x["friendly_name"].lower())
-    except Exception as e:
-        print(f"Warning fetching HA entities: {e}")
-        return []
-
-
-def get_ha_states_map():
-    """Returns a dict mapping entity_id -> state dict from HA Core."""
-    return {e["entity_id"]: e for e in fetch_ha_entities()}
-
-
 def write_hems_annotation(event_type: str, title: str, description: str, state_code: str, power_kw: float = 0.0, target_temp_c: float = 0.0, savings_eur: float = 0.0, severity: str = "info"):
     """Writes a native semantic event annotation to openhems InfluxDB for Grafana dashboards."""
     try:
@@ -414,62 +314,6 @@ def log_technical_error(domain: str, event_type: str, reason: str, explanation: 
         )
     except Exception as e_log:
         print(f"Warning logging technical error: {e_log}")
-
-
-def call_ha_service_detailed(domain: str, service: str, service_data: dict) -> Tuple[bool, Optional[str]]:
-    """Calls a Home Assistant Core REST API service and returns success status plus error message."""
-    global _WORKING_HA_BASE_URL
-    ha_url, token = get_ha_client_config()
-    if not token:
-        return False, "Geen Home Assistant token geconfigureerd in options.json of environment"
-
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    url = f"{ha_url}/api/services/{domain}/{service}"
-    try:
-        req = urllib.request.Request(url, data=json.dumps(service_data).encode("utf-8"), headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=5, context=ctx) as r:
-            if r.status in [200, 201]:
-                return True, None
-            return False, f"HTTP status {r.status}"
-    except urllib.error.HTTPError as he:
-        return False, f"HTTP Fout {he.code}: {he.reason}"
-    except urllib.error.URLError as ue:
-        _WORKING_HA_BASE_URL = None
-        return False, f"Verbindingsfout naar HA ({ha_url}): {ue.reason}"
-    except Exception as e:
-        _WORKING_HA_BASE_URL = None
-        return False, str(e)
-
-
-def call_ha_service(domain: str, service: str, service_data: dict) -> bool:
-    """Calls a Home Assistant Core REST API service and logs a technical error if the call fails."""
-    success, err_msg = call_ha_service_detailed(domain, service, service_data)
-    if not success:
-        print(f"Error calling HA service {domain}.{service}: {err_msg}")
-        try:
-            log_technical_error(
-                domain="hardware",
-                event_type="ha_service_error",
-                reason=f"❌ HA Schakelfout: {domain}.{service} Mislukt",
-                explanation=f"Aanroep naar Home Assistant service '{domain}.{service}' met data {json.dumps(service_data)} mislukt: {err_msg}",
-                inputs={"domain": domain, "service": service, "data": service_data, "error": err_msg},
-                category="ERROR"
-            )
-        except Exception:
-            pass
-    return success
-
-
-from layer3_scheduling.opportunistic_merger import OpportunisticDHWMerger, OpportunisticMergeResult
-from layer3_scheduling.plan_store import PlanStore
-from layer3_scheduling.decision_audit import DecisionAuditLogger
-
-GLOBAL_OPPORTUNISTIC_MERGE: Optional[OpportunisticMergeResult] = None
-_LAST_LOGGED_DECISION: Dict[str, Any] = {"state": None, "ts": 0.0}
 
 
 def evaluate_and_apply_dhw_run_merger(plan: Any, t_live: float) -> Any:
@@ -998,30 +842,6 @@ def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
 
 
 from integrations.daikin_altherma.actuator import DaikinActuator
-
-
-def make_daikin_ha_actuator() -> DaikinActuator:
-    def switch_caller(switch_name: str, state: bool):
-        entity_map = {
-            "s10s": "switch.warmtepomp_smart_grid_1_s10s",
-            "s11s": "switch.warmtepomp_smart_grid_2_s11s",
-            "cv_master": "switch.hc_mode_altherma_on"
-        }
-        eid = entity_map.get(switch_name)
-        if eid:
-            service = "turn_on" if state else "turn_off"
-            ok = call_ha_service("switch", service, {"entity_id": eid})
-            if not ok:
-                raise RuntimeError(f"Home Assistant service call mislukt voor {eid} -> {service}")
-        return True
-
-    def climate_caller(climate_name: str, temp: float):
-        ok = call_ha_service("climate", "set_temperature", {"entity_id": "climate.hc_dhw_dhw_setpoint", "temperature": temp})
-        if not ok:
-            raise RuntimeError(f"Home Assistant service call mislukt voor climate.hc_dhw_dhw_setpoint -> {temp}°C")
-        return True
-
-    return DaikinActuator(switch_caller=switch_caller, climate_caller=climate_caller)
 
 
 def test_influxdb_connection(url, database, username="", password="", retention="autogen"):
