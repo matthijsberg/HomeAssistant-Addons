@@ -81,12 +81,14 @@ class DaytimeArbitrationResult:
     planned_slots: List[int]
     savings_eur: float
     explanation: str
+    unheated_evening_dip_p95_c: float = 0.0
 
     def to_audit_dict(self) -> Dict[str, Any]:
         return {
             "decision_type": "DHW_DAYTIME_DISPATCH",
             "situation": self.situation,
             "unheated_evening_dip_c": round(self.unheated_evening_dip_c, 1),
+            "unheated_evening_dip_p95_c": round(self.unheated_evening_dip_p95_c, 1),
             "evening_dip_time": self.evening_dip_time,
             "selected_path_id": self.selected_path.path_id,
             "planned_mode": self.planned_mode,
@@ -350,9 +352,11 @@ class DhwDaytimeArbiter:
             heat_pump_power_kw=spec.solar_boost_electric_kw if day_target_c > 52.0 else spec.heat_pump_electric_kw
         )
         sim_temps = sim.get("temperatures_c", [])
+        sim_temps_p95 = sim.get("temperatures_p95_c", sim_temps)
         sim_labels = sim.get("labels", [])
 
         # Comfort check across simulated horizon: detect any drop below comfort threshold (40.0°C)
+        # Evaluated on expected median trajectory (P50); stochastic uncertainty is safeguarded via adaptive horizon margin
         search_start_dip = max(day_slots) + 1 if day_slots else 0
         dip_slots = [
             (idx, lbl, t) for idx, (lbl, t) in enumerate(zip(sim_labels, sim_temps))
@@ -553,6 +557,7 @@ class DhwDaytimeArbiter:
             heat_pump_schedule_slots=[]
         )
         unheated_temps = unheated_sim.get("temperatures_c", [])
+        unheated_temps_p95 = unheated_sim.get("temperatures_p95_c", unheated_temps)
         unheated_labels = unheated_sim.get("labels", [])
 
         # 2. Dynamic Peak Boundaries & Inter-Peak Valley
@@ -580,6 +585,7 @@ class DhwDaytimeArbiter:
         # 3. Dynamic Comfort Risk Assessment
         # Inspect temperature dip before/during the upcoming evening peak in the 24h rolling horizon
         evening_slots = []
+        evening_slots_p95 = []
         for i, (lbl, t) in enumerate(zip(unheated_labels, unheated_temps)):
             if i < n_slots:
                 sl_dt = getattr(slots[i], "dt", None)
@@ -588,6 +594,8 @@ class DhwDaytimeArbiter:
                     sl_dt = datetime.fromisoformat(sl_iso).astimezone(now_dt.tzinfo) if sl_iso else (now_dt + timedelta(minutes=15 * i))
                 if 17 <= sl_dt.hour <= 22:
                     evening_slots.append((i, lbl, t))
+                    t_p95 = unheated_temps_p95[i] if i < len(unheated_temps_p95) else t
+                    evening_slots_p95.append((i, lbl, t_p95))
 
         if evening_slots:
             min_eve = min(evening_slots, key=lambda x: x[2])
@@ -597,8 +605,14 @@ class DhwDaytimeArbiter:
             unheated_evening_dip = round(min(unheated_temps), 1) if unheated_temps else current_dhw_temp
             evening_dip_time = "19:30"
 
-        # Determine situation: evening comfort at risk if unheated tank dips below comfort threshold before/during evening peak
-        evening_comfort_risk = (unheated_evening_dip < spec.comfort_min_temp_c or current_dhw_temp <= 43.5)
+        if evening_slots_p95:
+            min_eve_p95 = min(evening_slots_p95, key=lambda x: x[2])
+            unheated_evening_dip_p95 = round(min_eve_p95[2], 1)
+        else:
+            unheated_evening_dip_p95 = round(min(unheated_temps_p95), 1) if unheated_temps_p95 else unheated_evening_dip
+
+        # Determine situation: evening comfort at risk if unheated tank dips below comfort threshold under P95 heavy usage
+        evening_comfort_risk = (unheated_evening_dip_p95 < spec.comfort_min_temp_c or current_dhw_temp <= 43.5)
 
         # 4. Pure Dynamic Search Window:
         # The daytime heating window is the dynamic valley between the morning peak and the evening peak
@@ -992,5 +1006,6 @@ class DhwDaytimeArbiter:
             power_kw=final_power_kw,
             planned_slots=final_planned_slots,
             savings_eur=savings,
-            explanation=explanation
+            explanation=explanation,
+            unheated_evening_dip_p95_c=unheated_evening_dip_p95
         )

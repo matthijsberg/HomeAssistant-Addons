@@ -193,7 +193,7 @@ def test_daytime_arbitrage_situation_1_comfort_risk():
 
 def test_daytime_arbitrage_situation_2_comfort_safe():
     now_dt = datetime(2026, 9, 15, 11, 0, tzinfo=AMS_TZ)
-    # Warm tank at 50°C -> evening dip >= 40°C -> Situation 2
+    # Warm tank at 55°C -> evening dip >= 40°C even under P95 heavy usage -> Situation 2
     # Zero solar and flat/higher midday price so buffering to 60C is not economical
     slots = []
     for i in range(96):
@@ -215,7 +215,7 @@ def test_daytime_arbitrage_situation_2_comfort_safe():
 
     arb_res = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
         slots=slots,
-        current_dhw_temp=50.0,
+        current_dhw_temp=55.0,
         dynamic_peaks=[],
         dhw_model=model,
         now_dt=now_dt
@@ -488,5 +488,68 @@ def test_cop_consistency_between_evaluate_window_cost_and_required_slots():
             tank_spec=spec
         )
         assert round(cop_window_60, 2) == cop_canon_60
+
+
+def test_p95_stochastic_comfort_risk_trigger_and_cost_invariance():
+    """
+    Verifies that:
+    1. A scenario with heavy/above-average tap demand (P95) triggers comfort risk
+       and daytime heating when a tank at 50°C would dip to 37.4°C in the evening,
+       even though P50 (41.2°C) would have falsely considered it safe.
+    2. A scenario with sufficient buffer (55°C) is recognized as safe under both P50 and P95,
+       remaining on Standby (Pad B1) with total_24h_cost_eur = €0.00 (not unnecessarily expensive).
+    """
+    now_dt = datetime(2026, 9, 15, 11, 0, tzinfo=AMS_TZ)
+    model = DhwThermalModel()
+    spec = DhwTankSpec()
+
+    # Create 24h slots with cheap night and normal day
+    slots = []
+    for i in range(96):
+        s_dt = now_dt + timedelta(minutes=15 * i)
+        p = 0.22 if (s_dt.hour < 6 or s_dt.hour >= 23) else 0.28
+        slots.append(
+            MockSlot(
+                slot_idx=i,
+                dt=s_dt,
+                label=s_dt.strftime("%H:%M"),
+                price_all_in=p,
+                solar_kw=0.0,
+                unallocated_kw=0.45,
+                outdoor_temp_c=12.0
+            )
+        )
+
+    # 1. Tank at 50°C: P50 dip is 41.2°C (safe), but P95 dip is 37.4°C (risk!)
+    arb_res_50 = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+        slots=slots,
+        current_dhw_temp=50.0,
+        dynamic_peaks=[],
+        dhw_model=model,
+        now_dt=now_dt,
+        tank_spec=spec
+    )
+    assert arb_res_50.unheated_evening_dip_c >= 40.0, "P50 was expected >= 40°C"
+    assert arb_res_50.unheated_evening_dip_p95_c < 40.0, "P95 was expected < 40°C"
+    # Must trigger situation 1 (risk) due to P95 safety check
+    assert arb_res_50.situation == "SITUATION_1_EVENING_COMFORT_RISK"
+    assert arb_res_50.planned_mode in ["forced_on", "forced_solar_boost_60"]
+
+    # 2. Tank at 55°C: Safe under both P50 and P95
+    arb_res_55 = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
+        slots=slots,
+        current_dhw_temp=55.0,
+        dynamic_peaks=[],
+        dhw_model=model,
+        now_dt=now_dt,
+        tank_spec=spec
+    )
+    assert arb_res_55.unheated_evening_dip_c >= 40.0
+    assert arb_res_55.unheated_evening_dip_p95_c >= 40.0
+    assert arb_res_55.situation == "SITUATION_2_COMFORT_SAFE"
+    assert arb_res_55.selected_path.path_id == "PAD_B1_STANDBY"
+    assert arb_res_55.selected_path.day_cost_eur == 0.0
+    assert arb_res_55.planned_mode == "normal"
+
 
 

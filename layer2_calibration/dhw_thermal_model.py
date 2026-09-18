@@ -44,6 +44,9 @@ T_TARGET_C = 50.0                        # Nominal hot water setpoint
 
 
 class DhwThermalModel:
+    TAP_FACTOR_P05 = 0.25   # Light usage factor
+    TAP_FACTOR_P95 = 1.50   # Heavy usage factor (stochastic shower stress scenario)
+
     def __init__(self, profile_path: str = "/config/unallocated_load_profile.json"):
         self.profile_path = profile_path
         self.profile = self._load_profile()
@@ -83,6 +86,14 @@ class DhwThermalModel:
         elif 19.5 <= h <= 22.0:
             return 0.30
         return 0.015
+
+    def get_learned_tap_kwh_th_p95(self, dow: int, quarter_idx: int) -> float:
+        """Returns expected P95 heavy-usage thermal energy drawn off (kWh_th) in a 15-minute slot."""
+        return round(self.get_learned_tap_kwh_th(dow, quarter_idx) * self.TAP_FACTOR_P95, 4)
+
+    def get_learned_tap_kwh_th_p05(self, dow: int, quarter_idx: int) -> float:
+        """Returns expected P05 light-usage thermal energy drawn off (kWh_th) in a 15-minute slot."""
+        return round(self.get_learned_tap_kwh_th(dow, quarter_idx) * self.TAP_FACTOR_P05, 4)
 
     def get_tap_demand_liters(self, kwh_th: float, t_tank: float = 50.0, t_cold: float = 12.0) -> float:
         """Converts thermal kWh demand into equivalent liters of 50°C mixed water."""
