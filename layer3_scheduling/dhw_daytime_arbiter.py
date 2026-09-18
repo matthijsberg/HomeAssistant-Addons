@@ -113,6 +113,33 @@ class DhwDaytimeArbiter:
     DHW_BUFFER_60_MAX_TANK_TEMP_C = 53.0     # Max tank temp to allow 60°C buffer (>=53°C is saturated)
     DHW_BUFFER_60_MIN_HEADROOM_C = 7.0      # Min temperature headroom required to justify 60°C run
 
+    # Safety buffer: accounts for tank standby cooling during active heating run (~0.08 kW * run duration)
+    # plus minor tap draw-offs, ensuring math.ceil does not leave the tank 0.2-0.5°C short of setpoint.
+    RUN_THERMAL_BUFFER_KWH = 0.15
+
+    @classmethod
+    def calculate_required_slots(
+        cls,
+        current_temp: float,
+        target_temp: float,
+        spec: DhwTankSpec,
+        step_hours: float = 0.25,
+        min_slots: int = 2,
+        max_slots: int = 8,
+        min_delta_c: float = 1.0,
+    ) -> int:
+        """
+        Calculates the required number of quarter-hour heating slots using the
+        canonical thermodynamic thermal output: P_th = P_el * COP(target).
+        Includes a small thermal safety buffer (0.15 kWh_th / ~0.37°C) to compensate for
+        concomitant tank standby heat loss and minor tap draw-offs during the run.
+        """
+        th_output_kw = spec.get_thermal_output_kw(target_temp)
+        delta_t = max(min_delta_c, target_temp - current_temp)
+        th_need = (delta_t * spec.thermal_capacity_kwh_per_k) + cls.RUN_THERMAL_BUFFER_KWH
+        slot_kwh_th = th_output_kw * step_hours
+        return max(min_slots, min(max_slots, math.ceil(th_need / slot_kwh_th)))
+
     @classmethod
     def calculate_slot_financials(
         cls,
@@ -335,8 +362,16 @@ class DhwDaytimeArbiter:
 
             # Temperature before night run (estimate from simulation around 03:00)
             t_night_est = max(34.0, morn_dip_c - 1.5)
+            n_night_slots = cls.calculate_required_slots(
+                current_temp=t_night_est,
+                target_temp=spec.target_setpoint_c,
+                spec=spec,
+                step_hours=step_hours,
+                min_slots=2,
+                max_slots=6,
+                min_delta_c=1.0,
+            )
             th_need_night = max(1.0, spec.target_setpoint_c - t_night_est) * spec.thermal_capacity_kwh_per_k
-            n_night_slots = max(2, min(6, math.ceil(th_need_night / (spec.thermal_output_kw * step_hours))))
 
             opt_night = cls.find_optimal_heating_window(
                 slots=slots,
@@ -562,8 +597,16 @@ class DhwDaytimeArbiter:
             situation = "SITUATION_1_EVENING_COMFORT_RISK"
 
             # PAD A1: Overdag naar dynamische optimale doeltemperatuur + Natraject Simulatie
+            n_slots_50 = cls.calculate_required_slots(
+                current_temp=current_dhw_temp,
+                target_temp=t_target_opt,
+                spec=spec,
+                step_hours=step_hours,
+                min_slots=2,
+                max_slots=8,
+                min_delta_c=1.0,
+            )
             th_need_50 = max(1.0, t_target_opt - current_dhw_temp) * spec.thermal_capacity_kwh_per_k
-            n_slots_50 = max(2, min(8, math.ceil(th_need_50 / (spec.thermal_output_kw * step_hours))))
             opt_day_50 = cls.find_optimal_heating_window(
                 slots=slots,
                 search_start_idx=day_start_idx,
@@ -607,8 +650,16 @@ class DhwDaytimeArbiter:
             evaluated_paths.append(path_a1)
 
             # PAD A2: In één ruk doorwarmen naar 60°C (Buffer)
+            n_slots_60 = cls.calculate_required_slots(
+                current_temp=current_dhw_temp,
+                target_temp=spec.boost_setpoint_c,
+                spec=spec,
+                step_hours=step_hours,
+                min_slots=3,
+                max_slots=8,
+                min_delta_c=2.0,
+            )
             th_need_60 = max(2.0, spec.boost_setpoint_c - current_dhw_temp) * spec.thermal_capacity_kwh_per_k
-            n_slots_60 = max(3, min(8, math.ceil(th_need_60 / (spec.thermal_output_kw * step_hours))))
             opt_day_60 = cls.find_optimal_heating_window(
                 slots=slots,
                 search_start_idx=day_start_idx,
@@ -738,8 +789,16 @@ class DhwDaytimeArbiter:
                     f"compressor-startverliezen. Standby behouden tot natuurlijk warmwaterverbruik optreedt."
                 )
             else:
+                n_slots_60 = cls.calculate_required_slots(
+                    current_temp=current_dhw_temp,
+                    target_temp=spec.boost_setpoint_c,
+                    spec=spec,
+                    step_hours=step_hours,
+                    min_slots=3,
+                    max_slots=8,
+                    min_delta_c=2.5,
+                )
                 th_need_60 = max(2.5, spec.boost_setpoint_c - current_dhw_temp) * spec.thermal_capacity_kwh_per_k
-                n_slots_60 = max(3, min(8, math.ceil(th_need_60 / (spec.thermal_output_kw * step_hours))))
                 opt_day_60 = cls.find_optimal_heating_window(
                     slots=slots,
                     search_start_idx=day_start_idx,

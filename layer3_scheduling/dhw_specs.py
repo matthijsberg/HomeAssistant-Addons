@@ -11,6 +11,7 @@ only requires updating config.json/heatpump_config.json without touching logic.
 
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
+from models.physics import calculate_dhw_cop, calculate_dhw_thermal_output_kw
 
 
 @dataclass
@@ -37,6 +38,26 @@ class DhwTankSpec:
         For 350L: (350 * 4.184) / 3600 = 0.40678 kWh/K
         """
         return round((self.volume_liters * self.specific_heat_water) / 3600.0, 4)
+
+    def get_cop(self, target_temp_c: float) -> float:
+        """Returns empirical COP for given target temperature."""
+        return calculate_dhw_cop(target_temp_c)
+
+    def get_electric_power_kw(self, target_temp_c: float) -> float:
+        """Returns compressor electrical draw (kW) for target temperature."""
+        return self.solar_boost_electric_kw if target_temp_c > 52.0 else self.heat_pump_electric_kw
+
+    def get_thermal_output_kw(self, target_temp_c: float) -> float:
+        """
+        Thermodynamically consistent thermal output (kW_th): P_th = P_el * COP(target).
+        For 50°C: 1.8 kW * 2.85 COP = 5.13 kW_th.
+        For 60°C: 2.4 kW * 2.15 COP = 5.16 kW_th.
+        """
+        return calculate_dhw_thermal_output_kw(
+            target_temp_c,
+            heat_pump_electric_kw=self.heat_pump_electric_kw,
+            solar_boost_electric_kw=self.solar_boost_electric_kw,
+        )
 
     @classmethod
     def from_config(cls, cfg: Optional[Dict[str, Any]] = None) -> "DhwTankSpec":

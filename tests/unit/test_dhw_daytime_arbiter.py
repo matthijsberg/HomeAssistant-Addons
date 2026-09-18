@@ -347,3 +347,44 @@ def test_rolling_24h_night_start_plans_tomorrow_daytime():
     for s_idx in arb_res.planned_slots:
         assert 39 <= s_idx < 76, f"Slot {s_idx} outside dynamic daytime valley"
 
+
+def test_dhw_boost_60_slot_calculation_and_trajectory_alignment():
+    """
+    Regression test for DHW planning formula vs physics simulation mismatch.
+    Scenario: Tank at 50.1°C, target 60.0°C (delta T = 9.9K).
+    Verifies that:
+    1. calculate_required_slots allocates 4 slots (not the under-dimensioned 3 slots).
+    2. simulate_trajectory() with the planned slots finishes within 0.3°C of target_temp (>= 59.7°C).
+    """
+    from layer3_scheduling.dhw_specs import DhwTankSpec
+
+    spec = DhwTankSpec()
+    dhw_model = DhwThermalModel()
+
+    n_slots_60 = DhwDaytimeArbiter.calculate_required_slots(
+        current_temp=50.1,
+        target_temp=60.0,
+        spec=spec,
+        step_hours=0.25,
+        min_slots=3,
+        max_slots=8,
+        min_delta_c=2.0
+    )
+    assert n_slots_60 == 4, f"Expected 4 slots for 50.1°C -> 60.0°C boost, got {n_slots_60}"
+
+    # Run simulation with the 4 planned slots [0, 1, 2, 3]
+    now_dt = datetime(2026, 9, 18, 12, 0, tzinfo=AMS_TZ)
+    sim = dhw_model.simulate_trajectory(
+        t_start_c=50.1,
+        start_dt=now_dt,
+        hours_ahead=4,
+        heat_pump_schedule_slots=list(range(n_slots_60)),
+        target_temp_c=60.0,
+        heat_pump_power_kw=spec.solar_boost_electric_kw
+    )
+
+    end_temp = sim["temperatures_c"][n_slots_60]
+    # Verify tank reaches within 0.3°C of 60.0°C
+    assert end_temp >= 59.7, f"Tank ended at {end_temp}°C, failing to reach 60.0°C target within 0.3°C tolerance"
+    assert end_temp <= 60.0, f"Tank overheated beyond target: {end_temp}°C"
+

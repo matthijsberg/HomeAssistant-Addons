@@ -30,6 +30,7 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
+from models.physics import calculate_dhw_cop
 
 AMS_TZ = ZoneInfo("Europe/Amsterdam")
 
@@ -216,7 +217,7 @@ class DhwThermalModel:
             q_hp_th = 0.0
             dt_hp = 0.0
             if i in heat_pump_schedule_slots and current_temp < (target_temp_c - 0.1):
-                cop_run = 2.85 if target_temp_c <= 52.0 else 2.15
+                cop_run = calculate_dhw_cop(target_temp_c)
                 q_hp_th = heat_pump_power_kw * cop_run * 0.25
                 max_dt = max(0.0, target_temp_c - current_temp)
                 dt_hp = min(q_hp_th / C_TANK_KWH_PER_C, max_dt)
