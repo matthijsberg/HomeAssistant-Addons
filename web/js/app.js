@@ -4543,93 +4543,28 @@
                     return;
                 }
 
-                if (dhwHistoryChartInstance) {
-                    dhwHistoryChartInstance.destroy();
-                    dhwHistoryChartInstance = null;
-                }
-
-                const ctx = canvas.getContext('2d');
-                dhwHistoryChartInstance = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: data.labels,
-                        datasets: [
-                            {
-                                label: 'Boilertemperatuur (°C)',
-                                data: data.temperatures_c,
-                                borderColor: '#F59E0B',
-                                backgroundColor: 'rgba(245, 158, 11, 0.08)',
-                                borderWidth: 2.5,
-                                pointRadius: 0,
-                                pointHoverRadius: 4,
-                                fill: true,
-                                tension: 0.3,
-                                yAxisID: 'y'
-                            },
-                            {
-                                label: 'Warmtevraag (kWh)',
-                                data: data.demand_kwh_th,
-                                type: 'bar',
-                                backgroundColor: 'rgba(56, 189, 248, 0.45)',
-                                borderColor: '#38BDF8',
-                                borderWidth: 1,
-                                borderRadius: 3,
-                                yAxisID: 'y1'
-                            }
-                        ]
-                    },
-                    options: {
-                        spitsblokRanges: data.forced_off_ranges,
-                        heatingRanges: data.heating_ranges,
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        interaction: { mode: 'index', intersect: false },
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                enabled: false,
-                                external: function(context) {
-                                    if (typeof customDhwTooltipHandler === 'function') {
-                                        customDhwTooltipHandler(context);
-                                    }
-                                }
-                            }
-                        },
-                        scales: {
-                            x: {
-                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                                ticks: {
-                                    color: '#94a3b8',
-                                    font: { size: 10, family: 'monospace' },
-                                    maxTicksLimit: 14
-                                }
-                            },
-                            y: {
-                                position: 'left',
-                                title: { display: true, text: 'Temperatuur (°C)', color: '#F59E0B', font: { size: 10, weight: 'bold' } },
-                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                                ticks: {
-                                    color: '#F59E0B',
-                                    font: { size: 10, family: 'monospace' },
-                                    callback: function(v) { return v + '°C'; }
-                                },
-                                min: 30,
-                                max: 65
-                            },
-                            y1: {
-                                position: 'right',
-                                title: { display: true, text: 'Warmtevraag (kWh)', color: '#38BDF8', font: { size: 10, weight: 'bold' } },
-                                grid: { drawOnChartArea: false },
-                                ticks: {
-                                    color: '#38BDF8',
-                                    font: { size: 10, family: 'monospace' },
-                                    callback: function(v) { return v.toFixed(1) + ' kWh'; }
-                                },
-                                min: 0,
-                                suggestedMax: 2.0
-                            }
-                        }
-                    }
+                dhwHistoryChartInstance = createThermalTrajectoryChart(canvas, {
+                    mode: 'history',
+                    labels: data.labels,
+                    temps: data.temperatures_c,
+                    p50Id: 'dhw_p50',
+                    p50Label: 'Boilertemperatuur (°C)',
+                    primaryColor: '#F59E0B',
+                    primaryBgFill: 'rgba(245, 158, 11, 0.08)',
+                    fill: true,
+                    tension: 0.3,
+                    demandKwh: data.demand_kwh_th,
+                    demandId: 'dhw_demand',
+                    demandLabel: 'Warmtevraag (kWh)',
+                    demandBorderRadius: 3,
+                    yTitle: 'Temperatuur (°C)',
+                    y1Title: 'Warmtevraag (kWh)',
+                    yMin: 30,
+                    yMax: 65,
+                    y1SuggestedMax: 2.0,
+                    spitsblokRanges: data.forced_off_ranges,
+                    heatingRanges: data.heating_ranges,
+                    tooltipHandler: typeof customDhwTooltipHandler === 'function' ? customDhwTooltipHandler : null
                 });
             } catch (e) {
                 console.error('Failed to load DHW history chart:', e);
@@ -4652,108 +4587,37 @@
                     return;
                 }
 
-                if (heatingHistoryChartInstance) {
-                    heatingHistoryChartInstance.destroy();
-                    heatingHistoryChartInstance = null;
-                }
-
-                const ctx = canvas.getContext('2d');
-                heatingHistoryChartInstance = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: data.labels,
-                        datasets: [
-                            {
-                                id: 'indoor_temp',
-                                label: 'Binnentemperatuur (°C)',
-                                data: data.indoor_temperatures_c,
-                                borderColor: '#F59E0B',
-                                backgroundColor: 'rgba(245, 158, 11, 0.08)',
-                                borderWidth: 2.5,
-                                pointRadius: 0,
-                                pointHoverRadius: 4,
-                                fill: true,
-                                tension: 0.3,
-                                yAxisID: 'y'
-                            },
-                            {
-                                id: 'outdoor_temp',
-                                label: 'Buitentemperatuur (°C)',
-                                data: data.outdoor_temperatures_c,
-                                borderColor: '#60A5FA',
-                                backgroundColor: 'transparent',
-                                borderWidth: 1.8,
-                                pointRadius: 0,
-                                pointHoverRadius: 4,
-                                fill: false,
-                                tension: 0.3,
-                                yAxisID: 'y'
-                            },
-                            {
-                                id: 'th_loss_demand',
-                                label: 'Warmteverlies (kWh)',
-                                data: data.demand_kwh_th,
-                                type: 'bar',
-                                backgroundColor: 'rgba(56, 189, 248, 0.45)',
-                                borderColor: '#38BDF8',
-                                borderWidth: 1,
-                                borderRadius: 3,
-                                yAxisID: 'y1'
-                            }
-                        ]
+                heatingHistoryChartInstance = createThermalTrajectoryChart(canvas, {
+                    mode: 'history',
+                    labels: data.labels,
+                    temps: data.indoor_temperatures_c,
+                    p50Id: 'indoor_temp',
+                    p50Label: 'Binnentemperatuur (°C)',
+                    primaryColor: '#F59E0B',
+                    primaryBgFill: 'rgba(245, 158, 11, 0.08)',
+                    fill: true,
+                    tension: 0.3,
+                    extraLine: {
+                        id: 'outdoor_temp',
+                        label: 'Buitentemperatuur (°C)',
+                        data: data.outdoor_temperatures_c,
+                        borderColor: '#60A5FA',
+                        borderWidth: 1.8,
+                        tension: 0.3,
+                        order: 0
                     },
-                    options: {
-                        spitsblokRanges: data.forced_off_ranges,
-                        heatingRanges: data.heating_ranges,
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        interaction: { mode: 'index', intersect: false },
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                enabled: false,
-                                external: function(context) {
-                                    if (typeof customHeatingTooltipHandler === 'function') {
-                                        customHeatingTooltipHandler(context);
-                                    }
-                                }
-                            }
-                        },
-                        scales: {
-                            x: {
-                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                                ticks: {
-                                    color: '#94a3b8',
-                                    font: { size: 10, family: 'monospace' },
-                                    maxTicksLimit: 14
-                                }
-                            },
-                            y: {
-                                position: 'left',
-                                title: { display: true, text: 'Temperatuur (°C)', color: '#F59E0B', font: { size: 10, weight: 'bold' } },
-                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                                ticks: {
-                                    color: '#F59E0B',
-                                    font: { size: 10, family: 'monospace' },
-                                    callback: function(v) { return v + '°C'; }
-                                },
-                                suggestedMin: 15,
-                                suggestedMax: 25
-                            },
-                            y1: {
-                                position: 'right',
-                                title: { display: true, text: 'Warmteverlies (kWh)', color: '#38BDF8', font: { size: 10, weight: 'bold' } },
-                                grid: { drawOnChartArea: false },
-                                ticks: {
-                                    color: '#38BDF8',
-                                    font: { size: 10, family: 'monospace' },
-                                    callback: function(v) { return v.toFixed(1) + ' kWh'; }
-                                },
-                                min: 0,
-                                suggestedMax: 2.0
-                            }
-                        }
-                    }
+                    demandKwh: data.demand_kwh_th,
+                    demandId: 'th_loss_demand',
+                    demandLabel: 'Warmteverlies (kWh)',
+                    demandBorderRadius: 3,
+                    yTitle: 'Temperatuur (°C)',
+                    y1Title: 'Warmteverlies (kWh)',
+                    ySuggestedMin: 15,
+                    ySuggestedMax: 25,
+                    y1SuggestedMax: 2.0,
+                    spitsblokRanges: data.forced_off_ranges,
+                    heatingRanges: data.heating_ranges,
+                    tooltipHandler: typeof customHeatingTooltipHandler === 'function' ? customHeatingTooltipHandler : null
                 });
             } catch (err) {
                 console.error('Failed to load heating history chart:', err);
@@ -5150,98 +5014,118 @@
                 existing.destroy();
             }
 
-            const chartDatasets = [
+            const chartDatasets = [];
+            const isHistory = (opts.mode === 'history');
+
+            // If not history mode, include uncertainty & counterfactual bands
+            if (!isHistory) {
                 // 1. Counterfactual Upper boundary: Zonder Verwarming P05
-                {
-                    id: opts.unhP05Id || 'dhw_unh_p05',
-                    label: opts.unhP05Label || 'Marge Onverwarmd P05 (°C)',
-                    data: opts.unhP05 || [],
-                    yAxisID: 'y',
-                    borderColor: 'rgba(148, 163, 184, 0.25)',
-                    backgroundColor: 'transparent',
-                    borderWidth: 1.0,
-                    borderDash: [2, 2],
-                    fill: false,
-                    pointRadius: 0,
-                    tension: 0.25,
-                    order: 6
-                },
+                if (opts.unhP05 && opts.unhP05.length > 0) {
+                    chartDatasets.push({
+                        id: opts.unhP05Id || 'dhw_unh_p05',
+                        label: opts.unhP05Label || 'Marge Onverwarmd P05 (°C)',
+                        data: opts.unhP05 || [],
+                        yAxisID: 'y',
+                        borderColor: 'rgba(148, 163, 184, 0.25)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.0,
+                        borderDash: [2, 2],
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.25,
+                        order: 6
+                    });
+                }
                 // 2. Counterfactual Lower boundary: Zonder Verwarming P95 with grey fill to P05
-                {
-                    id: opts.unhP95Id || 'dhw_unh_p95',
-                    label: opts.unhP95Label || 'Marge Onverwarmd (P05–P95)',
-                    data: opts.unhP95 || [],
-                    yAxisID: 'y',
-                    borderColor: 'rgba(148, 163, 184, 0.35)',
-                    backgroundColor: 'rgba(148, 163, 184, 0.12)',
-                    borderWidth: 1.0,
-                    borderDash: [3, 3],
-                    fill: '-1',
-                    pointRadius: 0,
-                    tension: 0.25,
-                    order: 7
-                },
+                if (opts.unhP95 && opts.unhP95.length > 0) {
+                    chartDatasets.push({
+                        id: opts.unhP95Id || 'dhw_unh_p95',
+                        label: opts.unhP95Label || 'Marge Onverwarmd (P05–P95)',
+                        data: opts.unhP95 || [],
+                        yAxisID: 'y',
+                        borderColor: 'rgba(148, 163, 184, 0.35)',
+                        backgroundColor: 'rgba(148, 163, 184, 0.12)',
+                        borderWidth: 1.0,
+                        borderDash: [3, 3],
+                        fill: '-1',
+                        pointRadius: 0,
+                        tension: 0.25,
+                        order: 7
+                    });
+                }
                 // 3. Counterfactual Line: Zonder Verwarming P50 (Light Slate Grey Dashed Line)
-                {
-                    id: (opts.unhP50Id === 'indoor_unh_p50') ? 'indoor_unh_p50' : 'dhw_unh_p50',
-                    label: opts.unhP50Label || 'Zonder Verwarming (°C)',
-                    data: opts.unhTemps || [],
-                    yAxisID: 'y',
-                    borderColor: '#94A3B8',
-                    backgroundColor: 'transparent',
-                    borderWidth: 2.2,
-                    borderDash: [5, 4],
-                    fill: false,
-                    tension: 0.25,
-                    order: 5,
-                    pointRadius: 0,
-                    pointHoverRadius: 5
-                },
+                if (opts.unhTemps && opts.unhTemps.length > 0) {
+                    chartDatasets.push({
+                        id: (opts.unhP50Id === 'indoor_unh_p50') ? 'indoor_unh_p50' : 'dhw_unh_p50',
+                        label: opts.unhP50Label || 'Zonder Verwarming (°C)',
+                        data: opts.unhTemps || [],
+                        yAxisID: 'y',
+                        borderColor: '#94A3B8',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2.2,
+                        borderDash: [5, 4],
+                        fill: false,
+                        tension: 0.25,
+                        order: 5,
+                        pointRadius: 0,
+                        pointHoverRadius: 5
+                    });
+                }
                 // 4. Expected Trajectory Upper boundary: P05
-                {
-                    id: opts.p05Id || 'dhw_p05',
-                    label: opts.p05Label || 'Marge Ondergrens P05 (°C)',
-                    data: opts.tempsP05 || [],
-                    yAxisID: 'y',
-                    borderColor: opts.p05BorderColor || 'rgba(245, 158, 11, 0.35)',
-                    backgroundColor: 'transparent',
-                    borderWidth: 1.2,
-                    borderDash: [3, 3],
-                    fill: false,
-                    pointRadius: 0,
-                    tension: 0.25,
-                    order: 1
-                },
+                if (opts.tempsP05 && opts.tempsP05.length > 0) {
+                    chartDatasets.push({
+                        id: opts.p05Id || 'dhw_p05',
+                        label: opts.p05Label || 'Marge Ondergrens P05 (°C)',
+                        data: opts.tempsP05 || [],
+                        yAxisID: 'y',
+                        borderColor: opts.p05BorderColor || 'rgba(245, 158, 11, 0.35)',
+                        backgroundColor: 'transparent',
+                        borderWidth: 1.2,
+                        borderDash: [3, 3],
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.25,
+                        order: 1
+                    });
+                }
                 // 5. Expected Trajectory Lower boundary: P95 with filled margin to P05
-                {
-                    id: opts.p95Id || 'dhw_p95',
-                    label: opts.p95Label || 'Marge (P05–P95)',
-                    data: opts.tempsP95 || [],
-                    yAxisID: 'y',
-                    borderColor: opts.p95BorderColor || 'rgba(245, 158, 11, 0.45)',
-                    backgroundColor: opts.marginBgColor || 'rgba(251, 191, 36, 0.15)',
-                    borderWidth: 1.2,
-                    borderDash: [4, 4],
-                    fill: '-1',
-                    pointRadius: 0,
-                    tension: 0.25,
-                    order: 2
-                },
-                // 6. Expected Temperature P50 (Solid bright line)
-                {
-                    id: (opts.p50Id === 'indoor_temp') ? 'indoor_temp' : 'dhw_p50',
-                    label: opts.p50Label || 'Verwachte Temperatuur P50 (°C)',
-                    data: opts.temps || [],
-                    yAxisID: 'y',
-                    borderColor: opts.primaryColor || '#F59E0B',
-                    backgroundColor: 'transparent',
-                    borderWidth: 2.5,
-                    tension: 0.25,
-                    pointRadius: 0,
-                    order: 3
-                },
-                // 7. Comfortgrens
-                {
+                if (opts.tempsP95 && opts.tempsP95.length > 0) {
+                    chartDatasets.push({
+                        id: opts.p95Id || 'dhw_p95',
+                        label: opts.p95Label || 'Marge (P05–P95)',
+                        data: opts.tempsP95 || [],
+                        yAxisID: 'y',
+                        borderColor: opts.p95BorderColor || 'rgba(245, 158, 11, 0.45)',
+                        backgroundColor: opts.marginBgColor || 'rgba(251, 191, 36, 0.15)',
+                        borderWidth: 1.2,
+                        borderDash: [4, 4],
+                        fill: '-1',
+                        pointRadius: 0,
+                        tension: 0.25,
+                        order: 2
+                    });
+                }
+            }
+
+            // Main Temperature Series (P50 or Actual)
+            chartDatasets.push({
+                id: (opts.p50Id === 'indoor_temp') ? 'indoor_temp' : (opts.p50Id || 'dhw_p50'),
+                label: opts.p50Label || (isHistory ? 'Temperatuur (°C)' : 'Verwachte Temperatuur P50 (°C)'),
+                data: opts.temps || [],
+                yAxisID: 'y',
+                borderColor: opts.primaryColor || '#F59E0B',
+                backgroundColor: opts.fill ? (opts.primaryBgFill || 'rgba(245, 158, 11, 0.08)') : 'transparent',
+                borderWidth: opts.borderWidth || 2.5,
+                tension: opts.tension !== undefined ? opts.tension : 0.25,
+                fill: opts.fill !== undefined ? opts.fill : false,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                order: 3
+            });
+
+            // Reference lines (Comfort, Target, Boost) if provided
+            if (opts.comfortTemp !== undefined && opts.comfortTemp !== null) {
+                chartDatasets.push({
                     id: opts.comfortId || 'dhw_comfort',
                     label: opts.comfortLabel || 'Comfortgrens',
                     data: Array(opts.labels.length).fill(opts.comfortTemp),
@@ -5252,9 +5136,11 @@
                     borderWidth: 1.5,
                     pointRadius: 0,
                     order: 4
-                },
-                // 8. Doeltemperatuur
-                {
+                });
+            }
+
+            if (opts.targetTemp !== undefined && opts.targetTemp !== null) {
+                chartDatasets.push({
                     id: opts.targetId || 'dhw_target',
                     label: opts.targetLabel || 'Doeltemperatuur',
                     data: Array(opts.labels.length).fill(opts.targetTemp),
@@ -5265,8 +5151,8 @@
                     borderWidth: 1.5,
                     pointRadius: 0,
                     order: 5
-                }
-            ];
+                });
+            }
 
             if (opts.boostTemp !== undefined && opts.boostTemp !== null) {
                 chartDatasets.push({
@@ -5283,32 +5169,40 @@
                 });
             }
 
+            // Extra line (e.g. outdoor temperature)
             if (opts.extraLine) {
                 chartDatasets.push({
-                    id: 'outdoor_temp',
+                    id: opts.extraLine.id || 'outdoor_temp',
                     label: opts.extraLine.label,
                     data: opts.extraLine.data,
                     yAxisID: 'y',
                     borderColor: opts.extraLine.borderColor || '#60A5FA',
                     backgroundColor: 'transparent',
                     borderWidth: opts.extraLine.borderWidth || 1.8,
-                    tension: 0.25,
+                    tension: opts.extraLine.tension !== undefined ? opts.extraLine.tension : 0.25,
+                    fill: false,
                     pointRadius: 0,
+                    pointHoverRadius: 4,
                     order: opts.extraLine.order || 0
                 });
             }
 
-            chartDatasets.push({
-                id: (opts.demandId === 'th_loss_demand') ? 'th_loss_demand' : 'dhw_demand',
-                label: opts.demandLabel || 'Warmtevraag (kWh)',
-                data: opts.demandKwh || [],
-                type: 'bar',
-                yAxisID: 'y1',
-                backgroundColor: 'rgba(56, 189, 248, 0.45)',
-                hoverBackgroundColor: '#38BDF8',
-                borderRadius: 2,
-                order: 8
-            });
+            // Secondary axis bar dataset (Demand / Heat Loss)
+            if (opts.demandKwh !== undefined) {
+                chartDatasets.push({
+                    id: (opts.demandId === 'th_loss_demand') ? 'th_loss_demand' : (opts.demandId || 'dhw_demand'),
+                    label: opts.demandLabel || 'Warmtevraag (kWh)',
+                    data: opts.demandKwh || [],
+                    type: 'bar',
+                    yAxisID: 'y1',
+                    backgroundColor: 'rgba(56, 189, 248, 0.45)',
+                    borderColor: '#38BDF8',
+                    borderWidth: 1,
+                    hoverBackgroundColor: '#38BDF8',
+                    borderRadius: opts.demandBorderRadius || 2,
+                    order: 8
+                });
+            }
 
             const ctx = canvas.getContext('2d');
             return new Chart(ctx, {
@@ -5336,26 +5230,37 @@
                     },
                     scales: {
                         x: {
-                            grid: { color: 'rgba(30, 41, 59, 0.3)' },
-                            ticks: { color: '#64748B', font: { size: 10 }, maxTicksLimit: 16 }
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: {
+                                color: '#94a3b8',
+                                font: { size: 10, family: 'monospace' },
+                                maxTicksLimit: 16
+                            }
                         },
                         y: {
                             position: 'left',
+                            min: opts.yMin !== undefined ? opts.yMin : undefined,
+                            max: opts.yMax !== undefined ? opts.yMax : undefined,
                             suggestedMin: opts.ySuggestedMin,
                             suggestedMax: opts.ySuggestedMax,
-                            grace: '5%',
+                            grace: (opts.yMin !== undefined || opts.yMax !== undefined) ? undefined : '5%',
                             title: {
                                 display: true,
                                 text: opts.yTitle || 'Temperatuur (°C)',
                                 color: opts.primaryColor || '#F59E0B',
                                 font: { size: 10, weight: 'bold' }
                             },
-                            grid: { color: 'rgba(30, 41, 59, 0.25)' },
-                            ticks: { color: opts.primaryColor || '#F59E0B', font: { size: 10 }, callback: v => `${v}°C` }
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: {
+                                color: opts.primaryColor || '#F59E0B',
+                                font: { size: 10, family: 'monospace' },
+                                callback: v => `${v}°C`
+                            }
                         },
                         y1: {
                             position: 'right',
-                            min: 0,
+                            min: opts.y1Min !== undefined ? opts.y1Min : 0,
+                            max: opts.y1Max !== undefined ? opts.y1Max : undefined,
                             suggestedMax: opts.y1SuggestedMax || 2.0,
                             grid: { drawOnChartArea: false },
                             title: {
@@ -5364,7 +5269,11 @@
                                 color: '#38BDF8',
                                 font: { size: 10, weight: 'bold' }
                             },
-                            ticks: { color: '#38BDF8', font: { size: 10 }, callback: v => `${Number(v).toFixed(1)} kWh` }
+                            ticks: {
+                                color: '#38BDF8',
+                                font: { size: 10, family: 'monospace' },
+                                callback: v => `${Number(v).toFixed(1)} kWh`
+                            }
                         }
                     }
                 }
