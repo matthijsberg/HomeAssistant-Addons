@@ -118,3 +118,96 @@ def test_daikin_reader_dhw_circuit_detection():
 
     # Case 3: Empty states map defaults to True
     assert DaikinReader.is_dhw_circuit_enabled({}) is True
+
+
+def test_daikin_actuator_implements_iactuator_controller_contract():
+    """
+    Verify DaikinActuator conforms to the IActuatorController interface contract.
+    Ensures:
+    1. isinstance(actuator, IActuatorController) and issubclass
+    2. apply_smart_grid_mode(mode) switches relays correctly and returns bool
+    3. execute_command(command: DeviceCommand) executes and returns bool
+    4. execute_mode maintains 100% backwards-compatibility and returns ActuationResult
+    """
+    from layer4_control.interfaces import IActuatorController
+    from models.canonical import DeviceCommand
+
+    executed_switches = {}
+    executed_climates = {}
+
+    def mock_switch(name: str, state: bool):
+        executed_switches[name] = state
+        return True
+
+    def mock_climate(name: str, temp: float):
+        executed_climates[name] = temp
+        return True
+
+    actuator = DaikinActuator(switch_caller=mock_switch, climate_caller=mock_climate)
+
+    # 1. Interface conformance
+    assert isinstance(actuator, IActuatorController)
+    assert issubclass(DaikinActuator, IActuatorController)
+
+    # 2. Test apply_smart_grid_mode directly across modes:
+    # SG1 (forced_off / Spitsblok): S10S=False, S11S=True, CV=False
+    ok_sg1 = actuator.apply_smart_grid_mode("SG1")
+    assert ok_sg1 is True
+    assert executed_switches["s10s"] is False
+    assert executed_switches["s11s"] is True
+    assert executed_switches["cv_master"] is False
+    assert actuator.last_actuation_result is not None
+    assert actuator.last_actuation_result.effective_mode == "forced_off"
+
+    # SG2 (normal / Eco): S10S=False, S11S=False, CV=True
+    ok_sg2 = actuator.apply_smart_grid_mode("SG2", current_cv_switch_state=True)
+    assert ok_sg2 is True
+    assert executed_switches["s10s"] is False
+    assert executed_switches["s11s"] is False
+    assert executed_switches["cv_master"] is True
+    assert actuator.last_actuation_result.effective_mode == "normal"
+
+    # SG3 (advised_on / Pre-heat): S10S=True, S11S=False, CV=True
+    ok_sg3 = actuator.apply_smart_grid_mode("SG3")
+    assert ok_sg3 is True
+    assert executed_switches["s10s"] is True
+    assert executed_switches["s11s"] is False
+    assert executed_switches["cv_master"] is True
+    assert actuator.last_actuation_result.effective_mode == "advised_on"
+
+    # SG4 (forced_on / DHW run): S10S=True, S11S=True, CV=False (hydraulic interlock!)
+    ok_sg4 = actuator.apply_smart_grid_mode("SG4")
+    assert ok_sg4 is True
+    assert executed_switches["s10s"] is True
+    assert executed_switches["s11s"] is True
+    assert executed_switches["cv_master"] is False
+    assert actuator.last_actuation_result.effective_mode == "forced_on"
+    assert executed_climates.get("dhw") == 50.0
+
+    # 3. Test execute_command via canonical DeviceCommand
+    cmd = DeviceCommand(
+        command_id="cmd_unit_test_01",
+        device_id="heat_pump.daikin_altherma",
+        action="set_mode",
+        parameters={
+            "mode": "max_on",
+            "current_cv_switch_state": True
+        },
+        priority=2
+    )
+    ok_cmd = actuator.execute_command(cmd)
+    assert ok_cmd is True
+    assert executed_switches["s10s"] is True
+    assert executed_switches["s11s"] is True
+    assert executed_switches["cv_master"] is False
+    assert executed_climates.get("dhw") == 60.0
+    assert actuator.last_actuation_result.effective_mode == "max_on"
+
+    # 4. Test backwards-compatible execute_mode
+    res = actuator.execute_mode("forced_space_heating", current_cv_switch_state=True)
+    assert res.success is True
+    assert res.requested_mode == "forced_space_heating"
+    assert res.effective_mode == "forced_space_heating"
+    assert executed_switches["s10s"] is True
+    assert executed_switches["s11s"] is True
+    assert executed_switches["cv_master"] is True
