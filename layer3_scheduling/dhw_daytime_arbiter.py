@@ -170,13 +170,21 @@ class DhwDaytimeArbiter:
         max_slots: int = 8,
         min_delta_c: float = 1.0,
         outdoor_temp_c: Optional[float] = None,
+        dhw_model: Optional[DhwThermalModel] = None,
     ) -> int:
         """
         Calculates the required number of quarter-hour heating slots using the
-        canonical thermodynamic thermal output: P_th = P_el * COP(target, outdoor_temp_c).
+        calibrated empirical heating model from DhwThermalModel when available,
+        or canonical thermodynamic output: P_th = P_el * COP(target, outdoor_temp_c).
         Includes a small thermal safety buffer (0.15 kWh_th / ~0.37°C) to compensate for
         concomitant tank standby heat loss and minor tap draw-offs during the run.
         """
+        if dhw_model is not None:
+            slot_mins = int(step_hours * 60)
+            emp_slots = dhw_model.calculate_required_slots(start_temp_c=current_temp, target_temp_c=target_temp, slot_minutes=slot_mins)
+            if emp_slots > 0:
+                return max(min_slots, min(max_slots, emp_slots))
+
         th_output_kw = spec.get_thermal_output_kw(target_temp, outdoor_temp_c=outdoor_temp_c)
         delta_t = max(min_delta_c, target_temp - current_temp)
         th_need = (delta_t * spec.thermal_capacity_kwh_per_k) + cls.RUN_THERMAL_BUFFER_KWH
@@ -432,6 +440,7 @@ class DhwDaytimeArbiter:
                 min_slots=2,
                 max_slots=6,
                 min_delta_c=1.0,
+                dhw_model=dhw_model,
             )
             th_need_night = max(1.0, spec.target_setpoint_c - t_night_est) * spec.thermal_capacity_kwh_per_k
 
@@ -689,6 +698,7 @@ class DhwDaytimeArbiter:
                 min_slots=2,
                 max_slots=8,
                 min_delta_c=1.0,
+                dhw_model=dhw_model,
             )
             th_need_50 = max(1.0, t_target_opt - current_dhw_temp) * spec.thermal_capacity_kwh_per_k
             opt_day_50 = cls.find_optimal_heating_window(
@@ -742,6 +752,7 @@ class DhwDaytimeArbiter:
                 min_slots=3,
                 max_slots=8,
                 min_delta_c=2.0,
+                dhw_model=dhw_model,
             )
             th_need_60 = max(2.0, spec.boost_setpoint_c - current_dhw_temp) * spec.thermal_capacity_kwh_per_k
             opt_day_60 = cls.find_optimal_heating_window(
@@ -887,6 +898,7 @@ class DhwDaytimeArbiter:
                     min_slots=3,
                     max_slots=8,
                     min_delta_c=2.5,
+                    dhw_model=dhw_model,
                 )
                 th_need_60 = max(2.5, spec.boost_setpoint_c - current_dhw_temp) * spec.thermal_capacity_kwh_per_k
                 opt_day_60 = cls.find_optimal_heating_window(

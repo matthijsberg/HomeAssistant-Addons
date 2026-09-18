@@ -225,7 +225,7 @@
           "Models & Forecasts"
         ],
         "summary": "Get DHW 350L thermal trajectory and daytime arbitrage",
-        "description": "Returns live tank temperature, simulated heated vs unheated trajectories, thermal demand in kWh_th and V40 equivalent liters, and 24h economic arbitrage decisions.",
+        "description": "Returns live tank temperature, simulated heated vs unheated trajectories, calibrated empirical startup transient and ramp rates (3.75 min/°C to 50°C, 4.30 min/°C in SG4 boost to 60°C), thermal demand in kWh_th and V40 equivalent liters, and 24h economic arbitrage decisions.",
         "parameters": [
           {
             "name": "resolution",

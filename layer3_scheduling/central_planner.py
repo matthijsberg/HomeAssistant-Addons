@@ -162,9 +162,12 @@ class CentralPlanner:
             delta_t = max(1.0, spec.target_setpoint_c - est_tank_temp)
             th_need_kwh = delta_t * spec.thermal_capacity_kwh_per_k
 
-            # Thermal capacity -> kWh_th per slot
-            th_per_slot = spec.thermal_output_kw * step_hours
-            n_req_slots = max(2, min(8, math.ceil(th_need_kwh / th_per_slot)))
+            # Calibrated duration using DhwThermalModel empirical opwarmtijd (including 5 min startup transient)
+            if dhw_model is not None:
+                n_req_slots = max(2, min(8, dhw_model.calculate_required_slots(start_temp_c=est_tank_temp, target_temp_c=spec.target_setpoint_c, slot_minutes=int(step_hours * 60))))
+            else:
+                th_per_slot = spec.thermal_output_kw * step_hours
+                n_req_slots = max(2, min(8, math.ceil(th_need_kwh / th_per_slot)))
 
             # 2. Find morning peak start slot or first slot with hour >= 6
             morn_start_idx = n_slots

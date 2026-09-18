@@ -95,6 +95,48 @@ class DhwThermalModel:
         """Returns expected P05 light-usage thermal energy drawn off (kWh_th) in a 15-minute slot."""
         return round(self.get_learned_tap_kwh_th(dow, quarter_idx) * self.TAP_FACTOR_P05, 4)
 
+    def calculate_startup_penalty(self, tank_temp_c: float) -> Tuple[float, float]:
+        """
+        Calculate startup transient duration (minutes) and electrical energy consumption (kWh).
+        Based on InfluxDB ground truth calibration of 20 real cold starts:
+        - duration = 2.5 + 0.06 * tank_temp (mean 4.94 min).
+        - electrical startup energy = ~108 Wh (0.108 kWh, ca. €0.025 to €0.030).
+        """
+        duration_min = 2.5 + 0.06 * max(20.0, min(65.0, tank_temp_c))
+        energy_kwh = 0.108
+        return round(duration_min, 2), energy_kwh
+
+    def calculate_heating_duration_minutes(self, start_temp_c: float, target_temp_c: float) -> float:
+        """
+        Calculate total heating duration in minutes including startup transient.
+        Based on InfluxDB ground truth:
+        - Startup transient: 2.5 + 0.06 * T_start (~5 min).
+        - 35°C to 50°C: 3.75 min/°C (6.5 kW_th effective output).
+        - 50°C to 60°C: 4.30 min/°C (7.2 kW_th / 2.85 kW_el in SG4 boost).
+        """
+        if target_temp_c <= start_temp_c:
+            return 0.0
+
+        t_startup, _ = self.calculate_startup_penalty(start_temp_c)
+
+        # Effective ramp rates
+        if target_temp_c <= 50.0:
+            delta_1 = target_temp_c - start_temp_c
+            t_effective = delta_1 * 3.75
+        else:
+            part1 = max(0.0, 50.0 - min(start_temp_c, 50.0)) * 3.75
+            part2 = (target_temp_c - max(50.0, start_temp_c)) * 4.30
+            t_effective = part1 + part2
+
+        return round(t_startup + t_effective, 1)
+
+    def calculate_required_slots(self, start_temp_c: float, target_temp_c: float, slot_minutes: int = 15) -> int:
+        """Calculate required number of integer dispatch slots based on empirical opwarmtijd."""
+        dur = self.calculate_heating_duration_minutes(start_temp_c, target_temp_c)
+        if dur <= 0.0:
+            return 0
+        return math.ceil(dur / slot_minutes)
+
     def get_tap_demand_liters(self, kwh_th: float, t_tank: float = 50.0, t_cold: float = 12.0) -> float:
         """Converts thermal kWh demand into equivalent liters of 50°C mixed water."""
         delta_t = max(5.0, t_tank - t_cold)

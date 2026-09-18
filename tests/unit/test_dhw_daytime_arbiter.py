@@ -602,11 +602,11 @@ def test_dhw_anti_chattering_hysteresis_situation_1_and_2():
     assert set(decisions_a2) == {"PAD_A2_DAY_60"}
 
     # Situation 2 test: Pad B2 threshold & retention
-    # At sol=0.74, b2_savings is ~€0.0504 (between 0.03 and 0.06)
+    # At sol=0.50, unallocated=0.10, b2_savings is ~€0.0578 (between 0.03 and 0.06)
     slots_mid = []
     for i in range(96):
         s_dt = now_dt + timedelta(minutes=15 * i)
-        slots_mid.append(MockSlot(slot_idx=i, dt=s_dt, label=s_dt.strftime("%H:%M"), price_all_in=0.20, solar_kw=0.74, unallocated_kw=0.45, outdoor_temp_c=12.0))
+        slots_mid.append(MockSlot(slot_idx=i, dt=s_dt, label=s_dt.strftime("%H:%M"), price_all_in=0.20, solar_kw=0.50, unallocated_kw=0.10, outdoor_temp_c=12.0))
 
     # Without previous B2 state: savings < 0.06 -> Pad B1 (Standby)
     res_b1 = DhwDaytimeArbiter.evaluate_daytime_arbitrage(
