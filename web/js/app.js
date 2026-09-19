@@ -1759,16 +1759,25 @@
                 let dsLabel = ds.label || '';
                 const isLine = ds.type === 'line' || (ds.borderDash && ds.borderDash.length > 0);
                 const color = ds.borderColor || ds.backgroundColor;
-                const cleanLabel = dsLabel.replace(/\s*\(kWh\)|\s*\(kW\)/g, '').trim();
+                const cleanLabel = dsLabel.replace(/\s*\([€/kwhKW\s-]+\)/gi, '').trim();
 
                 if (cleanLabel.includes('Zon Direct Benut')) return;
 
-                if (cleanLabel.includes('Stroomprijs') || cleanLabel.includes('Tarief') || cleanLabel.includes('Prijs')) {
+                const isPrice = ds.yAxisID === 'y1' || ds.id === 'epex_price' || ds.id === 'export_price' ||
+                    /epex|stroomprijs|tarief|prijs/i.test(dsLabel) ||
+                    dsLabel.includes('€/kWh');
+
+                if (isPrice) {
                     const priceSources = isPrediction
                         ? (window.__lastPredictionData?.price_sources || [])
                         : [];
                     const isStroomvoorspeller = (priceSources[dataIndex] === 'stroomvoorspeller');
-                    const lblText = isStroomvoorspeller ? 'Stroomprijs (Stroomvoorspeller)' : (cleanLabel.includes('EPEX') ? cleanLabel : 'Stroomprijs (EPEX)');
+                    let lblText = cleanLabel;
+                    if (isStroomvoorspeller) {
+                        lblText = 'Stroomprijs (Stroomvoorspeller)';
+                    } else if (!lblText.includes('EPEX') && !lblText.includes('Tarief') && !lblText.includes('Prijs')) {
+                        lblText = `EPEX ${lblText}`;
+                    }
                     dynamicRows.push({
                         type: 'dashed-line',
                         color: isStroomvoorspeller ? '#818CF8' : color,

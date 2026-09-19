@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.64] — 2026-09-19 (Bugfix: Verbruikshistorie Tooltip Toont EPEX Tarieven als €/kWh i.p.v. kW)
+
+### Frontend & Grafieksysteem
+- **Tooltip Herkenning voor EPEX Inkoop & Teruglevering in Historie:**
+  - In `customHemsTooltipHandler` (`web/js/app.js`) werd de dataset `EPEX Inkoop All-in (€/kWh)` niet herkend als tariefreeks omdat de string-matching alleen op de zoekterm `Prijs` zocht. Daardoor werd de beursprijs abusievelijk behandeld als vermogen en weergegeven als `0.11 kW (0.03 kWh)`.
+  - Nu controleert de tooltip robuust op `ds.yAxisID === 'y1'`, `€/kWh` en regex `/epex|stroomprijs|tarief|prijs/i`.
+  - EPEX inkoop- en teruglevertarieven worden nu in zowel Voorspelling als Historie uniform en correct getoond als `€X.XXXX/kWh` met gestreepte lijntokens.
+
+---
+
 ## [0.103.63] — 2026-09-19 (Dynamisch Oplopend DHW Vermogen per Kwartier in Verbruiksgrafiek)
 
 ### Central Planner & Dispatch Slots
