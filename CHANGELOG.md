@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.66] — 2026-09-19 (Compacte Sticky Filterbalk Zonder Overtollige Titels)
+
+### Frontend & UI Optimalisatie
+- **Ruimtewinst Sticky Controls:**
+  - De dubbele titels `VOORSPELLING 24H FORECAST` en `HISTORIE TELEMETRIE` zijn uit de sticky filterbalken verwijderd.
+  - De bovenliggende vaste header vermeldt immers al `Voorspelling & Optimalisatie` respectievelijk `Historie & Telemetrie`.
+  - Op mobiel bespaart dit een volledige regel hoogte en toont het een strakke, compacte rij knoppen zonder verspilling van verticale schermruimte.
+
+---
+
 ## [0.103.65] — 2026-09-19 (Bugfix: Naadloze Sticky Filterbalk Aansluiting op Mobiel)
 
 ### Frontend & Responsive Layout

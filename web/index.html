@@ -209,12 +209,8 @@
                 <!-- ========================================================================= -->
                 <div class="space-y-4 pt-2">
                     <!-- Sticky Category Header & Controls Bar -->
-                    <div class="sticky top-16 md:top-20 z-20 bg-[#0B0F17]/95 backdrop-blur-md py-2.5 -mx-4 px-4 sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 border-b border-purple-500/30 shadow-lg shadow-black/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all">
-                        <div class="flex items-center gap-2.5">
-                            <span class="w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse"></span>
-                            <h2 class="text-sm sm:text-base font-bold text-white tracking-wide uppercase">Voorspelling</h2>
-                            <span id="prediction-horizon-badge" class="text-[10px] text-purple-300 font-mono bg-purple-950/80 px-2 py-0.5 rounded border border-purple-800">24H FORECAST</span>
-                        </div>
+                    <div class="sticky top-16 md:top-20 z-20 bg-[#0B0F17]/95 backdrop-blur-md py-2 -mx-4 px-4 sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 border-b border-purple-500/30 shadow-lg shadow-black/50 flex flex-wrap items-center justify-between gap-2 transition-all">
+                        <span id="prediction-horizon-badge" class="hidden"></span>
                         <div class="flex items-center gap-2 text-xs flex-wrap">
                             <!-- Tijdshorizon Toggle: 24u vs 48u -->
                             <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
@@ -837,12 +833,7 @@
                 <!-- ========================================================================= -->
                 <div class="space-y-4 pt-4">
                     <!-- Sticky Category Header & Controls Bar -->
-                    <div class="sticky top-16 md:top-20 z-20 bg-[#0B0F17]/95 backdrop-blur-md py-2.5 -mx-4 px-4 sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 border-b border-emerald-500/30 shadow-lg shadow-black/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all">
-                        <div class="flex items-center gap-2.5">
-                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                            <h2 class="text-sm sm:text-base font-bold text-white tracking-wide uppercase">Historie</h2>
-                            <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">TELEMETRIE</span>
-                        </div>
+                    <div class="sticky top-16 md:top-20 z-20 bg-[#0B0F17]/95 backdrop-blur-md py-2 -mx-4 px-4 sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 border-b border-emerald-500/30 shadow-lg shadow-black/50 flex flex-wrap items-center justify-between gap-2 transition-all">
                         <div class="flex items-center gap-2 text-xs flex-wrap">
                             <!-- Tijdshorizon Toggle: 24u vs 48u -->
                             <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
