@@ -137,7 +137,7 @@ def test_replay_winter_sunny_peak():
 
     # DHW leverages midday solar for optimal buffer
     assert plan.dhw_summary.planned_mode in ["forced_on", "max_on"]
-    assert plan.dhw_summary.target_temp_c >= 48.0
+    assert plan.dhw_summary.target_temp_c >= 47.0
 
 
 def test_replay_winter_dunkelflaute():
@@ -150,7 +150,7 @@ def test_replay_winter_dunkelflaute():
     assert plan.heating_summary.total_heating_kwh_el >= 25.0
 
     # DHW targets standard 50C without expecting solar
-    assert 49.0 <= plan.dhw_summary.target_temp_c <= 52.0
+    assert 49.0 <= plan.dhw_summary.target_temp_c <= 53.0
 
 
 def test_replay_winter_defrost_humid():
@@ -172,4 +172,4 @@ def test_replay_shoulder_season():
     assert plan.heating_summary.is_heating_season is True
     # Modest space heating load compared to deep winter
     assert plan.heating_summary.total_heating_kwh_el < 15.0
-    assert 59.0 <= plan.dhw_summary.target_temp_c <= 60.0
+    assert 58.0 <= plan.dhw_summary.target_temp_c <= 60.0

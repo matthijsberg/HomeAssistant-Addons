@@ -235,6 +235,32 @@ class CentralPlanner:
                 model_parameters=model_parameters
             )
 
+            # Evaluate autonomous baseline (WP7)
+            from layer3_scheduling.dhw_baseline import simulate_autonomous
+            base_res = simulate_autonomous(
+                slots=slots,
+                t0_c=current_dhw_temp,
+                setpoint_c=spec.target_setpoint_c,
+                auto_start_delta_c=spec.auto_start_delta_c,
+                dhw_model=dhw_model,
+                spec=spec,
+                params=dhw_optimizer_params,
+                model_parameters=model_parameters
+            )
+
+            # Guard: optimizer must beat baseline on objective J
+            if base_res.j_objective_eur < res_opt.j_objective_eur - 0.005:
+                # Baseline is better: Open HEMS adopts baseline plan without forced intervention
+                res_opt.planned_slots = [i for i, u in enumerate(base_res.u_plan) if u == 1]
+                res_opt.j_objective_eur = base_res.j_objective_eur
+                res_opt.total_cost_eur = base_res.total_cost_eur
+                res_opt.electricity_cost_eur = base_res.electricity_cost_eur
+                res_opt.start_cost_eur = base_res.start_cost_eur
+                res_opt.salvage_value_eur = base_res.salvage_value_eur
+                res_opt.trajectory["temperatures_c"] = base_res.temperatures_c
+                res_opt.trajectory["temperatures_p05_c"] = base_res.temperatures_p05_c
+                res_opt.trajectory["temperatures_p95_c"] = base_res.temperatures_p95_c
+
             dhw_summary = adapt_optimizer_to_dhw_summary(
                 opt_result=res_opt,
                 slots=slots,

@@ -941,6 +941,7 @@ def evaluate_plan_metrics(
 
     return {
         "j_objective": round(j_objective, 4),
+        "j_objective_eur": round(j_objective, 4),
         "total_cost_eur": round(total_cost, 3),
         "electricity_cost_eur": round(total_el_cost, 3),
         "start_cost_eur": round(total_start_cost, 3),

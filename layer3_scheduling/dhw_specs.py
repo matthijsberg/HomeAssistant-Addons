@@ -29,6 +29,7 @@ class DhwTankSpec:
     comfort_min_temp_c: float = 40.0           # Minimum acceptable shower temperature
     target_setpoint_c: float = 50.0            # Nominal comfort target setpoint
     boost_setpoint_c: float = 60.0             # Solar/economic buffer setpoint
+    auto_start_delta_c: float = 10.0           # Autonomous restart hysteresis below setpoint (setpoint - delta)
 
     @property
     def thermal_capacity_kwh_per_k(self) -> float:
@@ -43,9 +44,10 @@ class DhwTankSpec:
         """Returns empirical COP for given target temperature and optional outdoor temperature."""
         return calculate_dhw_cop(target_temp_c, outdoor_temp_c=outdoor_temp_c, params=params)
 
-    def get_electric_power_kw(self, target_temp_c: float) -> float:
-        """Returns compressor electrical draw (kW) for target temperature."""
-        return self.solar_boost_electric_kw if target_temp_c > 52.0 else self.heat_pump_electric_kw
+    def get_electric_power_kw(self, target_temp_c: float, outdoor_temp_c: Optional[float] = None, params: Optional[dict] = None) -> float:
+        """Returns dynamic compressor electrical draw (kW) as function of tank and outdoor temperature."""
+        from models.physics import dhw_electric_power_kw
+        return dhw_electric_power_kw(target_temp_c, t_outdoor_c=outdoor_temp_c, params=params)
 
     def get_thermal_output_kw(self, target_temp_c: float, outdoor_temp_c: Optional[float] = None, params: Optional[dict] = None) -> float:
         """
@@ -60,7 +62,7 @@ class DhwTankSpec:
         )
 
     @classmethod
-    def from_config(cls, cfg: Optional[Dict[str, Any]] = None) -> "DhwTankSpec":
+    def from_config(cls, cfg: Optional[Dict[str, Any]] = None, live_setpoint_c: Optional[float] = None) -> "DhwTankSpec":
         """
         Builds a DhwTankSpec directly from the loaded system configuration dictionary.
         """
@@ -76,8 +78,9 @@ class DhwTankSpec:
         p_boost = float(b_cfg.get("solar_boost_power_kw", 3.0))
         th_cap = float(b_cfg.get("thermal_output_kw", 6.0))
         t_comf = float(b_cfg.get("min_comfort_temp_c", 40.0))
-        t_set = float(b_cfg.get("fallback_setpoint_temp", 50.0))
+        t_set = float(live_setpoint_c) if (live_setpoint_c is not None and 35.0 <= float(live_setpoint_c) <= 65.0) else float(b_cfg.get("fallback_setpoint_temp", 50.0))
         t_boost = float(b_cfg.get("boost_setpoint_temp", 60.0))
+        auto_delta = float(b_cfg.get("auto_start_delta_c", 10.0))
 
         return cls(
             volume_liters=vol,
@@ -89,5 +92,6 @@ class DhwTankSpec:
             thermal_output_kw=th_cap,
             comfort_min_temp_c=t_comf,
             target_setpoint_c=t_set,
-            boost_setpoint_c=t_boost
+            boost_setpoint_c=t_boost,
+            auto_start_delta_c=auto_delta
         )

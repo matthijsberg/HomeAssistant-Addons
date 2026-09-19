@@ -10,6 +10,15 @@
     "cop_min": 1.4,
     "cop_max": 3.2
   },
+  "dhw_power": {
+    "p_nom_50": 2.72,
+    "t_ref_tank_c": 50.0,
+    "k_t_tank": 0.074,
+    "t_ref_out_c": 10.0,
+    "k_out": 0.005,
+    "p_min_kw": 1.6,
+    "p_max_kw": 3.5
+  },
   "heating_average_cop": 4.8,
   "calibration_timestamp": "2026-09-06 08:02:06",
   "building": {

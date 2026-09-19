@@ -165,11 +165,31 @@ def ensure_active_canonical_plan(force_refresh=False, horizon_hours=48.0):
     cur_target_room = 20.0
     last_hw_time = None
     states_map = get_ha_states_map()
+    live_dhw_setpoint = None
     try:
         t_tank = float(states_map.get("sensor.hc_dhw_temperature_r5t_dhw_tank", {}).get("state", 0.0))
         if 20.0 <= t_tank <= 75.0:
             cur_dhw = t_tank
             last_hw_time = datetime.now(ZoneInfo("Europe/Amsterdam"))
+
+        # Read live DHW setpoint from Home Assistant if available
+        sp_raw = states_map.get("sensor.hc_dhw_dhw_setpoint", {}).get("state")
+        if sp_raw is not None:
+            try:
+                v_sp = float(sp_raw)
+                if 35.0 <= v_sp <= 65.0:
+                    live_dhw_setpoint = v_sp
+            except (ValueError, TypeError):
+                pass
+        if live_dhw_setpoint is None:
+            cl_sp = states_map.get("climate.hc_dhw_dhw_setpoint", {}).get("attributes", {}).get("temperature")
+            if cl_sp is not None:
+                try:
+                    v_sp = float(cl_sp)
+                    if 35.0 <= v_sp <= 65.0:
+                        live_dhw_setpoint = v_sp
+                except (ValueError, TypeError):
+                    pass
         
         # Read live room temperature and target setpoint from Daikin climate entity
         daikin_cl = states_map.get("climate.woonkamer_climate_daikin", {})
@@ -341,7 +361,7 @@ def ensure_active_canonical_plan(force_refresh=False, horizon_hours=48.0):
     model_params = load_json(PARAMS_FILE)
     from layer3_scheduling.dhw_specs import DhwTankSpec
     from layer3_scheduling.dhw_optimizer import DhwOptimizerParams
-    dhw_spec = DhwTankSpec.from_config(cfg)
+    dhw_spec = DhwTankSpec.from_config(cfg, live_setpoint_c=live_dhw_setpoint)
     dhw_opt_params = DhwOptimizerParams.from_config(cfg)
 
     plan = CentralPlanner.plan(

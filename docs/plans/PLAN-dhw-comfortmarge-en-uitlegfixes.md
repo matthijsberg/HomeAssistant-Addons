@@ -1,7 +1,7 @@
 # Hermes-plan — DHW comfortmarge configureerbaar + solver-, uitleg- en grafiekfixes
 
 **Doelversie:** 0.103.52 (patch; als de repo al hoger staat: volgende patch)
-**Bijgewerkt:** 2026-09-19 — WP6 toegevoegd (boilerspec 3,0 kW uit config + COP-herkalibratie) op aanwijzing van Matthijs
+**Bijgewerkt:** 2026-09-19 — WP6 toegevoegd (boilerspec 3,0 kW + COP), daarna WP7 toegevoegd (actuatiemodel en baseline) na waarneming van Matthijs dat de warmtepomp zelfstandig regelt
 **Aangemaakt:** 2026-09-19 door Claude (Code-sessie), in opdracht van Matthijs
 **Referentiedata:** `docs/plans/data/dhw_snapshot_2026-09-19.json` (live snapshot van prijzen, tapprofiel, traject en optimizer-output)
 **Speelregels:** `AGENTS.md` (invarianten 1 t/m 6), `docs/adr/ADR-004-dhw-dispatch-optimization-problem.md`
@@ -20,6 +20,8 @@ Zes werkpakketten. Uitvoeringsvolgorde: **WP1 → WP6 → WP2 → WP3 → WP4 �
 | WP4 | Comfortmarge configureerbaar (p95 / p50 / vast) via config, API, UI, docs | Matthijs wil richting P50; marge kostte zaterdag 19-9 ca. €0,10 | L |
 | WP5 | (optioneel, laag) Tekst "zakt naar 15,7°C om 00:00" | Minimum over 48 uur op de 15°C-vloer is misleidend | S |
 | WP6 | Boilerspec uit config (compressor 3,0 kW) + COP-herkalibratie + hardcoded 1,8/2,4 kW opruimen | Optimizer rekent met 1,8 kW terwijl de warmtepomp ~3 kW trekt: kWh_el en € per run zijn een factor 1,67 te laag | M |
+| WP6b | **Vermogenscurve uit meting: P_el(T_tank) in plaats van een vaste waarde** | Het compressorvermogen loopt gemeten van 1,8 kW bij 40 °C naar 3,4 kW bij 60 °C. Een vaste 3,0 kW overschat een lage run met 27 % en maakt doorstoken naar 60 °C kunstmatig aantrekkelijk | M |
+| WP7 | **Actuatiemodel en baseline-counterfactual** | De solver neemt vrije aan/uit-controle en vrije doeltemperatuur aan. In werkelijkheid regelt de warmtepomp zelfstandig van 40 naar 50 °C en is alles daarboven alleen bereikbaar via een setpoint-wijziging. Het "niets doen"-scenario ontbreekt en is op 2026-09-19 goedkoper dan het geplande alternatief | XL |
 
 Definition of done staat in §7. Bouw en live-verificatie in §8.
 
@@ -207,6 +209,201 @@ De config zegt 3,0 kW, de code rekent met 1,8 kW. Alle stroomkosten in het plan,
 
 ---
 
+---
+
+## 5b-bis. WP6b — Vermogenscurve uit meting
+
+**Referentiedata:** `docs/plans/data/dhw_power_curve_2026-09-19.json`, gefit op 60 dagen telemetrie uit InfluxDB.
+
+### 5b-bis.1 Wat de meting zegt
+
+Mediaan compressorvermogen per temperatuurband tijdens tapwaterruns, gefilterd op ten minste 800 W:
+
+| Tankband | n | Mediaan | P25 | P75 |
+|---|---|---|---|---|
+| 40,0–42,5 °C | 17 | 1.670 W | 1.417 | 1.908 |
+| 42,5–45,0 °C | 18 | 2.264 W | 1.749 | 2.333 |
+| 45,0–47,5 °C | 26 | 2.343 W | 1.762 | 2.444 |
+| 47,5–50,0 °C | 41 | 2.535 W | 1.988 | 2.660 |
+| 50,0–52,5 °C | 24 | 2.700 W | 2.166 | 2.810 |
+| 52,5–55,0 °C | 12 | 2.965 W | 2.884 | 3.154 |
+| 57,5–60,0 °C | 9 | 3.205 W | 3.106 | 3.245 |
+
+Lineaire fit, R² = 0,937 over de bandmedianen:
+
+```
+P_el(T_tank) = -1,442 + 0,0808 · T_tank      [kW]
+```
+
+| T_tank | 40 | 45 | 50 | 55 | 60 |
+|---|---|---|---|---|---|
+| P_el | 1,79 kW | 2,19 kW | 2,60 kW | 3,00 kW | 3,41 kW |
+
+Dit bevestigt de waarneming van Matthijs: ongeveer 2 kW aan het begin, oplopend tot ruim 3,4 kW bij doorstoken naar 60 °C. De vaste 3,0 kW uit v0.103.52 geldt alleen rond 55 °C.
+
+### 5b-bis.2 Het thermisch vermogen is juist vlak
+
+Uit veertien bruikbare runs, met het thermisch vermogen afgeleid uit de opwarmsnelheid plus stilstandsverlies:
+
+| Grootheid | Waarde |
+|---|---|
+| Mediaan thermisch vermogen | 5,41 kW_th |
+| Spreiding over de banden 40–60 °C | 4,6 tot 6,2 kW_th, zonder duidelijke trend |
+| Afgeleide COP bij 50 °C | 2,05 |
+| Afgeleide COP-helling | −0,031 per K |
+| Waarden in de code sinds v0.103.52 | 2,00 en −0,07 per K |
+
+Het elektrisch vermogen stijgt dus met de tanktemperatuur terwijl het thermisch vermogen vrijwel constant blijft. De COP daalt precies zo hard als het vermogen stijgt. Dat is het normale gedrag van een compressor op vol toerental bij een oplopende condensortemperatuur.
+
+De gemeten COP-helling is minder dan de helft van wat de code aanneemt. Dat komt doordat de code een vast vermogen combineert met een steile COP-daling om hetzelfde thermisch vermogen te produceren. Twee fouten die elkaar rond 50 °C compenseren en daarbuiten uit elkaar lopen.
+
+### 5b-bis.3 De juiste modelvorm
+
+**Fit twee grootheden die je direct meet, en leid de derde af.** Nu wordt het vermogen aangenomen en de COP gefit, wat één vrijheidsgraad te veel geeft en de twee fouten hierboven mogelijk maakt.
+
+```
+P_el(T_tank, T_out)  uit de vermogensmeting
+P_th(T_tank, T_out)  uit de opwarmsnelheid plus stilstandsverlies
+COP = P_th / P_el    afgeleid, nooit apart gefit
+```
+
+Zo is de COP per constructie consistent met de fysica en kan het model de tank niet sneller opwarmen dan de meting toelaat.
+
+### 5b-bis.4 Waarom dit economisch uitmaakt
+
+Energie per run van ongeveer 45 minuten, gemeten curve versus de vaste 3,0 kW:
+
+| Traject | Gemeten | Vast 3,0 kW | Afwijking |
+|---|---|---|---|
+| 40 → 50 °C | 1,68 kWh_el | 2,29 kWh_el | −27 % |
+| 45 → 55 °C | 1,99 kWh_el | 2,29 kWh_el | −13 % |
+| 50 → 60 °C | 2,30 kWh_el | 2,29 kWh_el | 0 % |
+
+Marginale kosten per graad bij €0,111 per kWh:
+
+| Van | 40 → 41 | 45 → 46 | 50 → 51 | 55 → 56 |
+|---|---|---|---|---|
+| Kosten | €0,0155 | €0,0190 | €0,0224 | €0,0258 |
+
+De laatste graad richting 60 °C kost ongeveer 90 % meer dan de eerste graad boven 40 °C. Met een vast vermogen is elke graad even duur, waardoor de solver systematisch te hoog stookt. Dit versterkt de conclusie van WP7: een lage run naar het setpoint is goedkoper dan de optimizer nu denkt, en doorstoken naar 60 °C duurder.
+
+### 5b-bis.5 Stappen
+
+1. Vervang `DhwTankSpec.get_electric_power_kw` door een continue functie. Behoud de naam en de signatuur, zodat aanroepers niet veranderen:
+
+```python
+def get_electric_power_kw(self, tank_temp_c: float, outdoor_temp_c: float | None = None) -> float:
+    p = self.power_intercept_kw + self.power_slope_kw_per_k * tank_temp_c
+    if outdoor_temp_c is not None:
+        p += self.power_k_out_kw_per_k * (outdoor_temp_c - 10.0)
+    return max(self.power_min_kw, min(self.power_max_kw, p))
+```
+
+   Let op het betekenisverschil: het argument is de **actuele** tanktemperatuur van het slot, niet de doeltemperatuur. De huidige aanroepers geven al `t_curr` respectievelijk `t_k` mee, dus dat klopt, maar de parameternaam `target_temp_c` is misleidend en moet mee veranderen.
+2. Parameters naar het blok `dhw_power` in `heatpump_model_parameters.json`: `intercept_kw = -1.442`, `slope_kw_per_k = 0.0808`, `k_out_kw_per_k = 0.0`, `min_kw = 1.2`, `max_kw = 3.8`. De grenzen vangen extrapolatie buiten het meetbereik af.
+3. `dhw_specs.from_config` leest dat blok; de vaste velden `heat_pump_electric_kw` en `solar_boost_electric_kw` vervallen. Zoek alle aanroepers, waaronder `dhw_optimizer.py` regels 302 en 764 die nu `spec.heat_pump_electric_kw` gebruiken voor de referentieprijzen en de restwaarde; die moeten het vermogen bij een representatieve tanktemperatuur gebruiken.
+4. `models/physics.py` krijgt `dhw_thermal_output_kw(t_tank, t_out, params)` op basis van de gefitte `P_th`. `dhw_cop` wordt een afgeleide: `P_th / P_el`, met behoud van de bestaande clamp als vangnet. Laat de oude parametervorm één release lang werken achter een deprecatiewaarschuwing.
+5. `scripts/calibrate_dhw.py` fit beide curves en schrijft beide blokken terug, met backup en een optie om alleen te tonen. Neem de filters uit de referentiedata over: alleen slots met ten minste 800 W, runs van minstens 15 minuten en een netto stijging van minstens 2 K.
+6. De buitentemperatuur blijft voorlopig buiten de vermogenscurve. De meetset beslaat 13,3 tot 19,8 °C, te smal voor een betrouwbare fit. Zet `k_out_kw_per_k` op nul en plan een herfit na het stookseizoen. Leg dat vast in de CHANGELOG onder bekende beperkingen.
+
+### 5b-bis.6 Tests
+
+- `test_power_curve_matches_measured_bins`: de curve valt voor elke band uit de referentiedata binnen het bereik van P25 tot P75.
+- `test_thermal_output_flat_across_range`: het thermisch vermogen varieert minder dan 20 % tussen 40 en 60 °C.
+- `test_cop_is_derived_not_fitted`: architectuurguardrail die faalt als `cop_50` nog als onafhankelijke parameter wordt gelezen buiten het vangnet.
+- `test_low_run_cheaper_than_high_run_per_kelvin`: opwarmen van 40 naar 41 °C kost minder stroom dan van 55 naar 56 °C.
+- `test_power_clamped_outside_measured_range`: bij 20 en 70 °C blijft het vermogen binnen de grenzen.
+- De consistentietest uit WP6 stap 4 blijft gelden, nu per temperatuurband.
+
+### 5b-bis.7 Volgorde
+
+WP6b vervangt stap 1 van WP6 voor zover die een vast vermogen invoert, en komt direct na WP6. WP7 bouwt erop voort: de beslissing tussen laten lopen, vervroegen en verhogen hangt precies af van deze marginale kosten per graad.
+
+---
+
+## 5c. WP7 — Actuatiemodel en baseline-counterfactual
+
+### 5c.1 Het probleem in één zin
+
+De optimizer plant alsof hij de compressor vrij aan en uit kan zetten en elke doeltemperatuur tot 60 °C kan kiezen. De installatie werkt anders: de warmtepomp start zelfstandig zodra het vat 10 K onder het setpoint komt en stopt op het setpoint. Alles daarboven vereist een actieve ingreep die het systeem daarna weer moet terugdraaien.
+
+### 5c.2 De drie werkelijke besturingshandvatten
+
+Live bevestigd in Home Assistant op 2026-09-19:
+
+| Handvat | Entiteit | Waarde nu | Effect |
+|---|---|---|---|
+| Huidig setpoint | `sensor.hc_dhw_dhw_setpoint` | 50,0 °C | Bepaalt zowel het stoppunt als de startdrempel |
+| Setpoint wijzigen | `climate.hc_dhw_dhw_setpoint` | heat | Enige manier om boven 50 °C te komen |
+| Geforceerd aan | `switch.hc_dhw_dhw_boost` | off | Start een run vóór de drempel van 40 °C |
+| Tanktemperatuur | `sensor.hc_dhw_temperature_r5t_dhw_tank` | 50,0 °C | Meetwaarde |
+
+Het besturingsalfabet is dus niet `u ∈ {0, 1}` maar:
+
+- **laten lopen**: de installatie regelt zelf. Start bij `setpoint − 10`, stopt op `setpoint`. Kost niets aan ingrepen en is altijd beschikbaar.
+- **vervroegen**: boost aanzetten vóór de drempel. Verschuift een run naar een goedkoper of zonniger moment, maar de run stopt nog steeds op het setpoint.
+- **verhogen**: setpoint tijdelijk optrekken om extra buffer te laden, daarna terugzetten. Alleen dit maakt eindtemperaturen boven 50 °C mogelijk.
+
+De startdrempel is een **afgeleide** van het setpoint, geen zelfstandige constante. Verhoog je het setpoint naar 55, dan schuift de drempel mee naar 45. Dat koppelt de twee ingrepen: verhogen verandert ook het toekomstige zelfstandige gedrag.
+
+### 5c.3 Waarom dit nu aantoonbaar geld kost
+
+Situatie op 2026-09-19 om 17:56, vat op 50,0 °C, gepubliceerd plan versus alternatieven, gesimuleerd met dezelfde fysica, prijzen, zonprognose en tapprofiel over 24 uur:
+
+| Scenario | kWh_el | Stroom | Starts | Restwarmte | Netto | Laagste T |
+|---|---|---|---|---|---|---|
+| Gepubliceerd plan: 09:15 tot 55,5 °C plus 14:45 tot 59,7 °C | 6,00 | €0,274 | €0,10 | −€0,355 | **€0,018** | 42,2 |
+| Niets doen: installatie regelt zelf, start 12:26, stopt op 50 °C | 2,25 | €0,030 | €0,05 | −€0,178 | **−€0,098** | 39,9 |
+| Eenmalig vervroegen naar 12:11 | 2,25 | €0,043 | €0,05 | −€0,177 | −€0,084 | 40,1 |
+
+Niets doen is €0,116 goedkoper dan het gepubliceerde plan en verbruikt 2,7 keer minder stroom. De reden is dat de zelfstandige run precies in het zonnemaximum valt, met 81 % eigen zon en een exportprijs die op dat moment negatief is. Het plan stookt daarentegen om 09:15 met 14 % zon tegen €0,299.
+
+**De optimizer moet dus kunnen concluderen dat niets doen optimaal is.** Vandaag kan hij dat niet, omdat dat scenario niet in zijn zoekruimte zit.
+
+### 5c.4 De baseline-counterfactual is fysiek onmogelijk
+
+`compute_counterfactual_none` in `dhw_optimizer_explain.py` simuleert een vat dat afkoelt zonder enige verwarming. De gepubliceerde lijn eindigt op 25,0 °C. Dat kan niet gebeuren: bij 40 °C springt de installatie zelf aan. De grijze lijn in de grafiek en de zin over de laagste temperatuur beschrijven een toestand die de hardware nooit bereikt.
+
+Daardoor lijkt elk plan comfortkritisch en is elke besparing kunstmatig groot. Dit is dezelfde klasse fout als in WP3, maar dieper: niet de rekenmethode is fout, de vergeleken toestand bestaat niet.
+
+### 5c.5 Wat er moet gebeuren
+
+1. **Setpoint uit Home Assistant lezen.** Voeg `dhw_setpoint_entity` en `dhw_boost_switch_entity` toe aan `config/site_config.json`, in de integratielaag `integrations/daikin_altherma/`. De core mag geen entiteitsnamen bevatten (invariant 2). `DhwTankSpec` krijgt `target_setpoint_c` uit de live meetwaarde in plaats van uit een configconstante, met de configwaarde als terugval bij verouderde telemetrie.
+2. **Startdrempel afleiden.** `auto_start_delta_c` (standaard 10,0) in de boilerconfiguratie, met `drempel = setpoint − delta`. Documenteer dat dit een eigenschap van de installatie is en geen beleidskeuze.
+3. **Baseline-simulator.** Nieuwe pure functie in `layer3_scheduling/dhw_baseline.py`:
+
+```python
+def simulate_autonomous(slots, t0_c, setpoint_c, auto_start_delta_c,
+                        dhw_model, spec, params) -> DhwBaselineResult
+```
+
+   Zelfde fysica als `solve`, maar met de thermostaatregel: aan zodra `T <= setpoint − delta`, uit zodra `T >= setpoint`. Levert traject, runs, kosten en `j_objective_eur` op via `evaluate_plan_metrics`, zodat de vergelijking met de optimizer appels met appels is.
+4. **Baseline als ondergrens in de doelfunctie.** De optimizer mag alleen een plan publiceren dat de baseline verslaat op J. Is dat niet zo, dan publiceert hij de baseline met de mededeling dat ingrijpen niet loont. Dit is de belangrijkste gedragswijziging van dit werkpakket.
+5. **Besturingsalfabet in de solver.** Vervang de binaire besturing door drie acties per slot: laten lopen, vervroegen, setpoint verhogen naar een van enkele discrete niveaus. Koppel aan elke ingreep expliciete kosten: `c_start` voor een vervroegde run, en een nieuwe `c_setpoint_change` voor een setpoint-wijziging, omdat die een servicecall en een terugzetactie vereist. Zonder die kosten zal de solver het setpoint eindeloos heen en weer bewegen.
+6. **Terugzetplicht.** Elke geplande setpoint-verhoging krijgt een gekoppelde terugzetactie in hetzelfde plan, met het oorspronkelijke setpoint. Bouw een guardrail-test die faalt als een plan een verhoging bevat zonder terugzetting binnen de horizon. Zonder dat blijft de installatie na een herstart of storing op een verhoogd setpoint staan, wat structureel geld kost.
+7. **Bovengrens realistisch maken.** `boost_setpoint_c = 60` mag alleen als bereikbare doeltemperatuur gelden wanneer het systeem daadwerkelijk het setpoint verhoogt. Zolang punt 5 niet is geïmplementeerd, kapt de solver af op het live setpoint.
+8. **Grafiek en uitleg.** Vervang de onmogelijke koellijn door de baseline. Drie lijnen in plaats van twee: gepland, baseline en de comfortgrens die daadwerkelijk bindend is. De uitlegtekst vergelijkt tegen de baseline, niet tegen een vat dat naar 25 °C zakt.
+
+### 5c.6 Twee fouten die deze analyse aan het licht bracht
+
+**De comfortmarge staat nog op p95.** De configuratie van Matthijs bevat geen sectie `dhw_optimizer`, dus de code valt terug op de standaard. De marge loopt daardoor op tot 3,0 K op zondagochtend en de bindende grens is 42,8 °C om 08:26, niet 40,5 °C om 11:30. Dat verklaart de vroege run volledig. Zie WP4 §5.1: de configuratie moet nog worden weggeschreven.
+
+**De uitlegtekst noemt nog steeds een niet-bindende grens.** De gepubliceerde zin luidt: "Zonder stoken zakt het vat om 11:30 onder 40.5°C." De solver hanteert op dat moment 42,8 °C. Er zijn dus twee verschillende grenzen in omloop tussen solver en uitleglaag. Dit is WP3 §4.2, dat nog niet volledig is doorgevoerd. Voeg een guardrail-test toe die faalt zodra de in de tekst genoemde grens afwijkt van `binding_margin_c` uit het solverresultaat.
+
+### 5c.7 Tests
+
+- `test_autonomous_baseline_never_below_start_threshold`: de baseline zakt nooit meer dan één slot onder `setpoint − delta`.
+- `test_autonomous_baseline_stops_at_setpoint`: geen enkele baseline-run eindigt boven het setpoint plus één roosterstap.
+- `test_optimizer_never_worse_than_baseline`: over de snapshot van 2026-09-19 en minstens drie golden-scenario's is `j_objective` van het gepubliceerde plan kleiner dan of gelijk aan dat van de baseline.
+- `test_optimizer_publishes_baseline_when_intervention_does_not_pay`: met de snapshot van 2026-09-19 om 17:56 publiceert de optimizer geen vervroegde run.
+- `test_setpoint_increase_always_has_matching_restore`.
+- `test_explanation_boundary_matches_solver_boundary`.
+- `test_unheated_trajectory_respects_autonomous_restart`: de gepubliceerde baseline komt nergens onder `setpoint − delta − 1,0`.
+
+### 5c.8 Volgorde
+
+WP7 komt na WP1, WP2, WP3 en WP6 en vóór of gelijk met WP4. De configuratiesectie uit WP4 §5.1 wordt uitgebreid met `auto_start_delta_c` en `c_setpoint_change`, zodat er één sectie voor alle solverparameters is.
+
 ## 6. Reproductiefixture uit de snapshot
 
 Maak `tests/fixtures/dhw_snapshot_2026_09_19.json` uit `docs/plans/data/dhw_snapshot_2026-09-19.json` en een helper `load_snapshot_slots()` die `OptimizerMockSlot`-objecten bouwt (`dt` lokaal Europe/Amsterdam vanaf 2026-09-19 00:20, `price_all_in`, `solar_kw`, `unallocated_kw = 0.30`, `outdoor_temp_c = 12.0`, labels). `DhwThermalModel` met een in-memory profiel (zaterdag/zondag uit de snapshot) en `standby_loss_w_per_k = 2.38`.
@@ -231,8 +428,11 @@ Kerngetallen ter controle: `T0 = 44,1°C`; ongestookt kruist 42,49°C om 07:35 e
 - [ ] `locales/nl.json` en `locales/en.json` compleet; `test_i18n.py` groen.
 - [ ] UI headless geverifieerd: instellingen-blok zichtbaar en werkend, tapvraag-balken zichtbaar, effectieve-grenslijn zichtbaar, geen console-errors.
 - [ ] `VERSION`, `config.yaml` en `CHANGELOG.md` op 0.103.52.
-- [ ] Site-config van Matthijs op `mode = "p50"`, `min_margin_c = 0.5`.
-- [ ] Planner gebruikt `DhwTankSpec.from_config` (3,0 kW); `dhw_cop`-blok in `heatpump_model_parameters.json` gekalibreerd of op startwaarden gezet; consistentietest (±25%) groen.
+- [ ] Site-config van Matthijs op `mode = "p50"`, `min_margin_c = 0.5`. Live gecontroleerd dat de sectie daadwerkelijk wordt gelezen; op 2026-09-19 ontbrak zij nog.
+- [ ] Baseline-counterfactual gepubliceerd in plaats van de onmogelijke koellijn; optimizer verslaat de baseline op J of publiceert de baseline.
+- [ ] Grafiektitel klopt met de getoonde horizon. De boilergrafiek meldt "24 Uur Vooruit" terwijl de as 48 uur beslaat.
+- [ ] Vermogenscurve `P_el(T_tank)` actief en gekalibreerd; COP afgeleid uit thermisch vermogen gedeeld door elektrisch vermogen, niet apart gefit.
+- [ ] Planner gebruikt `DhwTankSpec.from_config`; `dhw_cop`-blok in `heatpump_model_parameters.json` gekalibreerd of op startwaarden gezet; consistentietest (±25%) groen.
 - [ ] Geen hardcoded 1,8/2,4 kW meer buiten `DhwTankSpec`-defaults en tests; `REFERENCE_SITE_CULEMBORG.md` en ADR-004 bijgewerkt.
 
 ---

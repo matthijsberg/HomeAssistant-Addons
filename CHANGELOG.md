@@ -10,6 +10,24 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.56] — 2026-09-19 (Dynamisch DHW Compressorvermogen & WP7 Autonome Baseline Simulator)
+
+### Fysische Modellering & Dynamisch Compressorvermogen
+- **Dynamische Compressormodellering $P_{\text{el}}(T_{\text{tank}}, T_{\text{out}})$:**
+  - In `models/physics.py` is de canonieke pure functie `dhw_electric_power_kw` geïmplementeerd en gekoppeld aan `DhwTankSpec.get_electric_power_kw()`.
+  - Vervangt het starre 3,0 kW blok door een empirisch gekalibreerde functie over 60 dagen telemetrie (97 DHW runs in InfluxDB):  
+    $P_{\text{el}}(T_{\text{tank}}, T_{\text{out}}) = \text{clamp}(2{,}72 + 0{,}074 \cdot (T_{\text{tank}} - 50) - 0{,}005 \cdot (T_{\text{out}} - 10), 1{,}6, 3{,}5)$.
+  - Startfase bij 40°C trekt $\sim 1{,}98\text{ kW}_{\text{el}}$, basisfase bij 50°C $\sim 2{,}72\text{ kW}_{\text{el}}$, en vollastboost bij 60°C $\sim 3{,}46\text{ kW}_{\text{el}}$.
+  - Configuratieblok `dhw_power` toegevoegd aan `heatpump_model_parameters.json`.
+
+### Autonome Baseline & Actuatiemodel (WP7)
+- **Autonome Thermostaat Simulator (`dhw_baseline.py`):**
+  - Pure simulator `simulate_autonomous()` ingebouwd die het zelfstandige gedrag van de warmtepomp nabootst (aanslaan bij $T \le \text{setpoint} - 10\text{ K}$, afslaan bij $\text{setpoint}$, spitsblokkade-respect).
+  - De optimizer bewaakt dat een gepubliceerd plan altijd $J \le J_{\text{baseline}}$ behaalt; indien ingrijpen niet loont, wordt het zelfstandige plan overgenomen.
+  - Tegenfeitenlaag vergelijkt nu zuiver tegen de echte autonome baseline in plaats van een vat dat doorkoelt naar kamertemperatuur.
+
+---
+
 ## [0.103.55] — 2026-09-19 (DHW Traject Horizon 24h/48h Slicing & Sticky Controls Fix)
 
 ### Frontend & Dashboard Fixes

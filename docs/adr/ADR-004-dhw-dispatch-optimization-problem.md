@@ -34,11 +34,11 @@ We vervangen alle heuristische paden, ankers en handmatige regels door een pure,
   - $Q_{\text{tap}, k}$: verwachte P50 aftap (kWh_th) uit geleerde 7x96 matrix.
   - $Q_{\text{tap95}, k}$: P95 aftapscenario voor dynamische comfortbewaking.
   - $p_{\text{eff}, k}$: effectieve stroomprijs (€/kWh) in slot $k$ (zonne-overschot gewaardeerd tegen vermeden teruglevering, rest tegen all-in import).
-  - $P_{\text{el}}(T) = \text{spec.get\_electric\_power\_kw}(T)$ ($3,0$ kW nominaal, $\text{COP}_{50} \approx 2,0$).
+  - $P_{\text{el}}(T, T_{\text{out}}) = \text{clamp}(P_{50} + k_{T,\text{tank}} \cdot (T - 50) - k_{\text{out}} \cdot (T_{\text{out}} - 10), P_{\min}, P_{\max})$ ($2{,}72$ kW nominaal bij 50°C, $1{,}98$ kW bij 40°C, $3{,}46$ kW bij 60°C, empirisch gekalibreerd uit 60 dagen telemetrie).
   - $T_{\text{comf}} = 40,0^\circ\text{C}$, $T_{\max} = 60,0^\circ\text{C}$.
 
 ### 2. Systeemdynamica (Canonieke Balans)
-$$T_{k+1} = T_k + \frac{u_k \cdot P_{\text{el}}(T_k) \cdot \text{COP}(T_k, T_{\text{out}, k}) \cdot \Delta t - \text{UA} \cdot (T_k - T_{\text{amb}}) \cdot \frac{\Delta t}{1000} - Q_{\text{tap}, k}}{C}$$
+$$T_{k+1} = T_k + \frac{u_k \cdot P_{\text{el}}(T_k, T_{\text{out}, k}) \cdot \text{COP}(T_k, T_{\text{out}, k}) \cdot \Delta t - \text{UA} \cdot (T_k - T_{\text{amb}}) \cdot \frac{\Delta t}{1000} - Q_{\text{tap}, k}}{C}$$
 met $\text{COP}(T_k, T_{\text{out}, k}) = \text{clamp}(\text{COP}_{50} - k_T \cdot (T_k - 50) + k_{\text{out}} \cdot (T_{\text{out}} - 10), \text{COP}_{\min}, \text{COP}_{\max})$. Boven $T_{\max}$ wordt geen warmte meer toegevoegd.
 
 ### 3. Doelfunctie (Minimaliseren)

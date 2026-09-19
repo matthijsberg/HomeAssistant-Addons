@@ -135,7 +135,21 @@ def compute_counterfactual_none(
             first_dip_temp_c = round(t_curr, 1)
 
     min_temp_rounded = round(min_temp, 1)
-    if first_dip_idx is not None:
+    from layer3_scheduling.dhw_baseline import simulate_autonomous
+    base_res = simulate_autonomous(
+        slots=slots,
+        t0_c=t0_c,
+        setpoint_c=spec.target_setpoint_c,
+        auto_start_delta_c=spec.auto_start_delta_c,
+        dhw_model=dhw_model,
+        spec=spec,
+        params=params,
+        model_parameters=model_parameters
+    )
+
+    if base_res.first_run_start_time:
+        explanation = f"Zonder ingrijpen start de warmtepomp zelfstandig om {base_res.first_run_start_time} (bij {eff_boundary:.1f}°C)."
+    elif first_dip_idx is not None:
         explanation = f"Zonder stoken zakt het vat om {first_dip_time} onder {eff_boundary:.1f}°C."
     else:
         explanation = f"Vattemperatuur blijft de komende 48u comfortabel boven {eff_boundary:.1f}°C."
@@ -146,6 +160,10 @@ def compute_counterfactual_none(
             "temperatures_p05_c": temps_p05,
             "temperatures_p95_c": temps_p95,
         },
+        "baseline_result": base_res,
+        "baseline_trajectory": base_res.temperatures_c,
+        "baseline_runs": base_res.runs,
+        "baseline_j_eur": base_res.j_objective_eur,
         "min_temp_c": min_temp_rounded,
         "min_temp_time": min_temp_time,
         "first_dip_idx": first_dip_idx,
@@ -384,6 +402,13 @@ def explain_dhw_optimization(
         f"netto €{opt_result.j_objective_eur:.2f}."
     )
     finance_sentences = [fin_summary_line]
+    base_j = cf_none.get("baseline_j_eur", 0.0)
+    base_diff = base_j - opt_result.j_objective_eur
+    if base_diff >= 0.01:
+        finance_sentences.append(f"Actief plannen bespaart netto €{base_diff:.2f} t.o.v. de autonome thermostaat.")
+    elif base_diff <= -0.01:
+        finance_sentences.append(f"Autonoom stoken door de warmtepomp is €{-base_diff:.2f} voordeliger dan forceren.")
+
     total_savings = 0.0
     if cf_cap50.get("explanation"):
         finance_sentences.append(cf_cap50["explanation"])

@@ -79,6 +79,28 @@ def test_dhw_cop_clamping():
     assert cop_high == 3.2
 
 
+def test_dhw_electric_power_dynamic_scaling():
+    """
+    Verifies that compressor electrical power scales dynamically with tank and outdoor temperature:
+    - At 40°C tank, power ~ 1.98 kW
+    - At 50°C tank, power ~ 2.72 kW
+    - At 60°C tank, power ~ 3.46 kW
+    - Monotonically increases with tank temperature
+    - Clamped within [1.6, 3.5] kW
+    """
+    from models.physics import dhw_electric_power_kw
+    p40 = dhw_electric_power_kw(40.0, 10.0)
+    p50 = dhw_electric_power_kw(50.0, 10.0)
+    p60 = dhw_electric_power_kw(60.0, 10.0)
+    assert 1.9 <= p40 <= 2.1, f"Expected ~1.98 kW at 40°C, got {p40}"
+    assert 2.65 <= p50 <= 2.8, f"Expected ~2.72 kW at 50°C, got {p50}"
+    assert 3.35 <= p60 <= 3.55, f"Expected ~3.46 kW at 60°C, got {p60}"
+    assert p40 < p50 < p60
+    # Clamping
+    assert dhw_electric_power_kw(20.0, 10.0) >= 1.6
+    assert dhw_electric_power_kw(75.0, 10.0) <= 3.5
+
+
 def test_dhw_warming_rate_consistency():
     """
     WP6 Consistency Guardrail:

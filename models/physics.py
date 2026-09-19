@@ -88,6 +88,49 @@ def load_dhw_cop_params(path: Optional[Any] = None) -> dict:
     }
 
 
+def get_dhw_power_params(params: Optional[dict] = None) -> Tuple[float, float, float, float, float]:
+    """
+    Returns (p_50, k_t_tank, k_out, p_min, p_max).
+    Default calibration from 60-day InfluxDB empirical data:
+        P_el(50C, 10C out) = 2.72 kW
+        k_t_tank = 0.074 kW / K
+        k_out = 0.005 kW / K
+        clamp = [1.6 kW, 3.5 kW]
+    """
+    if params and isinstance(params, dict):
+        p_cfg = params.get("dhw_power")
+        if isinstance(p_cfg, dict):
+            return (
+                float(p_cfg.get("p_nom_50", 2.72)),
+                float(p_cfg.get("k_t_tank", 0.074)),
+                float(p_cfg.get("k_out", 0.005)),
+                float(p_cfg.get("p_min_kw", 1.6)),
+                float(p_cfg.get("p_max_kw", 3.5)),
+            )
+    return (2.72, 0.074, 0.005, 1.6, 3.5)
+
+
+def dhw_electric_power_kw(
+    t_tank_c: float,
+    t_outdoor_c: Optional[float] = None,
+    params: Optional[dict] = None
+) -> float:
+    """
+    Pure function: empirical tank-temperature and outdoor-temperature-dependent DHW electrical power (kW).
+    Formula:
+        dhw_electric_power_kw(t_tank_c, t_outdoor_c, params) = clamp(
+            P_50 + k_t_tank * (t_tank_c - 50.0) - k_out * (t_outdoor_c - 10.0),
+            P_min,
+            P_max
+        )
+    """
+    p_50, k_t_tank, k_out, p_min, p_max = get_dhw_power_params(params)
+    t_out = 10.0 if t_outdoor_c is None else float(t_outdoor_c)
+    raw_p = p_50 + (k_t_tank * (float(t_tank_c) - 50.0)) - (k_out * (t_out - 10.0))
+    clamped = max(p_min, min(p_max, raw_p))
+    return round(clamped, 3)
+
+
 def dhw_cop(
     t_tank_c: float,
     t_outdoor_c: Optional[float] = None,
@@ -196,18 +239,21 @@ def dhw_step(
                 t_max = float(spec["t_max_c"])
 
     # 4. Compressor electric power P_el (kW)
-    p_el_kw = 1.8
-    if spec is not None:
+    p_el_kw = dhw_electric_power_kw(t_tank_c, t_outdoor_c, params=params)
+    if spec is not None and not isinstance(spec, dict):
         if hasattr(spec, "get_electric_power_kw"):
-            p_el_kw = float(spec.get_electric_power_kw(t_tank_c))
+            try:
+                p_el_kw = float(getattr(spec, "get_electric_power_kw")(t_tank_c, outdoor_temp_c=t_outdoor_c, params=params))
+            except TypeError:
+                p_el_kw = float(getattr(spec, "get_electric_power_kw")(t_tank_c))
         elif hasattr(spec, "heat_pump_power_kw") and getattr(spec, "heat_pump_power_kw") is not None:
             p_el_kw = float(spec.heat_pump_power_kw)
         elif hasattr(spec, "heat_pump_electric_kw") and getattr(spec, "heat_pump_electric_kw") is not None:
             p_el_kw = float(spec.heat_pump_electric_kw)
             if t_tank_c > 52.0 and hasattr(spec, "solar_boost_electric_kw"):
                 p_el_kw = float(spec.solar_boost_electric_kw)
-        elif isinstance(spec, dict):
-            p_el_kw = float(spec.get("heat_pump_power_kw", spec.get("heat_pump_electric_kw", spec.get("p_el_kw", 1.8))))
+    elif isinstance(spec, dict):
+        p_el_kw = float(spec.get("heat_pump_power_kw", spec.get("heat_pump_electric_kw", p_el_kw)))
 
     # 5. Delivered heat q_geleverd
     # Above T_max no heat is added; heat addition cannot exceed T_max
