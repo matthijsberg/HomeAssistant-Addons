@@ -238,6 +238,16 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 raw_unh_p05 = opt_unh_traj.get("temperatures_p05_c", raw_unh_temps)
                 raw_unh_p95 = opt_unh_traj.get("temperatures_p95_c", raw_unh_temps)
 
+                # Slice by target_slots (96 for 24h, 192 for 48h)
+                target_slots = hours_sim * 4
+                raw_temps = raw_temps[:target_slots]
+                raw_p05 = raw_p05[:target_slots]
+                raw_p95 = raw_p95[:target_slots]
+                raw_dem = raw_dem[:target_slots]
+                raw_unh_temps = raw_unh_temps[:target_slots]
+                raw_unh_p05 = raw_unh_p05[:target_slots]
+                raw_unh_p95 = raw_unh_p95[:target_slots]
+
                 base_sim_dt = now_ams
                 raw_lbls = [
                     format_slot_label(base_sim_dt + timedelta(minutes=15 * i), None, i == 0, True)

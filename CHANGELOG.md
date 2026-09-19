@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.55] — 2026-09-19 (DHW Traject Horizon 24h/48h Slicing & Sticky Controls Fix)
+
+### Frontend & Dashboard Fixes
+- **DHW Temperatuurtraject Horizon Filter (24u vs 48u):**
+  - `/api/model/dhw-status` snijdt het traject (`temperatures_c`, `p05`, `p95`, `demand_kwh_th`) nu exact af op basis van de opgevraagde horizon (`96` slots voor `24h`, `192` slots voor `48h`).
+  - De boilervat-grafiek op het tabblad Voorspelling toont nu exact 24 uur wanneer 24u geselecteerd is, en 48 uur bij 48u.
+- **Sticky Filterbalken Fix (Voorspelling & Historie):**
+  - De sticky navigatie- en filterbalken op de tabbladen Voorspelling en Historie hebben nu `top-16 md:top-20 z-20` (in plaats van `top-0`), waardoor ze tijdens het scrollen perfect onder de vaste paginaheader blijven plakken zonder erachter te verdwijnen.
+
+---
+
 ## [0.103.54] — 2026-09-19 (Home Assistant Input Select Smart Grid Actuator & Idempotente Guard)
 
 ### Actuatie & Relaisstabiliteit (Stap 1 & 2)
