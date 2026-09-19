@@ -157,13 +157,13 @@ def load_historical_dhw_planned_windows(start_dt: datetime, end_dt: datetime) ->
                     dw = chosen.get("day_window_label", "")
                     if dw and dw != "Geen dagrun (Standby)" and "–" in dw:
                         s_t, e_t = dw.split("–")
-                        day_runs[d_str] = (s_t.replace("Nu (", "").replace(")", "").strip(), e_t.replace("Nu (", "").replace(")", "").strip(), float(chosen.get("day_power_kw", 2.4) or 2.4))
+                        day_runs[d_str] = (s_t.replace("Nu (", "").replace(")", "").strip(), e_t.replace("Nu (", "").replace(")", "").strip(), float(chosen.get("day_power_kw", 3.0) or 3.0))
                     # Nighttime planned run
                     nw = chosen.get("night_window_label", "")
                     if nw and nw != "N.v.t. (Ochtendcomfort gegarandeerd)" and "–" in nw:
                         s_t, e_t = nw.split("–")
                         run_d = (rec_dt + timedelta(days=1)).strftime("%Y-%m-%d") if rec_dt.hour >= 12 else d_str
-                        night_runs[run_d] = (s_t.strip(), e_t.strip(), 1.8)
+                        night_runs[run_d] = (s_t.strip(), e_t.strip(), 3.0)
         except Exception as e_dec:
             print(f"Warning parsing audit log in validation_overlay: {e_dec}")
 
@@ -175,7 +175,7 @@ def load_historical_dhw_planned_windows(start_dt: datetime, end_dt: datetime) ->
             s_t, e_t, p_kw = night_runs[d_str]
             windows.append({"date": d_str, "start_time": s_t, "end_time": e_t, "power_kw": p_kw})
         else:
-            windows.append({"date": d_str, "start_time": "01:30", "end_time": "02:30", "power_kw": 1.8})
+            windows.append({"date": d_str, "start_time": "01:30", "end_time": "02:30", "power_kw": 3.0})
         if d_str in day_runs:
             s_t, e_t, p_kw = day_runs[d_str]
             windows.append({"date": d_str, "start_time": s_t, "end_time": e_t, "power_kw": p_kw})
@@ -875,7 +875,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                             break
                     # Baseline fallback: standard night charging window (01:30–02:30) if no specific decision window logged
                     if p_dhw_kw == 0.0 and "01:30" <= t_cur < "02:30":
-                        p_dhw_kw = 1.8
+                        p_dhw_kw = 3.0
                     
                     p_cv_kw = 0.0
 

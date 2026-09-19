@@ -39,25 +39,24 @@ class DhwTankSpec:
         """
         return round((self.volume_liters * self.specific_heat_water) / 3600.0, 4)
 
-    def get_cop(self, target_temp_c: float, outdoor_temp_c: Optional[float] = None) -> float:
+    def get_cop(self, target_temp_c: float, outdoor_temp_c: Optional[float] = None, params: Optional[dict] = None) -> float:
         """Returns empirical COP for given target temperature and optional outdoor temperature."""
-        return calculate_dhw_cop(target_temp_c, outdoor_temp_c=outdoor_temp_c)
+        return calculate_dhw_cop(target_temp_c, outdoor_temp_c=outdoor_temp_c, params=params)
 
     def get_electric_power_kw(self, target_temp_c: float) -> float:
         """Returns compressor electrical draw (kW) for target temperature."""
         return self.solar_boost_electric_kw if target_temp_c > 52.0 else self.heat_pump_electric_kw
 
-    def get_thermal_output_kw(self, target_temp_c: float, outdoor_temp_c: Optional[float] = None) -> float:
+    def get_thermal_output_kw(self, target_temp_c: float, outdoor_temp_c: Optional[float] = None, params: Optional[dict] = None) -> float:
         """
         Thermodynamically consistent thermal output (kW_th): P_th = P_el * COP(target, outdoor_temp_c).
-        For 50°C at nominal 4°C: 1.8 kW * 2.85 COP = 5.13 kW_th.
-        For 60°C at nominal 4°C: 2.4 kW * 2.15 COP = 5.16 kW_th.
         """
         return calculate_dhw_thermal_output_kw(
             target_temp_c,
             heat_pump_electric_kw=self.heat_pump_electric_kw,
             solar_boost_electric_kw=self.solar_boost_electric_kw,
             outdoor_temp_c=outdoor_temp_c,
+            params=params,
         )
 
     @classmethod

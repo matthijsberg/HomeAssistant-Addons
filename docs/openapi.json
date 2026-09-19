@@ -538,6 +538,35 @@
         }
       }
     },
+    "/api/settings": {
+      "get": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Get system settings including DHW comfort margin",
+        "description": "Returns active baseload, solar cost, and DHW optimizer comfort margin settings.",
+        "responses": {
+          "200": {
+            "description": "Active settings object"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Update system settings including DHW comfort margin",
+        "description": "Updates baseload, solar cost, or DHW optimizer comfort margin mode and parameters.",
+        "responses": {
+          "200": {
+            "description": "Updated settings object"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
     "/api/openapi.json": {
       "get": {
         "tags": [

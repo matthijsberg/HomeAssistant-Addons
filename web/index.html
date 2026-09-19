@@ -143,7 +143,7 @@
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.103.52</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.103.53</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -1524,6 +1524,48 @@
                                 <span>€0,0741 / kWh</span>
                                 <span class="text-[10px] text-slate-500">(Beheerd via Batterij Arbitrage Beleid)</span>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- DHW Comfort Margin Setting (WP4) -->
+                    <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800 space-y-3 mt-4">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <h4 class="text-xs font-semibold text-slate-200">Comfortmarge Warm Water (DHW Optimizer)</h4>
+                                <p class="text-[11px] text-slate-400">Bepaalt hoeveel graden het vat minimaal boven de comfortgrens van 40°C moet blijven als buffer tegen ochtendpieken.</p>
+                            </div>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-teal-500/20 text-teal-300 border border-teal-500/40">DHW POLICY</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-1">
+                            <div>
+                                <label for="tab-dhw-margin-mode" class="text-[10px] text-slate-400 block mb-1">Modus</label>
+                                <select id="tab-dhw-margin-mode" onchange="onDhwMarginModeChange()" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-sans text-xs focus:border-teal-500 focus:outline-none">
+                                    <option value="p50">P50 (Gemiddeld, goedkoper)</option>
+                                    <option value="p95">P95 (Veilig, buffer zware ochtend)</option>
+                                    <option value="fixed">Vast (Constante marge in °C)</option>
+                                </select>
+                            </div>
+                            <div id="wrapper-dhw-margin-min">
+                                <label for="tab-dhw-margin-min" class="text-[10px] text-slate-400 block mb-1">Minimale Marge (°C)</label>
+                                <input type="number" step="0.1" min="0" max="5" id="tab-dhw-margin-min" value="0.5" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-teal-500 focus:outline-none">
+                            </div>
+                            <div id="wrapper-dhw-margin-factor">
+                                <label for="tab-dhw-margin-factor" class="text-[10px] text-slate-400 block mb-1">P95 Stress Factor</label>
+                                <input type="number" step="0.1" min="1.0" max="3.0" id="tab-dhw-margin-factor" value="1.5" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-teal-500 focus:outline-none">
+                            </div>
+                            <div id="wrapper-dhw-margin-horizon">
+                                <label for="tab-dhw-margin-horizon" class="text-[10px] text-slate-400 block mb-1">Stress Horizon (uren)</label>
+                                <input type="number" step="1" min="1" max="24" id="tab-dhw-margin-horizon" value="8" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-teal-500 focus:outline-none">
+                            </div>
+                            <div id="wrapper-dhw-margin-fixed" class="hidden">
+                                <label for="tab-dhw-margin-fixed" class="text-[10px] text-slate-400 block mb-1">Vaste Marge (°C)</label>
+                                <input type="number" step="0.5" min="0" max="10" id="tab-dhw-margin-fixed" value="2.0" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-teal-500 focus:outline-none">
+                            </div>
+                        </div>
+                        <div class="flex justify-end pt-1">
+                            <button id="btn-save-dhw-margin" onclick="saveDhwMarginFromTab()" class="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold rounded-lg shadow transition">
+                                Marge Opslaan
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -3174,7 +3216,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
     </div>
 
     <!-- CLIENT CONTROLLER & CHART.JS ENGINE -->
-    <script src="./js/i18n.js?v=0.103.52"></script>
-    <script src="./js/app.js?v=0.103.52"></script>
+    <script src="./js/i18n.js?v=0.103.53"></script>
+    <script src="./js/app.js?v=0.103.53"></script>
 </body>
 </html>

@@ -10,6 +10,33 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.53] — 2026-09-19 (DHW Comfortmarge Configureerbaar + Solver-, Uitleg- & Grafiekfixes)
+
+### DHW Solver Interpolatie & Boundary Fixes (WP1)
+- **Oplossing van de 0,25°C Grenskruip:**
+  - `dhw_optimizer.py` interpoleert stap 8b en de forward pass nu via `_interp_finite()` uitsluitend over eindige $V$-waarden.
+  - Voorkomt dat de comfortgrens bij harde lockouts, `OFF_DWELL` of counterfactual lockouts met $0{,}25^\circ\text{C}$ per geblokkeerd kwartier omhoog kruipt.
+  - Onjuiste meldingen als "noodzakelijk om comfort te behouden" verdwijnen wanneer uitstel fysisch perfect haalbaar is.
+
+### Boilerspec uit Config & Modelparameters (WP6)
+- **Dynamische Inlezing:**
+  - `CentralPlanner.plan()` en `ensure_active_canonical_plan()` lezen `DhwTankSpec.from_config(cfg)` en `model_parameters` direct dynamisch in.
+  - Hardcoded klasseconstanten (1,8 / 2,4 kW) opgeruimd uit alle API-routers en evaluators; `models/physics.py` leest `dhw_cop`-blok via `load_dhw_cop_params()`.
+
+### Tapvraag & Doelfunctie J Uitleglaag (WP2 & WP3)
+- **Zichtbare Tapbalken:** `demand_kwh_th` en `demand_p95_kwh_th` worden nu netjes meegenomen in de trajectory van de optimizer en getoond in de UI.
+- **Eerlijke Doelfunctie-Vergelijking:**
+  - Alle tegenfeiten (`cap50`, `delay`) vergelijken plannen nu op basis van de volledige doelfunctie $J$ (stroom + startkosten minus restwarmte) in plaats van alleen stroomkosten.
+  - Financiële kaart toont de exacte formule: `Plan 48u: stroom €X, starts €Y, restwarmte −€Z → netto €J.`
+
+### Configureerbare Comfortmarge (WP4 & WP5)
+- **Modus P50 / P95 / Vast:**
+  - Configureerbaar via `dhw_optimizer.comfort_margin` in `heatpump_config.json`, de nieuwe REST API (`GET`/`POST /api/settings`) en de UI-instellingentab.
+  - Matthijs' site-config staat op `mode: "p50"`, `min_margin_c: 0.5`.
+  - Tekstverwoording opgeschoond: noemt nu het eerste kruispunt onder de effectieve grens in plaats van het onreële 48-uurs minimum.
+
+---
+
 ## [0.103.52] — 2026-09-19 (Fysische DHW Kalibratie & Vermogens-/COP-Herijking)
 
 ### Fysische Kalibratie & DHW Vermogens-/COP-Correctie (WP6)

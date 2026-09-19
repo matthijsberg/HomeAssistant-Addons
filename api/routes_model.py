@@ -16,8 +16,9 @@ from api.context import (
     GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
 )
 from api.secrets_store import (
-    PARAMS_FILE, load_json, save_json, load_secrets
+    CONFIG_FILE, PARAMS_FILE, load_json, save_json, load_secrets
 )
+from layer3_scheduling.dhw_specs import DhwTankSpec
 from integrations.homeassistant.client import (
     get_ha_client_config, get_ha_states_map
 )
@@ -229,7 +230,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 raw_temps = opt_traj.get("temperatures_c", [])
                 raw_p05 = opt_traj.get("temperatures_p05_c", raw_temps)
                 raw_p95 = opt_traj.get("temperatures_p95_c", raw_temps)
-                raw_dem = [0.0] * len(raw_temps)
+                raw_dem = opt_traj.get("demand_kwh_th", [])
+                if len(raw_dem) < len(raw_temps):
+                    raw_dem = list(raw_dem) + [0.0] * (len(raw_temps) - len(raw_dem))
 
                 raw_unh_temps = opt_unh_traj.get("temperatures_c", [])
                 raw_unh_p05 = opt_unh_traj.get("temperatures_p05_c", raw_unh_temps)
@@ -259,8 +262,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             else:
                 # Retrieve planned slots & dispatch parameters directly from authoritative CanonicalDispatchPlan
                 cached_slots = [i for i, s in enumerate(plan.slots) if s.dhw_kw > 0]
-                c_power = plan.dhw_summary.power_kw if plan.dhw_summary else 1.8
-                c_target = plan.dhw_summary.target_temp_c if plan.dhw_summary else 50.0
+                spec = DhwTankSpec.from_config(load_json(CONFIG_FILE))
+                c_power = plan.dhw_summary.power_kw if plan.dhw_summary else spec.heat_pump_electric_kw
+                c_target = plan.dhw_summary.target_temp_c if plan.dhw_summary else spec.target_setpoint_c
 
                 base_sim_dt = now_ams
                 traj = GLOBAL_DHW_MODEL.simulate_trajectory(

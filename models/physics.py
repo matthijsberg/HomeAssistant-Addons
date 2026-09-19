@@ -59,6 +59,35 @@ def get_dhw_cop_params(params: Optional[dict] = None) -> tuple:
     return cop_50, k_t, k_out, cop_min, cop_max
 
 
+def load_dhw_cop_params(path: Optional[Any] = None) -> dict:
+    """Loads dhw_cop configuration dictionary from model parameter file or canonical defaults."""
+    import json
+    from pathlib import Path
+    default_paths = [
+        Path(path) if path else None,
+        Path("/config/heatpump_model_parameters.json"),
+        Path(__file__).parent.parent / "data" / "heatpump_model_parameters.json"
+    ]
+    for p in default_paths:
+        if p and p.exists():
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if "dhw_cop" in data and isinstance(data["dhw_cop"], dict):
+                        return data["dhw_cop"]
+                    elif "dhw_tank" in data and isinstance(data["dhw_tank"], dict):
+                        return data["dhw_tank"]
+            except Exception:
+                pass
+    return {
+        "cop_50": 2.0,
+        "k_t": 0.07,
+        "k_out": 0.05,
+        "cop_min": 1.4,
+        "cop_max": 3.2
+    }
+
+
 def dhw_cop(
     t_tank_c: float,
     t_outdoor_c: Optional[float] = None,

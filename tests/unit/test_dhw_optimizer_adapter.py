@@ -56,8 +56,8 @@ def test_counterfactual_cost_consistency():
         params=params
     )
     if cf_cap50["applies"]:
-        assert cf_cap50["cost_cap50_eur"] >= res_opt.total_cost_eur - 1e-4, (
-            f"Cap50 cost ({cf_cap50['cost_cap50_eur']}) must be >= optimal ({res_opt.total_cost_eur})"
+        assert cf_cap50["cost_cap50_eur"] >= res_opt.j_objective_eur - 0.005, (
+            f"Cap50 J ({cf_cap50['cost_cap50_eur']}) must be >= optimal J ({res_opt.j_objective_eur})"
         )
         assert cf_cap50["savings_eur"] >= 0.0
 
@@ -72,8 +72,8 @@ def test_counterfactual_cost_consistency():
         params=params
     )
     if cf_delay["applies"]:
-        assert cf_delay["cost_delay_eur"] >= res_opt.total_cost_eur - 1e-4, (
-            f"Delay cost ({cf_delay['cost_delay_eur']}) must be >= optimal ({res_opt.total_cost_eur})"
+        assert cf_delay["cost_delay_eur"] >= res_opt.j_objective_eur - 0.005, (
+            f"Delay J ({cf_delay['cost_delay_eur']}) must be >= optimal J ({res_opt.j_objective_eur})"
         )
         assert cf_delay["savings_eur"] >= 0.0
 

@@ -63,11 +63,41 @@ class DhwOptimizerParams:
     min_run_slots: int = 3                # L_min (3 slots = 45 min)
     min_dwell_slots: int = 4              # D_min (4 slots = 60 min rest after run)
     use_dynamic_margin: bool = True       # True for P95 stress margin, False for fixed
-    fixed_comfort_margin_c: float = 2.0   # Fixed comfort buffer (°C) if dynamic disabled
+    comfort_margin_mode: str = "p95"      # "p95" | "p50" | "fixed"
+    tap_stress_factor: float = 1.5        # P95 = factor * P50 (default 1.5)
+    min_comfort_margin_c: float = 0.5     # Minimum floor margin (°C)
+    fixed_comfort_margin_c: float = 2.0   # Fixed comfort buffer (°C) if mode == "fixed"
     dynamic_horizon_slots: int = 32       # H = 32 slots (8 hours lookahead)
     grid_step_c: float = 0.25             # Temperature discretization step (°C)
     terminal_cheap_percentile: float = 0.20 # Top 20% cheapest slots for salvage value p_hat
     t_amb_c: float = 18.0                 # Technical room ambient temperature (°C)
+
+    @classmethod
+    def from_config(cls, cfg: Optional[Dict[str, Any]] = None) -> "DhwOptimizerParams":
+        if not cfg:
+            return cls()
+        opt_cfg = cfg.get("dhw_optimizer", {})
+        cm = opt_cfg.get("comfort_margin", {})
+        mode = str(cm.get("mode", "p95")).lower()
+        if mode not in ("p95", "p50", "fixed"):
+            mode = "p95"
+        factor = float(cm.get("tap_stress_factor", 1.5))
+        factor = max(1.0, min(3.0, factor))
+        h_hours = float(cm.get("horizon_hours", 8.0))
+        h_slots = max(4, min(96, int(round(h_hours * 4))))
+        min_m = float(cm.get("min_margin_c", 0.5))
+        min_m = max(0.0, min(5.0, min_m))
+        fixed_m = float(cm.get("fixed_margin_c", 2.0))
+        fixed_m = max(0.0, min(10.0, fixed_m))
+
+        return cls(
+            comfort_margin_mode=mode,
+            use_dynamic_margin=(mode == "p95"),
+            tap_stress_factor=factor,
+            dynamic_horizon_slots=h_slots,
+            min_comfort_margin_c=min_m,
+            fixed_comfort_margin_c=fixed_m,
+        )
 
 
 @dataclass
@@ -92,6 +122,10 @@ class DhwOptimizerResult:
     slot_modes: List[str]
     validation_issue: Optional[str] = None
     solve_duration_ms: float = 0.0
+    electricity_cost_eur: float = 0.0
+    start_cost_eur: float = 0.0
+    salvage_value_eur: float = 0.0
+    j_objective_eur: float = 0.0
 
 
 # Internal discrete state representation for r:
@@ -171,6 +205,22 @@ def parse_initial_run_state(
     return state_to_idx[("OFF_FREE", 0)]
 
 
+def _interp_finite(t: float, T_grid: np.ndarray, v_col: np.ndarray, t_min_feas: float) -> float:
+    """
+    Interpolates cost-to-go on continuous temperature t, interpolating strictly over finite grid values.
+    Returns +inf if t is below continuous feasible comfort boundary t_min_feas.
+    Clamps to the first finite value if t is between t_min_feas and T_grid[fin[0]] to avoid boundary creep.
+    """
+    if t < (t_min_feas - 1e-4):
+        return np.inf
+    fin = np.isfinite(v_col)
+    if not np.any(fin):
+        return np.inf
+    T_fin = T_grid[fin]
+    V_fin = v_col[fin]
+    return float(np.interp(t, T_fin, V_fin, left=V_fin[0], right=V_fin[-1]))
+
+
 def solve(
     slots: List[Any],
     t0_c: float,
@@ -180,6 +230,7 @@ def solve(
     spec: Optional[DhwTankSpec] = None,
     params: Optional[DhwOptimizerParams] = None,
     dynamic_peaks: Optional[List[Any]] = None,
+    model_parameters: Optional[Dict[str, Any]] = None,
 ) -> DhwOptimizerResult:
     """
     Pure function: Solves the DHW optimal scheduling problem via exact backward Dynamic Programming.
@@ -311,7 +362,7 @@ def solve(
     p_hat = sum(cheapest_prices) / n_cheap
 
     t_out_mean = sum(out_temps) / N if N > 0 else 10.0
-    cop_hat = dhw_cop(50.0, t_out_mean)
+    cop_hat = dhw_cop(50.0, t_out_mean, params=model_parameters)
     salvage_eur_per_kwh_th = p_hat / cop_hat if cop_hat > 0 else 0.08
     terminal_val_per_kelvin = C_tank * salvage_eur_per_kwh_th
 
@@ -393,6 +444,7 @@ def solve(
                 t_outdoor_c=t_out_k,
                 dt_h=delta_t,
                 spec=tank_spec_dict,
+                params=model_parameters,
                 t_max_c=t_max,
                 t_amb_c=p.t_amb_c
             )
@@ -408,6 +460,7 @@ def solve(
                 t_outdoor_c=t_out_k,
                 dt_h=delta_t,
                 spec=tank_spec_step,
+                params=model_parameters,
                 t_max_c=t_max,
                 t_amb_c=p.t_amb_c
             )
@@ -432,19 +485,19 @@ def solve(
 
         for r_prime in range(R):
             v_next_col = V[k + 1, :, r_prime]
-            # If all values are infinite in next state, column remains infinite
-            if not np.all(np.isinf(v_next_col)):
+            fin = np.isfinite(v_next_col)
+            if np.any(fin):
+                T_fin = T_grid[fin]
+                V_fin = v_next_col[fin]
                 # Interpolate for u=0
-                # Filter points meeting comfort constraint
                 feas_mask_0 = t_next_0 >= (t_min_feas_next - 1e-4)
                 if np.any(feas_mask_0):
-                    # np.interp handles piecewise linear interpolation
                     v_interp_0[r_prime, feas_mask_0] = np.interp(
                         t_next_0[feas_mask_0],
-                        T_grid,
-                        v_next_col,
-                        left=np.inf,
-                        right=v_next_col[-1]
+                        T_fin,
+                        V_fin,
+                        left=V_fin[0],
+                        right=V_fin[-1]
                     )
 
                 # Interpolate for u=1
@@ -452,10 +505,10 @@ def solve(
                 if np.any(feas_mask_1):
                     v_interp_1[r_prime, feas_mask_1] = np.interp(
                         t_next_1[feas_mask_1],
-                        T_grid,
-                        v_next_col,
-                        left=np.inf,
-                        right=v_next_col[-1]
+                        T_fin,
+                        V_fin,
+                        left=V_fin[0],
+                        right=V_fin[-1]
                     )
 
         # 8c. Bellman update for each state (m, r)
@@ -484,6 +537,10 @@ def solve(
 
             V[k, :, r] = best_cost
 
+        # Defensive guard: replace any NaN with inf
+        if np.isnan(V[k]).any():
+            V[k] = np.where(np.isnan(V[k]), np.inf, V[k])
+
     # 9. Forward Pass: Track continuous trajectory from (T_0, r_0)
     current_t = float(t0_c)
     current_r = r0_idx
@@ -511,13 +568,14 @@ def solve(
             t_outdoor_c=t_out_k,
             dt_h=delta_t,
             spec=tank_spec_dict,
+            params=model_parameters,
             t_max_c=t_max,
             t_amb_c=p.t_amb_c
         )
-        if r_next_0 >= 0 and t_next_cand_0 >= (t_min_feas_next - 1e-4):
-            v_col_0 = V[k + 1, :, r_next_0]
-            val_0 = float(np.interp(t_next_cand_0, T_grid, v_col_0, left=np.inf, right=v_col_0[-1]))
-            cand_cost_0 = cost_start[current_r, 0] + val_0
+        if r_next_0 >= 0:
+            val_0 = _interp_finite(t_next_cand_0, T_grid, V[k + 1, :, r_next_0], t_min_feas_next)
+            if np.isfinite(val_0):
+                cand_cost_0 = cost_start[current_r, 0] + val_0
 
         # Evaluate candidate action u = 1
         cand_cost_1 = np.inf
@@ -531,21 +589,22 @@ def solve(
             t_outdoor_c=t_out_k,
             dt_h=delta_t,
             spec=tank_spec_step,
+            params=model_parameters,
             t_max_c=t_max,
             t_amb_c=p.t_amb_c
         )
-        if (not is_locked_k) and (r_next_1 >= 0) and (t_next_cand_1 >= (t_min_feas_next - 1e-4)):
-            v_col_1 = V[k + 1, :, r_next_1]
-            val_1 = float(np.interp(t_next_cand_1, T_grid, v_col_1, left=np.inf, right=v_col_1[-1]))
-            c_el, _, _, _ = calculate_slot_financials(
-                solar_kw=solar_kws[k],
-                unalloc_kw=unalloc_kws[k],
-                el_demand_kw=p_el,
-                price_all_in=prices_all_in[k],
-                step_hours=delta_t,
-                tariff_provider=tariff_provider
-            )
-            cand_cost_1 = cost_start[current_r, 1] + c_el + val_1
+        if (not is_locked_k) and (r_next_1 >= 0):
+            val_1 = _interp_finite(t_next_cand_1, T_grid, V[k + 1, :, r_next_1], t_min_feas_next)
+            if np.isfinite(val_1):
+                c_el, _, _, _ = calculate_slot_financials(
+                    solar_kw=solar_kws[k],
+                    unalloc_kw=unalloc_kws[k],
+                    el_demand_kw=p_el,
+                    price_all_in=prices_all_in[k],
+                    step_hours=delta_t,
+                    tariff_provider=tariff_provider
+                )
+                cand_cost_1 = cost_start[current_r, 1] + c_el + val_1
 
         # Decision
         if math.isinf(cand_cost_0) and math.isinf(cand_cost_1):
@@ -599,6 +658,7 @@ def solve(
             t_outdoor_c=t_out_k,
             dt_h=delta_t,
             spec=spec_05,
+            params=model_parameters,
             t_max_c=t_max,
             t_amb_c=p.t_amb_c
         )
@@ -609,6 +669,7 @@ def solve(
             t_outdoor_c=t_out_k,
             dt_h=delta_t,
             spec=spec_95,
+            params=model_parameters,
             t_max_c=t_max,
             t_amb_c=p.t_amb_c
         )
@@ -688,6 +749,13 @@ def solve(
 
     solve_dur_ms = round((time.perf_counter() - start_perf) * 1000.0, 2)
 
+    electricity_cost = round(total_cost_eur, 3)
+    start_cost = round(len(runs) * p.c_start, 3)
+    total_cost_combined = round(electricity_cost + start_cost, 3)
+    terminal_temp = t_star[-1] if t_star else t0_c
+    salvage_val = round(terminal_val_per_kelvin * max(0.0, terminal_temp - t_comf), 3)
+    j_obj = round(total_cost_combined - salvage_val, 3)
+
     return DhwOptimizerResult(
         planned_slots=planned_slots,
         runs=runs,
@@ -695,11 +763,17 @@ def solve(
             "temperatures_c": t_star,
             "temperatures_p05_c": t_p05,
             "temperatures_p95_c": t_p95,
+            "demand_kwh_th": [round(q, 4) for q in q_tap_p50],
+            "demand_p95_kwh_th": [round(q, 4) for q in q_tap_p95],
         },
-        total_cost_eur=round(total_cost_eur, 3),
+        total_cost_eur=total_cost_combined,
         slot_modes=slot_modes,
         validation_issue=validation_issue,
-        solve_duration_ms=solve_dur_ms
+        solve_duration_ms=solve_dur_ms,
+        electricity_cost_eur=electricity_cost,
+        start_cost_eur=start_cost,
+        salvage_value_eur=salvage_val,
+        j_objective_eur=j_obj,
     )
 
 
@@ -712,6 +786,7 @@ def evaluate_plan_metrics(
     tariff_provider: Any = None,
     dhw_model: Any = None,
     run_state0: Any = None,
+    model_parameters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Pure function: Evaluates any arbitrary binary heating plan u_plan across slots with the exact
@@ -772,7 +847,7 @@ def evaluate_plan_metrics(
     cheapest_prices = sorted(baseline_p_effs)[:n_cheap]
     p_hat = sum(cheapest_prices) / n_cheap
     t_out_mean = sum(out_temps) / N if N > 0 else 10.0
-    cop_hat = dhw_cop(50.0, t_out_mean)
+    cop_hat = dhw_cop(50.0, t_out_mean, params=model_parameters)
     salvage_eur_per_kwh_th = p_hat / cop_hat if cop_hat > 0 else 0.08
     terminal_val_per_kelvin = C_tank * salvage_eur_per_kwh_th
 
@@ -822,6 +897,7 @@ def evaluate_plan_metrics(
             t_outdoor_c=out_temps[k],
             dt_h=delta_t,
             spec=step_dict,
+            params=model_parameters,
             t_max_c=t_max,
             t_amb_c=params.t_amb_c
         )

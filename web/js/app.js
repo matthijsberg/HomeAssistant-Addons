@@ -687,7 +687,10 @@
                 loadValidationOverlayChart();
             }
             if (tabId === 'devices') loadDevices();
-            if (tabId === 'tariffs') loadTariffs();
+            if (tabId === 'tariffs') {
+                loadTariffs();
+                loadDhwSettingsFromApi();
+            }
             if (tabId === 'infrastructure') {
                 loadInfrastructure();
                 loadProviders();
@@ -3431,6 +3434,111 @@
 
         function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
+        function onDhwMarginModeChange() {
+            const mode = document.getElementById('tab-dhw-margin-mode')?.value || 'p95';
+            const wrapMin = document.getElementById('wrapper-dhw-margin-min');
+            const wrapFactor = document.getElementById('wrapper-dhw-margin-factor');
+            const wrapHorizon = document.getElementById('wrapper-dhw-margin-horizon');
+            const wrapFixed = document.getElementById('wrapper-dhw-margin-fixed');
+
+            if (wrapMin) wrapMin.classList.toggle('hidden', mode === 'fixed');
+            if (wrapFactor) wrapFactor.classList.toggle('hidden', mode !== 'p95');
+            if (wrapHorizon) wrapHorizon.classList.toggle('hidden', mode !== 'p95');
+            if (wrapFixed) wrapFixed.classList.toggle('hidden', mode !== 'fixed');
+        }
+
+        async function loadDhwSettingsFromApi() {
+            try {
+                const res = await fetch('./api/settings');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    if (document.getElementById('tab-baseload-input') && data.baseload_watts) {
+                        document.getElementById('tab-baseload-input').value = data.baseload_watts;
+                    }
+                    if (document.getElementById('tab-solar-cost-input') && data.solar_cost_eur_kwh) {
+                        document.getElementById('tab-solar-cost-input').value = Number(data.solar_cost_eur_kwh).toFixed(3);
+                    }
+                    const opt = data.dhw_optimizer || {};
+                    const cm = opt.comfort_margin || {};
+                    const modeEl = document.getElementById('tab-dhw-margin-mode');
+                    if (modeEl && cm.mode) modeEl.value = cm.mode;
+                    if (document.getElementById('tab-dhw-margin-min') && cm.min_margin_c !== undefined) {
+                        document.getElementById('tab-dhw-margin-min').value = cm.min_margin_c;
+                    }
+                    if (document.getElementById('tab-dhw-margin-factor') && cm.tap_stress_factor !== undefined) {
+                        document.getElementById('tab-dhw-margin-factor').value = cm.tap_stress_factor;
+                    }
+                    if (document.getElementById('tab-dhw-margin-horizon') && cm.horizon_hours !== undefined) {
+                        document.getElementById('tab-dhw-margin-horizon').value = cm.horizon_hours;
+                    }
+                    if (document.getElementById('tab-dhw-margin-fixed') && cm.fixed_margin_c !== undefined) {
+                        document.getElementById('tab-dhw-margin-fixed').value = cm.fixed_margin_c;
+                    }
+                    onDhwMarginModeChange();
+                }
+            } catch (err) {
+                console.error('Error loading settings:', err);
+            }
+        }
+
+        async function saveDhwMarginFromTab() {
+            const mode = document.getElementById('tab-dhw-margin-mode')?.value || 'p95';
+            const minM = parseFloat(document.getElementById('tab-dhw-margin-min')?.value || 0.5);
+            const factor = parseFloat(document.getElementById('tab-dhw-margin-factor')?.value || 1.5);
+            const horizon = parseFloat(document.getElementById('tab-dhw-margin-horizon')?.value || 8.0);
+            const fixedM = parseFloat(document.getElementById('tab-dhw-margin-fixed')?.value || 2.0);
+
+            const payload = {
+                dhw_optimizer: {
+                    comfort_margin: {
+                        mode: mode,
+                        min_margin_c: minM,
+                        tap_stress_factor: factor,
+                        horizon_hours: horizon,
+                        fixed_margin_c: fixedM
+                    }
+                }
+            };
+
+            try {
+                const res = await fetch('./api/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert(`Comfortmarge succesvol opgeslagen: ${mode.toUpperCase()} (min: ${minM}°C)`);
+                    if (typeof renderDhwTemperatureChart === 'function') renderDhwTemperatureChart();
+                    if (typeof loadChartData === 'function') loadChartData();
+                } else {
+                    alert('Fout bij opslaan: ' + (data.message || 'Onbekende fout'));
+                }
+            } catch (err) {
+                console.error('Error saving DHW margin:', err);
+                alert('Netwerkfout bij opslaan: ' + err.message);
+            }
+        }
+
+        async function saveSettingsFromTab() {
+            const baseVal = parseFloat(document.getElementById('tab-baseload-input')?.value || 300);
+            const solarVal = parseFloat(document.getElementById('tab-solar-cost-input')?.value || 0.06);
+            try {
+                await fetch('./api/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        baseload_watts: baseVal,
+                        solar_cost_eur_kwh: solarVal
+                    })
+                });
+                alert('Instellingen succesvol opgeslagen.');
+                if (typeof loadChartData === 'function') loadChartData();
+            } catch (err) {
+                console.error('Error saving settings:', err);
+            }
+        }
+
                 
         async function saveSolarCostFromTab() {
             const inp = document.getElementById('tab-solar-cost-input');
@@ -5078,6 +5186,21 @@
                 });
             }
 
+            if (opts.effectiveComfortTemp !== undefined && opts.effectiveComfortTemp !== null && Math.abs(opts.effectiveComfortTemp - (opts.comfortTemp || 40.0)) > 0.05) {
+                chartDatasets.push({
+                    id: 'dhw_effective_comfort',
+                    label: `Effectieve Grens (${opts.effectiveComfortTemp}°C)`,
+                    data: Array(opts.labels.length).fill(opts.effectiveComfortTemp),
+                    yAxisID: 'y',
+                    borderColor: 'rgba(244, 63, 94, 0.85)',
+                    borderDash: [2, 2],
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    order: 4
+                });
+            }
+
             if (opts.targetTemp !== undefined && opts.targetTemp !== null) {
                 chartDatasets.push({
                     id: opts.targetId || 'dhw_target',
@@ -5425,6 +5548,7 @@
                     unhP95: unhP95,
                     demandKwh: kwhThArr,
                     comfortTemp: 40.0,
+                    effectiveComfortTemp: dec.comfort_boundary_c || null,
                     targetTemp: 50.0,
                     boostTemp: isBoostMode ? 60.0 : null,
                     p50Id: 'dhw_p50',

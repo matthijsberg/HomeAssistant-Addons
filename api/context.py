@@ -337,9 +337,19 @@ def ensure_active_canonical_plan(force_refresh=False, horizon_hours=48.0):
         print(f"Warning determining lockout history: {e_lk}")
 
     # 6. Plan & Publish
+    cfg = load_json(CONFIG_FILE)
+    model_params = load_json(PARAMS_FILE)
+    from layer3_scheduling.dhw_specs import DhwTankSpec
+    from layer3_scheduling.dhw_optimizer import DhwOptimizerParams
+    dhw_spec = DhwTankSpec.from_config(cfg)
+    dhw_opt_params = DhwOptimizerParams.from_config(cfg)
+
     plan = CentralPlanner.plan(
         frame,
         current_dhw_temp=cur_dhw,
+        model_parameters=model_params,
+        dhw_spec=dhw_spec,
+        dhw_optimizer_params=dhw_opt_params,
         past_continuous_lockout_mins=past_lockout_mins,
         mins_since_last_lockout=mins_since_last_lockout
     )

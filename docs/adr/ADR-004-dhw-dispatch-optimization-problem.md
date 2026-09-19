@@ -34,7 +34,7 @@ We vervangen alle heuristische paden, ankers en handmatige regels door een pure,
   - $Q_{\text{tap}, k}$: verwachte P50 aftap (kWh_th) uit geleerde 7x96 matrix.
   - $Q_{\text{tap95}, k}$: P95 aftapscenario voor dynamische comfortbewaking.
   - $p_{\text{eff}, k}$: effectieve stroomprijs (€/kWh) in slot $k$ (zonne-overschot gewaardeerd tegen vermeden teruglevering, rest tegen all-in import).
-  - $P_{\text{el}}(T) = \text{spec.get\_electric\_power\_kw}(T)$ (1,8 kW bij $T \le 52^\circ\text{C}$, 2,4 kW bij $T > 52^\circ\text{C}$).
+  - $P_{\text{el}}(T) = \text{spec.get\_electric\_power\_kw}(T)$ ($3,0$ kW nominaal, $\text{COP}_{50} \approx 2,0$).
   - $T_{\text{comf}} = 40,0^\circ\text{C}$, $T_{\max} = 60,0^\circ\text{C}$.
 
 ### 2. Systeemdynamica (Canonieke Balans)

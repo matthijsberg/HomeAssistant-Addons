@@ -49,8 +49,8 @@
   * Inhoud: **350 Liter**
   * Thermische capaciteit: **$0,407\text{ kWh/K}$** ($350\text{ kg} \times 4,184\text{ kJ/(kg}\cdot\text{K)} / 3600$)
   * Standby warmteverlies: ~0,055 kW (~1,3 kWh per 24 uur)
-  * Normaal setpoint: 50,0°C (~1,8 kW elektrisch op compressor)
-  * Zonnebuffer boost setpoint: 60,0°C (~2,4 kW elektrisch op compressor)
+  * Normaal setpoint: 50,0°C (~3,0 kW elektrisch op compressor, COP ~2,0)
+  * Zonnebuffer boost setpoint: 60,0°C (~3,0 kW elektrisch op compressor)
 * **Vloerverwarming (CV):**
   * Dekvloer met hoge thermische inertie (2-massa vloermodel: betonmassa + binnenlucht).
   * Doeltemperatuur woonkamer: 20,0°C (Daikin Madoka thermostaat).

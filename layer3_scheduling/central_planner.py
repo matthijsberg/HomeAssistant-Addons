@@ -32,7 +32,7 @@ from layer3_scheduling.plan_store import get_plan_store, PlanStore
 from layer3_scheduling.tariff_provider import TariffProvider
 from layer3_scheduling.dhw_specs import DhwTankSpec
 from layer3_scheduling.dhw_shadow_logger import get_dhw_planner_mode, run_dhw_shadow_comparison
-from layer3_scheduling.dhw_optimizer import solve
+from layer3_scheduling.dhw_optimizer import solve, DhwOptimizerParams
 from layer3_scheduling.dhw_plan_adapter import adapt_optimizer_to_dhw_summary
 from models.physics import calculate_dhw_cop
 
@@ -44,8 +44,6 @@ class CentralPlanner:
     DHW_TANK_LITERS = 350.0
     DHW_THERMAL_CAPACITY_KWH_PER_K = 0.407  # 350L * 4.184 kJ/(kg*K) / 3600
     DHW_STANDBY_LOSS_KW = 0.055             # ~1.3 kWh/24h standing loss
-    DHW_HEAT_PUMP_ELECTRIC_KW = 1.8         # Standard 1.8 kW electric heating power
-    DHW_SOLAR_BOOST_ELECTRIC_KW = 2.4       # 2.4 kW boost power to 60°C
 
     @classmethod
     def plan(
@@ -57,12 +55,33 @@ class CentralPlanner:
         store: Optional[PlanStore] = None,
         past_continuous_lockout_mins: int = 0,
         mins_since_last_lockout: int = 999,
-        dhw_spec: Optional[DhwTankSpec] = None
+        dhw_spec: Optional[DhwTankSpec] = None,
+        dhw_optimizer_params: Optional[DhwOptimizerParams] = None
     ) -> CanonicalDispatchPlan:
         """
         Executes central optimization and returns the single authoritative CanonicalDispatchPlan.
         """
-        spec = dhw_spec or DhwTankSpec()
+        try:
+            from api.secrets_store import CONFIG_FILE, load_json
+            cfg = load_json(CONFIG_FILE) if CONFIG_FILE.exists() else {}
+        except Exception:
+            cfg = {}
+
+        if dhw_spec is None:
+            spec = DhwTankSpec.from_config(cfg)
+        else:
+            spec = dhw_spec
+
+        if dhw_optimizer_params is None:
+            dhw_optimizer_params = DhwOptimizerParams.from_config(cfg)
+
+        if model_parameters is None:
+            try:
+                from api.secrets_store import PARAMS_FILE, load_json
+                model_parameters = load_json(PARAMS_FILE) if PARAMS_FILE.exists() else {}
+            except Exception:
+                model_parameters = {}
+
         tp = tariffs or TariffProvider()
         now = frame.timestamp
         step_mins = frame.resolution_minutes
@@ -144,7 +163,7 @@ class CentralPlanner:
         planned_mode = "normal"
         planned_mode_label = "Normaal (Standby)"
         sww_target_temp = 50.0
-        sww_power_kw = cls.DHW_HEAT_PUMP_ELECTRIC_KW
+        sww_power_kw = spec.heat_pump_electric_kw
         daytime_arbitrage_audit = None
         arbiter_res = None
         dhw_summary_override = None
@@ -211,7 +230,9 @@ class CentralPlanner:
                 dhw_model=dhw_model,
                 tariff_provider=tp,
                 spec=spec,
-                dynamic_peaks=dynamic_peaks
+                params=dhw_optimizer_params,
+                dynamic_peaks=dynamic_peaks,
+                model_parameters=model_parameters
             )
 
             dhw_summary = adapt_optimizer_to_dhw_summary(
@@ -222,7 +243,9 @@ class CentralPlanner:
                 dhw_model=dhw_model,
                 tariff_provider=tp,
                 spec=spec,
-                dynamic_peaks=dynamic_peaks
+                params=dhw_optimizer_params,
+                dynamic_peaks=dynamic_peaks,
+                model_parameters=model_parameters
             )
 
             planned_mode = dhw_summary.planned_mode

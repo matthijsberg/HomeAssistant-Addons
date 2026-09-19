@@ -91,7 +91,7 @@ def evaluate_and_apply_dhw_run_merger(
                 plan.slots[slot_idx].mode_label = "Normaal (50°C)"
                 plan.slots[slot_idx].dhw_kw = 0.0
 
-        run_pwr = max(1.8, round(wp_power / 1000.0, 2))
+        run_pwr = max(3.0, round(wp_power / 1000.0, 2))
         # Reflect active run on current slot (slot 0) and next slots
         if plan and plan.slots:
             for run_i in range(min(4, len(plan.slots))):
@@ -185,7 +185,7 @@ def evaluate_and_apply_dhw_run_merger(
         call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_2_s11s"})
         call_ha_service("switch", "turn_off", {"entity_id": "switch.hc_mode_altherma_on"})
 
-        run_pwr = max(1.8, round(wp_power / 1000.0, 2))
+        run_pwr = max(3.0, round(wp_power / 1000.0, 2))
         for run_i in range(min(3, len(plan.slots))):
             plan.slots[run_i].mode_code = StandardizedState.FORCED_ON
             plan.slots[run_i].mode_label = "Geforceerd aan (50°C)"
@@ -279,7 +279,7 @@ def evaluate_and_log_night_boiler_decision(plan: Any, t_live: float):
                 title=reason,
                 description=explanation,
                 state_code=chosen_mode,
-                power_kw=0.0 if comfort_safe else 1.8,
+                power_kw=0.0 if comfort_safe else 3.0,
                 target_temp_c=50.0 if not comfort_safe else 0.0,
                 savings_eur=savings if comfort_safe else 0.0
             )

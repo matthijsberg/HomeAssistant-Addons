@@ -31,6 +31,7 @@ def compute_counterfactual_none(
     dhw_model: Any,
     spec: Optional[DhwTankSpec] = None,
     params: Optional[DhwOptimizerParams] = None,
+    model_parameters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Evaluates the unheated trajectory (u == 0 for all slots) using the canonical dhw_step.
@@ -65,6 +66,12 @@ def compute_counterfactual_none(
     min_temp_idx = 0
     min_temp_time = getattr(slots[0], "label", "Nu") if slots else "Nu"
 
+    # Effective comfort boundary
+    min_m = getattr(params, "min_comfort_margin_c", 0.5) if getattr(params, "comfort_margin_mode", "p95") == "p50" else (
+        getattr(params, "fixed_comfort_margin_c", 2.0) if getattr(params, "comfort_margin_mode", "p95") == "fixed" else getattr(params, "min_comfort_margin_c", 0.5)
+    )
+    eff_boundary = round(t_comf + min_m, 1)
+
     for k, s in enumerate(slots):
         dt_val = getattr(s, "dt", None)
         if dt_val is None:
@@ -75,8 +82,9 @@ def compute_counterfactual_none(
 
         out_t = float(getattr(s, "outdoor_temp_c", getattr(s, "outdoor_temp", 10.0)))
         p50 = dhw_model.get_learned_tap_kwh_th(dow, q_idx) if hasattr(dhw_model, "get_learned_tap_kwh_th") else 0.05
-        p95 = dhw_model.get_learned_tap_kwh_th_p95(dow, q_idx) if hasattr(dhw_model, "get_learned_tap_kwh_th_p95") else 0.075
-        p05 = dhw_model.get_learned_tap_kwh_th_p05(dow, q_idx) if hasattr(dhw_model, "get_learned_tap_kwh_th_p05") else 0.025
+        factor = getattr(params, "tap_stress_factor", 1.5)
+        p95 = p50 * factor
+        p05 = p50 * 0.3
 
         t_curr = dhw_step(
             t_tank_c=t_curr,
@@ -85,6 +93,7 @@ def compute_counterfactual_none(
             t_outdoor_c=out_t,
             dt_h=0.25,
             spec=tank_spec_dict,
+            params=model_parameters,
             t_max_c=spec.boost_setpoint_c,
             t_amb_c=params.t_amb_c
         )
@@ -95,6 +104,7 @@ def compute_counterfactual_none(
             t_outdoor_c=out_t,
             dt_h=0.25,
             spec=tank_spec_dict,
+            params=model_parameters,
             t_max_c=spec.boost_setpoint_c,
             t_amb_c=params.t_amb_c
         )
@@ -105,6 +115,7 @@ def compute_counterfactual_none(
             t_outdoor_c=out_t,
             dt_h=0.25,
             spec=tank_spec_dict,
+            params=model_parameters,
             t_max_c=spec.boost_setpoint_c,
             t_amb_c=params.t_amb_c
         )
@@ -118,19 +129,16 @@ def compute_counterfactual_none(
             min_temp_idx = k + 1
             min_temp_time = lbl
 
-        if first_dip_idx is None and t_curr < t_comf:
+        if first_dip_idx is None and t_curr < eff_boundary:
             first_dip_idx = k + 1
             first_dip_time = lbl
             first_dip_temp_c = round(t_curr, 1)
 
     min_temp_rounded = round(min_temp, 1)
     if first_dip_idx is not None:
-        explanation = (
-            f"Zonder stoken zakt het vat naar {min_temp_rounded:.1f}°C om {min_temp_time} "
-            f"(al onder comfort om {first_dip_time})."
-        )
+        explanation = f"Zonder stoken zakt het vat om {first_dip_time} onder {eff_boundary:.1f}°C."
     else:
-        explanation = f"Zonder stoken zakt het vat naar {min_temp_rounded:.1f}°C om {min_temp_time}."
+        explanation = f"Vattemperatuur blijft de komende 48u comfortabel boven {eff_boundary:.1f}°C."
 
     return {
         "trajectory": {
@@ -148,15 +156,16 @@ def compute_counterfactual_none(
 
 
 def compute_counterfactual_cap50(
+    opt_result: DhwOptimizerResult,
     slots: List[Any],
     t0_c: float,
     run_state0: Any,
-    opt_result: DhwOptimizerResult,
     dhw_model: Any,
     tariff_provider: Any,
     spec: Optional[DhwTankSpec] = None,
     params: Optional[DhwOptimizerParams] = None,
     dynamic_peaks: Optional[List[Any]] = None,
+    model_parameters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Evaluates the counterfactual where heating is capped strictly at 50.0°C.
@@ -197,35 +206,36 @@ def compute_counterfactual_cap50(
         tariff_provider=tariff_provider,
         spec=spec_cap50,
         params=params,
-        dynamic_peaks=dynamic_peaks
+        dynamic_peaks=dynamic_peaks,
+        model_parameters=model_parameters
     )
 
-    # Cost difference between capping at 50°C and optimal buffering
-    cost_diff = res_cap50.total_cost_eur - opt_result.total_cost_eur
-    savings_eur = round(max(0.0, cost_diff), 2)
+    # Objective cost difference on full J
+    cost_diff = res_cap50.j_objective_eur - opt_result.j_objective_eur
+    savings_eur = round(cost_diff, 2)
+    solver_suboptimal = (cost_diff < -0.005)
+    if solver_suboptimal:
+        print(f"[WARN] Solver suboptimal in cap50: J_cap50 ({res_cap50.j_objective_eur}) < J_opt ({opt_result.j_objective_eur})")
 
-    # Explain the benefit of buffering up to T_end
     first_opt_run = opt_result.runs[0]
     t_end = first_opt_run.t_end_c
 
-    # Find additional later runs required when capping at 50°C
-    later_runs = [r for r in res_cap50.runs if r.start_idx >= first_opt_run.end_idx]
-    if later_runs:
-        later_slot_idx = later_runs[0].start_idx
-        later_time = getattr(slots[later_slot_idx], "label", f"slot {later_slot_idx}") if later_slot_idx < len(slots) else "later"
+    if savings_eur >= 0.01:
         explanation = (
-            f"Één run tot {t_end:.1f}°C nu bespaart €{savings_eur:.2f} t.o.v. 50°C plus bijladen om {later_time}."
+            f"Doorstoken tot {t_end:.1f}°C i.p.v. aftoppen op 50°C bespaart netto €{savings_eur:.2f} "
+            f"(één start minder, inclusief stilstandsverlies)."
         )
     else:
-        explanation = f"Één run tot {t_end:.1f}°C nu bespaart €{savings_eur:.2f} t.o.v. aftoppen op 50.0°C."
+        explanation = None
 
     return {
-        "savings_eur": savings_eur,
-        "cost_cap50_eur": res_cap50.total_cost_eur,
+        "savings_eur": max(0.0, savings_eur),
+        "cost_cap50_eur": res_cap50.j_objective_eur,
         "cost_diff_eur": round(cost_diff, 3),
+        "solver_suboptimal": solver_suboptimal,
         "runs_cap50": res_cap50.runs,
         "explanation": explanation,
-        "applies": True
+        "applies": (explanation is not None)
     }
 
 
@@ -238,6 +248,7 @@ def compute_counterfactual_delay(
     spec: Optional[DhwTankSpec] = None,
     params: Optional[DhwOptimizerParams] = None,
     dynamic_peaks: Optional[List[Any]] = None,
+    model_parameters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Evaluates the counterfactual where heating is forbidden until after the first planned run.
@@ -272,29 +283,37 @@ def compute_counterfactual_delay(
         tariff_provider=tariff_provider,
         spec=spec,
         params=params,
-        dynamic_peaks=locked_peaks
+        dynamic_peaks=locked_peaks,
+        model_parameters=model_parameters
     )
 
-    cost_diff = res_delay.total_cost_eur - opt_result.total_cost_eur
-    savings_eur = round(max(0.0, cost_diff), 2)
+    cost_diff = res_delay.j_objective_eur - opt_result.j_objective_eur
+    savings_eur = round(cost_diff, 2)
+    solver_suboptimal = (cost_diff < -0.005)
+    if solver_suboptimal:
+        print(f"[WARN] Solver suboptimal in delay: J_delay ({res_delay.j_objective_eur}) < J_opt ({opt_result.j_objective_eur})")
 
     run_start_lbl = getattr(slots[first_run.start_idx], "label", f"slot {first_run.start_idx}") if first_run.start_idx < len(slots) else "nu"
     is_comfort_forced = bool(res_delay.validation_issue is not None)
 
     if is_comfort_forced:
         explanation = (
-            f"Nu starten ({run_start_lbl}) is noodzakelijk om comfort te behouden "
-            f"(tank zou anders onder {spec.comfort_min_temp_c:.1f}°C zakken)."
+            f"Nu starten ({run_start_lbl}) is noodzakelijk om comfort te behouden."
         )
     elif savings_eur > 0:
-        explanation = f"Nu starten ({run_start_lbl}) i.p.v. wachten bespaart €{savings_eur:.2f}."
+        alt_start_lbl = "later"
+        if res_delay.runs:
+            alt_idx = res_delay.runs[0].start_idx
+            alt_start_lbl = getattr(slots[alt_idx], "label", f"slot {alt_idx}") if alt_idx < len(slots) else "later"
+        explanation = f"Nu starten ({run_start_lbl}) i.p.v. wachten tot {alt_start_lbl} bespaart netto €{savings_eur:.2f} (incl. startkosten en restwarmte)."
     else:
         explanation = f"Nu starten ({run_start_lbl}) garandeert horizondekking zonder meerkosten."
 
     return {
-        "savings_eur": savings_eur,
-        "cost_delay_eur": res_delay.total_cost_eur,
+        "savings_eur": max(0.0, savings_eur),
+        "cost_delay_eur": res_delay.j_objective_eur,
         "cost_diff_eur": round(cost_diff, 3),
+        "solver_suboptimal": solver_suboptimal,
         "is_comfort_forced": is_comfort_forced,
         "explanation": explanation,
         "applies": True
@@ -311,6 +330,7 @@ def explain_dhw_optimization(
     spec: Optional[DhwTankSpec] = None,
     params: Optional[DhwOptimizerParams] = None,
     dynamic_peaks: Optional[List[Any]] = None,
+    model_parameters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Synthesizes the complete explanation layer for the DHW optimizer.
@@ -319,12 +339,12 @@ def explain_dhw_optimization(
     spec = spec or DhwTankSpec()
     params = params or DhwOptimizerParams()
 
-    cf_none = compute_counterfactual_none(slots, t0_c, dhw_model, spec, params)
+    cf_none = compute_counterfactual_none(slots, t0_c, dhw_model, spec, params, model_parameters=model_parameters)
     cf_cap50 = compute_counterfactual_cap50(
-        slots, t0_c, run_state0, opt_result, dhw_model, tariff_provider, spec, params, dynamic_peaks
+        opt_result, slots, t0_c, run_state0, dhw_model, tariff_provider, spec, params, dynamic_peaks, model_parameters=model_parameters
     )
     cf_delay = compute_counterfactual_delay(
-        slots, t0_c, opt_result, dhw_model, tariff_provider, spec, params, dynamic_peaks
+        slots, t0_c, opt_result, dhw_model, tariff_provider, spec, params, dynamic_peaks, model_parameters=model_parameters
     )
 
     # 1. Per-run explanations (exactly one sentence per planned run)
@@ -356,8 +376,14 @@ def explain_dhw_optimization(
             f"Door de geplande {len(opt_result.runs)} run(s) blijft het comfort 100% gegarandeerd."
         )
 
-    # 3. Finance card text (counterfactual differences)
-    finance_sentences = []
+    # 3. Finance card text (WP3: full J objective summary + counterfactual differences)
+    fin_summary_line = (
+        f"Plan 48u: stroom €{opt_result.electricity_cost_eur:.2f}, "
+        f"starts €{opt_result.start_cost_eur:.2f}, "
+        f"restwarmte −€{opt_result.salvage_value_eur:.2f} → "
+        f"netto €{opt_result.j_objective_eur:.2f}."
+    )
+    finance_sentences = [fin_summary_line]
     total_savings = 0.0
     if cf_cap50.get("explanation"):
         finance_sentences.append(cf_cap50["explanation"])
@@ -367,10 +393,7 @@ def explain_dhw_optimization(
         finance_sentences.append(cf_delay["explanation"])
         total_savings += cf_delay.get("savings_eur", 0.0)
 
-    if not finance_sentences:
-        finance_text = f"Optimale planning over 48 uur: totale stroomkosten €{opt_result.total_cost_eur:.2f}."
-    else:
-        finance_text = " ".join(finance_sentences)
+    finance_text = " ".join(finance_sentences)
 
     # 4. Bullets
     if len(opt_result.runs) >= 1:

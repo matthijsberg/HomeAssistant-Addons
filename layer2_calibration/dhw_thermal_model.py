@@ -215,7 +215,8 @@ class DhwThermalModel:
         hours_ahead: int = 24,
         heat_pump_schedule_slots: Optional[List[int]] = None,
         target_temp_c: float = 50.0,
-        heat_pump_power_kw: float = 1.8
+        heat_pump_power_kw: float = 3.0,
+        params: Optional[dict] = None
     ) -> Dict[str, Any]:
         """
         Simulates 15-minute tank temperature and thermal energy trajectory.

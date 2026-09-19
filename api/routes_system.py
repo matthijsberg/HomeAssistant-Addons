@@ -33,6 +33,26 @@ from models.canonical import StandardizedState, get_state_metadata
 from layer3_scheduling.plan_store import get_plan_store
 
 def handle_get(handler, path: str, qp: dict) -> bool:
+    if path == "/api/settings":
+        cfg = load_json(CONFIG_FILE)
+        opt_cfg = cfg.get("dhw_optimizer", {})
+        cm_cfg = opt_cfg.get("comfort_margin", {})
+        handler._send_json({
+            "status": "success",
+            "baseload_watts": cfg.get("baseload_watts", 300),
+            "solar_cost_eur_kwh": cfg.get("solar_cost_eur_kwh", 0.06),
+            "dhw_optimizer": {
+                "comfort_margin": {
+                    "mode": cm_cfg.get("mode", "p95"),
+                    "tap_stress_factor": float(cm_cfg.get("tap_stress_factor", 1.5)),
+                    "horizon_hours": float(cm_cfg.get("horizon_hours", 8.0)),
+                    "min_margin_c": float(cm_cfg.get("min_margin_c", 0.5)),
+                    "fixed_margin_c": float(cm_cfg.get("fixed_margin_c", 2.0))
+                }
+            }
+        })
+        return True
+
     if path == "/api/config/solar":
         cfg = load_json(CONFIG_FILE)
         sol = cfg.get("solar", {})
@@ -497,7 +517,7 @@ def handle_post(handler, path: str, body: dict) -> bool:
         return True
 
     # INFRASTRUCTURE: Save / Upsert InfluxDB Connection Profile
-    # SETTINGS: Update baseload & solar cost parameters
+    # SETTINGS: Update baseload, solar cost & dhw_optimizer parameters
     if path == "/api/settings" or path == "/api/analytics/solar_cost":
         try:
             cfg = load_json(CONFIG_FILE)
@@ -505,12 +525,66 @@ def handle_post(handler, path: str, body: dict) -> bool:
                 cfg["baseload_watts"] = float(body["baseload_watts"])
             if "solar_cost_eur_kwh" in body:
                 cfg["solar_cost_eur_kwh"] = round(float(body["solar_cost_eur_kwh"]), 4)
+
+            if "dhw_optimizer" in body and isinstance(body["dhw_optimizer"], dict):
+                opt_in = body["dhw_optimizer"]
+                cur_opt = cfg.setdefault("dhw_optimizer", {})
+                if "comfort_margin" in opt_in and isinstance(opt_in["comfort_margin"], dict):
+                    cm_in = opt_in["comfort_margin"]
+                    cur_cm = cur_opt.setdefault("comfort_margin", {})
+                    if "mode" in cm_in:
+                        m_val = str(cm_in["mode"]).lower()
+                        if m_val not in ("p95", "p50", "fixed"):
+                            raise ValueError("Invalid comfort_margin mode (must be 'p95', 'p50', or 'fixed')")
+                        cur_cm["mode"] = m_val
+                    if "tap_stress_factor" in cm_in:
+                        f_val = float(cm_in["tap_stress_factor"])
+                        if not (1.0 <= f_val <= 3.0):
+                            raise ValueError("tap_stress_factor must be between 1.0 and 3.0")
+                        cur_cm["tap_stress_factor"] = round(f_val, 2)
+                    if "horizon_hours" in cm_in:
+                        h_val = float(cm_in["horizon_hours"])
+                        if not (1.0 <= h_val <= 24.0):
+                            raise ValueError("horizon_hours must be between 1.0 and 24.0")
+                        cur_cm["horizon_hours"] = round(h_val, 1)
+                    if "min_margin_c" in cm_in:
+                        min_m = float(cm_in["min_margin_c"])
+                        if not (0.0 <= min_m <= 5.0):
+                            raise ValueError("min_margin_c must be between 0.0 and 5.0")
+                        cur_cm["min_margin_c"] = round(min_m, 2)
+                    if "fixed_margin_c" in cm_in:
+                        fix_m = float(cm_in["fixed_margin_c"])
+                        if not (0.0 <= fix_m <= 10.0):
+                            raise ValueError("fixed_margin_c must be between 0.0 and 10.0")
+                        cur_cm["fixed_margin_c"] = round(fix_m, 2)
+
             save_json(CONFIG_FILE, cfg)
+
+            # Re-plan immediately to reflect new settings
+            try:
+                ensure_active_canonical_plan(force_refresh=True)
+            except Exception as e_plan:
+                print(f"[WARN] Failed to re-plan after settings update: {e_plan}")
+
+            opt_cfg = cfg.get("dhw_optimizer", {})
+            cm_cfg = opt_cfg.get("comfort_margin", {})
             handler._send_json({
                 "status": "success",
                 "baseload_watts": cfg.get("baseload_watts", 300),
-                "solar_cost_eur_kwh": cfg.get("solar_cost_eur_kwh", 0.06)
+                "solar_cost_eur_kwh": cfg.get("solar_cost_eur_kwh", 0.06),
+                "dhw_optimizer": {
+                    "comfort_margin": {
+                        "mode": cm_cfg.get("mode", "p95"),
+                        "tap_stress_factor": float(cm_cfg.get("tap_stress_factor", 1.5)),
+                        "horizon_hours": float(cm_cfg.get("horizon_hours", 8.0)),
+                        "min_margin_c": float(cm_cfg.get("min_margin_c", 0.5)),
+                        "fixed_margin_c": float(cm_cfg.get("fixed_margin_c", 2.0))
+                    }
+                }
             })
+            return True
+        except ValueError as ve:
+            handler._send_json({"status": "error", "message": str(ve)}, 400)
             return True
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, 400)

@@ -35,6 +35,7 @@ def adapt_optimizer_to_dhw_summary(
     spec: Optional[DhwTankSpec] = None,
     params: Optional[DhwOptimizerParams] = None,
     dynamic_peaks: Optional[List[Any]] = None,
+    model_parameters: Optional[Dict[str, Any]] = None,
 ) -> DHWPlanSummary:
     """
     Pure function: Transforms DhwOptimizerResult into the authoritative canonical DHWPlanSummary.
@@ -153,6 +154,13 @@ def adapt_optimizer_to_dhw_summary(
         "dynamic_peaks": peaks_list,
         "savings_eur": explain_data["total_savings_eur"],
         "cost_total_eur": opt_result.total_cost_eur,
+        "electricity_cost_eur": opt_result.electricity_cost_eur,
+        "start_cost_eur": opt_result.start_cost_eur,
+        "salvage_value_eur": opt_result.salvage_value_eur,
+        "net_objective_eur": opt_result.j_objective_eur,
+        "j_objective_eur": opt_result.j_objective_eur,
+        "comfort_margin_mode": getattr(params, "comfort_margin_mode", "p95"),
+        "comfort_boundary_c": round(spec.comfort_min_temp_c + (getattr(params, "min_comfort_margin_c", 0.5) if getattr(params, "comfort_margin_mode", "p95") == "p50" else (getattr(params, "fixed_comfort_margin_c", 2.0) if getattr(params, "comfort_margin_mode", "p95") == "fixed" else getattr(params, "min_comfort_margin_c", 0.5))), 1),
         "trajectory": opt_result.trajectory,
         "unheated_trajectory": explain_data["unheated_trajectory"],
         "validation_issue": opt_result.validation_issue
