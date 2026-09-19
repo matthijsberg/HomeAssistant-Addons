@@ -65,7 +65,8 @@ def adapt_optimizer_to_dhw_summary(
         tariff_provider=tariff_provider,
         spec=spec,
         params=params,
-        dynamic_peaks=dynamic_peaks
+        dynamic_peaks=dynamic_peaks,
+        model_parameters=model_parameters
     )
 
     # 2. Check runs in upcoming 24 hours (first 96 slots)
