@@ -373,7 +373,14 @@ class ModelCalibrationEngine:
             max_shift_pct=0.25
         )
 
-        # 5. Save and return consolidated parameters
+        # 5. Save and return consolidated parameters: merge with existing keys to preserve dhw_cop, dhw_power, etc.
+        """
+        Calibrator ownership domain:
+        - Owns and updates: ua_base, c_wind, c_solar, solar_hourly_tilt_profile,
+          dhw_average_daily_kwh, dhw_standby_loss_kwh, dhw_average_cop, heating_average_cop, calibration_timestamp.
+        - Preserves untouched: dhw_cop, dhw_power, building, heat_pump, dhw_tank,
+          unallocated, metrics, version, and any custom/future configuration blocks.
+        """
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         updated_params = {
             "ua_base": smoothed_ua,
@@ -387,10 +394,12 @@ class ModelCalibrationEngine:
             "calibration_timestamp": now_str
         }
 
-        self.params = updated_params
+        merged_params = dict(self.params or {})
+        merged_params.update(updated_params)
+        self.params = merged_params
         self._save_params()
         print(f"✓ Saved updated parameters to {self.params_path}")
-        return updated_params
+        return merged_params
 
     def _extract_series(self, res: dict) -> dict:
         try:

@@ -43,19 +43,32 @@ def calculate_carnot_cop(
     return round(max(min_cop, min(max_cop, cop)), 2)
 
 
+_LOGGED_COP_FALLBACK = False
+_LOGGED_POWER_FALLBACK = False
+
+
 def get_dhw_cop_params(params: Optional[dict] = None) -> tuple:
     """Extracts DHW COP parameters from params dict with canonical defaults."""
+    global _LOGGED_COP_FALLBACK
     p = params or {}
+    has_custom = False
     if "dhw_cop" in p and isinstance(p["dhw_cop"], dict):
-        p = p["dhw_cop"]
-    elif "dhw_tank" in p and isinstance(p["dhw_tank"], dict) and ("cop_50" in p["dhw_tank"] or "COP_50" in p["dhw_tank"]):
-        p = p["dhw_tank"]
+        cop_cfg = p["dhw_cop"]
+        has_custom = True
+    elif "dhw_tank" in p and isinstance(p["dhw_tank"], dict) and "cop_50" in p["dhw_tank"]:
+        cop_cfg = p["dhw_tank"]
+        has_custom = True
+    else:
+        cop_cfg = {}
+        if not _LOGGED_COP_FALLBACK:
+            print("[WARN] get_dhw_cop_params: geen 'dhw_cop' blok in modelparameters; teruggevallen op standaarden (cop_50=2.0).")
+            _LOGGED_COP_FALLBACK = True
 
-    cop_50 = float(p.get("cop_50", p.get("COP_50", 2.0)))
-    k_t = float(p.get("k_t", p.get("k_T", 0.07)))
-    k_out = float(p.get("k_out", p.get("k_OUT", 0.05)))
-    cop_min = float(p.get("cop_min", p.get("COP_min", 1.4)))
-    cop_max = float(p.get("cop_max", p.get("COP_max", 3.2)))
+    cop_50 = float(cop_cfg.get("cop_50", cop_cfg.get("COP_50", 2.0)))
+    k_t = float(cop_cfg.get("k_t", cop_cfg.get("k_T", 0.07)))
+    k_out = float(cop_cfg.get("k_out", cop_cfg.get("k_OUT", 0.05)))
+    cop_min = float(cop_cfg.get("cop_min", cop_cfg.get("COP_min", 1.4)))
+    cop_max = float(cop_cfg.get("cop_max", cop_cfg.get("COP_max", 3.2)))
     return cop_50, k_t, k_out, cop_min, cop_max
 
 
@@ -94,7 +107,7 @@ def get_dhw_power_params(params: Optional[dict] = None) -> Tuple[float, float, f
     Default calibration from 60-day InfluxDB empirical data:
         P_el(50C, 10C out) = 2.72 kW
         k_t_tank = 0.074 kW / K
-        k_out = 0.005 kW / K
+        k_out = 0.057 kW / K
         clamp = [1.6 kW, 3.5 kW]
     """
     if params and isinstance(params, dict):
@@ -103,11 +116,15 @@ def get_dhw_power_params(params: Optional[dict] = None) -> Tuple[float, float, f
             return (
                 float(p_cfg.get("p_nom_50", 2.72)),
                 float(p_cfg.get("k_t_tank", 0.074)),
-                float(p_cfg.get("k_out", 0.005)),
+                float(p_cfg.get("k_out", 0.057)),
                 float(p_cfg.get("p_min_kw", 1.6)),
                 float(p_cfg.get("p_max_kw", 3.5)),
             )
-    return (2.72, 0.074, 0.005, 1.6, 3.5)
+    global _LOGGED_POWER_FALLBACK
+    if not _LOGGED_POWER_FALLBACK:
+        print("[WARN] get_dhw_power_params: geen 'dhw_power' blok in modelparameters; teruggevallen op standaarden (p_nom_50=2.72).")
+        _LOGGED_POWER_FALLBACK = True
+    return (2.72, 0.074, 0.057, 1.6, 3.5)
 
 
 def dhw_electric_power_kw(

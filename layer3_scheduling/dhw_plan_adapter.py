@@ -81,7 +81,9 @@ def adapt_optimizer_to_dhw_summary(
     else:
         first_run = runs_24h[0]
         sww_target_temp = round(first_run.t_end_c, 1)
-        sww_power_kw = spec.get_electric_power_kw(first_run.t_end_c)
+        first_start_idx = first_run.start_idx
+        first_out_t = float(getattr(slots[first_start_idx], "outdoor_temp_c", getattr(slots[first_start_idx], "outdoor_temp", 10.0))) if first_start_idx < N else 10.0
+        sww_power_kw = spec.get_electric_power_kw(first_run.t_end_c, outdoor_temp_c=first_out_t, params=model_parameters)
 
         if first_run.t_end_c >= 52.0:
             planned_mode = "max_on"
@@ -203,6 +205,7 @@ def apply_optimizer_to_dispatch_slots(
     dispatch_slots: List[DispatchPlanSlot],
     opt_result: DhwOptimizerResult,
     spec: Optional[DhwTankSpec] = None,
+    model_parameters: Optional[Dict[str, Any]] = None,
 ) -> List[DispatchPlanSlot]:
     """
     Pure function: Overlays DhwOptimizerResult onto an existing list of CanonicalDispatchPlan slots.
@@ -229,7 +232,8 @@ def apply_optimizer_to_dispatch_slots(
             state_enum = state_enum_map.get(mode_code, StandardizedState.NORMAL)
             meta = get_state_metadata(state_enum)
 
-            slot.dhw_kw = spec.get_electric_power_kw(t_curr) if is_active else 0.0
+            out_t_k = float(getattr(slot, "outdoor_temp_c", getattr(slot, "outdoor_temp", 10.0)))
+            slot.dhw_kw = spec.get_electric_power_kw(t_curr, outdoor_temp_c=out_t_k, params=model_parameters) if is_active else 0.0
             slot.mode_code = state_enum
             slot.mode_label = meta.get("label", "")
             slot.color_hex = meta.get("color_hex", "")

@@ -1,0 +1,264 @@
+{
+ "description": "Gemeten DHW-compressorvermogen en opwarmsnelheid uit InfluxDB (openhems.energy_telemetry), 60 dagen tot 2026-09-19. Basis voor de vermogenscurve P_el(T_tank) en de afgeleide COP in WP6b.",
+ "captured_at": "2026-09-19T18:30:00+02:00",
+ "query": {
+  "power": "SELECT mean(power_w) FROM energy_telemetry WHERE device_id='daikin_heat_pump' AND mode='dhw' GROUP BY time(5m)",
+  "tank": "SELECT mean(temperature_c) FROM energy_telemetry WHERE device_id='dhw_tank' GROUP BY time(5m)",
+  "outdoor": "SELECT mean(temperature_c) FROM energy_telemetry WHERE device_id='outdoor_weather' GROUP BY time(5m)"
+ },
+ "filter": "power_w >= 800, tanktemperatuur bekend",
+ "sample_count": 160,
+ "power_fit": {
+  "form": "P_el_kw = intercept + slope * T_tank_c",
+  "intercept": -1.442,
+  "slope": 0.0808,
+  "r_squared_on_bin_medians": 0.937,
+  "evaluated": {
+   "40": 1.79,
+   "45": 2.19,
+   "50": 2.6,
+   "55": 3.0,
+   "60": 3.41
+  }
+ },
+ "power_bins": {
+  "40.0-42.5": {
+   "n": 17,
+   "median_w": 1670,
+   "p25": 1417,
+   "p75": 1908
+  },
+  "42.5-45.0": {
+   "n": 18,
+   "median_w": 2264,
+   "p25": 1749,
+   "p75": 2333
+  },
+  "45.0-47.5": {
+   "n": 26,
+   "median_w": 2343,
+   "p25": 1762,
+   "p75": 2444
+  },
+  "47.5-50.0": {
+   "n": 41,
+   "median_w": 2535,
+   "p25": 1988,
+   "p75": 2660
+  },
+  "50.0-52.5": {
+   "n": 24,
+   "median_w": 2700,
+   "p25": 2166,
+   "p75": 2810
+  },
+  "52.5-55.0": {
+   "n": 12,
+   "median_w": 2965,
+   "p25": 2884,
+   "p75": 3154
+  },
+  "57.5-60.0": {
+   "n": 9,
+   "median_w": 3205,
+   "p25": 3106,
+   "p75": 3245
+  }
+ },
+ "thermal_output": {
+  "median_kw_th": 5.41,
+  "note": "vrijwel vlak over 40-60 C; per band: 40-45 5.28, 45-50 4.62, 50-55 6.19, 55-60 5.28",
+  "derived_cop_at_50c": 2.05,
+  "derived_cop_slope_per_k": -0.031,
+  "code_values_v0_103_52": {
+   "cop_50": 2.0,
+   "k_t": -0.07
+  }
+ },
+ "outdoor_temperature_coverage": {
+  "n": 32,
+  "min_c": 13.3,
+  "max_c": 19.8,
+  "median_c": 13.9,
+  "conclusion": "te weinig spreiding om k_out te fitten; opnieuw uitvoeren na het stookseizoen"
+ },
+ "measured_runs": [
+  {
+   "minutes": 45,
+   "t_start": 39.3,
+   "t_end": 49.5,
+   "p_el_kw": 2.22,
+   "rate_k_per_h": 13.5,
+   "p_th_kw": 5.55,
+   "cop": 2.5
+  },
+  {
+   "minutes": 45,
+   "t_start": 40.4,
+   "t_end": 53.4,
+   "p_el_kw": 2.39,
+   "rate_k_per_h": 17.3,
+   "p_th_kw": 7.11,
+   "cop": 2.98
+  },
+  {
+   "minutes": 35,
+   "t_start": 48.5,
+   "t_end": 57.3,
+   "p_el_kw": 2.87,
+   "rate_k_per_h": 15.0,
+   "p_th_kw": 6.19,
+   "cop": 2.16
+  },
+  {
+   "minutes": 50,
+   "t_start": 47.3,
+   "t_end": 60.1,
+   "p_el_kw": 2.93,
+   "rate_k_per_h": 15.4,
+   "p_th_kw": 6.34,
+   "cop": 2.17
+  },
+  {
+   "minutes": 45,
+   "t_start": 50.3,
+   "t_end": 59.9,
+   "p_el_kw": 2.83,
+   "rate_k_per_h": 12.8,
+   "p_th_kw": 5.28,
+   "cop": 1.86
+  },
+  {
+   "minutes": 65,
+   "t_start": 45.7,
+   "t_end": 60.0,
+   "p_el_kw": 2.7,
+   "rate_k_per_h": 13.2,
+   "p_th_kw": 5.45,
+   "cop": 2.02
+  },
+  {
+   "minutes": 30,
+   "t_start": 43.5,
+   "t_end": 50.0,
+   "p_el_kw": 2.32,
+   "rate_k_per_h": 13.0,
+   "p_th_kw": 5.36,
+   "cop": 2.31
+  },
+  {
+   "minutes": 45,
+   "t_start": 40.3,
+   "t_end": 49.4,
+   "p_el_kw": 2.24,
+   "rate_k_per_h": 12.1,
+   "p_th_kw": 5.0,
+   "cop": 2.24
+  },
+  {
+   "minutes": 30,
+   "t_start": 42.0,
+   "t_end": 49.4,
+   "p_el_kw": 2.17,
+   "rate_k_per_h": 14.9,
+   "p_th_kw": 6.12,
+   "cop": 2.82
+  }
+ ],
+ "energy_impact_vs_fixed_3kw": {
+  "40->50": {
+   "kwh_measured": 1.68,
+   "kwh_fixed_3kw": 2.29,
+   "delta_pct": -27
+  },
+  "45->55": {
+   "kwh_measured": 1.99,
+   "kwh_fixed_3kw": 2.29,
+   "delta_pct": -13
+  },
+  "50->60": {
+   "kwh_measured": 2.3,
+   "kwh_fixed_3kw": 2.29,
+   "delta_pct": 0
+  }
+ },
+ "marginal_cost_per_kelvin_at_0111_eur": {
+  "40": 0.0155,
+  "45": 0.019,
+  "50": 0.0224,
+  "55": 0.0258
+ },
+ "steady_state_fit": {
+  "description": "Herfit op alleen midden-van-run slots (buren links en rechts ook in dhw-modus), zodat opstart- en uitloopintervallen met deelbelasting wegvallen. Dit is de curve die de solver hoort te gebruiken, want die plant hele kwartieren.",
+  "sample_count": 115,
+  "form": "P_el_kw = p_nom_50 + k_t_tank * (T_tank - 50) - k_out * (T_out - 10)",
+  "p_nom_50": 2.583,
+  "k_t_tank": 0.0831,
+  "k_out": 0.0,
+  "p_min_kw": 1.3,
+  "p_max_kw": 3.6,
+  "r_squared": 0.622,
+  "evaluated": {
+   "40": 1.75,
+   "45": 2.17,
+   "50": 2.58,
+   "55": 3.0,
+   "60": 3.41
+  },
+  "bins_mid_run": {
+   "40.0-42.5": {
+    "n": 12,
+    "median_w": 1755
+   },
+   "42.5-45.0": {
+    "n": 16,
+    "median_w": 2274
+   },
+   "45.0-47.5": {
+    "n": 22,
+    "median_w": 2357
+   },
+   "47.5-50.0": {
+    "n": 25,
+    "median_w": 2549
+   },
+   "50.0-52.5": {
+    "n": 17,
+    "median_w": 2768
+   },
+   "52.5-55.0": {
+    "n": 9,
+    "median_w": 3074
+   },
+   "55.0-57.5": {
+    "n": 6,
+    "median_w": 3167
+   },
+   "57.5-60.0": {
+    "n": 6,
+    "median_w": 3206
+   }
+  },
+  "implied_cop_if_p_th_flat_5_41": {
+   "cop_50": 2.09,
+   "slope_per_k": -0.0674,
+   "cop_at_60": 1.59,
+   "note": "cop_min moet <= 1.59 zijn; de huidige 1.4 knelt pas boven 69 C en is dus veilig"
+  },
+  "comparison_v0_103_56": {
+   "hermes": {
+    "p_nom_50": 2.72,
+    "k_t_tank": 0.074,
+    "k_out": 0.005
+   },
+   "deviation_w": {
+    "40": "+230",
+    "45": "+180",
+    "50": "+140",
+    "55": "+90",
+    "60": "+50"
+   },
+   "bias_note": "De afwijking is het grootst aan de onderkant. Daardoor lijkt een run van 40 naar 50 C ca. 8% duurder dan gemeten, terwijl doorstoken van 50 naar 60 C maar 3% te duur uitvalt. De fout werkt systematisch tegen de autonome baseline."
+  }
+ }
+}

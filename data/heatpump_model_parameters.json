@@ -15,7 +15,7 @@
     "t_ref_tank_c": 50.0,
     "k_t_tank": 0.074,
     "t_ref_out_c": 10.0,
-    "k_out": 0.005,
+    "k_out": 0.057,
     "p_min_kw": 1.6,
     "p_max_kw": 3.5
   },

@@ -10,6 +10,37 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.57] — 2026-09-19 (DHW Parameter Flow End-to-End & Empirische k_out Validatie)
+
+### Deel A: Parameterbestand Aansluiten & Calibrator Behoud
+- **Parameter- & Buitentemperatuurdoorvoer:**
+  - Alle 8 aanroepen van `DhwTankSpec.get_electric_power_kw` in `dhw_optimizer.py` en `dhw_plan_adapter.py` geven nu expliciet `params=model_parameters` en de actuele/voorspelde `outdoor_temp_c` per slot door.
+  - Hiermee is gewaarborgd dat parameterwijzigingen in `heatpump_model_parameters.json` direct doorwerken in de solver en gepubliceerde plannen.
+- **Calibrator Behoudt Onbekende Blokken:**
+  - In `layer2_calibration/calibrator.py` (`ModelCalibrationEngine`) overschrijft een kalibratieronde niet langer onbekende sleutels; bestaande blokken zoals `dhw_cop`, `dhw_power`, `building`, etc. worden behouden via een veilige samenvoeging.
+- **Live Parameterbestand Geharmoniseerd:**
+  - `/config/heatpump_model_parameters.json` bevat nu zowel `dhw_cop` als `dhw_power` met gevalideerde waarden. Automatische backup `.json.bak` aangemaakt.
+- **Zichtbare Fallback-Waarschuwingen:**
+  - `get_dhw_power_params` en `get_dhw_cop_params` in `models/physics.py` loggen nu een duidelijke waarschuwing (`[WARN]`) zodra er op ingebouwde standaardwaarden wordt teruggevallen.
+- **Acceptatietests:**
+  - `tests/unit/test_dhw_power_params_integration.py` toegevoegd met 4 gerichte acceptatietests:
+    - `test_power_params_are_read_from_file`
+    - `test_calibration_preserves_unknown_blocks`
+    - `test_live_params_file_contains_dhw_blocks`
+    - `test_outdoor_temperature_reaches_power_function`
+
+### Deel B: Empirische Validatie van k_out
+- **Volledige Jaaranalyse (365 dagen telemetrie in InfluxDB openhems):**
+  - $N = 2.365$ stationaire 5-minuten intervallen met actieve buren ($P > 800\text{ W}$, $30 \le T_{\text{tank}} \le 65^\circ\text{C}$, $-20 \le T_{\text{out}} \le 45^\circ\text{C}$).
+  - Buitentemperatuurspreiding $17{,}5\text{ K}$ ($P_{05} = 0{,}9^\circ\text{C}$, $P_{95} = 18{,}4^\circ\text{C}$ $\ge 15\text{ K}$).
+  - Koudste kwintiel $474$ intervallen, warmste kwintiel $473$ intervallen ($\ge 30$).
+  - Simultane meervoudige OLS-regressie toont $k_{\text{out}} = +0{,}0570\text{ kW/K}$ ($t = -22{,}61$, 95% CI $[0{,}0520 ; 0{,}0619]$, $p < 10^{-15}$).
+  - Alle vier de statistische acceptatiecriteria zijn behaald. De fysica verklaart de negatieve correlatie (minder compressielift nodig bij hogere verdampingstemperaturen).
+- **Herhaalbaar Kalibratiescript:**
+  - `scripts/calibrate_dhw.py` uitgebreid met `--mode power`, `--dry-run`, `--write` en geautomatiseerde criteria-verificatie.
+
+---
+
 ## [0.103.56] — 2026-09-19 (Dynamisch DHW Compressorvermogen & WP7 Autonome Baseline Simulator)
 
 ### Fysische Modellering & Dynamisch Compressorvermogen

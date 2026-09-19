@@ -105,7 +105,8 @@ def test_adapter_maps_to_canonical_dhw_summary():
 
     assert isinstance(summary, DHWPlanSummary)
     assert summary.target_temp_c == round(first_run.t_end_c, 1)
-    assert summary.power_kw == spec.get_electric_power_kw(first_run.t_end_c)
+    first_out_t = slots[first_run.start_idx].outdoor_temp_c
+    assert summary.power_kw == spec.get_electric_power_kw(first_run.t_end_c, outdoor_temp_c=first_out_t)
 
     expected_mode = "max_on" if first_run.t_end_c >= 52.0 else "forced_on"
     assert summary.planned_mode == expected_mode

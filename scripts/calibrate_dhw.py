@@ -6,6 +6,9 @@ Fits canonical DHW parameters: COP_50, k_T, k_out via OLS over historical runs.
 
 import os
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import json
 import math
 import urllib.request
@@ -219,6 +222,179 @@ def run_dhw_calibration() -> Dict[str, Any]:
     }
 
 
+def run_dhw_power_calibration(dry_run: bool = True, write: bool = False, days: int = 365) -> Dict[str, Any]:
+    """
+    Deel B: Validates and fits the dynamic DHW electrical power model:
+        P_el = p_nom_50 + k_t_tank * (T_tank - 50) - k_out * (T_out - 10)
+    using stationary 5-minute intervals across InfluxDB energy_telemetry.
+    Enforces strict statistical acceptance criteria before allowing parameters to be written.
+    """
+    import shutil
+    import scipy.stats as stats
+    from api.secrets_store import PARAMS_FILE, load_json, save_json
+
+    sec = load_secrets()
+    pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
+    influx_url = "http://a0d7b954-influxdb:8086"
+    db_name = "openhems"
+
+    q = f"""
+    SELECT mean(power_w) AS power_w FROM energy_telemetry WHERE device_id = 'daikin_heat_pump' AND mode = 'dhw' AND time >= now() - {days}d GROUP BY time(5m) fill(none);
+    SELECT mean(temperature_c) AS tank_temp FROM energy_telemetry WHERE device_id = 'dhw_tank' AND time >= now() - {days}d GROUP BY time(5m) fill(none);
+    SELECT mean(temperature_c) AS out_temp FROM energy_telemetry WHERE device_id = 'outdoor_weather' AND time >= now() - {days}d GROUP BY time(5m) fill(none);
+    """
+    data = query_influx(influx_url, db_name, "openhems", pwd, q)
+
+    p_dict = {row[0]: row[1] for row in data["results"][0]["series"][0]["values"] if row[1] is not None}
+    t_dict = {row[0]: row[1] for row in data["results"][1]["series"][0]["values"] if row[1] is not None}
+    out_dict = {row[0]: row[1] for row in data["results"][2]["series"][0]["values"] if row[1] is not None}
+
+    # 1. Filter stationary intervals (active neighbor on both sides + power > 800W)
+    usable_p = []
+    usable_tank = []
+    usable_out = []
+
+    ts_sorted = sorted(p_dict.keys())
+    for ts in ts_sorted:
+        p_val = p_dict.get(ts)
+        p_prev = p_dict.get(ts - 300)
+        p_next = p_dict.get(ts + 300)
+
+        if p_val is None or p_val < 800:
+            continue
+        if p_prev is None or p_prev < 800:
+            continue
+        if p_next is None or p_next < 800:
+            continue
+
+        t_tank = t_dict.get(ts)
+        t_out = out_dict.get(ts)
+        if t_tank is None or t_out is None:
+            continue
+        if not (30.0 <= t_tank <= 65.0):
+            continue
+        if not (-20.0 <= t_out <= 45.0):
+            continue
+
+        usable_p.append(p_val)
+        usable_tank.append(t_tank)
+        usable_out.append(t_out)
+
+    N = len(usable_p)
+    p_arr = np.array(usable_p)
+    tank_arr = np.array(usable_tank)
+    out_arr = np.array(usable_out)
+
+    # 2. Evaluate Acceptance Criteria
+    out_p05 = float(np.percentile(out_arr, 5)) if N > 0 else 0.0
+    out_p95 = float(np.percentile(out_arr, 95)) if N > 0 else 0.0
+    out_spread = out_p95 - out_p05
+
+    q20 = float(np.percentile(out_arr, 20)) if N > 0 else 0.0
+    q80 = float(np.percentile(out_arr, 80)) if N > 0 else 0.0
+    n_cold = int(np.sum(out_arr <= q20)) if N > 0 else 0
+    n_warm = int(np.sum(out_arr >= q80)) if N > 0 else 0
+
+    crit_spread_ok = (out_spread >= 15.0)
+    crit_count_ok = (N >= 200)
+    crit_quintiles_ok = (n_cold >= 30 and n_warm >= 30)
+
+    # 3. Simultaneous Multiple OLS Regression
+    X = np.column_stack([np.ones(N), tank_arr - 50.0, -(out_arr - 10.0)])
+    Y = p_arr / 1000.0  # Convert to kW
+    beta = np.linalg.lstsq(X, Y, rcond=None)[0]
+    residuals = Y - X @ beta
+    dof = N - X.shape[1]
+    s2 = np.sum(residuals**2) / dof
+    var_beta = s2 * np.linalg.inv(X.T @ X)
+    se_beta = np.sqrt(np.diag(var_beta))
+
+    t_stat = beta / se_beta
+    t_crit = stats.t.ppf(0.975, dof)
+    ci_lower = beta - t_crit * se_beta
+    ci_upper = beta + t_crit * se_beta
+    p_values = 2 * (1 - stats.t.cdf(np.abs(t_stat), dof))
+
+    # Significance test: 95% CI of k_out must not contain 0
+    crit_signif_ok = not (ci_lower[2] <= 0.0 <= ci_upper[2])
+    all_criteria_passed = crit_spread_ok and crit_count_ok and crit_quintiles_ok and crit_signif_ok
+
+    report = {
+        "n_stationary_intervals": N,
+        "outdoor_temp_spread_k": round(out_spread, 1),
+        "outdoor_p05_c": round(out_p05, 1),
+        "outdoor_p95_c": round(out_p95, 1),
+        "coldest_quintile_count": n_cold,
+        "warmest_quintile_count": n_warm,
+        "criteria": {
+            "spread_ge_15k": crit_spread_ok,
+            "samples_ge_200": crit_count_ok,
+            "quintiles_ge_30": crit_quintiles_ok,
+            "k_out_significant_95pct": crit_signif_ok,
+            "all_passed": all_criteria_passed
+        },
+        "estimates": {
+            "p_nom_50_kw": {
+                "estimate": round(float(beta[0]), 3),
+                "se": round(float(se_beta[0]), 4),
+                "ci_95": [round(float(ci_lower[0]), 3), round(float(ci_upper[0]), 3)],
+                "p_value": float(p_values[0])
+            },
+            "k_t_tank_kw_per_k": {
+                "estimate": round(float(beta[1]), 4),
+                "se": round(float(se_beta[1]), 4),
+                "ci_95": [round(float(ci_lower[1]), 4), round(float(ci_upper[1]), 4)],
+                "p_value": float(p_values[1])
+            },
+            "k_out_kw_per_k": {
+                "estimate": round(float(beta[2]), 4),
+                "se": round(float(se_beta[2]), 4),
+                "ci_95": [round(float(ci_lower[2]), 4), round(float(ci_upper[2]), 4)],
+                "p_value": float(p_values[2])
+            }
+        }
+    }
+
+    if write and not dry_run:
+        if not all_criteria_passed:
+            print("[ERROR] Weigeren parameters weg te schrijven: niet alle statistische criteria zijn gehaald!")
+            report["write_status"] = "refused_criteria_failed"
+        else:
+            # Create backup of PARAMS_FILE
+            backup_path = PARAMS_FILE.with_suffix(".json.bak")
+            shutil.copyfile(PARAMS_FILE, backup_path)
+            cur_cfg = load_json(PARAMS_FILE)
+            cur_cfg.setdefault("dhw_power", {})["p_nom_50"] = round(float(beta[0]), 2)
+            cur_cfg["dhw_power"]["k_t_tank"] = round(float(beta[1]), 3)
+            cur_cfg["dhw_power"]["k_out"] = round(float(beta[2]), 3)
+            cur_cfg["dhw_power"]["t_ref_tank_c"] = 50.0
+            cur_cfg["dhw_power"]["t_ref_out_c"] = 10.0
+            cur_cfg["dhw_power"]["p_min_kw"] = 1.6
+            cur_cfg["dhw_power"]["p_max_kw"] = 3.5
+            save_json(PARAMS_FILE, cur_cfg)
+            print(f"✓ Gekalibreerde parameters opgeslagen naar {PARAMS_FILE} (backup: {backup_path})")
+            report["write_status"] = "written"
+    else:
+        report["write_status"] = "dry_run"
+
+    return report
+
+
 if __name__ == "__main__":
-    res = run_dhw_calibration()
-    print(json.dumps(res, indent=2))
+    import argparse
+    parser = argparse.ArgumentParser(description="DHW Calibrator")
+    parser.add_argument("--mode", choices=["cop", "power", "all"], default="all")
+    parser.add_argument("--write", action="store_true", help="Write fitted parameters to file")
+    parser.add_argument("--dry-run", action="store_true", default=True, help="Display only")
+    args = parser.parse_args()
+
+    results = {}
+    if args.mode in ["cop", "all"]:
+        print("=== DHW COP Empirical Calibration ===")
+        results["cop"] = run_dhw_calibration()
+    if args.mode in ["power", "all"]:
+        print("=== DHW Electrical Power Model Calibration ===")
+        is_dry = not args.write
+        results["power"] = run_dhw_power_calibration(dry_run=is_dry, write=args.write)
+
+    print(json.dumps(results, indent=2))

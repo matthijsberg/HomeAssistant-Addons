@@ -450,7 +450,7 @@ def solve(
             )
 
             # u = 1: heating step
-            p_el = spec.get_electric_power_kw(t_curr)
+            p_el = spec.get_electric_power_kw(t_curr, outdoor_temp_c=t_out_k, params=model_parameters)
             tank_spec_step = dict(tank_spec_dict)
             tank_spec_step["heat_pump_power_kw"] = p_el
             t_next_1[m] = dhw_step(
@@ -579,7 +579,7 @@ def solve(
 
         # Evaluate candidate action u = 1
         cand_cost_1 = np.inf
-        p_el = spec.get_electric_power_kw(current_t)
+        p_el = spec.get_electric_power_kw(current_t, outdoor_temp_c=t_out_k, params=model_parameters)
         tank_spec_step = dict(tank_spec_dict)
         tank_spec_step["heat_pump_power_kw"] = p_el
         t_next_cand_1 = dhw_step(
@@ -645,8 +645,8 @@ def solve(
     for k in range(N):
         u_k = planned_u[k]
         t_out_k = out_temps[k]
-        p_el_05 = spec.get_electric_power_kw(curr_05)
-        p_el_95 = spec.get_electric_power_kw(curr_95)
+        p_el_05 = spec.get_electric_power_kw(curr_05, outdoor_temp_c=t_out_k, params=model_parameters)
+        p_el_95 = spec.get_electric_power_kw(curr_95, outdoor_temp_c=t_out_k, params=model_parameters)
 
         spec_05 = dict(tank_spec_dict, heat_pump_power_kw=p_el_05)
         spec_95 = dict(tank_spec_dict, heat_pump_power_kw=p_el_95)
@@ -699,7 +699,7 @@ def solve(
             slot_modes[k] = "max_on" if t_k >= 52.0 else "forced_on"
 
             # Compute slot financials
-            p_el = spec.get_electric_power_kw(t_k)
+            p_el = spec.get_electric_power_kw(t_k, outdoor_temp_c=out_temps[k], params=model_parameters)
             c_slot, self_kwh, grid_kwh, _ = calculate_slot_financials(
                 solar_kw=solar_kws[k],
                 unalloc_kw=unalloc_kws[k],
@@ -888,7 +888,7 @@ def evaluate_plan_metrics(
             })
 
         # Electricity cost & physical step
-        p_el = spec.get_electric_power_kw(curr_t) if u_k == 1 else 0.0
+        p_el = spec.get_electric_power_kw(curr_t, outdoor_temp_c=out_temps[k], params=model_parameters) if u_k == 1 else 0.0
         step_dict = dict(tank_spec_dict, heat_pump_power_kw=p_el)
         curr_t = dhw_step(
             t_tank_c=curr_t,
