@@ -2,7 +2,14 @@
   "ua_base": 7.75896,
   "c_wind": 0.005,
   "c_solar": 0.05626,
-  "dhw_average_cop": 2.04,
+  "dhw_average_cop": 2.0,
+  "dhw_cop": {
+    "cop_50": 2.0,
+    "k_t": 0.07,
+    "k_out": 0.05,
+    "cop_min": 1.4,
+    "cop_max": 3.2
+  },
   "heating_average_cop": 4.8,
   "calibration_timestamp": "2026-09-06 08:02:06",
   "building": {

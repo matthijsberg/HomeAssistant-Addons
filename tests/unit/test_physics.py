@@ -54,8 +54,8 @@ def test_dhw_cop_monotonic_decrease_with_tank_temp():
         assert cops[i] > cops[i + 1], f"COP should decrease: {cops[i]} > {cops[i+1]} at {tank_temps[i]} vs {tank_temps[i+1]}"
 
     # Check nominal points
-    assert dhw_cop(50.0, 10.0) == 2.85
-    assert dhw_cop(60.0, 10.0) == 2.15
+    assert dhw_cop(50.0, 10.0) == 2.0
+    assert dhw_cop(60.0, 10.0) == 1.4
 
 
 def test_dhw_cop_monotonic_increase_with_outdoor_temp():
@@ -70,13 +70,50 @@ def test_dhw_cop_monotonic_increase_with_outdoor_temp():
 
 def test_dhw_cop_clamping():
     """Verify that extreme cold/hot or extreme tank temps are clamped to [COP_min, COP_max]."""
-    # Extremely cold outdoor temp and hot tank -> clamped to min (1.6)
+    # Extremely cold outdoor temp and hot tank -> clamped to min (1.4)
     cop_low = dhw_cop(t_tank_c=70.0, t_outdoor_c=-20.0)
-    assert cop_low == 1.6
+    assert cop_low == 1.4
 
-    # Mild outdoor temp and very cold tank -> clamped to max (3.6)
+    # Mild outdoor temp and very cold tank -> clamped to max (3.2)
     cop_high = dhw_cop(t_tank_c=20.0, t_outdoor_c=35.0)
-    assert cop_high == 3.6
+    assert cop_high == 3.2
+
+
+def test_dhw_warming_rate_consistency():
+    """
+    WP6 Consistency Guardrail:
+    Verify that simulated tank warming rate with 3.0 kW electrical power and COP ~2.0
+    is within 25% of the empirical 12 to 15 °C/hour (benchmark 13.5 °C/h) observed in InfluxDB runs.
+    """
+    c_tank = 0.407  # kWh/K for 350L
+    p_el = 3.0      # kW compressor draw
+    t_start = 45.0
+    t_out = 10.0
+    ua = 2.5        # W/K
+    spec = {
+        "thermal_capacity_kwh_per_k": c_tank,
+        "ua_w_per_k": ua,
+        "heat_pump_power_kw": p_el,
+        "target_temp_c": 60.0
+    }
+    t_curr = t_start
+    for _ in range(4):
+        t_curr = dhw_step(
+            t_tank_c=t_curr,
+            u=1.0,
+            q_tap_kwh=0.0,
+            t_outdoor_c=t_out,
+            dt_h=0.25,
+            spec=spec,
+            t_max_c=60.0
+        )
+    warming_rate_per_hour = t_curr - t_start
+    empirical_benchmark = 13.5
+    relative_error = abs(warming_rate_per_hour - empirical_benchmark) / empirical_benchmark
+    assert relative_error <= 0.25, (
+        f"Simulated warming rate {warming_rate_per_hour:.2f} °C/h deviates by "
+        f"{relative_error * 100:.1f}% from empirical benchmark {empirical_benchmark} °C/h (must be <= 25%)"
+    )
 
 
 def test_dhw_step_energy_conservation():

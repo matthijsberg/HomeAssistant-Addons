@@ -23,9 +23,9 @@ class DhwTankSpec:
     specific_heat_water: float = 4.184        # kJ / (kg * K)
     standby_loss_50_kw: float = 0.0589         # kW standby heat loss at 50°C
     standby_loss_60_kw: float = 0.0850         # kW standby heat loss at 60°C
-    heat_pump_electric_kw: float = 1.8         # Nominal compressor electrical power (50°C run)
-    solar_boost_electric_kw: float = 2.4       # Boost compressor electrical power (60°C run)
-    thermal_output_kw: float = 6.5             # Nominal thermal heat output (kW_th)
+    heat_pump_electric_kw: float = 3.0         # Nominal compressor electrical power (3.0 kW)
+    solar_boost_electric_kw: float = 3.0       # Boost compressor electrical power (3.0 kW)
+    thermal_output_kw: float = 6.0             # Nominal thermal heat output (kW_th, 3.0 kW * 2.0 COP)
     comfort_min_temp_c: float = 40.0           # Minimum acceptable shower temperature
     target_setpoint_c: float = 50.0            # Nominal comfort target setpoint
     boost_setpoint_c: float = 60.0             # Solar/economic buffer setpoint
@@ -73,9 +73,9 @@ class DhwTankSpec:
         sh = float(b_cfg.get("specific_heat_water", 4.184))
         s50 = float(b_cfg.get("standby_loss_50_kw", 0.0589))
         s60 = float(b_cfg.get("standby_loss_60_kw", 0.0850))
-        p_nom = float(b_cfg.get("compressor_power_kw", 1.8))
-        p_boost = float(b_cfg.get("solar_boost_power_kw", 2.4))
-        th_cap = float(b_cfg.get("thermal_output_kw", 6.5))
+        p_nom = float(b_cfg.get("compressor_power_kw", 3.0))
+        p_boost = float(b_cfg.get("solar_boost_power_kw", 3.0))
+        th_cap = float(b_cfg.get("thermal_output_kw", 6.0))
         t_comf = float(b_cfg.get("min_comfort_temp_c", 40.0))
         t_set = float(b_cfg.get("fallback_setpoint_temp", 50.0))
         t_boost = float(b_cfg.get("boost_setpoint_temp", 60.0))

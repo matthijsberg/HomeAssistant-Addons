@@ -51,11 +51,11 @@ def get_dhw_cop_params(params: Optional[dict] = None) -> tuple:
     elif "dhw_tank" in p and isinstance(p["dhw_tank"], dict) and ("cop_50" in p["dhw_tank"] or "COP_50" in p["dhw_tank"]):
         p = p["dhw_tank"]
 
-    cop_50 = float(p.get("cop_50", p.get("COP_50", 2.85)))
+    cop_50 = float(p.get("cop_50", p.get("COP_50", 2.0)))
     k_t = float(p.get("k_t", p.get("k_T", 0.07)))
     k_out = float(p.get("k_out", p.get("k_OUT", 0.05)))
-    cop_min = float(p.get("cop_min", p.get("COP_min", 1.6)))
-    cop_max = float(p.get("cop_max", p.get("COP_max", 3.6)))
+    cop_min = float(p.get("cop_min", p.get("COP_min", 1.4)))
+    cop_max = float(p.get("cop_max", p.get("COP_max", 3.2)))
     return cop_50, k_t, k_out, cop_min, cop_max
 
 
@@ -202,8 +202,8 @@ def dhw_step(
 def calculate_dhw_cop(
     target_temp_c: float,
     outdoor_temp_c: Optional[float] = None,
-    min_cop: float = 1.8,
-    max_cop: float = 4.5,
+    min_cop: float = 1.4,
+    max_cop: float = 3.2,
     params: Optional[dict] = None,
 ) -> float:
     """
@@ -219,8 +219,8 @@ def calculate_dhw_cop(
 
 def calculate_dhw_thermal_output_kw(
     target_temp_c: float,
-    heat_pump_electric_kw: float = 1.8,
-    solar_boost_electric_kw: float = 2.4,
+    heat_pump_electric_kw: float = 3.0,
+    solar_boost_electric_kw: float = 3.0,
     outdoor_temp_c: Optional[float] = None,
     params: Optional[dict] = None,
 ) -> float:

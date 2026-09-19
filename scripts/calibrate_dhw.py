@@ -191,6 +191,11 @@ def run_dhw_calibration() -> Dict[str, Any]:
     ss_res = float(np.sum(res_vec ** 2))
     r_squared = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
 
+    durations = [d["duration_min"] for d in dataset]
+    powers = [(d["e_el_kwh"] / (d["duration_min"] / 60.0)) for d in dataset]
+    rates = [((d["t_end_c"] - d["t_start_c"]) / (d["duration_min"] / 60.0)) for d in dataset]
+    th_powers = [(d["q_th_kwh"] / (d["duration_min"] / 60.0)) for d in dataset]
+
     return {
         "n_runs": n_runs,
         "cop_50_fitted": round(cop_50_fit, 3),
@@ -199,8 +204,15 @@ def run_dhw_calibration() -> Dict[str, Any]:
         "r_squared": round(r_squared, 3),
         "mae": round(mae, 3),
         "rmse": round(rmse, 3),
+        "mean_duration_min": round(float(np.mean(durations)), 1),
+        "median_duration_min": round(float(np.median(durations)), 1),
+        "mean_power_kw": round(float(np.mean(powers)), 2),
+        "median_power_kw": round(float(np.median(powers)), 2),
+        "mean_warming_rate_c_per_h": round(float(np.mean(rates)), 1),
+        "median_warming_rate_c_per_h": round(float(np.median(rates)), 1),
+        "mean_thermal_output_kw": round(float(np.mean(th_powers)), 2),
         "current_defaults": {
-            "cop_50": 2.85,
+            "cop_50": 2.0,
             "k_t": 0.07,
             "k_out": 0.05
         }

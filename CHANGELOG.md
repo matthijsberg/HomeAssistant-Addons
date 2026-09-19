@@ -10,6 +10,25 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.52] — 2026-09-19 (Fysische DHW Kalibratie & Vermogens-/COP-Herijking)
+
+### Fysische Kalibratie & DHW Vermogens-/COP-Correctie (WP6)
+- **Triple-Check & Empirische Kalibratie uit InfluxDB:**
+  - Uit analyse van 382 historische DHW-runs in InfluxDB blijkt dat een tapwaterrun gemiddeld slechts 36–40 minuten duurt (nooit 2 uur) en dat het 350L vat tijdens runs met 12 tot 15 °C per uur opwarmt ($\approx 5{,}5 - 6{,}2\text{ kW}_{\text{th}}$).
+  - De Daikin Altherma trekt tijdens DHW-vollast consistent $\sim 2{,}89\text{ kW}_{\text{el}}$ ($\approx 3{,}0\text{ kW}_{\text{el}}$).
+  - Bij $3{,}0\text{ kW}_{\text{el}}$ en $\sim 6{,}0\text{ kW}_{\text{th}}$ hoort een werkelijke $\text{COP} \approx 2{,}0$ bij 50°C (OLS fit op 345 runs geeft $\text{COP}_{50} = 1{,}902$).
+- **Gezamenlijke Correctie Vermogen & COP:**
+  - Elektrisch vermogen in `DhwTankSpec` verhoogd van $1{,}8\text{ kW}$ naar $3{,}0\text{ kW}$.
+  - Basis-COP in `data/heatpump_model_parameters.json` en `models/physics.py` verlaagd van $2{,}85$ naar $2{,}0$ met nieuw configureerbaar `dhw_cop`-blok (`cop_50: 2.0`, `k_t: 0.07`, `k_out: 0.05`, bounds `[1.4, 3.2]`).
+- **Impact op Getoonde Cijfers (Factor 1,67 Correctie):**
+  - Alle kWh en euro's per tapwaterrun in de UI waren tot nu toe een factor $1{,}67$ ($3{,}0 / 1{,}8$) te laag. Run 1 van vannacht toonde bijvoorbeeld $1{,}35\text{ kWh}$ en €$0{,}24$, maar kostte in werkelijkheid ongeveer $2{,}25\text{ kWh}$ en €$0{,}38$.
+  - De temperatuurvoorspellingen en trajectories klopten fysisch al wel, doordat de oude aanname $1{,}8\text{ kW} \times 2{,}85\text{ COP} = 5{,}13\text{ kW}_{\text{th}}$ toevallig nagenoeg gelijk was aan de werkelijke output van $3{,}0\text{ kW} \times 2{,}0\text{ COP} = 6{,}0\text{ kW}_{\text{th}}$ minus stilstandsverliezen.
+- **Guardrail & CI:**
+  - Nieuwe consistentietest `test_dhw_warming_rate_consistency` in `tests/unit/test_physics.py` garandeert dat de gesimuleerde opwarmsnelheid binnen 25% van de empirische $13{,}5^\circ\text{C}/\text{uur}$ blijft.
+  - Kalibratiescript `scripts/calibrate_dhw.py` uitgebreid met automatische rapportage van gemiddelde run-duur, elektrisch vermogen en opwarmsnelheid.
+
+---
+
 ## [0.95.1] — 2026-09-15 (Security Audit & Vulnerability Remediation)
 
 ### Security Hardening
