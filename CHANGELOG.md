@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.63] — 2026-09-19 (Dynamisch Oplopend DHW Vermogen per Kwartier in Verbruiksgrafiek)
+
+### Central Planner & Dispatch Slots
+- **Dynamische $P_{\text{el}}(T, T_{\text{out}})$ Toewijzing per Slot in PlanStore:**
+  - In `layer3_scheduling/central_planner.py` werd `slot.dhw_kw` voorheen gevuld met een statische constante (`sww_power_kw`), waardoor alle roze balken in de Verbruiksvoorspelling op gelijke hoogte stonden.
+  - Nu berekent `CentralPlanner.plan()` per actief kwartier het exacte dynamische compressorvermogen op basis van de oplopende tanktemperatuur $T_k$ en buitentemperatuur $T_{\text{out}, k}$.
+  - De roze staven in de Verbruiksvoorspelling lopen nu zichtbaar en fysisch correct op (bijv. van 1,69 kW bij 40°C naar 2,83 kW bij 50°C en 3,4 kW bij 60°C).
+
+---
+
 ## [0.103.62] — 2026-09-19 (Consistente Raming 50°C vs 60°C bij Autonome Start)
 
 ### Uitleglaag & Ramingen

@@ -167,6 +167,7 @@ class CentralPlanner:
         daytime_arbitrage_audit = None
         arbiter_res = None
         dhw_summary_override = None
+        res_opt = None
 
         # Priority 0: DHW Circuit Disabled in Home Assistant (e.g. Vacation / Holiday / Off)
         if not getattr(frame, "is_dhw_enabled", True):
@@ -333,8 +334,14 @@ class CentralPlanner:
             h_slot = heating_plan.slots[i] if i < len(heating_plan.slots) else None
             heating_kw = h_slot.heating_kw_el if h_slot else 0.0
 
-            # DHW allocation
-            dhw_kw = sww_power_kw if i in final_dhw_slots else 0.0
+            # DHW allocation: dynamic electric compressor power per slot from physical tank & outdoor temperature
+            if i in final_dhw_slots:
+                t_k = res_opt.trajectory["temperatures_c"][i] if (res_opt and "temperatures_c" in res_opt.trajectory and i < len(res_opt.trajectory["temperatures_c"])) else current_dhw_temp
+                out_t_k = float(getattr(s, "outdoor_temp_c", getattr(s, "outdoor_temp", 10.0)))
+                dhw_kw = spec.get_electric_power_kw(t_k, outdoor_temp_c=out_t_k, params=model_parameters)
+            else:
+                dhw_kw = 0.0
+
             if dhw_kw > 0.0:
                 # Daikin physical constraint: CV pauses during active DHW run
                 heating_kw = 0.0
@@ -359,12 +366,12 @@ class CentralPlanner:
                     # 6. Maximaal aan (60°C)
                     state = StandardizedState.MAX_ON
                     mode_lbl = "Maximaal aan (doorverwarming tot 60°C)"
-                    desc = f"Maximaal aan ({s.label}): Zonnebuffer doorverwarming naar 60°C · Vermogen {dhw_kw} kW elektrisch."
+                    desc = f"Maximaal aan ({s.label}): Zonnebuffer doorverwarming naar 60°C · Vermogen {dhw_kw:.2f} kW elektrisch."
                 else:
                     # 5. Geforceerd aan (50°C)
                     state = StandardizedState.FORCED_ON
                     mode_lbl = "Geforceerd aan (Nachtlading tot 50°C)" if planned_mode == "forced_night_50" else "Geforceerd aan (verwarmen tot 50°C)"
-                    desc = f"Geforceerd aan ({s.label}): Verwarmen naar setpoint 50°C · Vermogen {dhw_kw} kW elektrisch."
+                    desc = f"Geforceerd aan ({s.label}): Verwarmen naar setpoint 50°C · Vermogen {dhw_kw:.2f} kW elektrisch."
             elif h_slot and h_slot.is_preheat_active:
                 # 4. Geadviseerd aan (Vloerbuffer Pre-Heat SG3)
                 state = StandardizedState.ADVISED_ON
