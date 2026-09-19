@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.65] — 2026-09-19 (Bugfix: Naadloze Sticky Filterbalk Aansluiting op Mobiel)
+
+### Frontend & Responsive Layout
+- **Oplossing 23px Gap Boven Sticky Filterbalk op Mobiel:**
+  - `<header>` had binnen de flex-container `<main class="flex flex-col">` geen `shrink-0` (`flex-shrink-0`), waardoor de header op mobiele apparaten door flexbox werd ingekrompen tot 41px.
+  - Omdat de sticky controls op `top-16` (64px) stonden, ontstond er een doorkijk-opening van 23px waarin grafiekdata doorschemerde.
+  - Met `shrink-0 flex-shrink-0` op `<header>` is de hoogte op mobiel strak vergrendeld op exact 64px, waardoor de filterbalk nu met 0 pixels opening naadloos aansluit tegen de onderkant van de header.
+
+---
+
 ## [0.103.64] — 2026-09-19 (Bugfix: Verbruikshistorie Tooltip Toont EPEX Tarieven als €/kWh i.p.v. kW)
 
 ### Frontend & Grafieksysteem
