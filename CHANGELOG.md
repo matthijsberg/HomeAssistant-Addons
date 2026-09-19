@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.59] — 2026-09-19 (GUI Comfortmarge Snelkoppeling & Nachtzon Invariant)
+
+### GUI & Navigatie
+- **Directe Snelkoppeling Comfortmarge:**
+  - Op het tabblad **Voorspelling** is in de header van de DHW evaluatiekaart een directe knop `⚙️ Comfortmarge` toegevoegd die de gebruiker direct naar de instellingen scrollt.
+  - De link in de zijbalk is hernoemd van `Energieleveranciers` naar `Tarieven & Instellingen` ter verduidelijking.
+- **Sanitizer Fysische Nachtzon Invariant:**
+  - `TelemetrySanitizer` en `ObservationNowcaster` klemmen zonne-opwekking tussen 21:00 en 06:00 strikt op 0,00 kW ter bescherming tegen late schemer-ruis uit Forecast.Solar.
+
+---
+
 ## [0.103.58] — 2026-09-19 (Autonome Run Kosten & Energie naar 50°C en 60°C in Uitlegkaart)
 
 ### Uitleglaag & Tegenfeiten (Explain Engine)

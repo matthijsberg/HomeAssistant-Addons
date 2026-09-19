@@ -223,7 +223,9 @@ class TelemetrySanitizer:
             last_known_p = p_val
 
             # Solar matching
-            if key_exact in solar_map:
+            if slot_dt.hour >= 21 or slot_dt.hour < 6:
+                s_val = 0.0
+            elif key_exact in solar_map:
                 s_val = solar_map[key_exact]
             elif key_hour in solar_map:
                 s_val = solar_map[key_hour]
@@ -302,7 +304,10 @@ class TelemetrySanitizer:
                 raw_s = [s.solar_kw for s in slots]
                 nudged_s = ObservationNowcaster.nudge_solar_forecast(raw_s, live_solar_kw, slot_hours=slot_hours)
                 for idx_s, val in enumerate(nudged_s):
-                    slots[idx_s].solar_kw = val
+                    if slots[idx_s].dt.hour >= 21 or slots[idx_s].dt.hour < 6:
+                        slots[idx_s].solar_kw = 0.0
+                    else:
+                        slots[idx_s].solar_kw = val
                 nowcasting_active = True
 
             if live_outdoor_temp_c is not None and slots:
