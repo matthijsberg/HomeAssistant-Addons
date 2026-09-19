@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.60] — 2026-09-19 (Knop Directe Herberekening Planning op Voorspelling)
+
+### GUI & Dashboard
+- **Knop `🔄 Herberekenen` op Voorspelling:**
+  - Direct naast de 24u/48u en 15m/1h controls op het tabblad **Voorspelling** is een knop `🔄 Herberekenen` toegevoegd.
+  - Roept `POST /api/schedule/recalculate` aan om de centrale planner en optimizer met live data te herberekenen en werkt direct alle grafieken bij.
+
+---
+
 ## [0.103.59] — 2026-09-19 (GUI Comfortmarge Snelkoppeling & Nachtzon Invariant)
 
 ### GUI & Navigatie

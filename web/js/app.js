@@ -3520,6 +3520,37 @@
             }
         }
 
+        async function forceRecalculatePlan() {
+            const btn = document.getElementById('btn-force-recalculate');
+            const icon = document.getElementById('icon-recalculate');
+            if (btn) {
+                btn.disabled = true;
+                btn.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+            if (icon) icon.classList.add('animate-spin');
+
+            try {
+                const res = await fetch('./api/schedule/recalculate', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    if (typeof loadChartData === 'function') await loadChartData();
+                    if (typeof loadElectricityPricesChart === 'function') await loadElectricityPricesChart();
+                    if (typeof renderDhwTemperatureChart === 'function') await renderDhwTemperatureChart();
+                    if (typeof renderHeatingForecastChart === 'function') await renderHeatingForecastChart();
+                } else {
+                    console.error('Recalculate error:', data);
+                }
+            } catch (err) {
+                console.error('Error calling /api/schedule/recalculate:', err);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+                if (icon) icon.classList.remove('animate-spin');
+            }
+        }
+
         async function saveSettingsFromTab() {
             const baseVal = parseFloat(document.getElementById('tab-baseload-input')?.value || 300);
             const solarVal = parseFloat(document.getElementById('tab-solar-cost-input')?.value || 0.06);

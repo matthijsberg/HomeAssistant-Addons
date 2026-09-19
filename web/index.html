@@ -234,7 +234,12 @@
                                 <button id="btn-res-prediction-15m" data-res-group="prediction" data-res="15m" onclick="setPredictionResolution('15m')" class="res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
                             </div>
 
-                            <button onclick="loadChartData(); loadElectricityPricesChart(); renderDhwTemperatureChart(); renderHeatingForecastChart();" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5">
+                            <button id="btn-force-recalculate" onclick="forceRecalculatePlan()" class="px-2.5 py-1 bg-purple-700 hover:bg-purple-600 text-white text-xs rounded-lg font-medium border border-purple-500 transition flex items-center gap-1.5 shadow" title="Dwing een directe herberekening af in Laag 3 (CentralPlanner) en PlanStore">
+                                <svg id="icon-recalculate" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                <span>Herberekenen</span>
+                            </button>
+
+                            <button onclick="loadChartData(); loadElectricityPricesChart(); renderDhwTemperatureChart(); renderHeatingForecastChart();" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5" title="Ververs grafieken met reeds gecachte gegevens">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                                 <span>Verversen</span>
                             </button>
