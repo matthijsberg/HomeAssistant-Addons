@@ -10,6 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.62] — 2026-09-19 (Consistente Raming 50°C vs 60°C bij Autonome Start)
+
+### Uitleglaag & Ramingen
+- **Consistente Simultane Simulatie naar 50°C en 60°C:**
+  - In `layer3_scheduling/dhw_optimizer_explain.py` worden de stroom en kosten voor 50°C en 60°C nu binnen dezelfde unieke run-simulatie berekend.
+  - Hiermee is voorkomen dat de 50°C raming abusievelijk vaste startkosten van €0,05 bevatte terwijl de 60°C raming puur stroom telde.
+  - De verhouding klopt nu fysisch:
+    - 40 → 50°C: $1{,}90\text{ kWh}_{\text{el}}$, €0,03 (lagere condensordruk, $P_{\text{el}} \sim 2{,}0\text{ kW}$).
+    - 50 → 60°C: $2{,}01\text{ kWh}_{\text{el}}$, €0,09 (hogere condensordruk, lagere COP, $P_{\text{el}} \sim 3{,}4\text{ kW}$).
+    - Totaal naar 60°C: $3{,}91\text{ kWh}_{\text{el}}$, €0,12.
+
+---
+
 ## [0.103.61] — 2026-09-19 (Bugfix: P50 Comfortmarge Respecteert Minimummarge 0°C)
 
 ### DHW Optimizer Solver

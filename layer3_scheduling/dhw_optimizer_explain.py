@@ -152,13 +152,15 @@ def compute_counterfactual_none(
         r0 = base_res.runs[0]
         start_k = r0["start_idx"]
         t_start = r0["t_start_c"]
-        kwh_50 = r0["kwh_el"]
-        cost_50 = r0["cost_eur"]
 
-        # Simulate forward from dip start to 60°C
+        # Unified forward simulation from dip start to 50°C and 60°C
+        kwh_50 = 0.0
+        cost_50 = 0.0
         kwh_60 = 0.0
         cost_60 = 0.0
+        reached_50 = False
         t_sim = t_start
+
         for k in range(start_k, len(slots)):
             s = slots[k]
             out_t = float(getattr(s, "outdoor_temp_c", getattr(s, "outdoor_temp", 10.0)))
@@ -170,9 +172,7 @@ def compute_counterfactual_none(
                 price_all_in=float(getattr(s, "price_all_in", getattr(s, "import_price", 0.25))),
                 step_hours=0.25
             )
-            kwh_60 += p_el * 0.25
-            cost_60 += c_slot
-            t_sim = dhw_step(
+            t_next = dhw_step(
                 t_tank_c=t_sim,
                 u=1.0,
                 q_tap_kwh=0.05,
@@ -188,6 +188,17 @@ def compute_counterfactual_none(
                 t_max_c=62.0,
                 t_amb_c=params.t_amb_c
             )
+
+            if not reached_50:
+                kwh_50 += p_el * 0.25
+                cost_50 += c_slot
+                if t_next >= 50.0:
+                    reached_50 = True
+
+            kwh_60 += p_el * 0.25
+            cost_60 += c_slot
+
+            t_sim = t_next
             if t_sim >= 59.5:
                 break
 
