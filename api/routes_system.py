@@ -426,7 +426,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
     return False
 
 def handle_post(handler, path: str, body: dict) -> bool:
-    body = handler._read_json_body()
+    if body is None:
+        body = {}
 
     if path == "/api/config/solar":
         data = body or {}
@@ -560,12 +561,6 @@ def handle_post(handler, path: str, body: dict) -> bool:
 
             save_json(CONFIG_FILE, cfg)
 
-            # Re-plan immediately to reflect new settings
-            try:
-                ensure_active_canonical_plan(force_refresh=True)
-            except Exception as e_plan:
-                print(f"[WARN] Failed to re-plan after settings update: {e_plan}")
-
             opt_cfg = cfg.get("dhw_optimizer", {})
             cm_cfg = opt_cfg.get("comfort_margin", {})
             handler._send_json({
@@ -582,12 +577,22 @@ def handle_post(handler, path: str, body: dict) -> bool:
                     }
                 }
             })
+
+            # Re-plan in background so HTTP response is not delayed by external weather/price API calls
+            import threading
+            threading.Thread(target=ensure_active_canonical_plan, kwargs={"force_refresh": True}, daemon=True).start()
+
             return True
         except ValueError as ve:
             handler._send_json({"status": "error", "message": str(ve)}, 400)
             return True
+        except (BrokenPipeError, ConnectionResetError):
+            return True
         except Exception as e:
-            handler._send_json({"status": "error", "message": str(e)}, 400)
+            try:
+                handler._send_json({"status": "error", "message": str(e)}, 400)
+            except Exception:
+                pass
             return True
 
     if False and path == "/api/analytics/solar_cost":
@@ -816,9 +821,10 @@ def handle_post(handler, path: str, body: dict) -> bool:
     return False
 
 def handle_put(handler, path: str, body: dict) -> bool:
+    if body is None:
+        body = {}
     # UPDATE: Home Assistant Connector
     if path == "/api/infrastructure/homeassistant":
-        body = handler._read_json_body()
         cfg = load_json(CONFIG_FILE)
         ensure_framework_defaults(cfg)
         ha_cfg = cfg.setdefault("homeassistant", {})

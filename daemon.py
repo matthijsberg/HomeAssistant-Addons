@@ -64,13 +64,15 @@ from layer3_scheduling.plan_decision_evaluator import (
 class HemsApiHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, data, status=200):
+        payload = json.dumps(data, indent=2).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
-        self.wfile.write(json.dumps(data, indent=2).encode("utf-8"))
+        self.wfile.write(payload)
 
     def _read_json_body(self):
         try:
