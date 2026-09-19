@@ -1333,7 +1333,7 @@
                         tempSelect.appendChild(opt.cloneNode(true));
                     }
                 }
-                if (e.domain === 'switch' || e.domain === 'climate' || e.domain === 'input_boolean') {
+                if (e.domain === 'switch' || e.domain === 'climate' || e.domain === 'input_boolean' || e.domain === 'input_select') {
                     if (controlSelect) controlSelect.appendChild(opt.cloneNode(true));
                 }
             });

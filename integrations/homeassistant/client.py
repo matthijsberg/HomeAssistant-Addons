@@ -101,7 +101,7 @@ def fetch_ha_entities() -> List[Dict[str, Any]]:
             for s in states:
                 eid = s.get("entity_id", "")
                 domain = eid.split(".")[0]
-                if domain in ["sensor", "switch", "climate", "binary_sensor", "input_boolean", "weather"]:
+                if domain in ["sensor", "switch", "climate", "binary_sensor", "input_boolean", "input_select", "weather"]:
                     fname = s.get("attributes", {}).get("friendly_name") or eid
                     filtered.append({
                         "entity_id": eid,
