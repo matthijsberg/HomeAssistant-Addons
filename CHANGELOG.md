@@ -10,6 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.68] — 2026-09-19 (Historische Spitsblokken 100% uit Database i.p.v. Beredeneerd)
+
+### Historische Analytics & Piekdetectie
+- **Alle Historische Grafieken Halen Spitsblokken uit Database:**
+  - In `api/routes_analytics.py` werd in alle drie de historische endpoints (`power_producers`, `dhw_history`, `heating_history`) de hypothetische piekdetector `detect_dynamic_price_peaks` retroactief losgelaten op het opgevraagde tijdsvenster.
+  - Hierdoor ontstonden verschuivende en willekeurige rode spitsblokken die afhingen van het zoomniveau (24u vs 48u) en niet van de werkelijkheid.
+  - Nu roepen alle drie de endpoints de helper `fetch_actual_forced_off_ranges_from_db` aan:
+    - Vraagt InfluxDB `hems_annotations` uit op echte gerealiseerde `forced_off` hardware-actuaties (`state_code = 'forced_off'`).
+    - Als er geen werkelijke spitsblokkade was (zoals vanavond), blijft de grafiek 100% rustig (`forced_off_ranges = []`).
+    - Als er in het verleden wél een werkelijke blokkade was geactiveerd, wordt exact dat daadwerkelijke tijdsinterval getoond.
+
+---
+
 ## [0.103.67] — 2026-09-19 (Eliminatie Fantoom-Tapwatervraag & Retroactieve Spitsblok-Artefacten)
 
 ### DHW Historische Telemetrie & Modellering

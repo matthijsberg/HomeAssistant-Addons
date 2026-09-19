@@ -53,6 +53,61 @@ def resolve_analytics_time_range(tf: str):
         t_end = now_utc
     return t_start, t_end
 
+
+def fetch_actual_forced_off_ranges_from_db(
+    t_start_iso: str,
+    t_end_iso: str,
+    slot_dts: List[datetime],
+    interval_h: float = 0.25
+) -> List[Dict[str, Any]]:
+    """
+    Retrieves ACTUAL historical spitsblokken (forced_off hardware lockouts) from InfluxDB hems_annotations.
+    Zero synthetic / ad-hoc retroactive recalculations over sliding display slices.
+    """
+    if not slot_dts:
+        return []
+    try:
+        sec = load_secrets()
+        pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influx_password", "")
+        if not pwd:
+            return []
+        q = (
+            f'SELECT time, state_code, title FROM "hems_annotations" '
+            f'WHERE state_code = \'forced_off\' AND time >= \'{t_start_iso}\' AND time <= \'{t_end_iso}\' '
+            f'ORDER BY time ASC'
+        )
+        url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
+        with urllib.request.urlopen(url, timeout=3) as r:
+            res = json.loads(r.read().decode())
+        series = res.get("results", [{}])[0].get("series", [])
+        if not series:
+            return []
+        rows = series[0].get("values", [])
+        active_indices = set()
+        step_sec = interval_h * 3600.0
+        for row in rows:
+            t_str = row[0]
+            dt = datetime.fromisoformat(t_str.replace("Z", "+00:00"))
+            for idx, s_dt in enumerate(slot_dts):
+                if abs((dt - s_dt).total_seconds()) < (step_sec / 2.0 + 60.0):
+                    active_indices.add(idx)
+        ranges = []
+        if active_indices:
+            sorted_idx = sorted(list(active_indices))
+            cur_start = sorted_idx[0]
+            cur_end = sorted_idx[0]
+            for i in sorted_idx[1:]:
+                if i == cur_end + 1:
+                    cur_end = i
+                else:
+                    ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": "SPITSBLOK"})
+                    cur_start = i
+                    cur_end = i
+            ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": "SPITSBLOK"})
+        return ranges
+    except Exception:
+        return []
+
 def get_today_history_kpis(cfg: dict, sec: dict) -> dict:
     active_conn = cfg.get("influxdb_connections", [{}])[0]
     db_name = active_conn.get("database", "openhems")
@@ -684,20 +739,12 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 }
             }
 
-            from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
-            hist_timeline = []
-            for ts_s, p in zip(sorted_ts, series_prices):
-                dt_pt = datetime.fromisoformat(ts_s.replace("Z", "+00:00")).astimezone(AMS_TZ)
-                hist_timeline.append({"dt": dt_pt, "price": p})
-            dyn_peaks, _ = detect_dynamic_price_peaks(hist_timeline, step_mins=int(interval_h * 60))
-            forced_off_ranges = []
-            for p in dyn_peaks:
-                if p.get("is_hard_lockout"):
-                    forced_off_ranges.append({
-                        "start_idx": p.get("start_idx"),
-                        "end_idx": p.get("end_idx"),
-                        "name": "SPITSBLOK"
-                    })
+            # Historical telemetry: retrieve actual recorded hardware lockouts from database
+            t_start_dt, t_end_dt = resolve_analytics_time_range(tf)
+            t_start_iso = t_start_dt.strftime("%Y-%m-%dT%H:%M:00Z")
+            t_end_iso = t_end_dt.strftime("%Y-%m-%dT%H:%M:00Z")
+            slot_dts = [datetime.fromisoformat(ts_s.replace("Z", "+00:00")).astimezone(AMS_TZ) for ts_s in sorted_ts]
+            forced_off_ranges = fetch_actual_forced_off_ranges_from_db(t_start_iso, t_end_iso, slot_dts, interval_h=interval_h)
 
             res = {
                 "status": "success",
@@ -1003,8 +1050,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     last_t = round(float(t_val), 1)
                 temps.append(last_t)
 
-            # Historical DHW telemetry: only reflect actual recorded lockouts (zero retroactive synthetic blocks)
-            forced_off_ranges = []
+            # Historical DHW telemetry: retrieve actual recorded hardware lockouts from database
+            slot_dts = [datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ) for ts_str in sorted_ts]
+            forced_off_ranges = fetch_actual_forced_off_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
 
             handler._send_json({
                 "status": "success",
@@ -1122,31 +1170,13 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             demand_kwh_th = [round(UA * max(0.0, r - o) * interval_h, 2) for r, o in zip(r_sampled, o_sampled)]
 
             # Detect price peaks across historical timeline
-            from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
-            _, epex_prices_map, _ = get_epex_tariffs_cached(is_15m=(bucket_sz == "15m"))
-            hist_timeline = []
-            for s_dt in slots:
-                dt_ams = s_dt.astimezone(AMS_TZ)
-                k_p = dt_ams.strftime("%Y-%m-%d %H:%M" if bucket_sz == "15m" else "%Y-%m-%d %H:00")
-                p_val = epex_prices_map.get(k_p, 0.28)
-                hist_timeline.append({"dt": dt_ams, "price": p_val})
-            dyn_peaks, _ = detect_dynamic_price_peaks(hist_timeline, step_mins=step_mins)
-
-            forced_off_ranges = []
+            # Historical space heating telemetry: retrieve actual recorded hardware lockouts from database
+            slot_dts = [s_dt.astimezone(AMS_TZ) for s_dt in slots]
+            forced_off_ranges = fetch_actual_forced_off_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
             spits_indices = set()
-            for p in dyn_peaks:
-                if p.get("is_hard_lockout"):
-                    s_idx = p.get("start_idx", 0)
-                    e_idx = p.get("end_idx", 0)
-                    for idx_s in range(s_idx, min(len(slots), e_idx + 1)):
-                        spits_indices.add(idx_s)
-                    forced_off_ranges.append({
-                        "start_idx": s_idx,
-                        "end_idx": e_idx,
-                        "start_label": p.get("hard_start_time") or p.get("start_time"),
-                        "end_label": p.get("hard_end_time") or p.get("end_time"),
-                        "name": "SPITSBLOK"
-                    })
+            for r in forced_off_ranges:
+                for idx_s in range(r.get("start_idx", 0), min(len(slots), r.get("end_idx", 0) + 1)):
+                    spits_indices.add(idx_s)
 
             # Heating ranges (historical active runs) - strict non-overlap invariant with Spitsblok
             heating_ranges = []
