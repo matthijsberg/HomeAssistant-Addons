@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.58] — 2026-09-19 (Autonome Run Kosten & Energie naar 50°C en 60°C in Uitlegkaart)
+
+### Uitleglaag & Tegenfeiten (Explain Engine)
+- **Kosten- & Stroomraming bij Autonome Start in Comfortkaart:**
+  - In `layer3_scheduling/dhw_optimizer_explain.py` toont de witte comforttekst nu niet alleen het tijdstip en starttemperatuur van de autonome run, maar simuleert exact wat het op dat moment zou kosten aan kWh_el en euro's om door te stoken naar respectievelijk 50°C en 60°C.
+  - Formaat sluit naadloos aan bij de rest van de teksten:  
+    `Zonder ingrijpen start de warmtepomp zelfstandig om 14:30 (bij 40.5°C; naar 50°C: 1.89 kWh_el, €0.38 / naar 60°C: 3.88 kWh_el, €0.84). Door de geplande 2 run(s) blijft het comfort 100% gegarandeerd.`
+  - In `layer3_scheduling/dhw_baseline.py` is de tijdweergave van `first_run_start_time` robuust gemaakt voor `DispatchPlanSlot`-tijdstempels.
+
+---
+
 ## [0.103.57] — 2026-09-19 (DHW Parameter Flow End-to-End & Empirische k_out Validatie)
 
 ### Deel A: Parameterbestand Aansluiten & Calibrator Behoud

@@ -55,6 +55,14 @@ def test_optimizer_explanation_structure_in_central_planner():
     assert "bullet_2" in details
     assert "run_explanations" in details
 
+    # Verify comfort_text format contains autonomous cost estimates to 50°C and 60°C
+    c_txt = details["comfort_text"]
+    if "Zonder ingrijpen start de warmtepomp" in c_txt:
+        assert "naar 50°C:" in c_txt
+        assert "naar 60°C:" in c_txt
+        assert "kWh_el" in c_txt
+        assert "€" in c_txt
+
     # Number of run explanation sentences must strictly match number of planned runs
     runs = details.get("trajectory", {})
     run_sentences = details.get("run_explanations", [])

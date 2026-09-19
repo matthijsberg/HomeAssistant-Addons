@@ -164,7 +164,8 @@ def simulate_autonomous(
     for k, u in enumerate(u_plan):
         if u == 1:
             first_start = k
-            first_time = getattr(slots[k], "label", f"slot {k}")
+            dt_val = getattr(slots[k], "dt", None)
+            first_time = getattr(slots[k], "label", dt_val.strftime("%H:%M") if dt_val else f"slot {k}")
             break
 
     return DhwBaselineResult(

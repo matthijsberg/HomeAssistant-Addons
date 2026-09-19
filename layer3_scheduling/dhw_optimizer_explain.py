@@ -17,6 +17,7 @@ import math
 
 from models.physics import dhw_step
 from layer3_scheduling.dhw_specs import DhwTankSpec
+from layer3_scheduling.dhw_financials import calculate_slot_financials
 from layer3_scheduling.dhw_optimizer import (
     solve,
     DhwOptimizerParams,
@@ -147,7 +148,55 @@ def compute_counterfactual_none(
         model_parameters=model_parameters
     )
 
-    if base_res.first_run_start_time:
+    if base_res.first_run_start_time and base_res.runs:
+        r0 = base_res.runs[0]
+        start_k = r0["start_idx"]
+        t_start = r0["t_start_c"]
+        kwh_50 = r0["kwh_el"]
+        cost_50 = r0["cost_eur"]
+
+        # Simulate forward from dip start to 60°C
+        kwh_60 = 0.0
+        cost_60 = 0.0
+        t_sim = t_start
+        for k in range(start_k, len(slots)):
+            s = slots[k]
+            out_t = float(getattr(s, "outdoor_temp_c", getattr(s, "outdoor_temp", 10.0)))
+            p_el = spec.get_electric_power_kw(t_sim, outdoor_temp_c=out_t, params=model_parameters)
+            c_slot, _, _, _ = calculate_slot_financials(
+                solar_kw=float(getattr(s, "solar_kw", 0.0)),
+                unalloc_kw=float(getattr(s, "unallocated_kw", 0.3)),
+                el_demand_kw=p_el,
+                price_all_in=float(getattr(s, "price_all_in", getattr(s, "import_price", 0.25))),
+                step_hours=0.25
+            )
+            kwh_60 += p_el * 0.25
+            cost_60 += c_slot
+            t_sim = dhw_step(
+                t_tank_c=t_sim,
+                u=1.0,
+                q_tap_kwh=0.05,
+                t_outdoor_c=out_t,
+                dt_h=0.25,
+                spec={
+                    "thermal_capacity_kwh_per_k": spec.thermal_capacity_kwh_per_k,
+                    "ua_w_per_k": ua_w_per_k,
+                    "ambient_temp_c": params.t_amb_c,
+                    "target_temp_c": 62.0
+                },
+                params=model_parameters,
+                t_max_c=62.0,
+                t_amb_c=params.t_amb_c
+            )
+            if t_sim >= 59.5:
+                break
+
+        explanation = (
+            f"Zonder ingrijpen start de warmtepomp zelfstandig om {base_res.first_run_start_time} "
+            f"(bij {t_start:.1f}°C; naar 50°C: {kwh_50:.2f} kWh_el, €{cost_50:.2f} / "
+            f"naar 60°C: {kwh_60:.2f} kWh_el, €{cost_60:.2f})."
+        )
+    elif base_res.first_run_start_time:
         explanation = f"Zonder ingrijpen start de warmtepomp zelfstandig om {base_res.first_run_start_time} (bij {eff_boundary:.1f}°C)."
     elif first_dip_idx is not None:
         explanation = f"Zonder stoken zakt het vat om {first_dip_time} onder {eff_boundary:.1f}°C."
