@@ -10,6 +10,20 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.67] — 2026-09-19 (Eliminatie Fantoom-Tapwatervraag & Retroactieve Spitsblok-Artefacten)
+
+### DHW Historische Telemetrie & Modellering
+- **Eliminatie Fantoombalken Tapwatervraag tijdens Warmtepomprun:**
+  - In `DhwThermalModel.compute_historical_draw_offs` (`layer2_calibration/dhw_thermal_model.py`) werd elke minimale negatieve sensortemperatuurschommeling tijdens een run ($\Delta T < 0$) onterecht toegeschreven aan massale tapwaterafname ter grootte van het volledige thermische warmtepompvermogen ($1{,}1\text{ tot }1{,}3\text{ kWh}_{\text{th}}$).
+  - Nu vereist de logica tijdens actieve runs een daadwerkelijke significante temperatuursdaling ($\Delta T < -0{,}4^\circ\text{C}$). Ruis en stratificatieschommelingen ($\pm 0{,}1^\circ\text{C}$) bij 50°C worden niet langer geregistreerd als fantoom-tapwater.
+  - Alleen echte afname (zoals de avonddouche om 22:15, $\Delta T = -3{,}2^\circ\text{C}$) wordt correct als warmtevraag geregistreerd.
+- **Verwijdering Retroactieve Kunstmatige Spitsblokken in Historie:**
+  - `/api/analytics/dhw_history` draaide voorheen retroactief de voorspellende piekdetector (`detect_dynamic_price_peaks`) over de opgevraagde historische venster-slice (24u vs 48u).
+  - Daardoor werd in het 24-uurs venster willekeurig een rood "Spitsblok" ingetekend over de duurste avonduren, dat spontaan verdween bij het omschakelen naar 48 uur, terwijl er in werkelijkheid vanavond geen enkele spitsblokkade actief was.
+  - Historische grafieken tonen nu uitsluitend feitelijke gerealiseerde telemetrie zonder synthetische retroactieve blokkades.
+
+---
+
 ## [0.103.66] — 2026-09-19 (Compacte Sticky Filterbalk Zonder Overtollige Titels)
 
 ### Frontend & UI Optimalisatie

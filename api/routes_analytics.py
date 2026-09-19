@@ -1003,23 +1003,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     last_t = round(float(t_val), 1)
                 temps.append(last_t)
 
-            from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
-            _, epex_prices_map, _ = get_epex_tariffs_cached(is_15m=(bucket_sz == "15m"))
-            hist_timeline = []
-            for ts_str in sorted_ts:
-                dt_ams = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
-                k_p = dt_ams.strftime("%Y-%m-%d %H:%M" if bucket_sz == "15m" else "%Y-%m-%d %H:00")
-                p_val = epex_prices_map.get(k_p, 0.28)
-                hist_timeline.append({"dt": dt_ams, "price": p_val})
-            dyn_peaks, _ = detect_dynamic_price_peaks(hist_timeline, step_mins=int(interval_h * 60))
+            # Historical DHW telemetry: only reflect actual recorded lockouts (zero retroactive synthetic blocks)
             forced_off_ranges = []
-            for p in dyn_peaks:
-                if p.get("is_hard_lockout"):
-                    forced_off_ranges.append({
-                        "start_idx": p.get("start_idx"),
-                        "end_idx": p.get("end_idx"),
-                        "name": "SPITSBLOK"
-                    })
 
             handler._send_json({
                 "status": "success",

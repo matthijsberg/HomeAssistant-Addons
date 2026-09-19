@@ -186,16 +186,19 @@ class DhwThermalModel:
                     avg_t = (cur_t + prev_t) / 2.0
                     effective_cop = cop_heating or max(1.8, min(3.2, 4.6 - 0.05 * avg_t))
                     th_in = kwh_el * effective_cop
-                    if delta_t < 0:
-                        # Temperature fell despite heat pump running -> heavy tap draw-off
+                    if delta_t < -0.4:
+                        # Temperature fell significantly despite heat pump running -> genuine heavy tap draw-off
                         q_tap = max(0.0, th_in - q_standby_quarter - delta_e)
                     else:
-                        # Temperature rising -> tank mass is absorbing heat; 0 phantom tap water
+                        # Temperature rising, modulating or minor sensor jitter -> tank mass absorbs heat; zero phantom tap water
                         q_tap = 0.0
                 else:
                     # Heat pump standby/idle
-                    # Loss due to tapping equals thermal decrease minus standby
-                    q_tap = max(0.0, -q_standby_quarter - delta_e)
+                    # Only assign genuine tap if cooling exceeds normal standby loss and sensor quantization (>= 0.15°C drop)
+                    if delta_t < -0.15:
+                        q_tap = max(0.0, -q_standby_quarter - delta_e)
+                    else:
+                        q_tap = 0.0
 
                 q_tap = max(0.0, round(q_tap, 2))
                 if q_tap < 0.05:
