@@ -45,10 +45,12 @@ class DaikinActuator(IActuatorController):
         self,
         switch_caller: Optional[Callable[[str, bool], bool]] = None,
         climate_caller: Optional[Callable[[str, float], bool]] = None,
+        select_caller: Optional[Callable[[str], bool]] = None,
         device_id: str = "heat_pump.daikin_altherma"
     ):
         self.switch_caller = switch_caller
         self.climate_caller = climate_caller
+        self.select_caller = select_caller
         self.device_id = device_id
         self._last_actuation_result: Optional[ActuationResult] = None
 
@@ -80,25 +82,62 @@ class DaikinActuator(IActuatorController):
         success = True
         err = None
 
-        if self.switch_caller:
+        # 1. Smart Grid Actuation: via input_select (preferred) or direct relays
+        if self.select_caller:
+            mode_to_option = {
+                "normal": "Automatisch",
+                "forced_off": "Geforceerd uit",
+                "advised_on": "Geadviseerd aan",
+                "forced_on": "Geforceerd aan",
+                "max_on": "Geforceerd aan",
+                "forced_solar_boost_60": "Geforceerd aan",
+                "forced_night_50": "Geforceerd aan",
+                "forced_space_heating": "Geforceerd aan",
+                "advised_off": "Automatisch"
+            }
+            opt = mode_to_option.get(cmd.effective_mode, "Automatisch")
+            try:
+                r_sel = self.select_caller(opt)
+                if r_sel is False:
+                    success = False
+                    err = f"Select caller returned False for option {opt}"
+            except Exception as e:
+                success = False
+                err = str(e)
+        elif self.switch_caller:
             try:
                 # S10S
                 r1 = self.switch_caller("s10s", cmd.s10s_relay_on)
                 # S11S
                 r2 = self.switch_caller("s11s", cmd.s11s_relay_on)
-                # Hydraulic interlock CV switch
-                r3 = self.switch_caller("cv_master", cmd.cv_master_switch_on)
-                if r1 is False or r2 is False or r3 is False:
+                if r1 is False or r2 is False:
                     success = False
                     err = "One or more relay switch calls returned False"
-                if self.climate_caller:
-                    if cmd.target_dhw_temp_c is not None:
-                        self.climate_caller("dhw", cmd.target_dhw_temp_c)
-                    elif cmd.target_room_temp_c is not None:
-                        self.climate_caller("room", cmd.target_room_temp_c)
             except Exception as e:
                 success = False
                 err = str(e)
+
+        # 2. Hydraulic interlock CV switch
+        if self.switch_caller:
+            try:
+                r3 = self.switch_caller("cv_master", cmd.cv_master_switch_on)
+                if r3 is False:
+                    success = False
+                    err = (err + "; " if err else "") + "cv_master switch call returned False"
+            except Exception as e:
+                success = False
+                err = (err + "; " if err else "") + str(e)
+
+        # 3. Climate setpoint caller
+        if self.climate_caller:
+            try:
+                if cmd.target_dhw_temp_c is not None:
+                    self.climate_caller("dhw", cmd.target_dhw_temp_c)
+                elif cmd.target_room_temp_c is not None:
+                    self.climate_caller("room", cmd.target_room_temp_c)
+            except Exception as e:
+                success = False
+                err = (err + "; " if err else "") + str(e)
 
         self._last_actuation_result = ActuationResult(
             success=success,
@@ -180,7 +219,10 @@ class DaikinActuator(IActuatorController):
         return self._last_actuation_result
 
     @classmethod
-    def _normalize_sg_mode(cls, mode: str) -> str:
+    def _normalize_sg_mode(cls, mode: Any) -> str:
         """Normalizes SG1..SG4 / numeric modes to canonical Daikin mode strings."""
-        cleaned = str(mode).strip().lower()
-        return cls.SG_MODE_MAPPING.get(cleaned, mode)
+        val = getattr(mode, "value", mode)
+        cleaned = str(val).strip().lower()
+        if cleaned.startswith("standardizedstate."):
+            cleaned = cleaned.split(".")[-1]
+        return cls.SG_MODE_MAPPING.get(cleaned, cleaned)

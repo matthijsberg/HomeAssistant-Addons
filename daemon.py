@@ -2,7 +2,7 @@
 """
 Open HEMS Framework & Management Console
 ========================================
-Version: 0.103.53
+Version: 0.103.54
 Generic Energy Management Platform:
   - Multi-Vector Telemetry & Optimization Daemon
   - Domain Router Dispatch to api/routes_*.py
@@ -407,7 +407,11 @@ class HemsBackgroundCollector(threading.Thread):
 
             # 2. Get current slot mode
             cur_slot = plan.slots[0]
-            mode_to_execute = cur_slot.mode_code
+            val = getattr(cur_slot.mode_code, "value", cur_slot.mode_code)
+            req_clean = str(val).strip().lower()
+            if req_clean.startswith("standardizedstate."):
+                req_clean = req_clean.split(".")[-1]
+            mode_to_execute = req_clean
 
             # Determine continuous lockout duration from HA state
             cur_lockout_mins = 0.0
@@ -452,29 +456,36 @@ class HemsBackgroundCollector(threading.Thread):
                 )
             else:
                 # 5. Audit Log Hardware Actuation & verify HA state confirmation
-                curr_s10s = (states_map.get("switch.warmtepomp_smart_grid_1_s10s", {}).get("state") == "on")
-                curr_s11s = (states_map.get("switch.warmtepomp_smart_grid_2_s11s", {}).get("state") == "on")
+                curr_sel = states_map.get("input_select.warmtepomp_smart_grid_modus", {}).get("state")
+                mode_to_option = {
+                    "normal": "Automatisch",
+                    "forced_off": "Geforceerd uit",
+                    "advised_on": "Geadviseerd aan",
+                    "forced_on": "Geforceerd aan",
+                    "max_on": "Geforceerd aan",
+                    "forced_solar_boost_60": "Geforceerd aan",
+                    "forced_night_50": "Geforceerd aan",
+                    "forced_space_heating": "Geforceerd aan",
+                    "advised_off": "Automatisch"
+                }
+                target_sel = mode_to_option.get(res.effective_mode, "Automatisch")
                 curr_cv = (states_map.get("switch.hc_mode_altherma_on", {}).get("state") == "on")
 
                 has_switched = (
-                    res.command.s10s_relay_on != curr_s10s or
-                    res.command.s11s_relay_on != curr_s11s or
+                    curr_sel != target_sel or
                     res.command.cv_master_switch_on != curr_cv
                 )
 
                 if has_switched:
-                    print(f"[Open HEMS Actuator] Hardware geschakeld naar stand '{mode_to_execute}': S10S={res.command.s10s_relay_on}, S11S={res.command.s11s_relay_on}, CV_Master={res.command.cv_master_switch_on}", flush=True)
+                    print(f"[Open HEMS Actuator] Hardware geschakeld naar stand '{mode_to_execute}': Modus={target_sel}, CV_Master={res.command.cv_master_switch_on}", flush=True)
                     time.sleep(0.5)
                     fresh_states = get_ha_states_map()
-                    act_s10s = (fresh_states.get("switch.warmtepomp_smart_grid_1_s10s", {}).get("state") == "on")
-                    act_s11s = (fresh_states.get("switch.warmtepomp_smart_grid_2_s11s", {}).get("state") == "on")
+                    act_sel = fresh_states.get("input_select.warmtepomp_smart_grid_modus", {}).get("state")
                     act_cv = (fresh_states.get("switch.hc_mode_altherma_on", {}).get("state") == "on")
 
                     unconfirmed = []
-                    if res.command.s10s_relay_on != act_s10s:
-                        unconfirmed.append(f"S10S (doel {'AAN' if res.command.s10s_relay_on else 'UIT'}, is {'AAN' if act_s10s else 'UIT'})")
-                    if res.command.s11s_relay_on != act_s11s:
-                        unconfirmed.append(f"S11S (doel {'AAN' if res.command.s11s_relay_on else 'UIT'}, is {'AAN' if act_s11s else 'UIT'})")
+                    if target_sel != act_sel:
+                        unconfirmed.append(f"Smart Grid Modus (doel '{target_sel}', is '{act_sel}')")
                     if res.command.cv_master_switch_on != act_cv:
                         unconfirmed.append(f"CV Master (doel {'AAN' if res.command.cv_master_switch_on else 'UIT'}, is {'AAN' if act_cv else 'UIT'})")
 
@@ -483,12 +494,11 @@ class HemsBackgroundCollector(threading.Thread):
                             domain="hardware",
                             event_type="actuation_unconfirmed",
                             reason="❌ Schakeling Niet Bevestigd door Home Assistant",
-                            explanation=f"Open HEMS heeft de relais omgezet voor {mode_to_execute}, maar Home Assistant bevestigt de toestand niet: {', '.join(unconfirmed)}.",
+                            explanation=f"Open HEMS heeft de status omgezet voor {mode_to_execute}, maar Home Assistant bevestigt de toestand niet: {', '.join(unconfirmed)}.",
                             inputs={
                                 "mode_gevraagd": mode_to_execute,
                                 "onbevestigd": unconfirmed,
-                                "s10s_werkelijk": act_s10s,
-                                "s11s_werkelijk": act_s11s,
+                                "modus_werkelijk": act_sel,
                                 "cv_werkelijk": act_cv
                             },
                             category="ERROR"
@@ -503,7 +513,7 @@ class HemsBackgroundCollector(threading.Thread):
                             "advised_off": "⏸️ Smart Grid Relais: Gereduceerde Modulatie (SG1)"
                         }
                         act_title = mode_titles.get(res.effective_mode, f"⚙️ Smart Grid Relais: {res.effective_mode}")
-                        act_desc = f"Smart Grid relais omgezet: S10S={'AAN' if res.command.s10s_relay_on else 'UIT'}, S11S={'AAN' if res.command.s11s_relay_on else 'UIT'}, CV Master={'AAN' if res.command.cv_master_switch_on else 'UIT'}."
+                        act_desc = f"Smart Grid modus omgezet: '{target_sel}', CV Master={'AAN' if res.command.cv_master_switch_on else 'UIT'}."
                         if res.downgrade_reason:
                             act_desc += f" (Veiligheidsinterlock: {res.downgrade_reason})"
                         elif target_t:

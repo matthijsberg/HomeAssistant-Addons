@@ -40,7 +40,7 @@ class DaikinInterlock:
     @classmethod
     def resolve_command(
         cls,
-        requested_mode: str,
+        requested_mode: Any,
         current_cv_switch_state: bool = True,
         target_temp: Optional[float] = None,
         current_continuous_lockout_mins: float = 0.0
@@ -49,6 +49,12 @@ class DaikinInterlock:
         Resolves physical states and enforces hydraulic interlocks.
         Includes hard circuit breaker: max 150m continuous forced lockout cap.
         """
+        val = getattr(requested_mode, "value", requested_mode)
+        req_clean = str(val).strip().lower()
+        if req_clean.startswith("standardizedstate."):
+            req_clean = req_clean.split(".")[-1]
+        requested_mode = req_clean
+
         # 1. Forced Off (SG Stand 1: S10S=OFF, S11S=ON)
         if requested_mode == "forced_off":
             if current_continuous_lockout_mins >= 150.0:

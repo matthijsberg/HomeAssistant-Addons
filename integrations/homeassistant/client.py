@@ -159,7 +159,21 @@ def call_ha_service(domain: str, service: str, service_data: dict) -> bool:
 
 
 def make_daikin_ha_actuator() -> DaikinActuator:
-    """Creates a configured DaikinActuator delegating switch and climate calls to Home Assistant Core."""
+    """Creates a configured DaikinActuator delegating select, switch and climate calls to Home Assistant Core."""
+    states_map = get_ha_states_map()
+
+    def select_caller(option_name: str) -> bool:
+        eid = "input_select.warmtepomp_smart_grid_modus"
+        curr_opt = states_map.get(eid, {}).get("state")
+        if curr_opt == option_name:
+            # Idempotent guard: already in target state, do NOT fire redundant service calls
+            return True
+        ok = call_ha_service("input_select", "select_option", {"entity_id": eid, "option": option_name})
+        if not ok:
+            raise RuntimeError(f"Home Assistant service call mislukt voor {eid} -> {option_name}")
+        states_map[eid] = {"state": option_name}
+        return True
+
     def switch_caller(switch_name: str, state: bool):
         entity_map = {
             "s10s": "switch.warmtepomp_smart_grid_1_s10s",
@@ -168,16 +182,33 @@ def make_daikin_ha_actuator() -> DaikinActuator:
         }
         eid = entity_map.get(switch_name)
         if eid:
+            curr_state = (states_map.get(eid, {}).get("state") == "on")
+            if curr_state == state:
+                # Idempotent guard: switch already in desired state
+                return True
             service = "turn_on" if state else "turn_off"
             ok = call_ha_service("switch", service, {"entity_id": eid})
             if not ok:
                 raise RuntimeError(f"Home Assistant service call mislukt voor {eid} -> {service}")
+            states_map[eid] = {"state": "on" if state else "off"}
         return True
 
     def climate_caller(climate_name: str, temp: float):
-        ok = call_ha_service("climate", "set_temperature", {"entity_id": "climate.hc_dhw_dhw_setpoint", "temperature": temp})
+        eid = "climate.hc_dhw_dhw_setpoint"
+        curr_temp_str = states_map.get(eid, {}).get("attributes", {}).get("temperature")
+        try:
+            if curr_temp_str is not None and abs(float(curr_temp_str) - temp) < 0.2:
+                # Idempotent guard: temperature setpoint already set
+                return True
+        except (ValueError, TypeError):
+            pass
+        ok = call_ha_service("climate", "set_temperature", {"entity_id": eid, "temperature": temp})
         if not ok:
-            raise RuntimeError(f"Home Assistant service call mislukt voor climate.hc_dhw_dhw_setpoint -> {temp}°C")
+            raise RuntimeError(f"Home Assistant service call mislukt voor {eid} -> {temp}°C")
         return True
 
-    return DaikinActuator(switch_caller=switch_caller, climate_caller=climate_caller)
+    return DaikinActuator(
+        switch_caller=switch_caller,
+        climate_caller=climate_caller,
+        select_caller=select_caller
+    )

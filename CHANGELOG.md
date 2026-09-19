@@ -10,6 +10,23 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.54] — 2026-09-19 (Home Assistant Input Select Smart Grid Actuator & Idempotente Guard)
+
+### Actuatie & Relaisstabiliteit (Stap 1 & 2)
+- **Actuatie via `input_select.warmtepomp_smart_grid_modus`:**
+  - `make_daikin_ha_actuator()` stuurt nu primair `input_select.select_option` aan met de canonieke HA-opties (`"Automatisch"`, `"Geadviseerd aan"`, `"Geforceerd aan"`, `"Geforceerd uit"`).
+  - Home Assistant's automatie `warmtepomp_smart_grid_control` schakelt vervolgens beide UniPi-relais (S10S en S11S) atomair om.
+- **Idempotente Toestandcheck (0 Relaisklapperen):**
+  - Vóór elke serviceaanroep (select, switch, climate) controleert de actuator of de huidige toestand in Home Assistant al overeenkomt met de gewenste toestand.
+  - Voorkomt dat er elke 60 seconden onnodige schakelcommando's naar Home Assistant of UniPi worden verstuurd.
+- **Enum-naar-String Normalisatie:**
+  - `cur_slot.mode_code` wordt expliciet genormaliseerd naar lowercase string (strip van `StandardizedState.`), waardoor `forced_on` en `max_on` niet meer onbedoeld terugvallen naar `normal`.
+- **Sanering van Conflicterende HA Automaties:**
+  - `automation.warmtepomp_smart_grid_control` is ingeschakeld om het input_select netjes te vertalen naar S10S/S11S.
+  - Oude legacy automatie `warmtepomp_smart_grid_hems_klimaat_regeling` en excess energy automatiseringen blijven gedeactiveerd.
+
+---
+
 ## [0.103.53] — 2026-09-19 (DHW Comfortmarge Configureerbaar + Solver-, Uitleg- & Grafiekfixes)
 
 ### DHW Solver Interpolatie & Boundary Fixes (WP1)
