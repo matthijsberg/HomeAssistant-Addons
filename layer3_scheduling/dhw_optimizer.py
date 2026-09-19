@@ -332,16 +332,22 @@ def solve(
 
     # Compute dynamic comfort margins m_k
     m_margins = [0.0] * (N + 1)
-    if p.use_dynamic_margin:
+    if p.comfort_margin_mode == "p95":
+        min_floor = max(0.0, float(getattr(p, "min_comfort_margin_c", 0.5)))
         for k in range(N):
             window_end = min(N, k + p.dynamic_horizon_slots)
             stress_diff_sum = sum(q_tap_p95[j] - q_tap_p50[j] for j in range(k, window_end))
             m_dyn = stress_diff_sum / C_tank
-            m_margins[k] = max(0.5, round(m_dyn, 2))
+            m_margins[k] = max(min_floor, round(m_dyn, 2))
         m_margins[N] = m_margins[N - 1]
-    else:
+    elif p.comfort_margin_mode == "fixed":
+        fixed_val = max(0.0, float(getattr(p, "fixed_comfort_margin_c", 2.0)))
         for k in range(N + 1):
-            m_margins[k] = p.fixed_comfort_margin_c
+            m_margins[k] = fixed_val
+    else:  # "p50" mode: pure median tap demand without stress buffer
+        p50_margin = max(0.0, float(getattr(p, "min_comfort_margin_c", 0.0)))
+        for k in range(N + 1):
+            m_margins[k] = p50_margin
 
     # 5. Terminal condition (Salvage Value p_hat / COP_hat)
     # Estimate baseline p_eff across slots to derive cheapest 20%

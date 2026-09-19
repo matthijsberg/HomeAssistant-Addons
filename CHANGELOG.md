@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.61] — 2026-09-19 (Bugfix: P50 Comfortmarge Respecteert Minimummarge 0°C)
+
+### DHW Optimizer Solver
+- **Oplossing Onterechte 2.0°C Marge bij Modus P50:**
+  - In `layer3_scheduling/dhw_optimizer.py` viel de solver bij `mode == "p50"` ten onrechte terug op `fixed_comfort_margin_c` (2,0°C). Daardoor werd het vat altijd boven 42,0°C gehouden en forceerde de solver een onnodige tussenrun zodra het vat 42,5°C bereikte.
+  - Nu gebruikt `mode == "p50"` strikt `min_comfort_margin_c` (standaard 0,0°C). Het vat mag nu echt leeglopen tot 40,0°C en start vervolgens in één enkele efficiënte run naar ~60°C.
+- **Frontend Opslag Recalculate:**
+  - `saveDhwMarginFromTab()` in `web/js/app.js` triggert nu direct `POST /api/schedule/recalculate` zodat het nieuwe schema meteen zichtbaar is zonder handmatig herberekenen.
+
+---
+
 ## [0.103.60] — 2026-09-19 (Knop Directe Herberekening Planning op Voorspelling)
 
 ### GUI & Dashboard

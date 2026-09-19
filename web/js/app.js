@@ -3509,8 +3509,11 @@
                 const data = await res.json();
                 if (data.status === 'success') {
                     alert(`Comfortmarge succesvol opgeslagen: ${mode.toUpperCase()} (min: ${minM}°C)`);
-                    if (typeof renderDhwTemperatureChart === 'function') renderDhwTemperatureChart();
-                    if (typeof loadChartData === 'function') loadChartData();
+                    await fetch('./api/schedule/recalculate', { method: 'POST' });
+                    if (typeof loadChartData === 'function') await loadChartData();
+                    if (typeof loadElectricityPricesChart === 'function') await loadElectricityPricesChart();
+                    if (typeof renderDhwTemperatureChart === 'function') await renderDhwTemperatureChart();
+                    if (typeof renderHeatingForecastChart === 'function') await renderHeatingForecastChart();
                 } else {
                     alert('Fout bij opslaan: ' + (data.message || 'Onbekende fout'));
                 }
