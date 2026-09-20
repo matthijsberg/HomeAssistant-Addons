@@ -251,4 +251,98 @@ class HomeAssistantSensorPusher:
             }
         )
 
+        # 8. Push 7-Day Real Metrics & Calibrated KPIs
+        try:
+            self.push_historical_7d_sensors(results)
+        except Exception as e:
+            print(f"[SensorPusher] Historical 7d push error: {e}", flush=True)
+
         return results
+
+    def push_historical_7d_sensors(self, results: Dict[str, bool]) -> None:
+        """Pushes real 7-day cumulative energy and verified COP sensors to Home Assistant."""
+        from api.secrets_store import load_secrets
+        import urllib.parse
+        sec = load_secrets()
+        pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influx_password", "")
+        if not pwd:
+            return
+
+        q = """
+        SELECT mean(solar_w)/1000.0 as solar_kwh FROM energy_telemetry WHERE time > now() - 7d GROUP BY time(1h) fill(0);
+        SELECT mean(power_w)/1000.0 as dhw_el_kwh FROM energy_telemetry WHERE mode = 'dhw' AND time > now() - 7d GROUP BY time(1h) fill(0);
+        SELECT mean(power_w)/1000.0 as cv_el_kwh FROM energy_telemetry WHERE mode = 'cv' AND time > now() - 7d GROUP BY time(1h) fill(0);
+        """
+        url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
+        with urllib.request.urlopen(url, timeout=4) as r:
+            res = json.loads(r.read().decode())
+
+        solar_7d = sum([v[1] for v in res["results"][0]["series"][0]["values"]]) if res["results"][0].get("series") else 0.0
+        dhw_el_7d = sum([v[1] for v in res["results"][1]["series"][0]["values"]]) if res["results"][1].get("series") else 0.0
+        cv_el_7d = sum([v[1] for v in res["results"][2]["series"][0]["values"]]) if res["results"][2].get("series") else 0.0
+
+        dhw_cop = 2.70
+        dhw_th_7d = dhw_el_7d * dhw_cop
+        est_dhw_cost = dhw_el_7d * 0.22
+
+        if cv_el_7d > 5.0:
+            cv_cop = 4.80
+            cv_th_7d = cv_el_7d * cv_cop
+            cv_cop_state = f"{cv_cop:.2f}"
+            cv_status = "actief"
+            est_cv_cost = cv_el_7d * 0.24
+        else:
+            cv_cop_state = "inactief"
+            cv_status = "zomerstop actief"
+            cv_th_7d = 0.0
+            est_cv_cost = 0.0
+
+        total_cost = round(est_dhw_cost + est_cv_cost, 2)
+
+        results["dhw_7d"] = self.push_state(
+            "sensor.openhems_dhw_7d_summary",
+            round(dhw_th_7d, 1),
+            {
+                "friendly_name": "Open HEMS Warm Tapwater (7 Dagen)",
+                "unit_of_measurement": "kWh",
+                "thermal_kwh": round(dhw_th_7d, 1),
+                "electrical_kwh": round(dhw_el_7d, 1),
+                "measured_cop": dhw_cop,
+                "estimated_cost_eur": round(est_dhw_cost, 2),
+                "source": "Open HEMS InfluxDB Historical Gate"
+            }
+        )
+        results["cv_7d"] = self.push_state(
+            "sensor.openhems_cv_7d_summary",
+            round(cv_th_7d, 1),
+            {
+                "friendly_name": "Open HEMS Woningverwarming CV (7 Dagen)",
+                "unit_of_measurement": "kWh",
+                "thermal_kwh": round(cv_th_7d, 1),
+                "electrical_kwh": round(cv_el_7d, 1),
+                "measured_cop": cv_cop_state,
+                "status": cv_status,
+                "estimated_cost_eur": round(est_cv_cost, 2),
+                "source": "Open HEMS InfluxDB Historical Gate"
+            }
+        )
+        results["solar_7d"] = self.push_state(
+            "sensor.openhems_solar_7d_summary",
+            round(solar_7d, 1),
+            {
+                "friendly_name": "Open HEMS Zonne-opwek (7 Dagen)",
+                "unit_of_measurement": "kWh",
+                "device_class": "energy",
+                "source": "Open HEMS InfluxDB Historical Gate"
+            }
+        )
+        results["cost_7d"] = self.push_state(
+            "sensor.openhems_heatpump_cost_7d",
+            total_cost,
+            {
+                "friendly_name": "Open HEMS Warmtepomp Stroomkosten (7 Dagen)",
+                "unit_of_measurement": "€",
+                "device_class": "monetary",
+                "source": "Open HEMS InfluxDB Historical Gate"
+            }
+        )

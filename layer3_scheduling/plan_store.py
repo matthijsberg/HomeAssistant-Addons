@@ -28,6 +28,27 @@ class PlanStore:
         self._plan_version: int = 0
         self._publication_history: List[Dict[str, Any]] = []
         self._persistence_path = persistence_path
+        self._in_flight_dhw_run: Optional[Dict[str, Any]] = None
+
+    def register_in_flight_run(self, target_temp_c: float, mode: str, started_at: Optional[datetime] = None) -> None:
+        """Register an active DHW run commitment to protect against premature abortion or replanning shift."""
+        with self._lock:
+            self._in_flight_dhw_run = {
+                "active": True,
+                "target_temp_c": float(target_temp_c),
+                "mode": mode,
+                "started_at": (started_at or datetime.now(timezone.utc)).isoformat()
+            }
+
+    def clear_in_flight_run(self) -> None:
+        """Clear active in-flight run once target temperature is attained or compressor returns to standby."""
+        with self._lock:
+            self._in_flight_dhw_run = None
+
+    def get_in_flight_run(self) -> Optional[Dict[str, Any]]:
+        """Return current in-flight run commitment if any."""
+        with self._lock:
+            return dict(self._in_flight_dhw_run) if self._in_flight_dhw_run else None
 
     @classmethod
     def get_instance(cls, persistence_path: Optional[Path] = None) -> "PlanStore":

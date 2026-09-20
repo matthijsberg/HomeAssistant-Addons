@@ -353,6 +353,22 @@ def ensure_active_canonical_plan(force_refresh=False, horizon_hours=48.0):
             else:
                 past_lockout_mins = 0
                 mins_since_last_lockout = int(diff_mins)
+
+        # In-Flight Physical Telemetry Check:
+        wp_st = states_map.get("sensor.warmtepomp_power", {})
+        try:
+            wp_pwr = float(wp_st.get("state", 0.0) or 0.0)
+        except (ValueError, TypeError):
+            wp_pwr = 0.0
+        dhw_demand_st = (states_map.get("binary_sensor.hc_dhw_dhw_demand", {}).get("state") == "on")
+        dhw_valve_st = (states_map.get("binary_sensor.hc_dhw_valve_dhw_tank", {}).get("state") == "on")
+        
+        store = get_plan_store()
+        if (s10_on and s11_on) or (wp_pwr > 600.0 and (dhw_demand_st or dhw_valve_st)) or (wp_pwr > 1200.0 and cur_dhw < 58.0):
+            if not store.get_in_flight_run():
+                target_t = 60.0 if (s10_on and s11_on and cur_dhw >= 48.0) else 50.0
+                if cur_dhw < target_t - 0.3:
+                    store.register_in_flight_run(target_temp_c=target_t, mode="forced_on")
     except Exception as e_lk:
         print(f"Warning determining lockout history: {e_lk}")
 

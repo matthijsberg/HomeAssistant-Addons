@@ -10,6 +10,20 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.69] — 2026-09-20 (In-Flight DHW Run Continuïteit, Failsafe Watchdog & CV Herstel)
+
+### DHW Run Continuïteit & Failsafe Watchdog
+- **In-Flight Run Protection in PlanStore & Solver:**
+  - `PlanStore` registreert gestarte of actieve DHW runs als bindende toezegging via `register_in_flight_run()`.
+  - `CentralPlanner.plan()` en `dhw_optimizer.py` dwingen af dat actieve kwartieren niet mogen worden verplaatst of geannuleerd zolang $T_{\text{tank}} < T_{\text{target}} - 0{,}3^\circ\text{C}$.
+- **Failsafe Watchdog & Relais-Release:**
+  - `daemon.py` en `plan_decision_evaluator.py` monitoren fysieke SG4-relais en compressorvermogen. Zodra het setpoint is bereikt of de compressor uitdraait, worden S10/S11 direct vrijgegeven naar SG2 (Automatisch).
+- **CV Master Switch Herstel (Hydraulische Interlock):**
+  - Opgelost: In `DaikinInterlock` werd in `Normal` (SG2) de vorige CV-status hergebruikt, waardoor na een tapwatercyclus de centrale verwarming permanent op `off` bleef staan.
+  - `cv_master_switch_on` wordt nu in `Normal` en `Advised` expliciet geforceerd op `True`, zodat ruimteverwarming direct kan hervatten zodra tapwater gereed is.
+
+---
+
 ## [0.103.68] — 2026-09-19 (Historische Spitsblokken 100% uit Database i.p.v. Beredeneerd)
 
 ### Historische Analytics & Piekdetectie

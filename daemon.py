@@ -60,6 +60,7 @@ from layer3_scheduling.plan_decision_evaluator import (
     evaluate_and_log_night_boiler_decision,
     evaluate_and_log_planner_decisions
 )
+from layer3_scheduling.plan_store import PlanStore
 
 class HemsApiHandler(BaseHTTPRequestHandler):
 
@@ -412,6 +413,18 @@ class HemsBackgroundCollector(threading.Thread):
             if req_clean.startswith("standardizedstate."):
                 req_clean = req_clean.split(".")[-1]
             mode_to_execute = req_clean
+
+            # In-Flight Run Continuity Guard:
+            # If an active run is in flight and tank is below setpoint, protect against premature de-actuation
+            in_flight = PlanStore.get_instance().get_in_flight_run()
+            if in_flight:
+                target_in_flight = float(in_flight.get("target_temp_c", 50.0))
+                if t_live < target_in_flight - 0.3:
+                    in_flight_mode = in_flight.get("mode", "forced_on")
+                    if mode_to_execute in ["normal", "off", "standby"]:
+                        mode_to_execute = in_flight_mode
+                else:
+                    PlanStore.get_instance().clear_in_flight_run()
 
             # Determine continuous lockout duration from HA state
             cur_lockout_mins = 0.0

@@ -111,21 +111,22 @@ class DaikinInterlock:
 
         # 4. Advised Off (Lossy Mapping: Daikin SG has no Stand for soft advice)
         elif requested_mode == "advised_off":
-            # Downgrade to SG2 (Normal) and report downgrade
+            # Downgrade to SG2 (Normal) and report downgrade; ensure CV master is ON
             return DaikinHardwareCommand(
                 s10s_relay_on=False,
                 s11s_relay_on=False,
-                cv_master_switch_on=current_cv_switch_state,
+                cv_master_switch_on=True,
                 effective_mode="normal",
                 downgrade_reason="Daikin SG contacts lack soft-lockout state; downgraded to SG2 normal with setpoint bias"
             )
 
-        # 5. Normal (SG Stand 2)
+        # 5. Normal (SG Stand 2: S10S=OFF, S11S=OFF)
         else:
+            # Under normal operation without active DHW run, CV master switch must be ON
             return DaikinHardwareCommand(
                 s10s_relay_on=False,
                 s11s_relay_on=False,
-                cv_master_switch_on=current_cv_switch_state,
+                cv_master_switch_on=True,
                 effective_mode="normal",
                 downgrade_reason=None
             )

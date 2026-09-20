@@ -199,30 +199,59 @@ class CentralPlanner:
             # Check DHW Planner mode: 'optimizer' (default) or 'shadow' (diagnostic)
             planner_mode = get_dhw_planner_mode(model_parameters)
 
-            # Query previous plan from PlanStore for anti-cycling & run continuity
-            is_running = False
-            try:
-                prev_plan = get_plan_store().get_plan()
-                if prev_plan and prev_plan.slots:
-                    gen_dt = getattr(prev_plan, "generated_at", None)
-                    if isinstance(gen_dt, str):
-                        gen_dt = datetime.fromisoformat(gen_dt)
-                    if gen_dt is None or abs((now - gen_dt).total_seconds()) <= 2700:
-                        matching = []
-                        for s in prev_plan.slots:
-                            s_dt = getattr(s, "dt", None)
-                            if s_dt is None and getattr(s, "dt_iso", ""):
-                                try:
-                                    s_dt = datetime.fromisoformat(s.dt_iso)
-                                except Exception:
-                                    pass
-                            if s_dt and s_dt <= now < (s_dt + timedelta(minutes=step_mins)):
-                                matching.append(s)
-                        is_running = any(s.dhw_kw > 0.0 for s in matching) if matching else bool(prev_plan.slots[0].dhw_kw > 0.0)
-            except Exception:
-                pass
+            # Query PlanStore for in-flight DHW run commitment & run continuity
+            store = get_plan_store()
+            in_flight = store.get_in_flight_run()
+            in_flight_slots = 0
+            in_flight_target_c = 50.0
 
-            run_state0 = ("ON_FREE", 0) if is_running else ("OFF_FREE", 0)
+            # Also check if previous plan had slot 0 running DHW or matching slot running
+            if not in_flight:
+                try:
+                    prev_plan = store.get_plan()
+                    if prev_plan and prev_plan.slots:
+                        gen_dt = getattr(prev_plan, "generated_at", None)
+                        if isinstance(gen_dt, str):
+                            gen_dt = datetime.fromisoformat(gen_dt)
+                        if gen_dt is None or abs((now - gen_dt).total_seconds()) <= 2700:
+                            matching = []
+                            for s in prev_plan.slots:
+                                s_dt = getattr(s, "dt", None)
+                                if s_dt is None and getattr(s, "dt_iso", ""):
+                                    try:
+                                        s_dt = datetime.fromisoformat(s.dt_iso)
+                                    except Exception:
+                                        pass
+                                if s_dt and s_dt <= now < (s_dt + timedelta(minutes=step_mins)):
+                                    matching.append(s)
+                            cur_match = matching[0] if matching else prev_plan.slots[0]
+                            if cur_match.dhw_kw > 0.0:
+                                p0_mode = getattr(cur_match, "mode_code", "")
+                                p0_target = 60.0 if str(p0_mode) in ["max_on", "forced_solar_boost_60", "StandardizedState.MAX_ON"] else 50.0
+                                if current_dhw_temp < p0_target - 0.3:
+                                    in_flight = {
+                                        "active": True,
+                                        "target_temp_c": p0_target,
+                                        "mode": str(p0_mode),
+                                        "started_at": now.isoformat()
+                                    }
+                                    store.register_in_flight_run(target_temp_c=p0_target, mode=str(p0_mode))
+                except Exception:
+                    pass
+
+            if in_flight:
+                in_flight_target_c = float(in_flight.get("target_temp_c", 50.0))
+                if current_dhw_temp >= in_flight_target_c - 0.3:
+                    # In-flight run has attained setpoint! Release commitment.
+                    store.clear_in_flight_run()
+                    in_flight_slots = 0
+                else:
+                    # Run is active: compute remaining slots needed (~2.2°C per 15 min slot)
+                    delta_t_rem = in_flight_target_c - current_dhw_temp
+                    in_flight_slots = max(1, min(6, math.ceil(delta_t_rem / 2.2)))
+
+            is_running = (in_flight_slots > 0)
+            run_state0 = ("ON_MANDATORY", 1) if is_running else ("OFF_FREE", 0)
 
             res_opt = solve(
                 slots=slots,
@@ -233,7 +262,9 @@ class CentralPlanner:
                 spec=spec,
                 params=dhw_optimizer_params,
                 dynamic_peaks=dynamic_peaks,
-                model_parameters=model_parameters
+                model_parameters=model_parameters,
+                in_flight_slots=in_flight_slots,
+                in_flight_target_c=in_flight_target_c
             )
 
             # Evaluate autonomous baseline (WP7)
@@ -249,8 +280,8 @@ class CentralPlanner:
                 model_parameters=model_parameters
             )
 
-            # Guard: optimizer must beat baseline on objective J
-            if base_res.j_objective_eur < res_opt.j_objective_eur - 0.005:
+            # Guard: optimizer must beat baseline on objective J (only if NOT locked into an in-flight run)
+            if in_flight_slots == 0 and base_res.j_objective_eur < res_opt.j_objective_eur - 0.005:
                 # Baseline is better: Open HEMS adopts baseline plan without forced intervention
                 res_opt.planned_slots = [i for i, u in enumerate(base_res.u_plan) if u == 1]
                 res_opt.j_objective_eur = base_res.j_objective_eur

@@ -52,6 +52,16 @@ def test_lossy_mapping_advised_off():
     assert "No physical SG" in cmd.downgrade_reason or "SG contacts lack" in cmd.downgrade_reason
 
 
+def test_hydraulic_interlock_cv_master_restored_in_normal():
+    """Verify that when DHW finishes and mode transitions to normal, cv_master_switch_on is restored to True."""
+    # Even if current_cv_switch_state was False during DHW run, normal mode must restore it to True
+    cmd = DaikinInterlock.resolve_command(requested_mode="normal", current_cv_switch_state=False)
+    assert cmd.s10s_relay_on is False
+    assert cmd.s11s_relay_on is False
+    assert cmd.cv_master_switch_on is True
+    assert cmd.effective_mode == "normal"
+
+
 def test_daikin_actuator_feedback():
     """Verify actuator tracks effective_mode feedback."""
     executed_switches = {}

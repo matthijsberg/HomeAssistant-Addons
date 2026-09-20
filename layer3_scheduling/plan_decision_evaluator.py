@@ -101,6 +101,7 @@ def evaluate_and_apply_dhw_run_merger(
                 plan.slots[run_i].heating_kw = 0.0
 
         store = PlanStore.get_instance()
+        store.register_in_flight_run(target_temp_c=60.0, mode="max_on")
         store.publish_plan(plan)
         
         now_ts = time.time()
@@ -151,6 +152,7 @@ def evaluate_and_apply_dhw_run_merger(
             plan.slots[0].dhw_kw = 0.0
 
             store = PlanStore.get_instance()
+            store.clear_in_flight_run()
             store.publish_plan(plan)
 
         now_ts = time.time()
@@ -199,6 +201,7 @@ def evaluate_and_apply_dhw_run_merger(
                 plan.slots[slot_idx].dhw_kw = 0.0
 
         store = PlanStore.get_instance()
+        store.register_in_flight_run(target_temp_c=50.0, mode="forced_on")
         store.publish_plan(plan)
 
         now_ts = time.time()

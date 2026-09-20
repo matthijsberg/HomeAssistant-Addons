@@ -71,9 +71,9 @@ def test_sensor_pusher_payload_generation():
     )
 
     res = pusher.push_plan_sensors(dummy_plan)
-    assert len(res) == 7
+    assert len(res) == 11
     assert all(res.values())
-    assert pusher.push_state.call_count == 7
+    assert pusher.push_state.call_count == 11
 
     # Verify entity IDs pushed
     called_entities = [call[0][0] for call in pusher.push_state.call_args_list]
@@ -84,3 +84,7 @@ def test_sensor_pusher_payload_generation():
     assert "sensor.openhems_heatpump_dispatch_24h_forecast" in called_entities
     assert "sensor.openhems_dhw_target_temperature" in called_entities
     assert "sensor.openhems_dispatch_status" in called_entities
+    assert "sensor.openhems_dhw_7d_summary" in called_entities
+    assert "sensor.openhems_cv_7d_summary" in called_entities
+    assert "sensor.openhems_solar_7d_summary" in called_entities
+    assert "sensor.openhems_heatpump_cost_7d" in called_entities

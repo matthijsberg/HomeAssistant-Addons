@@ -231,6 +231,8 @@ def solve(
     params: Optional[DhwOptimizerParams] = None,
     dynamic_peaks: Optional[List[Any]] = None,
     model_parameters: Optional[Dict[str, Any]] = None,
+    in_flight_slots: int = 0,
+    in_flight_target_c: float = 50.0,
 ) -> DhwOptimizerResult:
     """
     Pure function: Solves the DHW optimal scheduling problem via exact backward Dynamic Programming.
@@ -613,7 +615,12 @@ def solve(
                 cand_cost_1 = cost_start[current_r, 1] + c_el + val_1
 
         # Decision
-        if math.isinf(cand_cost_0) and math.isinf(cand_cost_1):
+        if k < in_flight_slots:
+            # Physical In-Flight Run Commitment: Heat pump is already running and must complete cycle
+            u_opt = 1
+            current_t = t_next_cand_1
+            current_r = r_next_1 if r_next_1 >= 0 else idx_on_free
+        elif math.isinf(cand_cost_0) and math.isinf(cand_cost_1):
             # Degradation / Fallback recovery:
             # If initial tank was below comfort or no feasible path exists,
             # activate heat pump as fast as possible outside hard lockouts.
