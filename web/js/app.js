@@ -1948,9 +1948,10 @@
                     if (adh && adh.is_active) {
                         liveDhwCard.classList.remove('hidden');
                         const targetBadge = document.getElementById('live-dhw-target-badge');
+                        const is60Run = Boolean(adh.should_merge || (adh.target_temp_c && adh.target_temp_c >= 55.0));
                         if (targetBadge) {
                             targetBadge.innerText = `Doel: ${Number(adh.target_temp_c).toFixed(0)}°C`;
-                            targetBadge.className = adh.should_merge 
+                            targetBadge.className = is60Run 
                                 ? 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-600 text-white border border-purple-400 shadow'
                                 : 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-600 text-white border border-emerald-400 shadow';
                         }
@@ -1960,8 +1961,8 @@
                         }
                         const badgeContainer = document.getElementById('live-dhw-decision-badge-container');
                         if (badgeContainer) {
-                            if (adh.should_merge) {
-                                badgeContainer.innerHTML = '<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow"><span class="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span> Gekozen: Doorwarmen tot 60°C (Fusie)</span>';
+                            if (is60Run) {
+                                badgeContainer.innerHTML = '<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow"><span class="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span> Gekozen: Doorwarmen tot 60°C (Zonnebuffer)</span>';
                             } else {
                                 badgeContainer.innerHTML = '<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Gekozen: Stoppen bij 50°C (Basislading)</span>';
                             }

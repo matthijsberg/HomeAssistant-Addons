@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.70] — 2026-09-20 (Harmonisatie DHW Live Banner met Exacte Optimizer 60°C Doel)
+
+### UI & Live DHW Besluitvorming
+- **Oplossen Tegenstrijdige DHW Banner (50°C vs 60°C):**
+  - In `OpportunisticDHWMerger.evaluate_merge()` werd uitsluitend gezocht naar toekomstige runs (`idx >= 1`). Als slot 0 reeds als 60°C zonnebuffer/max_on was gepland, concludeerde de merger ten onrechte dat er geen 60°C run was en overschreef hij de status met "Stoppen bij 50°C (Basislading)" en "Doel 50°C bereikt (49.8°C)".
+  - Nu herkent `OpportunisticDHWMerger` direct wanneer slot 0 (de actieve run) reeds een 60°C zonnebuffer is (`max_on`).
+  - De paarse banner toont nu netjes **Doel: 60°C**, **Gekozen: Doorwarmen tot 60°C (Zonnebuffer)** en stemt 100% overeen met de grafieklijn (59°C) en het optimalisatieplan onderaan.
+
+---
+
 ## [0.103.69] — 2026-09-20 (In-Flight DHW Run Continuïteit, Failsafe Watchdog & CV Herstel)
 
 ### DHW Run Continuïteit & Failsafe Watchdog

@@ -107,6 +107,42 @@ class OpportunisticDHWMerger:
         active_lookahead = lookahead_slots if lookahead_slots is not None else cls.LOOKAHEAD_SLOTS_MAX
         tank_target_50_reached = (current_tank_temp_c >= 49.8)
 
+        # CASE 0: Active slot (slot 0) is ALREADY a 60°C thermal storage / solar boost run
+        cur_s = plan.slots[0]
+        cur_mode = str(getattr(cur_s, "mode_code", "")).lower()
+        plan_summary = getattr(plan, "dhw_summary", None)
+        cur_is_60 = (
+            "max_on" in cur_mode
+            or "solar_boost" in cur_mode
+            or getattr(cur_s, "target_temp_c", 50.0) >= 58.0
+            or (plan_summary and getattr(plan_summary, "target_temp_c", 50.0) >= 58.0 and getattr(plan_summary, "run_start", "").startswith("Nu"))
+        )
+
+        if cur_is_60:
+            target_60_reached = (current_tank_temp_c >= 59.8)
+            mode_lbl = "Doel 60°C bereikt — Automatisch (SG2)" if target_60_reached else "Doorwarmen naar 60°C (Zonnebuffer)"
+            dec_expl = (
+                f"Besluit: Doel 60°C bereikt ({current_tank_temp_c:.1f}°C) — Automatisch (SG2). Het boilervat is volledig doorgewarmd tot 60°C zonnebuffer. Smart Grid relais zijn vrijgegeven."
+                if target_60_reached else
+                f"Besluit: Doorwarmen naar 60°C (Zonnebuffer). De warmtepomp is actief ({current_power_kw:.2f} kW, {current_tank_temp_c:.1f}°C) en verwarmt het vat conform plan door tot 60°C om zonnestroom te bufferen."
+            )
+            return OpportunisticMergeResult(
+                should_merge=True,
+                promoted_mode="normal" if target_60_reached else "max_on",
+                target_temp_c=60.0,
+                reason="Geplande 60°C zonnebuffer is actief",
+                decision_explanation=dec_expl,
+                original_slot_idx=0,
+                original_slot_time="nu",
+                savings_estimate_eur=0.20,
+                cancelled_slots=[],
+                is_dhw_active=True,
+                current_tank_temp_c=current_tank_temp_c,
+                current_power_kw=current_power_kw,
+                active_target_temp_c=60.0,
+                active_mode_label=mode_lbl
+            )
+
         # Scan upcoming slots within lookahead window
         candidate_slots_60: List[int] = []
         candidate_slots_50: List[int] = []
