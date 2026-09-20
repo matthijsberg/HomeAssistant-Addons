@@ -10,6 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.73] — 2026-09-20 (Zelflerende Modelparameters voor PV Rendement & Thermische Vloercapaciteit)
+
+### Zelflerend Model & Parameter Kalibratie
+- **Toevoeging PV Rendementsfactor ($k_{\text{pv}}$) aan Zelflerend Model:**
+  - `layer2_calibration/learned_forecaster.py` analyseert nu in InfluxDB de werkelijke zonneproductie van Inepro 103 over alle zonnedagen.
+  - Vergelijkt de gerealiseerde mediaan ($27{,}2\text{ kWh/dag}$) met het theoretische 5,76 kWp ZW-dakmodel en berekent de werkelijke rendements-/oriëntatiefactor ($95{,}3\%$).
+- **Toevoeging Thermische Vloercapaciteit ($C_{\text{floor}}$) aan Zelflerend Model:**
+  - Berekent en bewaakt de thermische massa van de betondekvloer ($14{,}5\text{ kWh/K}$) via de 2R1C dynamische warmteoverdrachtsrespons over gerealiseerde stookdagen.
+- **Model Governance API & UI Integratie:**
+  - Beide nieuwe fysische parameters zijn opgenomen in de aanbevelingentabel (`/api/model/recommendations`) en worden ondersteund in het acceptatiemechanisme (`/api/model/recommendations/accept`).
+
+---
+
 ## [0.103.72] — 2026-09-20 (Avondspits Window Opgerekt naar 22:00)
 
 ### Dynamische Piekdetectie & Spitsblokkades

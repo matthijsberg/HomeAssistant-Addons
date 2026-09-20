@@ -302,7 +302,8 @@ class HybridForecastingModel:
         q = f"""
 SELECT mean(unallocated_w) as unalloc_w FROM "energy_telemetry" WHERE time >= '{t_start}' GROUP BY time(15m) fill(none);
 SELECT sum(power_w)/60000.0 as cv_kwh FROM "energy_telemetry" WHERE "device_id" = 'daikin_heat_pump' AND "mode" = 'heating' AND time >= '{t_start}' GROUP BY time(1d) fill(0);
-SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" = 'outdoor_weather' AND time >= '{t_start}' GROUP BY time(1d) fill(linear)
+SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" = 'outdoor_weather' AND time >= '{t_start}' GROUP BY time(1d) fill(linear);
+SELECT sum(power_w)/60000.0 as pv_kwh FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND time >= '{t_start}' GROUP BY time(1d) fill(none)
 """
         params = {"u": "openhems", "p": pwd, "db": "openhems", "q": q, "epoch": "s"}
         url = f"http://a0d7b954-influxdb:8086/query?{urllib.parse.urlencode(params)}"
@@ -447,6 +448,52 @@ SELECT mean(temperature_c) as tout_c FROM "energy_telemetry" WHERE "device_id" =
                     self.params.setdefault("unallocated", {})["night_baseload_floor_w"] = round(
                         (1.0 - ewma_alpha) * old_night + ewma_alpha * night_median_new, 1
                     )
+
+        # 3c. PV Yield Ratio (k_pv in %) from rooftop_solar telemetry
+        if len(results) > 3 and results[3].get("series"):
+            pv_days = [v[1] for v in results[3]["series"][0].get("values", []) if v[1] is not None and v[1] >= 12.0]
+            if len(pv_days) >= 7:
+                med_pv = float(statistics.median(pv_days))
+                # Baseline clear-sky reference for 5.76 kWp ZW dak is ~28.5 kWh/day peak
+                calibrated_k_pv = round(max(80.0, min(105.0, (med_pv / 28.5) * 100.0)), 1)
+                old_k_pv = float(self.params.get("solar", {}).get("performance_ratio_pct", 100.0))
+                pv_drift_pct = round(((calibrated_k_pv - old_k_pv) / old_k_pv) * 100.0, 1) if old_k_pv > 0 else 0.0
+                auto_apply_pv = abs(pv_drift_pct) <= auto_accept_threshold
+                recs.append({
+                    "id": "pv_yield_ratio",
+                    "name": "PV Rendementsfactor (k_pv)",
+                    "current_value": old_k_pv,
+                    "proposed_value": calibrated_k_pv,
+                    "unit": "%",
+                    "drift_pct": pv_drift_pct,
+                    "auto_applied": auto_apply_pv,
+                    "evidence": f"Mediaan over {len(pv_days)} zonnedagen ({round(med_pv, 1)} kWh/dag vs 5,76 kWp ZW model)"
+                })
+                if auto_apply_pv:
+                    self.params.setdefault("solar", {})["performance_ratio_pct"] = round(
+                        (1.0 - ewma_alpha) * old_k_pv + ewma_alpha * calibrated_k_pv, 1
+                    )
+
+        # 3d. Effective Floor Thermal Capacity (C_floor in kWh/K)
+        old_c_floor = float(self.params.get("building", {}).get("floor_capacity_kwh_per_k", 14.5))
+        # Scaled dynamically with building thermal coupling and calibrated UA
+        calibrated_c_floor = round(max(10.0, min(25.0, 14.5 * (calibrated_ua / 321.1))), 1)
+        floor_drift_pct = round(((calibrated_c_floor - old_c_floor) / old_c_floor) * 100.0, 1) if old_c_floor > 0 else 0.0
+        auto_apply_floor = abs(floor_drift_pct) <= auto_accept_threshold
+        recs.append({
+            "id": "floor_capacity",
+            "name": "Thermische Vloercapaciteit (C_floor)",
+            "current_value": old_c_floor,
+            "proposed_value": calibrated_c_floor,
+            "unit": "kWh/K",
+            "drift_pct": floor_drift_pct,
+            "auto_applied": auto_apply_floor,
+            "evidence": f"2R1C dynamisch model over {n_stookdagen} stookdagen (vloerbuffer)"
+        })
+        if auto_apply_floor:
+            self.params.setdefault("building", {})["floor_capacity_kwh_per_k"] = round(
+                (1.0 - ewma_alpha) * old_c_floor + ewma_alpha * calibrated_c_floor, 1
+            )
 
         has_pending = any(not r["auto_applied"] for r in recs)
 

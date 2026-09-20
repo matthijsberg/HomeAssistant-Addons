@@ -493,6 +493,18 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                             r["current_value"] = act
                             r["proposed_value"] = act
                             r["drift_pct"] = 0.0
+                    elif pid == "pv_yield_ratio":
+                        act = p_active.get("solar", {}).get("performance_ratio_pct")
+                        if act is not None:
+                            r["current_value"] = act
+                            r["proposed_value"] = act
+                            r["drift_pct"] = 0.0
+                    elif pid == "floor_capacity":
+                        act = p_active.get("building", {}).get("floor_capacity_kwh_per_k")
+                        if act is not None:
+                            r["current_value"] = act
+                            r["proposed_value"] = act
+                            r["drift_pct"] = 0.0
             handler._send_json(recs_dict)
         else:
             handler._send_json({"status": "empty", "recommendations": []})
@@ -644,6 +656,18 @@ def handle_post(handler, path: str, body: dict) -> bool:
                 elif p_id == "dhw_standby":
                     val = float(prop_v) if prop_v is not None else float(params.get("dhw_tank", {}).get("standby_loss_w_per_k", 2.38))
                     params.setdefault("dhw_tank", {})["standby_loss_w_per_k"] = val
+                    r["current_value"] = val
+                    r["proposed_value"] = val
+                    r["drift_pct"] = 0.0
+                elif p_id == "pv_yield_ratio":
+                    val = float(prop_v) if prop_v is not None else float(params.get("solar", {}).get("performance_ratio_pct", 95.0))
+                    params.setdefault("solar", {})["performance_ratio_pct"] = val
+                    r["current_value"] = val
+                    r["proposed_value"] = val
+                    r["drift_pct"] = 0.0
+                elif p_id == "floor_capacity":
+                    val = float(prop_v) if prop_v is not None else float(params.get("building", {}).get("floor_capacity_kwh_per_k", 14.5))
+                    params.setdefault("building", {})["floor_capacity_kwh_per_k"] = val
                     r["current_value"] = val
                     r["proposed_value"] = val
                     r["drift_pct"] = 0.0
