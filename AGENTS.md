@@ -13,6 +13,7 @@ Before presenting any code changes or committing:
 - [ ] **4. Test Suite Green:** All tests (including architecture guardrails and golden replay tests) must pass before pushing (`pytest tests/`).
 - [ ] **5. API & MCP Lockstep Parity:** Any change, addition, or retirement of a REST API endpoint MUST be declared in `docs/openapi.json` and simultaneously exposed in `mcp_server.py`. Architectural guardrail `tests/architecture/test_api_mcp_lockstep.py` enforces 100% parity.
 - [ ] **6. GUI & Frontend Verification via Headless Browser:** When modifying the WebUI, HTML, CSS, JavaScript, or dashboard charts, the QA agent must use the headless browser (via `browser_exec` with `capture_screenshot()` and DOM/console error inspection) to perform visual and live data verification before marking work complete.
+- [ ] **7. Historical Telemetry Fidelity (Feiten vs. Redeneren):** Alle data voor historische grafieken (actuaties, staten, vermogens, spitsblokken) moet direct worden opgehaald uit de persistente opslag (InfluxDB telemetrie en annotaties), NOOIT ter plekke synthetisch worden geredeneerd of achteraf berekend met voorspellende modellen (zoals `detect_dynamic_price_peaks` over een willekeurig zoomvenster). Redeneren en modelleren over historische data is uitsluitend toegestaan voor afgeleide data (zoals thermische vermogensafleidingen, trendanalyses, kalibraties en samenvattingen), mits voorzien van fysische ruisbewaking.
 
 ---
 
