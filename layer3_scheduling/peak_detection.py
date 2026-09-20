@@ -39,8 +39,8 @@ def detect_dynamic_price_peaks(
          op de absolute top van de prijsgolf om afkoeling van de vloer/woning in de winter te voorkomen.
       3. Flank-degradatie: Schouder-uren buiten de 2,5u top-kam worden 'Economisch Blokadvies' (⚠️),
          waarin de warmtepomp op minimale modulatie (950W) mag doorpruttelen indien nodig.
-      4. Strikte Spitsuren Afbakening: Alleen echte Ochtendspits (06:00-10:00) en Avondspits (17:00-21:00)
-         mogen een harde blokkade vormen. Nachtelijke uren (21:00-06:00) worden nooit hard geblokkeerd.
+      4. Strikte Spitsuren Afbakening: Alleen echte Ochtendspits (06:00-10:00) en Avondspits (17:00-22:00)
+         mogen een harde blokkade vormen. Nachtelijke uren (22:00-06:00) worden nooit hard geblokkeerd.
       5. Historie- en Dwell-bewust: Houdt rekening met reeds verstreken blokkadeduren en dwingt minimaal
          120 min hersteltijd af tussen twee opeenvolgende blokkades.
     """
@@ -127,10 +127,10 @@ def detect_dynamic_price_peaks(
         dt_end = timeline_items[e_idx]["dt"] + timedelta(minutes=step_mins)
 
         h = dt_start.hour
-        # Strikte spitsuren: Ochtendspits (06:00-10:00) en Avondspits (17:00-21:00).
-        # Buiten deze vensters (21:00-06:00 en 10:00-17:00) NOOIT harde blokkade!
-        is_spits_window = (6 <= h < 10) or (17 <= h < 21)
-        name = "Ochtendspits" if 6 <= h < 11 else ("Middagpiek" if 11 <= h < 17 else ("Avondspits" if 17 <= h < 21 else "Nachttarief"))
+        # Strikte spitsuren: Ochtendspits (06:00-10:00) en Avondspits (17:00-22:00).
+        # Buiten deze vensters (22:00-06:00 en 10:00-17:00) NOOIT harde blokkade!
+        is_spits_window = (6 <= h < 10) or (17 <= h < 22)
+        name = "Ochtendspits" if 6 <= h < 11 else ("Middagpiek" if 11 <= h < 17 else ("Avondspits" if 17 <= h < 22 else "Nachttarief"))
 
         # Bepaal of deze piek een harde blokkade rechtvaardigt
         is_hard_cluster = (max_p >= p85) and ((max_p - p_med) >= 0.050) and is_spits_window

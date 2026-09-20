@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.72] — 2026-09-20 (Avondspits Window Opgerekt naar 22:00)
+
+### Dynamische Piekdetectie & Spitsblokkades
+- **Verruiming Avondspits van 21:00 naar 22:00:**
+  - In `layer3_scheduling/peak_detection.py` is het harde avondspitsvenster aangepast van `17 <= h < 21` naar `17 <= h < 22`.
+  - Hierdoor worden prijspieken tussen 21:00 en 22:00 niet meer automatisch gedegradeerd naar `Nachttarief` (zacht advies), maar kwalificeren ze volwaardig voor de continue 150m harde SG1-spitsblokkade (`FORCED_OFF`).
+
+---
+
 ## [0.103.71] — 2026-09-20 (Harmonisatie Financiële Berekening Kosten Historie vs Verbruikshistorie)
 
 ### Financiën & Historische Grafieken
