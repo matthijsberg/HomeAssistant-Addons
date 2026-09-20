@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.71] — 2026-09-20 (Harmonisatie Financiële Berekening Kosten Historie vs Verbruikshistorie)
+
+### Financiën & Historische Grafieken
+- **Correctie Asymmetrische Saldering in Kosten Historie:**
+  - In `Kosten Historie` werd het netto vermogen `netKw = afnameKw - terugKw` eerst gesaldeerd en vervolgens vermenigvuldigd met de inkoopprijs ($0{,}48\text{ kWh} \times \text{\euro}0{,}1094 = \text{\euro}0{,}05$). Dit ging uit van virtuele 100% saldering tegen het inkooptarief voor de geëxporteerde $0{,}18\text{ kWh}$.
+  - In werkelijkheid betaal je over de werkelijke netafname ($0{,}66\text{ kWh} \times \text{\euro}0{,}1094 = \text{\euro}0{,}072$) en ontvang je de werkelijke terugleververgoeding ($0{,}18\text{ kWh} \times \text{\euro}0{,}0000 = \text{\euro}0{,}00$).
+  - `Kosten Historie` berekent de netto kosten nu identiek aan `Verbruikshistorie` op basis van de afzonderlijke import- en exportstromen, waardoor beide grafieken exact matchen op **€0,07**.
+
+---
+
 ## [0.103.70] — 2026-09-20 (Harmonisatie DHW Live Banner met Exacte Optimizer 60°C Doel)
 
 ### UI & Live DHW Besluitvorming

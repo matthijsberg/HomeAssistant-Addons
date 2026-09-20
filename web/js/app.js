@@ -4407,16 +4407,16 @@
                     const histPrices = data.prices || [];
                     const histExportPrices = data.export_prices || [];
 
-                    // Calculate Net Cost / Revenue per slot for history
-                    const histNetCostEurArr = netKw.map((nKw, idx) => {
-                        const kwh = Math.abs(nKw) * intervalH;
-                        if (nKw >= 0) {
-                            const pBuy = histPrices[idx] || 0.25;
-                            return Number((kwh * pBuy).toFixed(3));
-                        } else {
-                            const pSell = (histExportPrices[idx] !== undefined) ? histExportPrices[idx] : 0.10;
-                            return Number((- (kwh * pSell)).toFixed(3));
-                        }
+                    // Calculate Net Cost / Revenue per slot for history using actual import and export components
+                    const histNetCostEurArr = afnameKw.map((afn, idx) => {
+                        const ter = Math.abs(terugKw[idx] || 0);
+                        const kwhImport = afn * intervalH;
+                        const kwhExport = ter * intervalH;
+                        const pBuy = histPrices[idx] || 0.25;
+                        const pSell = (histExportPrices[idx] !== undefined) ? histExportPrices[idx] : 0.00;
+                        const costImport = kwhImport * pBuy;
+                        const revenueExport = kwhExport * pSell;
+                        return Number((costImport - revenueExport).toFixed(3));
                     });
 
                     // Summary statistics
