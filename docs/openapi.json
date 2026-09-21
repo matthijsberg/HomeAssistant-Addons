@@ -371,6 +371,51 @@
         }
       }
     },
+    "/api/analytics/plan_vs_actual": {
+      "get": {
+        "tags": [
+          "Analytics & History"
+        ],
+        "summary": "Get aligned plan vs actual time-series for solar, heat pump, and DHW",
+        "description": "Returns aligned historical datasets comparing actual telemetry against planned dispatch schedules, solar forecasts, and boiler runs.",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "description": "Historical timeframe window: '24h', '48h', or '7d'",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "24h",
+                "48h",
+                "7d"
+              ],
+              "default": "24h"
+            }
+          },
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Time resolution bucket: '15m' or '1h'",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h"
+              ],
+              "default": "15m"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aligned plan vs actual historical dataset"
+          }
+        }
+      }
+    },
     "/api/analytics/decisions": {
       "get": {
         "tags": [

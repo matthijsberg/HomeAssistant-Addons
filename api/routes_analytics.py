@@ -108,6 +108,100 @@ def fetch_actual_forced_off_ranges_from_db(
     except Exception:
         return []
 
+
+def fetch_actual_heating_ranges_from_db(
+    t_start_iso: str,
+    t_end_iso: str,
+    slot_dts: List[datetime],
+    interval_h: float = 0.25
+) -> List[Dict[str, Any]]:
+    """
+    Retrieves ACTUAL historical heating runs (forced_on, max_on) from InfluxDB hems_annotations.
+    """
+    if not slot_dts:
+        return []
+    try:
+        sec = load_secrets()
+        pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influx_password", "")
+        if not pwd:
+            return []
+        q = (
+            f'SELECT time, state_code, title FROM "hems_annotations" '
+            f'WHERE (state_code = \'forced_on\' OR state_code = \'max_on\') AND time >= \'{t_start_iso}\' AND time <= \'{t_end_iso}\' '
+            f'ORDER BY time ASC'
+        )
+        url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
+        with urllib.request.urlopen(url, timeout=3) as r:
+            res = json.loads(r.read().decode())
+        series = res.get("results", [{}])[0].get("series", [])
+        if not series:
+            return []
+        rows = series[0].get("values", [])
+        active_indices = set()
+        step_sec = interval_h * 3600.0
+        for row in rows:
+            t_str = row[0]
+            dt = datetime.fromisoformat(t_str.replace("Z", "+00:00"))
+            for idx, s_dt in enumerate(slot_dts):
+                if abs((dt - s_dt).total_seconds()) < (step_sec / 2.0 + 60.0):
+                    active_indices.add(idx)
+        ranges = []
+        if active_indices:
+            sorted_idx = sorted(list(active_indices))
+            cur_start = sorted_idx[0]
+            cur_end = sorted_idx[0]
+            for i in sorted_idx[1:]:
+                if i == cur_end + 1:
+                    cur_end = i
+                else:
+                    ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": "ACTUEEL VERWARMD"})
+                    cur_start = i
+                    cur_end = i
+            ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": "ACTUEEL VERWARMD"})
+        return ranges
+    except Exception:
+        return []
+
+
+def fetch_planned_dhw_ranges_from_db(
+    slot_dts: List[datetime],
+    hist_dhw_windows: List[Dict[str, Any]],
+    interval_h: float = 0.25
+) -> List[Dict[str, Any]]:
+    """
+    Maps historical planned decision windows (from open_hems_decisions.jsonl) onto slot indices.
+    """
+    if not slot_dts or not hist_dhw_windows:
+        return []
+    try:
+        active_indices = set()
+        for idx, s_dt in enumerate(slot_dts):
+            d_cur = s_dt.strftime("%Y-%m-%d")
+            t_cur = s_dt.strftime("%H:%M")
+            for w in hist_dhw_windows:
+                if w.get("date") == d_cur:
+                    st = w.get("start_time", "")
+                    et = w.get("end_time", "")
+                    if st and et and st <= t_cur < et:
+                        active_indices.add(idx)
+                        break
+        ranges = []
+        if active_indices:
+            sorted_idx = sorted(list(active_indices))
+            cur_start = sorted_idx[0]
+            cur_end = sorted_idx[0]
+            for i in sorted_idx[1:]:
+                if i == cur_end + 1:
+                    cur_end = i
+                else:
+                    ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": "GEPLAND VERWARMEN"})
+                    cur_start = i
+                    cur_end = i
+            ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": "GEPLAND VERWARMEN"})
+        return ranges
+    except Exception:
+        return []
+
 def get_today_history_kpis(cfg: dict, sec: dict) -> dict:
     active_conn = cfg.get("influxdb_connections", [{}])[0]
     db_name = active_conn.get("database", "openhems")
@@ -1050,9 +1144,12 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     last_t = round(float(t_val), 1)
                 temps.append(last_t)
 
-            # Historical DHW telemetry: retrieve actual recorded hardware lockouts from database
+            # Historical DHW telemetry: retrieve actual recorded hardware lockouts and runs from database
             slot_dts = [datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ) for ts_str in sorted_ts]
             forced_off_ranges = fetch_actual_forced_off_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
+            heating_ranges = fetch_actual_heating_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
+            hist_dhw_windows = load_historical_dhw_planned_windows(t_start_dt, t_end_dt)
+            planned_heating_ranges = fetch_planned_dhw_ranges_from_db(slot_dts, hist_dhw_windows, interval_h=interval_h)
 
             handler._send_json({
                 "status": "success",
@@ -1060,6 +1157,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "temperatures_c": temps,
                 "demand_kwh_th": demands_kwh_th,
                 "forced_off_ranges": forced_off_ranges,
+                "heating_ranges": heating_ranges,
+                "planned_heating_ranges": planned_heating_ranges,
                 "interval_h": interval_h
             })
             return True
@@ -1221,6 +1320,132 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             return True
         except Exception as e:
             handler._send_json({"status": "error", "message": str(e)}, status=500)
+            return True
+
+    # =========================================================================
+    # API: HISTORICAL PLAN VS ACTUAL OVERLAY
+    # =========================================================================
+    if path.startswith("/api/analytics/plan_vs_actual"):
+        try:
+            sec = load_secrets()
+            cfg = load_json(CONFIG_FILE)
+            active_conn = cfg.get("influxdb_connections", [{}])[0]
+            pwd = sec.get("influxdb", {}).get(active_conn.get("id"), "") or sec.get("influxdb", {}).get("local_ha_influxdb", "")
+
+            parsed_url = urllib.parse.urlparse(handler.path)
+            qp = urllib.parse.parse_qs(parsed_url.query)
+            tf = qp.get("range", ["24h"])[0]
+            user_res = qp.get("resolution", ["15m"])[0]
+
+            days = 1 if tf == "24h" else (2 if tf == "48h" else 7)
+            bucket_sz = "1h" if user_res == "1h" else "15m"
+            interval_h = 1.0 if bucket_sz == "1h" else 0.25
+            time_fmt = "%H:%M" if bucket_sz == "15m" else "%H:00"
+
+            now = datetime.now(timezone.utc)
+            t_start_dt = now - timedelta(days=days)
+            t_start = t_start_dt.strftime("%Y-%m-%dT%H:00:00Z")
+            t_end = now.strftime("%Y-%m-%dT%H:00:00Z")
+
+            q_telemetry = f"""
+            SELECT mean("solar_w") as solar, mean("heatpump_w") as hp, mean("temperature_c") as tank_temp
+            FROM "energy_telemetry" 
+            WHERE time >= '{t_start}' AND time <= '{t_end}'
+            GROUP BY time({bucket_sz}) fill(linear);
+            SELECT mean("solar_kw") FROM "weather_solar_forecast" WHERE time >= '{t_start}' AND time <= '{t_end}' GROUP BY time({bucket_sz}) fill(linear);
+            """
+            url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q_telemetry)}"
+            with urllib.request.urlopen(url, timeout=5) as r:
+                influx_res = json.loads(r.read().decode())
+
+            gen_pts = influx_res.get('results', [{}])[0].get('series', [{}])[0].get('values', []) if len(influx_res.get('results', [])) > 0 else []
+            sol_pred_pts = influx_res.get('results', [{}])[1].get('series', [{}])[0].get('values', []) if len(influx_res.get('results', [])) > 1 else []
+            sol_pred_map = {p[0]: float(p[1] or 0.0) * 1000.0 for p in sol_pred_pts}
+
+            hist_dhw_windows = load_historical_dhw_planned_windows(t_start_dt.astimezone(AMS_TZ), now.astimezone(AMS_TZ))
+            slot_dts = [datetime.fromisoformat(p[0].replace("Z", "+00:00")).astimezone(AMS_TZ) for p in gen_pts]
+            actual_runs = fetch_actual_heating_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
+            planned_runs = fetch_planned_dhw_ranges_from_db(slot_dts, hist_dhw_windows, interval_h=interval_h)
+
+            labels = []
+            timestamps = []
+            act_solar = []
+            pred_solar = []
+            act_hp = []
+            plan_hp = []
+            act_temp = []
+
+            prev_dt = None
+            for i, p in enumerate(gen_pts):
+                ts_str = p[0]
+                timestamps.append(ts_str)
+                dt_ams = slot_dts[i]
+
+                if prev_dt is not None and dt_ams.day != prev_dt.day:
+                    day_str = DUTCH_DAYS_SHORT[dt_ams.weekday()]
+                    time_lbl = f"{day_str} {dt_ams.strftime(time_fmt)}"
+                else:
+                    time_lbl = dt_ams.strftime(time_fmt)
+                labels.append(time_lbl)
+                prev_dt = dt_ams
+
+                # Actuals
+                s_w = float(p[1] or 0.0)
+                hp_w = float(p[2] or 0.0)
+                t_c = float(p[3] or 50.0) if len(p) > 3 and p[3] is not None else 50.0
+
+                act_solar.append(round(s_w))
+                act_hp.append(round(hp_w))
+                act_temp.append(round(t_c, 1))
+
+                # Predicted Solar
+                fc_w = sol_pred_map.get(ts_str, 0.0)
+                pred_solar.append(round(fc_w))
+
+                # Planned HP
+                d_cur = dt_ams.strftime("%Y-%m-%d")
+                t_cur = dt_ams.strftime("%H:%M")
+                p_hp_w = 0.0
+                for w in hist_dhw_windows:
+                    if w.get("date") == d_cur and w.get("start_time", "") <= t_cur < w.get("end_time", ""):
+                        p_hp_w = float(w.get("power_kw", 3.0)) * 1000.0
+                        break
+                plan_hp.append(round(p_hp_w))
+
+            # Compute MAE metrics
+            solar_diffs = [abs(a - p) for a, p in zip(act_solar, pred_solar) if p > 50 or a > 50]
+            hp_diffs = [abs(a - p) for a, p in zip(act_hp, plan_hp) if p > 200 or a > 200]
+            solar_mae = round(sum(solar_diffs) / len(solar_diffs), 1) if solar_diffs else 0.0
+            hp_mae = round(sum(hp_diffs) / len(hp_diffs), 1) if hp_diffs else 0.0
+
+            handler._send_json({
+                "status": "success",
+                "range": tf,
+                "resolution": bucket_sz,
+                "interval_h": interval_h,
+                "timestamps": timestamps,
+                "labels": labels,
+                "solar": {
+                    "actual_w": act_solar,
+                    "forecast_plan_w": pred_solar
+                },
+                "heatpump": {
+                    "actual_w": act_hp,
+                    "planned_w": plan_hp
+                },
+                "dhw": {
+                    "actual_temp_c": act_temp,
+                    "planned_runs": planned_runs,
+                    "actual_runs": actual_runs
+                },
+                "metrics": {
+                    "solar_mae_w": solar_mae,
+                    "hp_mae_w": hp_mae
+                }
+            })
+            return True
+        except Exception as e:
+            handler._send_json({"status": "error", "message": f"Fout bij plan vs actual: {str(e)}"}, status=500)
             return True
 
     if path.startswith("/api/analytics/decisions"):

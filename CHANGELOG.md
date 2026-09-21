@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.75] — 2026-09-21 (Fix Fantoom Warmwaterverbruik tijdens Warmtepomp Stookcyclus)
+
+### DHW Thermodynamica & Historische Berekeningen
+- **Eliminatie Fantoompieken (`layer2_calibration/dhw_thermal_model.py`):**
+  - Gerepareerd dat een initiële stratificatie- en circulatiemenging in het vat (of uurgemiddelde bucket-inval) tijdens het aanslaan van de warmtepomp (`kwh_el > 0.05`) niet langer ten onrechte als heetwaterverbruik (`q_tap`) wordt gekwalificeerd.
+  - `collapse_threshold` verhoogd naar -2,5°C (1-uurs resolutie) en -1,5°C (15m resolutie) voor detectie van echt zwaar tapwaterverbruik tijdens actieve verwarming.
+- **Unit Tests:**
+  - `tests/unit/test_analytics_plan_vs_actual.py`: `test_compute_historical_draw_offs_no_phantom` toegevoegd om regressie van fantoomverbruik tijdens stookcycli te voorkomen.
+
+---
+
 ## [0.103.74] — 2026-09-21 (Vloerbuffer via Kamerthermostaat, P60 DHW Marge & Relais SG4 Sturing)
 
 ### Vloerbuffer & Ruimteverwarming

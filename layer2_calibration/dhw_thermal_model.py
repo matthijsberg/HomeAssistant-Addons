@@ -182,15 +182,18 @@ class DhwThermalModel:
                 delta_e = c_tank_kwh_per_k * delta_t
 
                 if kwh_el > 0.05:
-                    # Heat pump active
+                    # Heat pump active: charging internal coil and tank mass
                     avg_t = (cur_t + prev_t) / 2.0
                     effective_cop = cop_heating or max(1.8, min(3.2, 4.6 - 0.05 * avg_t))
                     th_in = kwh_el * effective_cop
-                    if delta_t < -0.4:
+                    # Avoid phantom draw-offs caused by initial coil circulation mixing or 1-hour bucket averaging.
+                    # Only assign draw-off during active heating if there is a severe thermal collapse (cold mains intake).
+                    collapse_threshold = -2.5 if interval_h >= 1.0 else -1.5
+                    if delta_t < collapse_threshold:
                         # Temperature fell significantly despite heat pump running -> genuine heavy tap draw-off
                         q_tap = max(0.0, th_in - q_standby_quarter - delta_e)
                     else:
-                        # Temperature rising, modulating or minor sensor jitter -> tank mass absorbs heat; zero phantom tap water
+                        # Temperature rising, modulating or minor sensor mixing/jitter -> zero phantom tap water
                         q_tap = 0.0
                 else:
                     # Heat pump standby/idle

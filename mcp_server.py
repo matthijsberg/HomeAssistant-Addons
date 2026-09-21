@@ -148,6 +148,20 @@ def openhems_get_analytics_dhw(range: str = "24h", resolution: str = "15m") -> s
 
 
 @mcp.tool()
+def openhems_get_plan_vs_actual(range: str = "24h", resolution: str = "15m") -> str:
+    """Get aligned plan vs actual time-series comparing realized telemetry to planned dispatch schedules and forecasts.
+
+    Args:
+        range: Historical timeframe: '24h', '48h', or '7d'.
+        resolution: Bucket size: '15m' or '1h'.
+    Returns:
+        JSON string with aligned actual vs planned solar, heat pump power, and boiler trajectories.
+    """
+    res = _api_request("/api/analytics/plan_vs_actual", params={"range": range, "resolution": resolution})
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
 def openhems_get_decisions(limit: int = 20, offset: int = 0) -> str:
     """Get chronological audit trail of all dispatch decisions with physical and financial rationale.
 

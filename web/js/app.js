@@ -215,6 +215,19 @@
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, 3);
                 });
 
+                // 3. Planned Heating Ranges (Cyan / Light Blue: Planned Stookvensters)
+                const plannedRanges = (chart.options && chart.options.plannedHeatingRanges) || (chart.data && chart.data.plannedHeatingRanges) || [];
+                plannedRanges.forEach(r => {
+                    const bounds = getRangeBounds(r);
+                    if (!bounds) return;
+
+                    // Subtle cyan background tint + solid 3px bottom accent
+                    ctx.fillStyle = 'rgba(56, 189, 248, 0.10)';
+                    ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
+                    ctx.fillStyle = '#38BDF8';
+                    ctx.fillRect(bounds.left, chartArea.bottom - 3, bounds.width, 3);
+                });
+
                 ctx.restore();
             }
         };
@@ -4241,6 +4254,40 @@
                         borderRadius: 2,
                         order: 4
                     });
+
+                    // 5. Geplande Zonne-forecast curve (Gele stippellijn)
+                    if (data.solar_forecast_negative && data.solar_forecast_negative.length > 0) {
+                        datasets.push({
+                            label: 'Zon Voorspelling (kW)',
+                            data: toKwNeg(data.solar_forecast_negative),
+                            type: 'line',
+                            borderColor: '#FACC15',
+                            borderDash: [5, 4],
+                            backgroundColor: 'transparent',
+                            borderWidth: 1.8,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            tension: 0.25,
+                            order: 0
+                        });
+                    }
+
+                    // 6. Gepland Warmtepomp Stookprofiel (Cyaan getrapte contour)
+                    if (data.hp_plan && data.hp_plan.length > 0) {
+                        datasets.push({
+                            label: 'WP Gepland (kW)',
+                            data: toKw(data.hp_plan),
+                            type: 'line',
+                            borderColor: '#38BDF8',
+                            borderDash: [4, 4],
+                            stepped: true,
+                            backgroundColor: 'transparent',
+                            borderWidth: 1.8,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            order: 0
+                        });
+                    }
                 } else {
                     // === LIJN (LINE / AREA) MODUS in kW ===
                     datasets = [
