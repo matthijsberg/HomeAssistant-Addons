@@ -10,6 +10,18 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.76] — 2026-09-21 (Fix Smart Grid Feedback Race Condition & CV Master Respect)
+
+### Hardware Actuatie & Home Assistant Integratie
+- **Eliminatie Feedback-Loop (`layer3_scheduling/plan_decision_evaluator.py`):**
+  - Vrijgaves en noodstarts van DHW sturen niet langer individuele fysieke relais switches (`s10s` / `s11s`) sequentieel aan met milliseconden-tussentoestand, maar schakelen altijd gecoördineerd via `input_select.warmtepomp_smart_grid_modus`.
+- **CV Master Respect in Ruststand (`daemon.py`):**
+  - `switch.hc_mode_altherma_on` wordt uitsluitend beheerd tijdens actieve DHW runs (hydraulische interlock). In `normal` ruststand respecteert Open HEMS de handmatige toestand van de gebruiker (geen foutmeldingen meer als verwarming door de gebruiker is uitgeschakeld).
+- **Home Assistant Debounce Guard (`automations.yaml`):**
+  - `warmtepomp_smart_grid_sync` automation voorzien van `for: "00:00:01"` trigger-debounce en idempotent guards (`states(...) != ...`) om oscillaties tussen control en sync automations fysiek onmogelijk te maken.
+
+---
+
 ## [0.103.75] — 2026-09-21 (Fix Fantoom Warmwaterverbruik tijdens Warmtepomp Stookcyclus)
 
 ### DHW Thermodynamica & Historische Berekeningen

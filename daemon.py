@@ -554,13 +554,19 @@ class HemsBackgroundCollector(threading.Thread):
                 target_sel = mode_to_option.get(res.effective_mode, "Automatisch")
                 curr_cv = (states_map.get("switch.hc_mode_altherma_on", {}).get("state") == "on")
 
-                has_switched = (
-                    curr_sel != target_sel or
-                    res.command.cv_master_switch_on != curr_cv
-                )
+                # CV Master switch is only managed by Open HEMS during DHW runs (forced OFF for hydraulic isolation)
+                # or when explicitly releasing an in-flight DHW run back to normal.
+                # In normal idle state, Open HEMS respects the user's manual heating setting.
+                cv_needs_switch = False
+                if res.effective_mode in ("forced_on", "max_on", "forced_solar_boost_60", "forced_night_50"):
+                    cv_needs_switch = (curr_cv is True)
+                elif in_flight is not None and res.effective_mode == "normal":
+                    cv_needs_switch = (curr_cv is False)
+
+                has_switched = (curr_sel != target_sel or cv_needs_switch)
 
                 if has_switched:
-                    print(f"[Open HEMS Actuator] Hardware geschakeld naar stand '{mode_to_execute}': Modus={target_sel}, CV_Master={res.command.cv_master_switch_on}", flush=True)
+                    print(f"[Open HEMS Actuator] Hardware geschakeld naar stand '{mode_to_execute}': Modus={target_sel}, CV_Master={'AAN' if (curr_cv or cv_needs_switch) else 'UIT'}", flush=True)
                     time.sleep(0.5)
                     fresh_states = get_ha_states_map()
                     act_sel = fresh_states.get("input_select.warmtepomp_smart_grid_modus", {}).get("state")
@@ -569,7 +575,7 @@ class HemsBackgroundCollector(threading.Thread):
                     unconfirmed = []
                     if target_sel != act_sel:
                         unconfirmed.append(f"Smart Grid Modus (doel '{target_sel}', is '{act_sel}')")
-                    if res.command.cv_master_switch_on != act_cv:
+                    if cv_needs_switch and (res.command.cv_master_switch_on != act_cv):
                         unconfirmed.append(f"CV Master (doel {'AAN' if res.command.cv_master_switch_on else 'UIT'}, is {'AAN' if act_cv else 'UIT'})")
 
                     if unconfirmed:

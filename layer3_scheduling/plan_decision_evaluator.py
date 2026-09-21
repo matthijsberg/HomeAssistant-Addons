@@ -78,10 +78,12 @@ def evaluate_and_apply_dhw_run_merger(
     GLOBAL_OPPORTUNISTIC_MERGE = merge_res
 
     if merge_res.should_merge:
-        # Actuate HA purely via Smart Grid relays (SG4) and hydraulic interlock.
+        # Actuate HA via input_select (atomic coordinated SG4 actuation) and hydraulic interlock.
         # DO NOT touch climate.hc_dhw_dhw_setpoint; Daikin heats to boost temp natively in SG4.
-        call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
-        call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_2_s11s"})
+        call_ha_service("input_select", "select_option", {
+            "entity_id": "input_select.warmtepomp_smart_grid_modus",
+            "option": "Geforceerd aan"
+        })
         call_ha_service("switch", "turn_off", {"entity_id": "switch.hc_mode_altherma_on"})
 
         # Cancel the upcoming planned slots in the plan!
@@ -135,8 +137,10 @@ def evaluate_and_apply_dhw_run_merger(
             )
     elif is_actively_heating and t_live >= 49.8:
         # Target reached! Stop forced mode and return relays to SG2 (Automatisch)
-        call_ha_service("switch", "turn_off", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
-        call_ha_service("switch", "turn_off", {"entity_id": "switch.warmtepomp_smart_grid_2_s11s"})
+        call_ha_service("input_select", "select_option", {
+            "entity_id": "input_select.warmtepomp_smart_grid_modus",
+            "option": "Automatisch"
+        })
         call_ha_service("switch", "turn_on", {"entity_id": "switch.hc_mode_altherma_on"})
 
         if plan and plan.slots:
@@ -182,8 +186,10 @@ def evaluate_and_apply_dhw_run_merger(
             )
     elif is_actively_heating and plan and plan.slots:
         # Boiler is actively heating to 50°C standard comfort (still below 49.8°C)!
-        call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
-        call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_2_s11s"})
+        call_ha_service("input_select", "select_option", {
+            "entity_id": "input_select.warmtepomp_smart_grid_modus",
+            "option": "Geforceerd aan"
+        })
         call_ha_service("switch", "turn_off", {"entity_id": "switch.hc_mode_altherma_on"})
 
         run_pwr = max(3.0, round(wp_power / 1000.0, 2))
