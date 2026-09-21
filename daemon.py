@@ -61,6 +61,9 @@ from layer3_scheduling.plan_decision_evaluator import (
     evaluate_and_log_planner_decisions
 )
 from layer3_scheduling.plan_store import PlanStore
+from layer4_control.room_thermostat_buffer import RoomThermostatBufferController
+
+GLOBAL_ROOM_BUFFER_CTRL = RoomThermostatBufferController(default_baseline_c=20.5)
 
 class HemsApiHandler(BaseHTTPRequestHandler):
 
@@ -419,12 +422,74 @@ class HemsBackgroundCollector(threading.Thread):
             in_flight = PlanStore.get_instance().get_in_flight_run()
             if in_flight:
                 target_in_flight = float(in_flight.get("target_temp_c", 50.0))
-                if t_live < target_in_flight - 0.3:
+                if t_live < target_in_flight - 0.2:
                     in_flight_mode = in_flight.get("mode", "forced_on")
                     if mode_to_execute in ["normal", "off", "standby"]:
                         mode_to_execute = in_flight_mode
                 else:
                     PlanStore.get_instance().clear_in_flight_run()
+                    in_flight = None
+
+            # Space Heating: Floor buffer preheat via Room Thermostat (+1.0°C) with rate limiter
+            now_utc = datetime.now(timezone.utc)
+            room_cl = states_map.get("climate.woonkamer_climate_daikin", {})
+            room_attrs = room_cl.get("attributes", {})
+            try:
+                t_room_live = float(room_attrs.get("current_temperature", 20.5))
+            except (ValueError, TypeError):
+                t_room_live = 20.5
+            try:
+                t_room_setpoint = float(room_attrs.get("target_temp_low", room_attrs.get("temperature", 20.5)))
+            except (ValueError, TypeError):
+                t_room_setpoint = 20.5
+
+            if mode_to_execute == "advised_on":
+                elevated_t = GLOBAL_ROOM_BUFFER_CTRL.request_preheat(t_room_live, t_room_setpoint, now=now_utc)
+                if elevated_t is not None:
+                    call_ha_service("climate", "set_temperature", {
+                        "entity_id": "climate.woonkamer_climate_daikin",
+                        "target_temp_low": elevated_t,
+                        "target_temp_high": elevated_t + 3.0
+                    })
+                    write_hems_annotation(
+                        event_type="space_heating_preheat",
+                        title=f"♨️ Vloerbuffer Pre-Heat (+1.0°C) -> {elevated_t}°C",
+                        description=f"Kamerthermostaat verhoogd naar {elevated_t}°C (basis {t_room_setpoint}°C) voor betonbuffer vóór piek.",
+                        state_code="advised_on",
+                        power_kw=1.5,
+                        target_temp_c=elevated_t
+                    )
+                # Keep physical relays in normal (SG2); room thermostat handles heat pump activation cleanly
+                mode_to_execute = "normal"
+            else:
+                restored_t = GLOBAL_ROOM_BUFFER_CTRL.request_release(now=now_utc)
+                if restored_t is not None:
+                    call_ha_service("climate", "set_temperature", {
+                        "entity_id": "climate.woonkamer_climate_daikin",
+                        "target_temp_low": restored_t,
+                        "target_temp_high": restored_t + 3.0
+                    })
+
+            # Watchdog 1: Room Thermostat Failsafe
+            wd_room = GLOBAL_ROOM_BUFFER_CTRL.watchdog_check(t_room_setpoint, now=now_utc)
+            if wd_room is not None:
+                call_ha_service("climate", "set_temperature", {
+                    "entity_id": "climate.woonkamer_climate_daikin",
+                    "target_temp_low": wd_room,
+                    "target_temp_high": wd_room + 3.0
+                })
+
+            # Watchdog 2: DHW Thermostat Setpoint Failsafe (ensure standard 50°C baseline)
+            dhw_cl_temp = states_map.get("climate.hc_dhw_dhw_setpoint", {}).get("attributes", {}).get("temperature")
+            if dhw_cl_temp is not None:
+                try:
+                    if abs(float(dhw_cl_temp) - 50.0) > 0.2 and not in_flight:
+                        call_ha_service("climate", "set_temperature", {
+                            "entity_id": "climate.hc_dhw_dhw_setpoint",
+                            "temperature": 50.0
+                        })
+                except (ValueError, TypeError):
+                    pass
 
             # Determine continuous lockout duration from HA state
             cur_lockout_mins = 0.0
@@ -443,7 +508,12 @@ class HemsBackgroundCollector(threading.Thread):
 
             # 3. Instantiate DaikinActuator and execute mode
             actuator = make_daikin_ha_actuator()
-            target_t = 60.0 if mode_to_execute in ["max_on", "forced_solar_boost_60"] else (50.0 if mode_to_execute in ["forced_on", "forced_night_50"] else None)
+            if in_flight:
+                target_t = float(in_flight.get("target_temp_c", 50.0))
+            elif getattr(cur_slot, "target_temp_c", None) is not None:
+                target_t = float(cur_slot.target_temp_c)
+            else:
+                target_t = 60.0 if mode_to_execute in ["max_on", "forced_solar_boost_60"] else (50.0 if mode_to_execute in ["forced_on", "forced_night_50"] else None)
             res = actuator.execute_mode(
                 requested_mode=mode_to_execute,
                 current_cv_switch_state=cv_active,

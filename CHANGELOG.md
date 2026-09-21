@@ -10,6 +10,29 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.74] — 2026-09-21 (Vloerbuffer via Kamerthermostaat, P60 DHW Marge & Relais SG4 Sturing)
+
+### Vloerbuffer & Ruimteverwarming
+- **Vloerbuffer via Kamerthermostaat (`layer4_control/room_thermostat_buffer.py`):**
+  - Pre-heat buffer in de dekvloer stuurt niet langer het SG3-contact aan, maar verhoogt de kamerthermostaat (`climate.woonkamer_climate_daikin`) met minimaal +1,0°C (veilig geclamped op max 22,5°C). Relais blijven in stand SG2 (Normaal).
+- **Harde Rate Limiting & Pendelbeveiliging:**
+  - Maximaal 2 wijzigingen per rolling uur (1x up, 1x terug).
+  - Maximaal 6 wijzigingen per 24 uur (max 3 complete up/down cycli).
+  - Minimale runtijd van 45 minuten voordat het setpoint mag worden vrijgegeven.
+  - Watchdog failsafe: herstelt het kamerthermostaat-setpoint gegarandeerd naar baseline als er geen buffer actief is.
+
+### Boilervat & SG4 Relaissturing
+- **Zuivere Relaissturing voor SG4:**
+  - Alle aanroepen naar `climate.set_temperature` voor 50°C en 60°C runs verwijderd uit `plan_decision_evaluator.py` en `integrations/daikin_altherma/actuator.py`. Stoken naar 60°C gebeurt zuiver via relaisstand SG4.
+  - Watchdog failsafe: herstelt `climate.hc_dhw_dhw_setpoint` gegarandeerd naar 50,0°C zodra een run klaar is.
+- **DHW Doeltemperatuur op Maat (P60 Marge):**
+  - In `layer3_scheduling/dhw_optimizer.py` is `comfort_margin_mode` standaard op `"p60"` gezet (15% stressmarge). De optimizer stuurt standaard op de laagst mogelijke doeltemperatuur (bijv. 54°C) die tot het volgende optimale slot reikt.
+  - Tussentijdse afslag (bijv. 54°C) schakelt SG4 direct terug naar SG2; door de 50°C basiswaarde stopt de warmtepomp onmiddellijk zonder Modbus-schrijfcycli.
+- **Foutoplossing Opportunistische Fusie:**
+  - `OpportunisticDHWMerger` vereist nu verplicht dat de fysieke driewegklep op tapwater staat (`binary_sensor.hc_dhw_valve_dhw_tank == 'on'`). Sluit valse triggers door vloerverwarmingsvermogen uit.
+
+---
+
 ## [0.103.73] — 2026-09-20 (Zelflerende Modelparameters voor PV Rendement & Thermische Vloercapaciteit)
 
 ### Zelflerend Model & Parameter Kalibratie

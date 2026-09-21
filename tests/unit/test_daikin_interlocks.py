@@ -186,13 +186,19 @@ def test_daikin_actuator_implements_iactuator_controller_contract():
     assert actuator.last_actuation_result.effective_mode == "advised_on"
 
     # SG4 (forced_on / DHW run): S10S=True, S11S=True, CV=False (hydraulic interlock!)
+    # Standard 50/60 runs rely strictly on SG-ready relays without Modbus climate overwrites
     ok_sg4 = actuator.apply_smart_grid_mode("SG4")
     assert ok_sg4 is True
     assert executed_switches["s10s"] is True
     assert executed_switches["s11s"] is True
     assert executed_switches["cv_master"] is False
     assert actuator.last_actuation_result.effective_mode == "forced_on"
-    assert executed_climates.get("dhw") == 50.0
+    assert executed_climates.get("dhw") is None
+
+    # Anomalous target temperature (deviating from standard 50/60): invokes climate_caller
+    ok_sg4_custom = actuator.apply_smart_grid_mode("SG4", target_temp=52.5)
+    assert ok_sg4_custom is True
+    assert executed_climates.get("dhw") == 52.5
 
     # 3. Test execute_command via canonical DeviceCommand
     cmd = DeviceCommand(
@@ -205,12 +211,13 @@ def test_daikin_actuator_implements_iactuator_controller_contract():
         },
         priority=2
     )
+    executed_climates.clear()
     ok_cmd = actuator.execute_command(cmd)
     assert ok_cmd is True
     assert executed_switches["s10s"] is True
     assert executed_switches["s11s"] is True
     assert executed_switches["cv_master"] is False
-    assert executed_climates.get("dhw") == 60.0
+    assert executed_climates.get("dhw") is None  # Standard 60°C uses native SG4 relay
     assert actuator.last_actuation_result.effective_mode == "max_on"
 
     # 4. Test backwards-compatible execute_mode

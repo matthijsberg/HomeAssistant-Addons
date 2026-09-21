@@ -85,7 +85,7 @@ class DaikinInterlock:
 
         # 3. Forced On (DHW Run 50°C) or Max On (DHW Solar Boost 60°C) (SG Stand 4: S10S=ON, S11S=ON)
         elif requested_mode in ["forced_on", "max_on", "forced_solar_boost_60", "forced_night_50"]:
-            target_dhw = 60.0 if requested_mode in ["max_on", "forced_solar_boost_60"] else 50.0
+            target_dhw = target_temp if target_temp is not None else (60.0 if requested_mode in ["max_on", "forced_solar_boost_60"] else 50.0)
             # CRITICAL HYDRAULIC INTERLOCK: CV Master Switch MUST be turned OFF
             return DaikinHardwareCommand(
                 s10s_relay_on=True,

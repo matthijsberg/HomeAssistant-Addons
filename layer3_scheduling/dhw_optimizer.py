@@ -62,10 +62,10 @@ class DhwOptimizerParams:
     c_start: float = 0.05                 # Start cost (€) per compressor ignition
     min_run_slots: int = 3                # L_min (3 slots = 45 min)
     min_dwell_slots: int = 4              # D_min (4 slots = 60 min rest after run)
-    use_dynamic_margin: bool = True       # True for P95 stress margin, False for fixed
-    comfort_margin_mode: str = "p95"      # "p95" | "p50" | "fixed"
-    tap_stress_factor: float = 1.5        # P95 = factor * P50 (default 1.5)
-    min_comfort_margin_c: float = 0.5     # Minimum floor margin (°C)
+    use_dynamic_margin: bool = True       # True for dynamic stress margin, False for fixed
+    comfort_margin_mode: str = "p60"      # "p60" (economical minimal buffer) | "p95" | "p50" | "fixed"
+    tap_stress_factor: float = 1.15       # P60 factor (default 1.15, modest headroom without overheating)
+    min_comfort_margin_c: float = 0.2     # Minimum floor margin (°C)
     fixed_comfort_margin_c: float = 2.0   # Fixed comfort buffer (°C) if mode == "fixed"
     dynamic_horizon_slots: int = 32       # H = 32 slots (8 hours lookahead)
     grid_step_c: float = 0.25             # Temperature discretization step (°C)
@@ -78,21 +78,21 @@ class DhwOptimizerParams:
             return cls()
         opt_cfg = cfg.get("dhw_optimizer", {})
         cm = opt_cfg.get("comfort_margin", {})
-        mode = str(cm.get("mode", "p95")).lower()
-        if mode not in ("p95", "p50", "fixed"):
-            mode = "p95"
-        factor = float(cm.get("tap_stress_factor", 1.5))
+        mode = str(cm.get("mode", "p60")).lower()
+        if mode not in ("p60", "p95", "p50", "fixed"):
+            mode = "p60"
+        factor = float(cm.get("tap_stress_factor", 1.15 if mode == "p60" else 1.5))
         factor = max(1.0, min(3.0, factor))
         h_hours = float(cm.get("horizon_hours", 8.0))
         h_slots = max(4, min(96, int(round(h_hours * 4))))
-        min_m = float(cm.get("min_margin_c", 0.5))
+        min_m = float(cm.get("min_margin_c", 0.2 if mode == "p60" else 0.5))
         min_m = max(0.0, min(5.0, min_m))
         fixed_m = float(cm.get("fixed_margin_c", 2.0))
         fixed_m = max(0.0, min(10.0, fixed_m))
 
         return cls(
             comfort_margin_mode=mode,
-            use_dynamic_margin=(mode == "p95"),
+            use_dynamic_margin=(mode in ("p60", "p95")),
             tap_stress_factor=factor,
             dynamic_horizon_slots=h_slots,
             min_comfort_margin_c=min_m,
@@ -339,6 +339,15 @@ def solve(
         for k in range(N):
             window_end = min(N, k + p.dynamic_horizon_slots)
             stress_diff_sum = sum(q_tap_p95[j] - q_tap_p50[j] for j in range(k, window_end))
+            m_dyn = stress_diff_sum / C_tank
+            m_margins[k] = max(min_floor, round(m_dyn, 2))
+        m_margins[N] = m_margins[N - 1]
+    elif p.comfort_margin_mode == "p60":
+        # P60 margin: modest headroom (+15-20% tap stress) avoiding unnecessary overheating to 60°C
+        min_floor = max(0.0, float(getattr(p, "min_comfort_margin_c", 0.2)))
+        for k in range(N):
+            window_end = min(N, k + p.dynamic_horizon_slots)
+            stress_diff_sum = sum(0.22 * (q_tap_p95[j] - q_tap_p50[j]) for j in range(k, window_end))
             m_dyn = stress_diff_sum / C_tank
             m_margins[k] = max(min_floor, round(m_dyn, 2))
         m_margins[N] = m_margins[N - 1]

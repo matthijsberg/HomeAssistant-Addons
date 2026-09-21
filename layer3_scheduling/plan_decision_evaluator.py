@@ -52,11 +52,11 @@ def evaluate_and_apply_dhw_run_merger(
 
     dhw_demand_sensor = states_map.get("binary_sensor.hc_dhw_dhw_demand", {})
     dhw_valve_sensor = states_map.get("binary_sensor.hc_dhw_valve_dhw_tank", {})
+    is_dhw_valve = (dhw_demand_sensor.get("state") == "on" or dhw_valve_sensor.get("state") == "on")
 
-    is_actively_heating = (
-        (wp_power > 600.0 and (dhw_demand_sensor.get("state") == "on" or dhw_valve_sensor.get("state") == "on"))
-        or (wp_power > 1200.0 and t_live < 58.0)
-    )
+    # Hydraulic fidelity: Only consider active heating if 3-way valve is physically routed to DHW!
+    # Never trigger on high electrical compressor power alone (which can be space heating).
+    is_actively_heating = (wp_power > 600.0 and is_dhw_valve)
 
     is_hard_lockout = False
     if plan and getattr(plan, "dynamic_peaks", None):
@@ -78,8 +78,8 @@ def evaluate_and_apply_dhw_run_merger(
     GLOBAL_OPPORTUNISTIC_MERGE = merge_res
 
     if merge_res.should_merge:
-        # Actuate HA to promote setpoint to 60°C and set hardware interlocks
-        call_ha_service("climate", "set_temperature", {"entity_id": "climate.hc_dhw_dhw_setpoint", "temperature": 60.0})
+        # Actuate HA purely via Smart Grid relays (SG4) and hydraulic interlock.
+        # DO NOT touch climate.hc_dhw_dhw_setpoint; Daikin heats to boost temp natively in SG4.
         call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
         call_ha_service("switch", "turn_on", {"entity_id": "switch.warmtepomp_smart_grid_2_s11s"})
         call_ha_service("switch", "turn_off", {"entity_id": "switch.hc_mode_altherma_on"})
@@ -134,11 +134,10 @@ def evaluate_and_apply_dhw_run_merger(
                 savings_estimate_eur=merge_res.savings_estimate_eur
             )
     elif is_actively_heating and t_live >= 49.8:
-        # 50°C target already reached! Stop forced mode and return relays to SG2 (Automatisch)
+        # Target reached! Stop forced mode and return relays to SG2 (Automatisch)
         call_ha_service("switch", "turn_off", {"entity_id": "switch.warmtepomp_smart_grid_1_s10s"})
         call_ha_service("switch", "turn_off", {"entity_id": "switch.warmtepomp_smart_grid_2_s11s"})
         call_ha_service("switch", "turn_on", {"entity_id": "switch.hc_mode_altherma_on"})
-        call_ha_service("climate", "set_temperature", {"entity_id": "climate.hc_dhw_dhw_setpoint", "temperature": 50.0})
 
         if plan and plan.slots:
             for slot_idx in merge_res.cancelled_slots:
