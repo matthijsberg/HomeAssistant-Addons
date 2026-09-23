@@ -6292,9 +6292,14 @@
                         ? `<span class="text-xs text-slate-500 font-mono italic">— (Reeds actief)</span>`
                         : `<div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-amber-950/60 border border-amber-500/40 text-amber-300 font-bold font-mono text-xs"><span>${r.proposed_value}</span> <span class="text-[10px] text-amber-400/70 font-normal">${r.unit}</span></div>`;
 
+                    const isSub = Boolean(r.parent_id);
+                    const rowClass = isSub ? 'bg-slate-900/30 text-xs hover:bg-slate-800/20 transition border-l-2 border-amber-500/40' : 'hover:bg-slate-800/30 transition';
+                    const nameClass = isSub ? 'py-1.5 pl-6 font-medium text-slate-300' : 'py-2.5 font-bold text-white';
+                    const cellPad = isSub ? 'py-1.5' : 'py-2.5';
+
                     return `
-                        <tr class="hover:bg-slate-800/30 transition">
-                            <td class="py-2.5 font-bold text-white">
+                        <tr class="${rowClass}">
+                            <td class="${nameClass}">
                                 <span class="inline-flex items-center gap-1.5">
                                     <span>${r.name}</span>
                                     <button type="button" onclick="toggleInfoPopover(event, 'param_${r.id}')" class="text-slate-500 hover:text-cyan-400 transition-colors p-0.5 focus:outline-none" aria-label="Toelichting">
@@ -6302,11 +6307,11 @@
                                     </button>
                                 </span>
                             </td>
-                            <td class="py-2.5 text-center">${activeCell}</td>
-                            <td class="py-2.5 text-center">${proposedCell}</td>
-                            <td class="py-2.5 text-center font-bold ${driftColor} font-mono">${driftSign}${drift}%</td>
-                            <td class="py-2.5 text-[11px] text-slate-400 font-sans">${r.evidence || '--'}</td>
-                            <td class="py-2.5 text-right font-mono">${statusBadge}</td>
+                            <td class="${cellPad} text-center">${activeCell}</td>
+                            <td class="${cellPad} text-center">${proposedCell}</td>
+                            <td class="${cellPad} text-center font-bold ${driftColor} font-mono">${driftSign}${drift}%</td>
+                            <td class="${cellPad} text-[11px] text-slate-400 font-sans">${r.evidence || '--'}</td>
+                            <td class="${cellPad} text-right font-mono">${statusBadge}</td>
                         </tr>
                     `;
                 }).join('');

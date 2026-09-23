@@ -442,12 +442,12 @@ class SpaceHeatingPolicy:
                     cop=cop,
                     room_temp_c=round(t_room_slot, 2),
                     floor_temp_c=round(t_floor_slot, 2),
-                    heat_loss_kw=round(q_loss, 2),
+                    heat_loss_kw=round(max(0.0, q_loss - q_solar_gain), 2),
                     mode_code=mode_code,
                     is_preheat_active=is_preheat,
                     is_lockout_active=is_lockout,
                     cost_th_eur_per_kwh=c_th,
-                    outdoor_temp_c=round(t_out, 1)
+                    outdoor_temp_c=round(t_out, 2)
                 )
             )
 

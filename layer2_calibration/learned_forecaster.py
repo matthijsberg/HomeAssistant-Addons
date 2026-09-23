@@ -434,57 +434,59 @@ SELECT sum(power_w)/60000.0 as pv_kwh FROM "energy_telemetry" WHERE "device_id" 
         auto_accept_threshold = float(self.params.get("auto_accept_max_drift_pct", 3.0))
         recs = []
 
-        # 3a. Building UA recommendation (strictly from empirical stookdagen OLS)
+        # 3a. Building Envelope 3D recommendation (Conduction, Wind, Passive Solar)
         if has_sufficient_ua_data:
             ua_drift_pct = round(((calibrated_ua - old_ua) / old_ua) * 100.0, 1) if old_ua > 0 else 0.0
             auto_apply_ua = abs(ua_drift_pct) <= auto_accept_threshold
             recs.append({
                 "id": "building_ua",
-                "name": "Gebouwverlies Woning (UA)",
+                "name": "Gebouw Warmteverlies (3D Schilmodel)",
                 "current_value": old_ua,
                 "proposed_value": calibrated_ua,
                 "unit": "W/K",
                 "drift_pct": ua_drift_pct,
                 "auto_applied": auto_apply_ua,
-                "evidence": f"OLS regressie over {n_stookdagen} stookdagen (R² = {r_squared})"
+                "evidence": f"3D OLS regressie (T_buiten, wind, zon) over {n_stookdagen} stookdagen (R² = {r_squared})"
             })
             if auto_apply_ua:
                 self.params.setdefault("building", {})["ua_base_w_per_k"] = round(
                     (1.0 - ewma_alpha) * old_ua + ewma_alpha * calibrated_ua, 1
                 )
 
-            # Wind sensitivity recommendation
+            # Wind sensitivity sub-parameter
             old_c_wind = float(self.params.get("building", {}).get("c_wind_w_per_k_ms", 0.208))
             wind_drift_pct = round(((calibrated_c_wind - old_c_wind) / old_c_wind) * 100.0, 1) if old_c_wind > 0 else 0.0
             auto_apply_wind = abs(wind_drift_pct) <= auto_accept_threshold
             recs.append({
                 "id": "c_wind",
-                "name": "Windgevoeligheid Gevel (c_wind)",
+                "parent_id": "building_ua",
+                "name": "↳ Windtoeslag Gevel (c_wind)",
                 "current_value": round(old_c_wind, 3),
                 "proposed_value": round(calibrated_c_wind, 3),
                 "unit": "W/(K·m/s)",
                 "drift_pct": wind_drift_pct,
                 "auto_applied": auto_apply_wind,
-                "evidence": f"Convectie/infiltratie over {n_stookdagen} stookdagen"
+                "evidence": f"Convectie- en tochtverlies per m/s wind over {n_stookdagen} stookdagen"
             })
             if auto_apply_wind:
                 self.params.setdefault("building", {})["c_wind_w_per_k_ms"] = round(
                     (1.0 - ewma_alpha) * old_c_wind + ewma_alpha * calibrated_c_wind, 3
                 )
 
-            # Passive solar gain recommendation
+            # Passive solar gain sub-parameter
             old_c_solar = float(self.params.get("building", {}).get("c_solar_passive", 0.056))
             solar_drift_pct = round(((calibrated_c_solar - old_c_solar) / old_c_solar) * 100.0, 1) if old_c_solar > 0 else 0.0
             auto_apply_solar = abs(solar_drift_pct) <= auto_accept_threshold
             recs.append({
                 "id": "c_solar",
-                "name": "Passieve Zonnewinst (c_solar)",
+                "parent_id": "building_ua",
+                "name": "↳ Passieve Zonnewinst (c_solar)",
                 "current_value": round(old_c_solar, 3),
                 "proposed_value": round(calibrated_c_solar, 3),
                 "unit": "factor",
                 "drift_pct": solar_drift_pct,
                 "auto_applied": auto_apply_solar,
-                "evidence": f"Stralingswinst via ramen over {n_stookdagen} stookdagen"
+                "evidence": f"Gratis opwarming via glasoppervlak over {n_stookdagen} stookdagen"
             })
             if auto_apply_solar:
                 self.params.setdefault("building", {})["c_solar_passive"] = round(

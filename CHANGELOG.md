@@ -10,6 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.79] — 2026-09-23 (Geconsolideerd 3D Schilmodel & Netto Warmteverlies)
+
+### Architectuur & Model Governance
+- **Geconsolideerd Schilmodel (`layer2_calibration/learned_forecaster.py` & `web/js/app.js`):**
+  - Gebouwverlies is gebundeld tot één logische hoofdentiteit: `Gebouw Warmteverlies (3D Schilmodel)`.
+  - Windgevoeligheid (`c_wind`) en passieve zonnewinst (`c_solar`) worden weergegeven als ingesprongen sub-parameters onder het hoofdmodel.
+- **Fysisch Netto Warmteverlies (`layer3_scheduling/space_heating_policy.py`):**
+  - De berekende parameter `heat_loss_kw` rapporteert nu het netto warmteverlies: `max(0.0, q_loss - q_solar_gain)`.
+  - Op een zonnige wintermiddag compenseert de zoninstraling via het glasoppervlak de transmissie, waardoor de berekende warmteverliesstaven zichtbaar dalen.
+  - In een koude, stormachtige nacht stijgt het verlies door de windtoeslag en het ontbreken van zon.
+
+---
+
 ## [0.103.78] — 2026-09-23 (Continue 15m Weersinterpolatie & Natuurlijke Temperatuurcurve)
 
 ### Data Sanitization & Visualisatie
