@@ -10,6 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.78] — 2026-09-23 (Continue 15m Weersinterpolatie & Natuurlijke Temperatuurcurve)
+
+### Data Sanitization & Visualisatie
+- **Continue Kwartier-Interpolatie (`layer1_data_collection/sanitizer.py` & `nowcasting.py`):**
+  - Uurlijkse weers- en zonnevoorspellingen van Open-Meteo worden nu continu geïnterpoleerd tussen uurankers (`f = minute / 60.0`).
+  - Voorkomt platte 4-kwartiers traptredes in de buitentemperatuur, windsnelheid en zonne-irradiantie.
+  - Prijzen en buitentemperaturen krijgen 2 decimalen resolutie om kwantisatieruis te elimineren.
+- **Vloeiend Warmteverliestraject (`web/js/app.js` & `api/routes_model.py`):**
+  - De berekende warmteverliesstaven (`thermal_loss_kw` / `demandKwh`) variëren nu natuurlijk per kwartier met het temperatuur- en windverloop mee (geen identieke 4-kwartiers blokken meer).
+  - De buitentemperatuurcurve in de grafiek wordt weergegeven met een natuurlijke spline (`tension: 0.35`).
+
+---
+
 ## [0.103.77] — 2026-09-21 (3D Warmteverliesmodel: Basisisolatie UA, Windinfiltratie & Passieve Zon)
 
 ### Ruimteverwarming & Kalibratie

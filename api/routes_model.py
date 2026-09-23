@@ -62,7 +62,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         if h_summary and h_summary.slots:
             n_sim = min(len(h_summary.slots), n_future_slots * (4 if not is_15m else 1))
             raw_labels = [plan.slots[i].time_label for i in range(n_sim)] if plan.slots else [f"T+{i}" for i in range(n_sim)]
-            raw_out_temps = [round(s.outdoor_temp_c, 1) for s in h_summary.slots[:n_sim]]
+            raw_out_temps = [round(s.outdoor_temp_c, 2) for s in h_summary.slots[:n_sim]]
             raw_in_temps = [round(s.room_temp_c, 1) for s in h_summary.slots[:n_sim]]
             raw_floor_temps = [round(s.floor_temp_c, 1) for s in h_summary.slots[:n_sim]]
             raw_cops = [round(s.cop, 2) for s in h_summary.slots[:n_sim]]

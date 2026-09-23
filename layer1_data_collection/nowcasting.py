@@ -107,7 +107,7 @@ class ObservationNowcaster:
         for i, raw_val in enumerate(raw_temps_c):
             t_hours = i * slot_hours
             weight = cls._compute_blend_weight(t_hours, h)
-            nudged = round(raw_val + (delta_temp * weight), 1)
+            nudged = round(raw_val + (delta_temp * weight), 2)
             assimilated.append(nudged)
 
         return assimilated
@@ -136,7 +136,7 @@ class ObservationNowcaster:
         for i, raw_val in enumerate(raw_winds_ms):
             t_hours = i * slot_hours
             weight = cls._compute_blend_weight(t_hours, h)
-            nudged = round(max(0.0, raw_val + (delta_wind * weight)), 1)
+            nudged = round(max(0.0, raw_val + (delta_wind * weight)), 2)
             assimilated.append(nudged)
 
         return assimilated

@@ -5523,6 +5523,7 @@
                         data: outTemps,
                         borderColor: '#60A5FA',
                         borderWidth: 1.8,
+                        tension: 0.35,
                         order: 0
                     }
                 });

@@ -222,25 +222,43 @@ class TelemetrySanitizer:
                 p_q = Quality.INTERPOLATED
             last_known_p = p_val
 
-            # Solar matching
+            # Solar matching with continuous 15-minute interpolation
+            dt_floor = slot_dt.replace(minute=0, second=0, microsecond=0)
+            dt_ceil = dt_floor + timedelta(hours=1)
+            key_floor = dt_floor.strftime("%Y-%m-%d %H:00")
+            key_ceil = dt_ceil.strftime("%Y-%m-%d %H:00")
+            frac = slot_dt.minute / 60.0
+
             if slot_dt.hour >= 21 or slot_dt.hour < 6:
                 s_val = 0.0
             elif key_exact in solar_map:
                 s_val = solar_map[key_exact]
+            elif slot_dt.minute != 0 and key_floor in solar_map and key_ceil in solar_map:
+                s_val = max(0.0, (1.0 - frac) * float(solar_map[key_floor]) + frac * float(solar_map[key_ceil]))
             elif key_hour in solar_map:
                 s_val = solar_map[key_hour]
             else:
                 s_val = 0.0
 
-            # Outdoor temp & wind matching
+            # Outdoor temp & wind matching with smooth continuous 15-minute interpolation
             if key_exact in weather_map:
                 w_entry = weather_map[key_exact]
+                t_val = w_entry.get("temp", last_known_t)
+                w_val = w_entry.get("wind", 0.0)
+            elif slot_dt.minute != 0 and key_floor in weather_map and key_ceil in weather_map:
+                wf = weather_map[key_floor]
+                wc = weather_map[key_ceil]
+                tf = wf.get("temp", last_known_t)
+                tc = wc.get("temp", last_known_t)
+                t_val = (1.0 - frac) * tf + frac * tc
+                w_val = (1.0 - frac) * wf.get("wind", 0.0) + frac * wc.get("wind", 0.0)
             elif key_hour in weather_map:
                 w_entry = weather_map[key_hour]
+                t_val = w_entry.get("temp", last_known_t)
+                w_val = w_entry.get("wind", 0.0)
             else:
-                w_entry = {"temp": last_known_t, "wind": 0.0}
-            t_val = w_entry.get("temp", last_known_t)
-            w_val = w_entry.get("wind", 0.0)
+                t_val = last_known_t
+                w_val = 0.0
             last_known_t = t_val
 
             # Unallocated demand matching (7x96 matrix support)
@@ -283,12 +301,12 @@ class TelemetrySanitizer:
                     label=lbl,
                     price_all_in=round(p_val, 4),
                     solar_kw=round(s_val, 3),
-                    outdoor_temp_c=round(t_val, 1),
+                    outdoor_temp_c=round(t_val, 2),
                     unallocated_kw=round(u_val, 3),
                     dhw_temp_c=clean_dhw if i == 0 else None,
                     room_temp_c=clean_room if i == 0 else None,
                     floor_temp_c=clean_floor if i == 0 else None,
-                    wind_speed_ms=round(w_val, 1),
+                    wind_speed_ms=round(w_val, 2),
                     quality=p_q if is_fresh else Quality.STALE,
                     issues=slot_issues
                 )
