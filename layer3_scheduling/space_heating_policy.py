@@ -64,12 +64,25 @@ class SpaceHeatingPolicy:
         ua = cls.UA_BUILDING_KW_PER_K
         reg_a = cls.REGRESSION_A
         reg_b = cls.REGRESSION_B
+        c_wind = cls.WIND_INFILTRATION_COEFF_KW_PER_K_PER_MS
+        c_solar = cls.SOLAR_GAIN_COEFFICIENT
+        c_floor = cls.C_FLOOR_KWH_PER_K
         if params_file.exists():
             try:
                 p = json.loads(params_file.read_text(encoding="utf-8"))
-                ua_w = p.get("building", {}).get("ua_base_w_per_k")
+                b = p.get("building", {})
+                ua_w = b.get("ua_base_w_per_k")
                 if ua_w is not None and float(ua_w) > 0:
                     ua = float(ua_w) / 1000.0  # W/K to kW/K
+                c_wind_w = b.get("c_wind_w_per_k_ms")
+                if c_wind_w is not None and float(c_wind_w) > 0:
+                    c_wind = float(c_wind_w) / 1000.0  # W/(K*m/s) to kW/(K*m/s)
+                c_sol = b.get("c_solar_passive")
+                if c_sol is not None and float(c_sol) > 0:
+                    c_solar = float(c_sol)
+                fl_cap = b.get("floor_capacity_kwh_per_k")
+                if fl_cap is not None and float(fl_cap) > 0:
+                    c_floor = float(fl_cap)
                 mod_curve = p.get("heat_pump", {}).get("modulation_curve", "")
                 if mod_curve and "-" in mod_curve:
                     parts = mod_curve.split("-")
@@ -78,7 +91,14 @@ class SpaceHeatingPolicy:
                     reg_b = float(clean_b)
             except Exception:
                 pass
-        return {"ua_kw_per_k": ua, "reg_a": reg_a, "reg_b": reg_b}
+        return {
+            "ua_kw_per_k": ua,
+            "reg_a": reg_a,
+            "reg_b": reg_b,
+            "c_wind_kw_per_k_ms": c_wind,
+            "c_solar_passive": c_solar,
+            "floor_capacity_kwh_per_k": c_floor
+        }
 
     @classmethod
     def calculate_modulating_power(
@@ -142,7 +162,8 @@ class SpaceHeatingPolicy:
         solar_kw: List[float],
         dynamic_peaks: List[Dict[str, Any]],
         min_comfort_room_c: float,
-        step_hours: float = 0.25
+        step_hours: float = 0.25,
+        wind_speeds_ms: Optional[List[float]] = None
     ) -> bool:
         """
         Model Predictive Control (MPC) check:
@@ -158,15 +179,20 @@ class SpaceHeatingPolicy:
                 t_f = t_floor_cur
                 act_p = cls.get_active_parameters()
                 ua_base = act_p["ua_kw_per_k"]
+                c_wind = act_p.get("c_wind_kw_per_k_ms", cls.WIND_INFILTRATION_COEFF_KW_PER_K_PER_MS)
+                c_solar = act_p.get("c_solar_passive", cls.SOLAR_GAIN_COEFFICIENT)
+                c_floor = act_p.get("floor_capacity_kwh_per_k", cls.C_FLOOR_KWH_PER_K)
                 for step_idx in range(current_slot, p_end + 1):
                     if step_idx >= len(outdoor_temps_c):
                         break
                     t_out = outdoor_temps_c[step_idx]
-                    q_loss = ua_base * max(0.0, t_r - t_out)
-                    q_solar = cls.SOLAR_GAIN_COEFFICIENT * solar_kw[step_idx]
+                    v_wind = wind_speeds_ms[step_idx] if (wind_speeds_ms and step_idx < len(wind_speeds_ms)) else 0.0
+                    effective_ua = ua_base + c_wind * max(0.0, v_wind - 2.0)
+                    q_loss = effective_ua * max(0.0, t_r - t_out)
+                    q_solar = c_solar * solar_kw[step_idx]
                     r_fl = cls.R_FLOOR_AIR_K_PER_KW if t_f >= t_r else 2.75
                     q_fl = (t_f - t_r) / r_fl
-                    dt_f = ((-q_fl) / cls.C_FLOOR_KWH_PER_K) * step_hours
+                    dt_f = ((-q_fl) / c_floor) * step_hours
                     dt_r = ((q_fl + q_solar - q_loss) / cls.C_AIR_KWH_PER_K) * step_hours
                     t_f += dt_f
                     t_r += dt_r
@@ -270,10 +296,14 @@ class SpaceHeatingPolicy:
             # Instantaneous building heat loss with wind infiltration correction
             v_wind = wind_speeds_ms[i] if (wind_speeds_ms and i < len(wind_speeds_ms)) else 0.0
             act_p = cls.get_active_parameters()
-            effective_ua = act_p["ua_kw_per_k"] + cls.WIND_INFILTRATION_COEFF_KW_PER_K_PER_MS * max(0.0, v_wind - 2.0)
+            c_wind = act_p.get("c_wind_kw_per_k_ms", cls.WIND_INFILTRATION_COEFF_KW_PER_K_PER_MS)
+            c_solar = act_p.get("c_solar_passive", cls.SOLAR_GAIN_COEFFICIENT)
+            c_floor = act_p.get("floor_capacity_kwh_per_k", cls.C_FLOOR_KWH_PER_K)
+
+            effective_ua = act_p["ua_kw_per_k"] + c_wind * max(0.0, v_wind - 2.0)
             q_loss = effective_ua * max(0.0, t_room - t_out)
             # Passive window solar thermal gain
-            q_solar_gain = cls.SOLAR_GAIN_COEFFICIENT * solar_kw[i]
+            q_solar_gain = c_solar * solar_kw[i]
 
             # Check constraints
             is_dhw_running = (i in active_dhw_slots)
@@ -314,7 +344,7 @@ class SpaceHeatingPolicy:
                     # 2. Solar buffer: free solar surplus (>=1.5 kW)
                     # 3. Valley buffer: cheap night valley only if room is below target setpoint
                     needs_deficit_buffer = cls._is_buffer_needed_for_peak(
-                        i, t_room, t_floor, outdoor_temps_c, solar_kw, dynamic_peaks, min_comfort_room, step_hours
+                        i, t_room, t_floor, outdoor_temps_c, solar_kw, dynamic_peaks, min_comfort_room, step_hours, wind_speeds_ms
                     )
                     is_solar_surplus = (solar_kw[i] >= 1.5)
 
@@ -395,7 +425,7 @@ class SpaceHeatingPolicy:
             else:
                 r_floor_air = 2.75  # ~0.36 kW/K downward thermal resistance for ~145 m2
             q_floor_to_room = (t_floor - t_room) / r_floor_air
-            dt_floor = ((q_heat_th - q_floor_to_room) / cls.C_FLOOR_KWH_PER_K) * step_hours
+            dt_floor = ((q_heat_th - q_floor_to_room) / c_floor) * step_hours
             dt_room = ((q_floor_to_room + q_solar_gain - q_loss) / cls.C_AIR_KWH_PER_K) * step_hours
 
             t_floor = round(t_floor + dt_floor, 2)

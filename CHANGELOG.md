@@ -10,6 +10,21 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.77] — 2026-09-21 (3D Warmteverliesmodel: Basisisolatie UA, Windinfiltratie & Passieve Zon)
+
+### Ruimteverwarming & Kalibratie
+- **3D Fysische Warmtebalans (`layer3_scheduling/space_heating_policy.py`):**
+  - Instantane warmtevraag berekent nu gelijktijdig transmissie (`UA_base`), windkoeling (`c_wind * max(0, v_wind - 2.0)`) en passieve zonnewinst (`c_solar * solar_kw`).
+  - Model Predictive Control pre-heat controle (`_is_buffer_needed_for_peak`) houdt nu ook rekening met wind en zon op het voorliggende traject.
+  - Dynamische parameterinlezing via `get_active_parameters()` voor `ua_kw_per_k`, `c_wind_kw_per_k_ms`, `c_solar_passive` en `floor_capacity_kwh_per_k`.
+- **Multi-variabele OLS Regressie (`layer2_calibration/learned_forecaster.py`):**
+  - Scheidt het zuivere geleidingsverlies van het gebouw (`UA_base`) van wind- en zonne-effecten via `solve_ols_3x3` over gerealiseerde stookdagen.
+  - Genereert samenhangende kalibratie-aanbevelingen voor `building_ua` (W/K), `c_wind` (W/(K·m/s)) en `c_solar` (passieve zonnewinstfactor).
+- **Unit Tests:**
+  - `test_multivariable_building_loss_calibration` toegevoegd in `tests/unit/test_learned_forecaster.py`.
+
+---
+
 ## [0.103.76] — 2026-09-21 (Fix Smart Grid Feedback Race Condition & CV Master Respect)
 
 ### Hardware Actuatie & Home Assistant Integratie

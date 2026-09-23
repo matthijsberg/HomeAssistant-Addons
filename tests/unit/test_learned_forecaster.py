@@ -179,3 +179,64 @@ def test_sample_size_guard_suppresses_premature_ua_recommendation():
         rec_ids = [r["id"] for r in res["recommendations"]["recommendations"]]
         assert "building_ua" not in rec_ids
         assert "night_baseload" in rec_ids
+
+
+def test_multivariable_building_loss_calibration():
+    """Verify that when PV/weather data is present, 3D regression produces wind and solar coefficients."""
+    forecaster = HybridForecastingModel()
+    forecaster.secrets = {"influxdb": {"local_ha_influxdb": "dummy_pw"}}
+    forecaster.params = {
+        "building": {
+            "ua_base_w_per_k": 320.0,
+            "c_wind_w_per_k_ms": 0.208,
+            "c_solar_passive": 0.056,
+            "floor_capacity_kwh_per_k": 14.5
+        },
+        "unallocated": {"night_baseload_floor_w": 250.0},
+        "auto_accept_max_drift_pct": 5.0,
+        "rolling_window_days": 90,
+        "learning_rate_ewma": 1.0
+    }
+    forecaster.profile = {"profile_96_quarters": [[250.0] * 96 for _ in range(7)]}
+
+    base_ts = 1758000000
+    unalloc_values = [[base_ts + q * 900, 250.0] for q in range(96 * 7)]
+    cv_values = []
+    tout_values = []
+    pv_values = []
+    for d in range(25):
+        ts_day = base_ts + d * 86400
+        tout = 4.0 + (d % 6) * 1.5
+        dt_k = 19.5 - tout
+        pv_kwh = 5.0 + (d % 10) * 2.0
+        th_kwh = 7.5 * dt_k - 0.08 * pv_kwh
+        el_kwh = th_kwh / calculate_carnot_cop(tout)
+        cv_values.append([ts_day, el_kwh])
+        tout_values.append([ts_day, tout])
+        pv_values.append([ts_day, pv_kwh])
+
+    mock_data = {
+        "results": [
+            {"series": [{"name": "energy_telemetry", "values": unalloc_values}]},
+            {"series": [{"name": "energy_telemetry", "values": cv_values}]},
+            {"series": [{"name": "energy_telemetry", "values": tout_values}]},
+            {"series": [{"name": "energy_telemetry", "values": pv_values}]}
+        ]
+    }
+
+    with mock.patch("urllib.request.urlopen") as mock_url, \
+         mock.patch("layer2_calibration.learned_forecaster.save_json"):
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = json.dumps(mock_data).encode("utf-8")
+        mock_url.return_value.__enter__.return_value = mock_resp
+
+        res = forecaster.retrain_from_openhems()
+        assert res["status"] == "success"
+        recs = {r["id"]: r for r in res["recommendations"]["recommendations"]}
+
+        assert "building_ua" in recs
+        assert "c_wind" in recs
+        assert "c_solar" in recs
+        assert 180.0 <= recs["building_ua"]["proposed_value"] <= 450.0
+        assert 0.05 <= recs["c_wind"]["proposed_value"] <= 0.35
+        assert 0.02 <= recs["c_solar"]["proposed_value"] <= 0.25

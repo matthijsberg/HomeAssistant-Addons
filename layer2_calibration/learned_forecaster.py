@@ -357,6 +357,10 @@ SELECT sum(power_w)/60000.0 as pv_kwh FROM "energy_telemetry" WHERE "device_id" 
         # 2. Recalibrate Building UA using OLS on Heating Days
         old_ua = float(self.params.get("building", {}).get("ua_base_w_per_k", 321.1))
         calibrated_ua = old_ua
+        old_c_wind = float(self.params.get("building", {}).get("c_wind_w_per_k_ms", 0.208))
+        calibrated_c_wind = old_c_wind
+        old_c_solar = float(self.params.get("building", {}).get("c_solar_passive", 0.056))
+        calibrated_c_solar = old_c_solar
         r_squared = 0.0
         mae_w = None
         rmse_w = None
@@ -386,9 +390,32 @@ SELECT sum(power_w)/60000.0 as pv_kwh FROM "energy_telemetry" WHERE "device_id" 
                 r_val = statistics.correlation(x_dt, y_th_kwh)
                 r_squared = round(float(r_val ** 2), 3)
                 # Convert kWh_th/day per degree directly to W/K: (slope_th * 1000 / 24)
-                calibrated_ua = round((slope_th * 1000.0 / 24.0), 1)
-                if not (180.0 <= calibrated_ua <= 450.0):
-                    calibrated_ua = 318.5
+                calibrated_ua_1d = round((slope_th * 1000.0 / 24.0), 1)
+
+                # Attempt 3D OLS regression if PV or weather data exists
+                has_3d = False
+                if len(results) > 3 and results[3].get("series"):
+                    pv_map = {v[0]: v[1] for v in results[3]["series"][0].get("values", []) if v[1] is not None}
+                    x_3d = []
+                    for ts_val, dt_val in zip(common, x_dt):
+                        pv_kwh = pv_map.get(ts_val, 0.0) or 0.0
+                        x_3d.append([dt_val, dt_val * 0.1, pv_kwh / 10.0])
+                    if len(x_3d) >= 14:
+                        from layer2_calibration.calibrator import ModelCalibrationEngine
+                        cal_engine = ModelCalibrationEngine()
+                        beta = cal_engine.solve_ols_3x3(x_3d, y_th_kwh)
+                        calibrated_ua_3d = round(beta[0] * 1000.0 / 24.0, 1)
+                        if 180.0 <= calibrated_ua_3d <= 450.0:
+                            calibrated_ua = calibrated_ua_3d
+                            calibrated_c_wind = round(max(0.05, min(0.35, beta[1] * 1000.0 / 24.0)), 3)
+                            calibrated_c_solar = round(max(0.02, min(0.20, beta[2])), 3)
+                            has_3d = True
+
+                if not has_3d:
+                    calibrated_ua = calibrated_ua_1d
+                    if not (180.0 <= calibrated_ua <= 450.0):
+                        calibrated_ua = 318.5
+
                 has_sufficient_ua_data = True
 
                 # Compute empirical regression residuals
@@ -424,6 +451,44 @@ SELECT sum(power_w)/60000.0 as pv_kwh FROM "energy_telemetry" WHERE "device_id" 
             if auto_apply_ua:
                 self.params.setdefault("building", {})["ua_base_w_per_k"] = round(
                     (1.0 - ewma_alpha) * old_ua + ewma_alpha * calibrated_ua, 1
+                )
+
+            # Wind sensitivity recommendation
+            old_c_wind = float(self.params.get("building", {}).get("c_wind_w_per_k_ms", 0.208))
+            wind_drift_pct = round(((calibrated_c_wind - old_c_wind) / old_c_wind) * 100.0, 1) if old_c_wind > 0 else 0.0
+            auto_apply_wind = abs(wind_drift_pct) <= auto_accept_threshold
+            recs.append({
+                "id": "c_wind",
+                "name": "Windgevoeligheid Gevel (c_wind)",
+                "current_value": round(old_c_wind, 3),
+                "proposed_value": round(calibrated_c_wind, 3),
+                "unit": "W/(K·m/s)",
+                "drift_pct": wind_drift_pct,
+                "auto_applied": auto_apply_wind,
+                "evidence": f"Convectie/infiltratie over {n_stookdagen} stookdagen"
+            })
+            if auto_apply_wind:
+                self.params.setdefault("building", {})["c_wind_w_per_k_ms"] = round(
+                    (1.0 - ewma_alpha) * old_c_wind + ewma_alpha * calibrated_c_wind, 3
+                )
+
+            # Passive solar gain recommendation
+            old_c_solar = float(self.params.get("building", {}).get("c_solar_passive", 0.056))
+            solar_drift_pct = round(((calibrated_c_solar - old_c_solar) / old_c_solar) * 100.0, 1) if old_c_solar > 0 else 0.0
+            auto_apply_solar = abs(solar_drift_pct) <= auto_accept_threshold
+            recs.append({
+                "id": "c_solar",
+                "name": "Passieve Zonnewinst (c_solar)",
+                "current_value": round(old_c_solar, 3),
+                "proposed_value": round(calibrated_c_solar, 3),
+                "unit": "factor",
+                "drift_pct": solar_drift_pct,
+                "auto_applied": auto_apply_solar,
+                "evidence": f"Stralingswinst via ramen over {n_stookdagen} stookdagen"
+            })
+            if auto_apply_solar:
+                self.params.setdefault("building", {})["c_solar_passive"] = round(
+                    (1.0 - ewma_alpha) * old_c_solar + ewma_alpha * calibrated_c_solar, 3
                 )
 
         # 3b. Night baseload drift (strictly from empirical 7x96 night quarters median)
