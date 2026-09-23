@@ -505,6 +505,18 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                             r["current_value"] = act
                             r["proposed_value"] = act
                             r["drift_pct"] = 0.0
+                    elif pid == "c_wind":
+                        act = p_active.get("building", {}).get("c_wind_w_per_k_ms")
+                        if act is not None:
+                            r["current_value"] = act
+                            r["proposed_value"] = act
+                            r["drift_pct"] = 0.0
+                    elif pid == "c_solar":
+                        act = p_active.get("building", {}).get("c_solar_passive")
+                        if act is not None:
+                            r["current_value"] = act
+                            r["proposed_value"] = act
+                            r["drift_pct"] = 0.0
             handler._send_json(recs_dict)
         else:
             handler._send_json({"status": "empty", "recommendations": []})
@@ -668,6 +680,18 @@ def handle_post(handler, path: str, body: dict) -> bool:
                 elif p_id == "floor_capacity":
                     val = float(prop_v) if prop_v is not None else float(params.get("building", {}).get("floor_capacity_kwh_per_k", 14.5))
                     params.setdefault("building", {})["floor_capacity_kwh_per_k"] = val
+                    r["current_value"] = val
+                    r["proposed_value"] = val
+                    r["drift_pct"] = 0.0
+                elif p_id == "c_wind":
+                    val = float(prop_v) if prop_v is not None else float(params.get("building", {}).get("c_wind_w_per_k_ms", 0.208))
+                    params.setdefault("building", {})["c_wind_w_per_k_ms"] = val
+                    r["current_value"] = val
+                    r["proposed_value"] = val
+                    r["drift_pct"] = 0.0
+                elif p_id == "c_solar":
+                    val = float(prop_v) if prop_v is not None else float(params.get("building", {}).get("c_solar_passive", 0.056))
+                    params.setdefault("building", {})["c_solar_passive"] = val
                     r["current_value"] = val
                     r["proposed_value"] = val
                     r["drift_pct"] = 0.0
