@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.94] — 2026-09-24 (Separation of Electrical and Thermal Power & Clean Arbitrage Accounting)
+
+### Wiskundige Saldering & Fysische Scheiding
+- **Expliciete Scheiding Stroom (kWh el) vs Warmte (kWh th)**: In `KpiPresenter` worden elektrische en thermische kilowatturen niet meer verward. Alle labels tonen nu expliciet `kWh el` voor opgenomen stroom en `kWh th` voor thermische opbrengst in het boilervat en de vloer (bijv. `3.0 kWh el (9.2 kWh th)` bij COP 3.1).
+- **Zuivere HEMS Arbitrage-berekening (Geen Passieve Zon-dubbeltelling)**:
+  - De passive zon-zelfconsumptie van het hele huishouden (12.1 kWh voor apparaten/sluip) is weggehaald uit de HEMS besparingskaart (deze hoort zuiver thuis op de Zonnepanelen-kaart).
+  - De actieve zonne-arbitrage op de besparingskaart toont nu uitsluitend de stroom die de warmtepomp/boiler doelbewust heeft gebufferd (`hp_solar_el_kwh` = 3.0 kWh el / 9.2 kWh th) i.p.v. overtollig terugleveren.
+  - Besparingen zijn nu realistisch en betrouwbaar (~€1,20–€1,60 i.p.v. de kunstmatig opgeblazen €5,18).
+
 ## [0.103.93] — 2026-09-24 (Accurate Net Financial Balancing, Root Modal Relocation, Clean SVG Icons & Dashed Red Top Lines)
 
 ### Wiskundige Saldering & Financiële Nauwkeurigheid
