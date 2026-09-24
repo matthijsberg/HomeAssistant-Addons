@@ -674,28 +674,85 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         dhw_hours = round(sum(step_h for b in boiler if b > 0.1), 1)
         cv_hours = round(sum(step_h for h in heating if h > 0.1), 1)
 
+        # Cost Breakdown Components
+        unalloc_kwh = round(sum(u * step_h for u in unallocated), 2)
+        unalloc_cost = round(sum(u * p * step_h for u, p in zip(unallocated, prices)), 2)
+        dhw_kwh = round(hp_dhw_kwh, 2)
+        dhw_cost = round(sum(b * p * step_h for b, p in zip(boiler, prices)), 2)
+        cv_kwh = round(hp_cv_kwh, 2)
+        cv_cost = round(sum(h * p * step_h for h, p in zip(heating, prices)), 2)
+
+        # Savings & Arbitrage Breakdown
+        peak_prices = [p for p, slot in zip(prices, plan.slots if plan else []) if getattr(slot, 'is_peak_lockout', False)]
+        avg_peak_price = (sum(peak_prices) / len(peak_prices)) if peak_prices else 0.45
+        dhw_avg_p = (dhw_cost / dhw_kwh) if dhw_kwh > 0.05 else 0.22
+        dhw_arbitrage_saving = round(max(0.0, dhw_kwh * (avg_peak_price - dhw_avg_p)), 2)
+
+        cv_lockout_hours = round(sum(step_h for slot in (plan.slots if plan else []) if getattr(slot, 'is_peak_lockout', False)), 1)
+        cv_spitsblok_saving = round(cv_lockout_hours * 0.8 * max(0.05, avg_peak_price - 0.25), 2)
+
+        avg_grid_price = (pred_afname_eur / pred_afname_kwh) if pred_afname_kwh > 0.1 else 0.28
+        solar_selfcons_saving = round(solar_selfcons_kwh * max(0.05, avg_grid_price - 0.00605), 2)
+        tot_savings = round(dhw_arbitrage_saving + cv_spitsblok_saving + solar_selfcons_saving, 2)
+        if tot_savings < 0.50:
+            tot_savings = round(hems_savings_eur, 2)
+
         forecast_kpis = {
             "costs": {
                 "title": "Kosten (24u Rollend)",
                 "main": f"€{net_cost_eur:.2f}",
-                "sub": f"{net_kwh_balance:.1f} kWh netto · gem. €{avg_p:.2f}/kWh"
+                "sub": f"{net_kwh_balance:.1f} kWh netto · gem. €{avg_p:.2f}/kWh",
+                "headline": f"Verwachte energiekosten: €{net_cost_eur:.2f} over 24 uur",
+                "explanation": "Netto kosten bestaan uit huishoudelijk sluipverbruik, tapwater en CV, minus gratis zonne-energie en feed-in vergoeding.",
+                "breakdown": [
+                    {"label": "Sluip- & Basisverbruik", "icon": "🏠", "kwh": unalloc_kwh, "eur": unalloc_cost, "desc": "300W continue huishoudlast (koelkast, ventilatie, stand-by)"},
+                    {"label": "Warm Tapwater (DHW)", "icon": "🚿", "kwh": dhw_kwh, "eur": dhw_cost, "desc": f"Boilerrun(s) gepland op daltarief/zon (€{dhw_avg_p:.2f}/kWh)"},
+                    {"label": "CV Ruimteverwarming", "icon": "♨️", "kwh": cv_kwh, "eur": cv_cost, "desc": f"Vloerverwarming & thermische buffer ({cv_hours}u stooktijd)"},
+                    {"label": "Zon Direct Benut (Aftrek)", "icon": "☀️", "kwh": -solar_selfcons_kwh, "eur": -solar_selfcons_eur, "desc": "Gratis eigen dakopwekking direct in huis verbruikt"},
+                    {"label": "Teruglevering aan het Net", "icon": "🔌", "kwh": -solar_export_kwh, "eur": -solar_export_eur, "desc": f"Overtollige zonne-energie (€0,006/kWh vergoeding)"}
+                ],
+                "footer": f"Totaal verbruik: {tot_cons_kwh:.1f} kWh · Netto netafname: {net_kwh_balance:.1f} kWh"
             },
             "solar": {
                 "title": "Zonnepanelen (24u Rollend)",
                 "main": f"€{solar_total_value_eur:.2f}",
                 "main_extra": f"({tot_solar_kwh:.1f} kWh)",
-                "sub": f"€{solar_selfcons_eur:.2f} benut ({solar_selfcons_kwh:.1f} kWh) · €{solar_export_eur:.2f} retour ({solar_export_kwh:.1f} kWh)"
+                "sub": f"€{solar_selfcons_eur:.2f} benut ({solar_selfcons_kwh:.1f} kWh) · €{solar_export_eur:.2f} retour ({solar_export_kwh:.1f} kWh)",
+                "headline": f"Zonnepanelen Totale Waarde: €{solar_total_value_eur:.2f} ({tot_solar_kwh:.1f} kWh)",
+                "explanation": "Open HEMS maximaliseert het eigen verbruik door tapwater en vloerverwarming tijdens zonneschijn te sturen.",
+                "breakdown": [
+                    {"label": "Direct Eigen Verbruik", "icon": "🏠", "kwh": solar_selfcons_kwh, "eur": solar_selfcons_eur, "desc": f"{round((solar_selfcons_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% van de opwek direct in huis/boiler benut"},
+                    {"label": "Teruglevering aan het Net", "icon": "🔌", "kwh": solar_export_kwh, "eur": solar_export_eur, "desc": f"{round((solar_export_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% geëxporteerd tegen teruglevertarief"},
+                    {"label": "Totale Zonne-opwekking", "icon": "☀️", "kwh": tot_solar_kwh, "eur": solar_total_value_eur, "desc": "5.76 kWp ZW-installatie conform 15m weerinterpolatie"}
+                ],
+                "footer": f"Zelfconsumptie: {round((solar_selfcons_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% · Vermeden netafname: €{solar_selfcons_eur:.2f}"
             },
             "savings": {
                 "title": "Besparing (24u Rollend)",
-                "main": f"€{hems_savings_eur:.2f}",
-                "sub": f"{shifted_kwh:.1f} kWh verschoven naar dal/zon"
+                "main": f"€{tot_savings:.2f}",
+                "sub": f"{shifted_kwh:.1f} kWh verschoven naar dal/zon",
+                "headline": f"Totale HEMS Besparing: €{tot_savings:.2f} over 24 uur",
+                "explanation": "Berekend t.o.v. een standaard ongeoptimaliseerde thermostaat die zonder rekening te houden met dynamische tarieven of spitsperiodes zou stoken.",
+                "breakdown": [
+                    {"label": "Tapwater Spitsvermijding", "icon": "🚿", "kwh": dhw_kwh, "eur": dhw_arbitrage_saving, "desc": f"Boiler verwarmd op dal/zon (€{dhw_avg_p:.2f}/kWh) i.p.v. tijdens dure spits (€{avg_peak_price:.2f}/kWh)"},
+                    {"label": "CV Spitsblokkades", "icon": "♨️", "kwh": round(cv_lockout_hours * 0.8, 1), "eur": cv_spitsblok_saving, "desc": f"Geen stroomverbruik tijdens {cv_lockout_hours}u spitsblokkades dankzij betondekvloer"},
+                    {"label": "Zonne-energie Arbitrage", "icon": "☀️", "kwh": solar_selfcons_kwh, "eur": solar_selfcons_saving, "desc": "Lokale opslag in boiler en vloer i.p.v. spotgoedkoop terugleveren (€0,006/kWh)"}
+                ],
+                "footer": f"{shifted_kwh:.1f} kWh flexibel vermogen verschoven naar goedkope dal/zon-uren"
             },
             "heatpump": {
                 "title": "Warmtepomp (24u Rollend)",
                 "main": f"{hp_tot_stroom_kwh:.1f} kWh",
                 "main_extra": f"(~€{hp_cost_eur:.2f})",
-                "sub": f"{hp_tot_th:.1f} kWh th (COP {hp_cop:.1f}) · {dhw_hours:.1f}u SWW / {cv_hours:.1f}u CV"
+                "sub": f"{hp_tot_th:.1f} kWh th (COP {hp_cop:.1f}) · {dhw_hours:.1f}u SWW / {cv_hours:.1f}u CV",
+                "headline": f"Warmtepomp Totaal: {hp_tot_stroom_kwh:.1f} kWh el (~€{hp_cost_eur:.2f})",
+                "explanation": "De Daikin Altherma levert zowel tapwater als vloerverwarming via een geoptimaliseerd Smart Grid relaisprofiel.",
+                "breakdown": [
+                    {"label": "Tapwater (DHW Boiler)", "icon": "🚿", "kwh": dhw_kwh, "eur": dhw_cost, "desc": f"{dhw_hours}u stooktijd · {round(dhw_kwh * 3.1, 1)} kWh thermisch (gem. COP ~3,1)"},
+                    {"label": "Ruimteverwarming (CV Vloer)", "icon": "♨️", "kwh": cv_kwh, "eur": cv_cost, "desc": f"{cv_hours}u stooktijd · {round(cv_kwh * 4.5, 1)} kWh thermisch (gem. COP ~4,5)"},
+                    {"label": "Totaal Warmteopbrengst", "icon": "⚡", "kwh": hp_tot_th, "eur": hp_cost_eur, "desc": f"Seizoens-COP {hp_cop:.1f} over alle runs gecombineerd"}
+                ],
+                "footer": f"Totale stookduur: {round(dhw_hours + cv_hours, 1)} uur · Thermische opbrengst: {hp_tot_th:.1f} kWh th"
             }
         }
 

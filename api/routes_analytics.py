@@ -262,22 +262,57 @@ def get_today_history_kpis(cfg: dict, sec: dict) -> dict:
 
     return {
         "costs": {
+            "title": "Kosten Vandaag (Historie)",
             "main": f"€{net_cost_eur:.2f}",
-            "sub": f"{tot_afname_kwh:.1f} kWh afname · {tot_terug_kwh:.1f} kWh retour"
+            "sub": f"{tot_afname_kwh:.1f} kWh afname · {tot_terug_kwh:.1f} kWh retour",
+            "headline": f"Werkelijke energiekosten vandaag: €{net_cost_eur:.2f}",
+            "explanation": "Gerealiseerde kosten op basis van InfluxDB energiemetingen en dynamische uurprijzen sinds middernacht.",
+            "breakdown": [
+                {"label": "Netafname (Totaal)", "icon": "🔌", "kwh": round(tot_afname_kwh, 2), "eur": round(tot_afname_kwh * p_imp, 2), "desc": f"Gemeten stroomafname via de hoofdmeter (€{p_imp:.2f}/kWh gem.)"},
+                {"label": "Warmtepomp Verbruik", "icon": "⚡", "kwh": round(tot_hp_kwh, 2), "eur": hp_cost_eur, "desc": f"Inepro kWh-meter warmtepomp ({hp_th_kwh} kWh thermisch opgewekt)"},
+                {"label": "Zon Direct Benut (Aftrek)", "icon": "☀️", "kwh": -round(selfcons_kwh, 2), "eur": -solar_selfcons_eur, "desc": "Zonnestroom direct in huis verbruikt (vermeden afname)"},
+                {"label": "Teruglevering aan het Net", "icon": "📤", "kwh": -round(tot_terug_kwh, 2), "eur": -solar_export_eur, "desc": f"Netto export naar het net (€{p_exp:.3f}/kWh)"}
+            ],
+            "footer": f"Netto netafname: {tot_afname_kwh - tot_terug_kwh:.1f} kWh · Teruglevering: {tot_terug_kwh:.1f} kWh"
         },
         "solar": {
+            "title": "Zonnepanelen Vandaag",
             "main": f"€{solar_total_value_eur:.2f}",
             "main_extra": f"({tot_solar_kwh:.1f} kWh)",
-            "sub": f"€{solar_selfcons_eur:.2f} benut ({selfcons_kwh:.1f} kWh) · €{solar_export_eur:.2f} retour ({tot_terug_kwh:.1f} kWh)"
+            "sub": f"€{solar_selfcons_eur:.2f} benut ({selfcons_kwh:.1f} kWh) · €{solar_export_eur:.2f} retour ({tot_terug_kwh:.1f} kWh)",
+            "headline": f"Zonnepanelen Vandaag: €{solar_total_value_eur:.2f} ({tot_solar_kwh:.1f} kWh)",
+            "explanation": "Werkelijk opgewekte zonnestroom gemeten door Inepro 103 zonne-omvormer.",
+            "breakdown": [
+                {"label": "Direct Eigen Verbruik", "icon": "🏠", "kwh": round(selfcons_kwh, 2), "eur": solar_selfcons_eur, "desc": f"{round((selfcons_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% direct lokaal in huis/boiler benut"},
+                {"label": "Teruglevering aan het Net", "icon": "🔌", "kwh": round(tot_terug_kwh, 2), "eur": solar_export_eur, "desc": f"{round((tot_terug_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% geëxporteerd overschot"},
+                {"label": "Totale Opwekking", "icon": "☀️", "kwh": round(tot_solar_kwh, 2), "eur": solar_total_value_eur, "desc": "Totale zonne-energie sinds 00:00u"}
+            ],
+            "footer": f"Zelfconsumptie: {round((selfcons_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% · Bespaard op netafname: €{solar_selfcons_eur:.2f}"
         },
         "savings": {
+            "title": "Besparing Vandaag",
             "main": f"€{realized_savings_eur:.2f}",
-            "sub": f"{peak_avoided_kwh:.1f} kWh vermeden in spits"
+            "sub": f"{peak_avoided_kwh:.1f} kWh vermeden in spits",
+            "headline": f"Gerealiseerde Besparing Vandaag: €{realized_savings_eur:.2f}",
+            "explanation": "Kostenbesparing gerealiseerd door HEMS sturing ten opzichte van ongecontroleerd stoken in piekuren.",
+            "breakdown": [
+                {"label": "Spitsblokkades Vermeden", "icon": "🔒", "kwh": peak_avoided_kwh, "eur": realized_savings_eur, "desc": "Warmtepomp vergrendeld tijdens dure spitsuren via betondekvloer buffer"},
+                {"label": "Zelfconsumptie Winst", "icon": "☀️", "kwh": round(selfcons_kwh, 2), "eur": round(selfcons_kwh * max(0.05, p_imp - p_exp), 2), "desc": "Zon lokaal verbruikt i.p.v. terugleveren"}
+            ],
+            "footer": f"Totaal {peak_avoided_kwh:.1f} kWh dure netstroom vermeden"
         },
         "heatpump": {
+            "title": "Warmtepomp Vandaag",
             "main": f"{tot_hp_kwh:.1f} kWh",
             "main_extra": f"(~€{hp_cost_eur:.2f})",
-            "sub": f"{hp_th_kwh:.1f} kWh th · SCOP 3.65"
+            "sub": f"{hp_th_kwh:.1f} kWh th · SCOP 3.65",
+            "headline": f"Warmtepomp Vandaag: {tot_hp_kwh:.1f} kWh el (~€{hp_cost_eur:.2f})",
+            "explanation": "Werkelijk gemeten stroomverbruik en berekende thermische opbrengst van de Daikin Altherma warmtepomp.",
+            "breakdown": [
+                {"label": "Elektrische Netafname", "icon": "⚡", "kwh": round(tot_hp_kwh, 2), "eur": hp_cost_eur, "desc": "Totaal stroomverbruik warmtepomp sinds middernacht"},
+                {"label": "Thermische Opbrengst", "icon": "♨️", "kwh": hp_th_kwh, "eur": None, "desc": "Geleverde warmte aan CV en sanitair warm water (SCOP 3.65)"}
+            ],
+            "footer": f"Seizoens-COP 3.65 · {hp_th_kwh} kWh thermische warmte geproduceerd"
         }
     }
 

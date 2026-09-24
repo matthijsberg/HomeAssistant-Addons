@@ -143,7 +143,7 @@
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.103.80</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.103.81</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -179,25 +179,29 @@
                 <!-- 1. TOP 4 KPI METRIC CARDS (FORECAST 24H) -->
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                     <!-- 1. Kosten (24u Rollend) -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-blue-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('costs', 'prediction')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-600 group-hover:text-blue-400 text-xs transition" title="Klik voor specificatie">🔍</span>
                         <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-costs-title" data-i18n="kpi.costs_24h">Kosten (24u Rollend)</span>
                         <div class="text-xl font-bold text-white mt-1" id="pred-kpi-costs-main">€--</div>
                         <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="pred-kpi-costs-sub">-- kWh netto</span>
                     </div>
                     <!-- 2. Zonnepanelen (24u Rollend) -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-amber-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('solar', 'prediction')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-600 group-hover:text-amber-400 text-xs transition" title="Klik voor specificatie">🔍</span>
                         <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-solar-title" data-i18n="kpi.solar_panels">Zonnepanelen (24u Rollend)</span>
                         <div class="text-xl font-bold text-amber-400 mt-1" id="pred-kpi-solar-main">€--</div>
                         <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="pred-kpi-solar-sub">-- benut · -- retour</span>
                     </div>
                     <!-- 3. HEMS Besparing (24u Rollend) -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-emerald-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('savings', 'prediction')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-600 group-hover:text-emerald-400 text-xs transition" title="Klik voor specificatie">🔍</span>
                         <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-savings-title" data-i18n="kpi.hems_savings">Besparing (24u Rollend)</span>
                         <div class="text-xl font-bold text-emerald-400 mt-1" id="pred-kpi-savings-main">€--</div>
                         <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="pred-kpi-savings-sub">-- verschoven naar dal/zon</span>
                     </div>
                     <!-- 4. Warmtepomp (24u Rollend) -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-cyan-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('heatpump', 'prediction')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-600 group-hover:text-cyan-400 text-xs transition" title="Klik voor specificatie">🔍</span>
                         <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-hp-title" data-i18n="kpi.heatpump">Warmtepomp (24u Rollend)</span>
                         <div class="text-xl font-bold text-cyan-400 mt-1" id="pred-kpi-hp-main">-- kWh</div>
                         <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="pred-kpi-hp-sub">-- kWh th (COP --)</span>
@@ -829,31 +833,93 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- ========================================================================= -->
+                <!-- MODAL: KPI DETAIL BREAKDOWN POPUP (KOSTEN / BESPARING / ZON / WP)         -->
+                <!-- ========================================================================= -->
+                <div id="kpi-detail-modal" class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm hidden" onclick="handleKpiModalBackdrop(event)">
+                    <div class="relative w-full max-w-lg bg-[#0e1422] border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                        <!-- Modal Header -->
+                        <div class="p-4 sm:p-5 border-b border-slate-800 bg-slate-900/60 flex items-center justify-between">
+                            <div class="flex items-center gap-2.5">
+                                <span id="kpi-modal-icon" class="text-xl">💶</span>
+                                <div>
+                                    <h3 id="kpi-modal-title" class="text-base sm:text-lg font-bold text-white leading-snug">Kosten Breakdown</h3>
+                                    <p id="kpi-modal-subtitle" class="text-[11px] text-slate-400 font-sans"></p>
+                                </div>
+                            </div>
+                            <button type="button" onclick="closeKpiDetailModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition focus:outline-none" aria-label="Sluiten">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+
+                        <!-- Modal Content (Scrollable) -->
+                        <div class="p-4 sm:p-5 space-y-4 overflow-y-auto text-xs font-sans">
+                            <!-- Highlight Hero Banner -->
+                            <div id="kpi-modal-hero" class="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-baseline justify-between">
+                                <div>
+                                    <span id="kpi-modal-hero-label" class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Totaal</span>
+                                    <div id="kpi-modal-hero-main" class="text-2xl font-black text-white font-mono mt-0.5">€--</div>
+                                </div>
+                                <div id="kpi-modal-hero-badge" class="text-right">
+                                    <!-- Dynamic Extra Badge -->
+                                </div>
+                            </div>
+
+                            <!-- Explanation text -->
+                            <div id="kpi-modal-explanation" class="text-slate-300 leading-relaxed text-[11px] bg-slate-900/40 p-3 rounded-xl border border-slate-800/60">
+                                --
+                            </div>
+
+                            <!-- Detailed Breakdown Items -->
+                            <div class="space-y-1.5">
+                                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block px-1">Specificatie Verbruikers &amp; Componenten</span>
+                                <div id="kpi-modal-breakdown-list" class="space-y-2 rounded-xl bg-[#0B0F17] border border-slate-800/80 p-3 divide-y divide-slate-800/50">
+                                    <!-- Populated via JS -->
+                                </div>
+                            </div>
+
+                            <!-- Footer Summary Metric -->
+                            <div id="kpi-modal-footer-text" class="text-[10px] text-slate-400 font-mono text-center pt-1">
+                                --
+                            </div>
+                        </div>
+
+                        <!-- Modal Footer -->
+                        <div class="p-3 sm:p-4 border-t border-slate-800 bg-slate-900/60 flex justify-end">
+                            <button type="button" onclick="closeKpiDetailModal()" class="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-white transition">Sluiten</button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div id="view-history" class="tab-content space-y-6">
                 <!-- TOP 4 KPI METRIC CARDS FOR HISTORIE -->
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                     <!-- 1. Kosten Vandaag -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-blue-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('costs', 'history')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-600 group-hover:text-blue-400 text-xs transition" title="Klik voor specificatie">🔍</span>
                         <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-costs-title" data-i18n="kpi.costs_today">Kosten Vandaag</span>
                         <div class="text-xl font-bold text-white mt-1" id="hist-kpi-costs-main">€--</div>
                         <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-costs-sub">-- kWh afname · -- kWh retour</span>
                     </div>
                     <!-- 2. Zonnepanelen Vandaag (met €) -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-amber-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('solar', 'history')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-600 group-hover:text-amber-400 text-xs transition" title="Klik voor specificatie">🔍</span>
                         <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-solar-title" data-i18n="kpi.solar_today">Zonnepanelen Vandaag</span>
                         <div class="text-xl font-bold text-amber-400 mt-1" id="hist-kpi-solar-main">€--</div>
                         <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-solar-sub">-- benut · -- retour</span>
                     </div>
                     <!-- 3. Besparing Vandaag -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-emerald-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('savings', 'history')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-600 group-hover:text-emerald-400 text-xs transition" title="Klik voor specificatie">🔍</span>
                         <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-savings-title" data-i18n="kpi.savings_today">Besparing Vandaag</span>
                         <div class="text-xl font-bold text-emerald-400 mt-1" id="hist-kpi-savings-main">€--</div>
                         <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-savings-sub">-- vermeden in spits</span>
                     </div>
                     <!-- 4. Warmtepomp Vandaag -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow">
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-cyan-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('heatpump', 'history')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-600 group-hover:text-cyan-400 text-xs transition" title="Klik voor specificatie">🔍</span>
                         <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-hp-title" data-i18n="kpi.heatpump_today">Warmtepomp Vandaag</span>
                         <div class="text-xl font-bold text-cyan-400 mt-1" id="hist-kpi-hp-main">-- kWh</div>
                         <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-hp-sub">-- kWh th · SCOP --</span>
@@ -3246,7 +3312,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
     </div>
 
     <!-- CLIENT CONTROLLER & CHART.JS ENGINE -->
-    <script src="./js/i18n.js?v=0.103.80"></script>
-    <script src="./js/app.js?v=0.103.80"></script>
+    <script src="./js/i18n.js?v=0.103.81"></script>
+    <script src="./js/app.js?v=0.103.81"></script>
 </body>
 </html>

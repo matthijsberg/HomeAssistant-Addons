@@ -10,6 +10,12 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.81] — 2026-09-24 (Interactieve KPI Detail- & Breakdown Modals)
+
+### UI & Explainability
+- **Interactieve KPI Detailmodals (`web/index.html` & `web/js/app.js`)**: Top KPI kaarten (Kosten, Zonnepanelen, Besparing, Warmtepomp) zijn nu interactief en openen bij een klik een gedetailleerde specificatiepopup (`kpi-detail-modal`).
+- **Verbruikers & Arbitrage Breakdown (`api/routes_schedule.py` & `api/routes_analytics.py`)**: `forecast_kpis` en `history_kpis` verrijkt met volledige uitsplitsing naar basislast/sluipverbruik (300W continue last), tapwater (DHW), CV vloerverwarming, vermeden spitskosten en zonne-arbitrage.
+
 ## [0.103.80] — 2026-09-24 (Ruimteverwarming Beslis- en Uitlegbox)
 
 ### UI & Explainability
