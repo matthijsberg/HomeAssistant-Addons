@@ -35,7 +35,7 @@ class KpiPresenter:
         """Builds standardized 24h rolling forecast KPI cards with modal breakdown specifications."""
         net_kwh_balance = round(pred_afname_kwh - pred_terug_kwh, 2)
         p_act = prices[0] if prices else 0.28
-        avg_p = round(net_cost_eur / net_kwh_balance, 2) if abs(net_kwh_balance) >= 0.1 else round(p_act, 2)
+        avg_import_p = round(pred_afname_eur / pred_afname_kwh, 2) if pred_afname_kwh >= 0.1 else round(p_act, 2)
 
         solar_selfcons_kwh = round(pred_selfcons_kwh, 2)
         solar_selfcons_eur = round(pred_selfcons_eur, 2)
@@ -79,19 +79,20 @@ class KpiPresenter:
 
         shifted_kwh = round(plan.dhw_summary.total_stroom_kwh, 1) if (plan and getattr(plan, "dhw_summary", None)) else 0.0
 
+        net_sign = "+" if net_kwh_balance > 0 else ""
         costs_card = KpiCardItem(
             title="Kosten (24u Rollend)",
             main=f"€{net_cost_eur:.2f}",
-            sub=f"{net_kwh_balance:.1f} kWh netto · gem. €{avg_p:.2f}/kWh",
+            sub=f"{net_sign}{net_kwh_balance:.1f} kWh netto · inkoop €{avg_import_p:.2f}/kWh",
             headline=f"Verwachte energiekosten: €{net_cost_eur:.2f} over 24 uur",
             explanation="Netto kosten bestaan uit huishoudelijk sluipverbruik, tapwater en CV, minus gratis zonne-energie en feed-in vergoeding.",
             footer=f"Totaal verbruik: {tot_cons_kwh:.1f} kWh · Netto netafname: {net_kwh_balance:.1f} kWh",
             breakdown=[
-                KpiBreakdownItem("Sluip- & Basisverbruik", "🏠", unalloc_kwh, unalloc_cost, "300W continue huishoudlast (koelkast, ventilatie, stand-by)"),
-                KpiBreakdownItem("Warm Tapwater (DHW)", "🚿", dhw_kwh, dhw_cost, f"Boilerrun(s) gepland op daltarief/zon (€{dhw_avg_p:.2f}/kWh)"),
-                KpiBreakdownItem("CV Ruimteverwarming", "♨️", cv_kwh, cv_cost, f"Vloerverwarming & thermische buffer ({cv_hours}u stooktijd)"),
-                KpiBreakdownItem("Zon Direct Benut (Aftrek)", "☀️", -solar_selfcons_kwh, -solar_selfcons_eur, "Gratis eigen dakopwekking direct in huis verbruikt"),
-                KpiBreakdownItem("Teruglevering aan het Net", "🔌", -solar_export_kwh, -solar_export_eur, "Overtollige zonne-energie (€0,006/kWh vergoeding)")
+                KpiBreakdownItem("Sluip- & Basisverbruik", "blue", unalloc_kwh, unalloc_cost, "300W continue huishoudlast (koelkast, ventilatie, stand-by)"),
+                KpiBreakdownItem("Warm Tapwater (DHW)", "pink", dhw_kwh, dhw_cost, f"Boilerrun(s) gepland op daltarief/zon (€{dhw_avg_p:.2f}/kWh)"),
+                KpiBreakdownItem("CV Ruimteverwarming", "indigo", cv_kwh, cv_cost, f"Vloerverwarming & thermische buffer ({cv_hours}u stooktijd)"),
+                KpiBreakdownItem("Zon Direct Benut (Aftrek)", "amber", -solar_selfcons_kwh, -solar_selfcons_eur, "Gratis eigen dakopwekking direct in huis verbruikt"),
+                KpiBreakdownItem("Teruglevering aan het Net", "cyan", -solar_export_kwh, -solar_export_eur, "Overtollige zonne-energie tegen teruglevertarief")
             ]
         )
 
@@ -104,9 +105,9 @@ class KpiPresenter:
             explanation="Open HEMS maximaliseert het eigen verbruik door tapwater en vloerverwarming tijdens zonneschijn te sturen.",
             footer=f"Zelfconsumptie: {round((solar_selfcons_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% · Vermeden netafname: €{solar_selfcons_eur:.2f}",
             breakdown=[
-                KpiBreakdownItem("Direct Eigen Verbruik", "🏠", solar_selfcons_kwh, solar_selfcons_eur, f"{round((solar_selfcons_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% van de opwek direct in huis/boiler benut"),
-                KpiBreakdownItem("Teruglevering aan het Net", "🔌", solar_export_kwh, solar_export_eur, f"{round((solar_export_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% geëxporteerd tegen teruglevertarief"),
-                KpiBreakdownItem("Totale Zonne-opwekking", "☀️", tot_solar_kwh, solar_total_value_eur, "5.76 kWp ZW-installatie conform 15m weerinterpolatie")
+                KpiBreakdownItem("Direct Eigen Verbruik", "amber", solar_selfcons_kwh, solar_selfcons_eur, f"{round((solar_selfcons_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% van de opwek direct in huis/boiler benut"),
+                KpiBreakdownItem("Teruglevering aan het Net", "cyan", solar_export_kwh, solar_export_eur, f"{round((solar_export_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% geëxporteerd tegen teruglevertarief"),
+                KpiBreakdownItem("Totale Zonne-opwekking", "emerald", tot_solar_kwh, solar_total_value_eur, "5.76 kWp ZW-installatie conform 15m weerinterpolatie")
             ]
         )
 
@@ -118,9 +119,9 @@ class KpiPresenter:
             explanation="Berekend t.o.v. een standaard ongeoptimaliseerde thermostaat die zonder rekening te houden met dynamische tarieven of spitsperiodes zou stoken.",
             footer=f"{shifted_kwh:.1f} kWh flexibel vermogen verschoven naar goedkope dal/zon-uren",
             breakdown=[
-                KpiBreakdownItem("Tapwater Spitsvermijding", "🚿", dhw_kwh, dhw_arbitrage_saving, f"Boiler verwarmd op dal/zon (€{dhw_avg_p:.2f}/kWh) i.p.v. tijdens dure spits (€{avg_peak_price:.2f}/kWh)"),
-                KpiBreakdownItem("CV Spitsblokkades", "♨️", round(cv_lockout_hours * 0.8, 1), cv_spitsblok_saving, f"Geen stroomverbruik tijdens {cv_lockout_hours}u spitsblokkades dankzij betondekvloer"),
-                KpiBreakdownItem("Zonne-energie Arbitrage", "☀️", solar_selfcons_kwh, solar_selfcons_saving, "Lokale opslag in boiler en vloer i.p.v. spotgoedkoop terugleveren (€0,006/kWh)")
+                KpiBreakdownItem("Tapwater Spitsvermijding", "pink", dhw_kwh, dhw_arbitrage_saving, f"Boiler verwarmd op dal/zon (€{dhw_avg_p:.2f}/kWh) i.p.v. tijdens dure spits (€{avg_peak_price:.2f}/kWh)"),
+                KpiBreakdownItem("CV Spitsblokkades", "indigo", round(cv_lockout_hours * 0.8, 1), cv_spitsblok_saving, f"Geen stroomverbruik tijdens {cv_lockout_hours}u spitsblokkades dankzij betondekvloer"),
+                KpiBreakdownItem("Zonne-energie Arbitrage", "amber", solar_selfcons_kwh, solar_selfcons_saving, "Lokale opslag in boiler en vloer i.p.v. spotgoedkoop terugleveren (€0,006/kWh)")
             ]
         )
 
@@ -133,9 +134,9 @@ class KpiPresenter:
             explanation="De Daikin Altherma levert zowel tapwater als vloerverwarming via een geoptimaliseerd Smart Grid relaisprofiel.",
             footer=f"Totale stookduur: {round(dhw_hours + cv_hours, 1)} uur · Thermische opbrengst: {hp_tot_th:.1f} kWh th",
             breakdown=[
-                KpiBreakdownItem("Tapwater (DHW Boiler)", "🚿", dhw_kwh, dhw_cost, f"{dhw_hours}u stooktijd · {round(dhw_kwh * 3.1, 1)} kWh thermisch (gem. COP ~3,1)"),
-                KpiBreakdownItem("Ruimteverwarming (CV Vloer)", "♨️", cv_kwh, cv_cost, f"{cv_hours}u stooktijd · {round(cv_kwh * 4.5, 1)} kWh thermisch (gem. COP ~4,5)"),
-                KpiBreakdownItem("Totaal Warmteopbrengst", "⚡", hp_tot_th, hp_cost_eur, f"Seizoens-COP {hp_cop:.1f} over alle runs gecombineerd")
+                KpiBreakdownItem("Tapwater (DHW Boiler)", "pink", dhw_kwh, dhw_cost, f"{dhw_hours}u stooktijd · {round(dhw_kwh * 3.1, 1)} kWh thermisch (gem. COP ~3,1)"),
+                KpiBreakdownItem("Ruimteverwarming (CV Vloer)", "indigo", cv_kwh, cv_cost, f"{cv_hours}u stooktijd · {round(cv_kwh * 4.5, 1)} kWh thermisch (gem. COP ~4,5)"),
+                KpiBreakdownItem("Totaal Warmteopbrengst", "emerald", hp_tot_th, hp_cost_eur, f"Seizoens-COP {hp_cop:.1f} over alle runs gecombineerd")
             ]
         )
 

@@ -567,11 +567,6 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         step_h = 0.25 if is_15m else 1.0
         tot_cons_kwh = round(sum(u + b + h + c for u, b, h, c in zip(unallocated, boiler, heating, battery_charge)) * step_h, 2)
         tot_solar_kwh = round(sum(solar) * step_h, 2)
-        net_cost_eur = round(sum(np * p for np, p in zip(net_power, prices)) * step_h, 2)
-        gross_cost_eur = round(sum((u + b + h + c) * p for u, b, h, c, p in zip(unallocated, boiler, heating, battery_charge, prices)) * step_h, 2)
-        solar_savings_eur = round(max(0.0, gross_cost_eur - net_cost_eur), 2)
-
-        # Compute detailed 6-box prediction metrics aligned with historical power producers
         pred_afname_kwh = 0.0
         pred_afname_eur = 0.0
         pred_terug_kwh = 0.0
@@ -586,7 +581,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         selfcons_series = []
         verbruik_series = []
 
-        for u, b, h, c, s, d, np_val, p in zip(unallocated, boiler, heating, battery_charge, solar, battery_discharge, net_power, prices):
+        for u, b, h, c, s, d, np_val, p, p_exp in zip(unallocated, boiler, heating, battery_charge, solar, battery_discharge, net_power, prices, export_prices):
             c_tot = u + b + h + c
             g_tot = s + d
             afn = max(0.0, np_val)
@@ -601,11 +596,15 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             pred_afname_kwh += afn * step_h
             pred_afname_eur += afn * step_h * p
             pred_terug_kwh += ter * step_h
-            pred_terug_eur += ter * step_h * p
+            pred_terug_eur += ter * step_h * p_exp
             pred_selfcons_kwh += s_cons * step_h
             pred_selfcons_eur += s_cons * step_h * p
-            pred_solar_eur += s * step_h * p
+            pred_solar_eur += s * step_h * p_exp
             pred_verbruik_eur += c_tot * step_h * p
+
+        net_cost_eur = round(pred_afname_eur - pred_terug_eur, 2)
+        gross_cost_eur = round(pred_verbruik_eur, 2)
+        solar_savings_eur = round(max(0.0, gross_cost_eur - net_cost_eur), 2)
 
         def fmt_kw(val, neg=False):
             sign = "-" if neg and val > 0 else ""

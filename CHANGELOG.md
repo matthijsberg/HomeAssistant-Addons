@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.92] — 2026-09-24 (Accurate Net Financial Balancing, Root Modal Relocation & Minimalist UI Polish)
+
+### Wiskundige Berekening & Saldering
+- **Correcte Teruglevertarief Saldering**: In `routes_schedule.py` werd teruglevering (`pred_terug_eur`) gecorrigeerd door te vermenigvuldigen met de werkelijke terugleververgoeding (`p_exp` ~€0,06/kWh) in plaats van het all-in inkooptarief (`p` ~€0,28/kWh). Hierdoor zijn de verwachte kosten realistisch (€+1,15 i.p.v. het fictieve negatieve bedrag).
+- **Consistente Gemiddelde Inkoopprijs**: `avg_import_p` berekent nu zuiver het gewogen gemiddelde importtarief over de netafname.
+
+### UI & Modal Fixes
+- **Modal Relocatie naar Root (`<body>`)**: `kpi-detail-modal` en `param-history-modal` stonden voorheen genest in de tab `#view-decisions`. Hierdoor kregen ze `display: none` wanneer een gebruiker op het tabblad Voorspelling of Historie zat. Beide modals zijn verplaatst naar het root-niveau van de body en openen nu direct bij een klik/tap op de KPI-kaarten.
+- **Verwijderen van Emojis & Icon Polish**: De vergrootglas-emoji's (`🔍`) op alle 8 KPI-kaarten zijn vervangen door minimalistische SVG detail-iconen. In de modal popup zijn alle kinderlijke emoticons vervangen door strakke monochrome SVGs en subtiele status-dots.
+
 ## [0.103.91] — 2026-09-24 (Clean Chart Canvas: Badges & Emojis Removed from Price Overlays)
 
 ### UI & Visuele Rust
