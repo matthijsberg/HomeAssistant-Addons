@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.83] — 2026-09-24 (Fase 1 Modulaire UI Decompositie & Token Optimalisatie)
+
+### Architectuur & Token Reductie
+- **Extractie Modale Controllers (`web/js/modules/`)**: Modals ontkoppeld uit `app.js` conform *Refactoring Patterns* en *Software Design Philosophy*:
+  - `web/js/modules/modal_decision.js`: Audit logbesluiten en geaggregeerde events.
+  - `web/js/modules/modal_kpi_detail.js`: KPI detailpopups (Kosten, Zonnepanelen, Besparing, Warmtepomp).
+  - `web/js/modules/modal_param_history.js`: Parameter kalibratiegeschiedenis en trendlijn.
+- **Slankere Frontend Kernel**: `web/js/app.js` met meer dan 400 regels gereduceerd; interacties verlopen via gerichte, diepe modules met een minimale interface.
+
 ## [0.103.82] — 2026-09-24 (Model Parameter Aanpassingsgeschiedenis & Kwartaal Audit)
 
 ### UI & Explainability
