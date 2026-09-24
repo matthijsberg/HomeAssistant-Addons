@@ -10,6 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.82] — 2026-09-24 (Model Parameter Aanpassingsgeschiedenis & Kwartaal Audit)
+
+### UI & Explainability
+- **Parameter Aanpassingsgeschiedenis Modal (`web/index.html` & `web/js/app.js`)**: Klikken op een modelrij in de kalibratietabel opent direct een geschiedenispaginale popup (`param-history-modal`) met kwartaal-, maand- en jaartijdvensters, trendgrafiek (stepped trajectory), en chronologische audittabel met bewijsvoering.
+- **Dedicated Parameter History Engine (`layer2_calibration/parameter_history.py`)**: Beheert persistente logging en drift-analyse van alle fysische modelparameters over tijdvensters.
+- **REST & MCP Lockstep Parity (`docs/openapi.json` & `mcp_server.py`)**: `GET /api/model/parameter-history` geregistreerd met MCP tool `openhems_get_parameter_history`.
+
 ## [0.103.81] — 2026-09-24 (Interactieve KPI Detail- & Breakdown Modals)
 
 ### UI & Explainability

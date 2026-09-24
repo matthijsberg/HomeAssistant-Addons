@@ -57,6 +57,7 @@ def test_mcp_high_level_tools_coverage():
         "/api/schedule/recalculate": "openhems_recalculate_schedule",
         "/api/model/dhw-status": "openhems_get_dhw_status",
         "/api/model/heating-forecast": "openhems_get_heating_forecast",
+        "/api/model/parameter-history": "openhems_get_parameter_history",
         "/api/analytics/power_producers": "openhems_get_analytics_power",
         "/api/analytics/dhw_history": "openhems_get_analytics_dhw",
         "/api/analytics/plan_vs_actual": "openhems_get_plan_vs_actual",
@@ -87,6 +88,12 @@ def test_mcp_parameter_parity_with_openapi():
     pp_tool_params = list(inspect.signature(mcp_server.openhems_get_analytics_power).parameters.keys())
     for p in pp_params:
         assert p in pp_tool_params, f"Parameter '{p}' from OpenAPI /api/analytics/power_producers missing in openhems_get_analytics_power!"
+
+    # Check /api/model/parameter-history
+    ph_params = [p["name"] for p in paths["/api/model/parameter-history"]["get"].get("parameters", [])]
+    ph_tool_params = list(inspect.signature(mcp_server.openhems_get_parameter_history).parameters.keys())
+    for p in ph_params:
+        assert p in ph_tool_params, f"Parameter '{p}' from OpenAPI /api/model/parameter-history missing in openhems_get_parameter_history!"
 
 
 def test_mcp_resources_and_prompts_defined():

@@ -115,6 +115,20 @@ def openhems_get_heating_forecast(resolution: str = "15m") -> str:
     return json.dumps(res, indent=2)
 
 
+@mcp.tool()
+def openhems_get_parameter_history(parameter_id: str = "building_ua", timeframe: str = "quarter") -> str:
+    """Get calibration and adjustment history for a learned model parameter.
+
+    Args:
+        parameter_id: Identifier of parameter ('building_ua', 'c_wind', 'c_solar', 'night_baseload', 'floor_capacity', 'pv_yield_ratio').
+        timeframe: History timeframe: 'quarter' (default, 90d), '30d', '1y', or 'all'.
+    Returns:
+        JSON with parameter drift, chronological adjustment events, and timeline trend data.
+    """
+    res = _api_request("/api/model/parameter-history", params={"parameter_id": parameter_id, "timeframe": timeframe})
+    return json.dumps(res, indent=2)
+
+
 # =============================================================================
 # TOOLS: ANALYTICS, AUDIT & TELEMETRY HISTORY
 # =============================================================================

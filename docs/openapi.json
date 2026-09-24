@@ -279,6 +279,49 @@
         }
       }
     },
+    "/api/model/parameter-history": {
+      "get": {
+        "tags": [
+          "Models & Forecasts"
+        ],
+        "summary": "Get model parameter adjustment and calibration history",
+        "description": "Returns chronological adjustment history, drift evolution, and timeline points for learned model parameters across timeframes (quarter, 30d, 1y, all).",
+        "parameters": [
+          {
+            "name": "parameter_id",
+            "in": "query",
+            "description": "Identifier of the model parameter (e.g. building_ua, c_wind, c_solar, night_baseload, floor_capacity, pv_yield_ratio)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "building_ua"
+            }
+          },
+          {
+            "name": "timeframe",
+            "in": "query",
+            "description": "Timeframe filter: 'quarter' (default, 90d), '30d', '1y', or 'all'",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "30d",
+                "quarter",
+                "90d",
+                "1y",
+                "all"
+              ],
+              "default": "quarter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Parameter adjustment history dataset"
+          }
+        }
+      }
+    },
     "/api/analytics/power_producers": {
       "get": {
         "tags": [

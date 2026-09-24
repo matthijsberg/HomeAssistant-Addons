@@ -5952,6 +5952,7 @@
             if (e.key === 'Escape') {
                 closeDecisionModal();
                 closeKpiDetailModal();
+                closeParamHistoryModal();
             }
         });
 
@@ -6040,6 +6041,218 @@
         window.openKpiDetailModal = openKpiDetailModal;
         window.closeKpiDetailModal = closeKpiDetailModal;
         window.handleKpiModalBackdrop = handleKpiModalBackdrop;
+
+        // =========================================================================
+        // PARAMETER ADJUSTMENT HISTORY CONTROLLER
+        // =========================================================================
+        let activeParamHistoryId = 'building_ua';
+        let activeParamHistoryTimeframe = 'quarter';
+        let paramHistoryChartInstance = null;
+
+        async function openParameterHistoryModal(paramId, timeframe = 'quarter') {
+            activeParamHistoryId = paramId || 'building_ua';
+            activeParamHistoryTimeframe = timeframe || 'quarter';
+            const modal = document.getElementById('param-history-modal');
+            if (!modal) return;
+            modal.classList.remove('hidden');
+            await setParamHistoryTimeframe(activeParamHistoryTimeframe);
+        }
+
+        async function setParamHistoryTimeframe(tf) {
+            activeParamHistoryTimeframe = tf;
+            ['30d', 'quarter', '1y', 'all'].forEach(t => {
+                const btn = document.getElementById('btn-ph-tf-' + t);
+                if (btn) {
+                    if (t === tf) {
+                        btn.className = 'px-2.5 py-1 rounded transition font-medium bg-blue-600 text-white shadow';
+                    } else {
+                        btn.className = 'px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-white';
+                    }
+                }
+            });
+            await loadParameterHistory();
+        }
+
+        async function loadParameterHistory() {
+            try {
+                const res = await fetch(`./api/model/parameter-history?parameter_id=${encodeURIComponent(activeParamHistoryId)}&timeframe=${encodeURIComponent(activeParamHistoryTimeframe)}`);
+                if (!res.ok) return;
+                const d = await res.json();
+
+                const titleEl = document.getElementById('param-hist-modal-title');
+                const descEl = document.getElementById('param-hist-modal-desc');
+                const statCurEl = document.getElementById('param-hist-stat-current');
+                const statStartEl = document.getElementById('param-hist-stat-start');
+                const statDriftEl = document.getElementById('param-hist-stat-drift');
+                const statCountEl = document.getElementById('param-hist-stat-count');
+                const chartUnitEl = document.getElementById('param-hist-chart-unit');
+                const driftBadgeEl = document.getElementById('param-hist-net-drift-badge');
+
+                if (titleEl) titleEl.textContent = `${d.parameter_name || activeParamHistoryId}`;
+                if (descEl) descEl.textContent = `${d.description || ''} · ${d.timeframe_label || ''}`;
+                if (statCurEl) statCurEl.textContent = `${d.current_value} ${d.unit}`;
+                if (statStartEl) statStartEl.textContent = `${d.start_value} ${d.unit}`;
+                if (chartUnitEl) chartUnitEl.textContent = `Eenheid: ${d.unit}`;
+
+                const drift = Number(d.net_drift_pct || 0);
+                const driftSign = drift > 0 ? '+' : '';
+                const driftColor = drift === 0 ? 'text-slate-400' : (drift < 0 ? 'text-blue-400' : 'text-amber-400');
+                if (statDriftEl) {
+                    statDriftEl.className = `text-base font-bold font-mono mt-0.5 ${driftColor}`;
+                    statDriftEl.textContent = `${driftSign}${drift}%`;
+                }
+                if (statCountEl) statCountEl.textContent = `${d.total_adjustments || 0} updates`;
+
+                if (driftBadgeEl) {
+                    const badgeBg = Math.abs(drift) <= 5.0 ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40' : 'bg-amber-950/60 text-amber-300 border-amber-500/40';
+                    driftBadgeEl.innerHTML = `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border ${badgeBg}">Netto Drift: ${driftSign}${drift}%</span>`;
+                }
+
+                // Render Audit Table
+                const tBody = document.getElementById('param-hist-table-body');
+                if (tBody) {
+                    const records = d.records || [];
+                    if (records.length === 0) {
+                        tBody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-slate-500 font-mono">Geen aanpassingen gevonden in deze periode.</td></tr>';
+                    } else {
+                        tBody.innerHTML = records.map(r => {
+                            const rDrift = Number(r.drift_pct || 0);
+                            const rDriftSign = rDrift > 0 ? '+' : '';
+                            const rDriftColor = rDrift === 0 ? 'text-slate-400' : (rDrift < 0 ? 'text-blue-400' : 'text-amber-400');
+                            let typeBadge = '';
+                            if (r.change_type === 'accepted') {
+                                typeBadge = '<span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-950 text-blue-300 border border-blue-800">Geaccepteerd</span>';
+                            } else if (r.change_type === 'auto_applied') {
+                                typeBadge = '<span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">Automatisch</span>';
+                            } else {
+                                typeBadge = '<span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-800 text-slate-300">Basis</span>';
+                            }
+
+                            return `
+                                <tr class="hover:bg-slate-800/30 transition">
+                                    <td class="py-2 px-3 font-mono text-slate-300 whitespace-nowrap">${r.formatted_date}</td>
+                                    <td class="py-2 px-3 text-center font-mono">
+                                        <span class="text-slate-500">${r.old_value}</span>
+                                        <span class="text-slate-600 px-1">&rarr;</span>
+                                        <span class="text-white font-bold">${r.new_value}</span>
+                                        <span class="text-[10px] text-slate-400 ml-0.5">${d.unit}</span>
+                                    </td>
+                                    <td class="py-2 px-3 text-center font-mono font-bold ${rDriftColor}">${rDriftSign}${rDrift}%</td>
+                                    <td class="py-2 px-3 text-center whitespace-nowrap">${typeBadge}</td>
+                                    <td class="py-2 px-3 text-slate-400 text-[10px] leading-tight font-sans">${r.evidence || '--'}</td>
+                                </tr>
+                            `;
+                        }).join('');
+                    }
+                }
+
+                // Render Chart
+                renderParamHistoryChart(d);
+            } catch (e) {
+                console.warn('Error loading parameter history:', e);
+            }
+        }
+
+        function renderParamHistoryChart(data) {
+            const canvas = document.getElementById('chart-param-history');
+            if (!canvas) return;
+
+            if (paramHistoryChartInstance) {
+                paramHistoryChartInstance.destroy();
+                paramHistoryChartInstance = null;
+            }
+
+            const points = data.timeline || [];
+            if (points.length === 0) return;
+
+            const labels = points.map(p => p.date_short || p.label);
+            const values = points.map(p => p.value);
+
+            const ctx = canvas.getContext('2d');
+            const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+            gradient.addColorStop(0, 'rgba(59, 130, 246, 0.35)');
+            gradient.addColorStop(1, 'rgba(59, 130, 246, 0.0)');
+
+            paramHistoryChartInstance = new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: data.parameter_name,
+                        data: values,
+                        borderColor: '#3B82F6',
+                        backgroundColor: gradient,
+                        borderWidth: 2.2,
+                        pointBackgroundColor: '#60A5FA',
+                        pointBorderColor: '#1E3A8A',
+                        pointHoverRadius: 6,
+                        pointRadius: 4,
+                        fill: true,
+                        stepped: true,
+                        tension: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#0B0F17',
+                            borderColor: '#1E293B',
+                            borderWidth: 1,
+                            titleColor: '#F8FAFC',
+                            bodyColor: '#94A3B8',
+                            callbacks: {
+                                label: function(context) {
+                                    const pt = points[context.dataIndex];
+                                    const drift = pt ? (pt.drift_pct ? ` (Drift: ${pt.drift_pct}%)` : '') : '';
+                                    return `Waarde: ${context.parsed.y} ${data.unit}${drift}`;
+                                },
+                                afterLabel: function(context) {
+                                    const pt = points[context.dataIndex];
+                                    return pt && pt.evidence ? `Grondslag: ${pt.evidence}` : '';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(30, 41, 59, 0.4)' },
+                            ticks: { color: '#64748B', font: { family: 'monospace', size: 10 } }
+                        },
+                        y: {
+                            grid: { color: 'rgba(30, 41, 59, 0.4)' },
+                            ticks: {
+                                color: '#94A3B8',
+                                font: { family: 'monospace', size: 10 },
+                                callback: val => `${val} ${data.unit}`
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function closeParamHistoryModal() {
+            const modal = document.getElementById('param-history-modal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function handleParamHistoryModalBackdrop(event) {
+            if (event.target && event.target.id === 'param-history-modal') {
+                closeParamHistoryModal();
+            }
+        }
+
+        window.openParameterHistoryModal = openParameterHistoryModal;
+        window.setParamHistoryTimeframe = setParamHistoryTimeframe;
+        window.closeParamHistoryModal = closeParamHistoryModal;
+        window.handleParamHistoryModalBackdrop = handleParamHistoryModalBackdrop;
 
         function filterDecisionAudit(domain) {
             activeDecisionFilter = domain;
@@ -6401,17 +6614,22 @@
                         : `<div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-amber-950/60 border border-amber-500/40 text-amber-300 font-bold font-mono text-xs"><span>${r.proposed_value}</span> <span class="text-[10px] text-amber-400/70 font-normal">${r.unit}</span></div>`;
 
                     const isSub = Boolean(r.parent_id);
-                    const rowClass = isSub ? 'bg-slate-900/30 text-xs hover:bg-slate-800/20 transition border-l-2 border-amber-500/40' : 'hover:bg-slate-800/30 transition';
+                    const rowClass = isSub 
+                        ? 'bg-slate-900/30 text-xs hover:bg-slate-800/40 transition border-l-2 border-amber-500/40 cursor-pointer group' 
+                        : 'hover:bg-slate-800/40 transition cursor-pointer group';
                     const nameClass = isSub ? 'py-1.5 pl-6 font-medium text-slate-300' : 'py-2.5 font-bold text-white';
                     const cellPad = isSub ? 'py-1.5' : 'py-2.5';
 
                     return `
-                        <tr class="${rowClass}">
+                        <tr class="${rowClass}" onclick="openParameterHistoryModal('${r.id}')" title="Klik om de kalibratiegeschiedenis en drift te bekijken">
                             <td class="${nameClass}">
                                 <span class="inline-flex items-center gap-1.5">
                                     <span>${r.name}</span>
-                                    <button type="button" onclick="toggleInfoPopover(event, 'param_${r.id}')" class="text-slate-500 hover:text-cyan-400 transition-colors p-0.5 focus:outline-none" aria-label="Toelichting">
+                                    <button type="button" onclick="event.stopPropagation(); toggleInfoPopover(event, 'param_${r.id}')" class="text-slate-500 hover:text-cyan-400 transition-colors p-0.5 focus:outline-none" aria-label="Toelichting">
                                         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4m0-4h.01"></path></svg>
+                                    </button>
+                                    <button type="button" onclick="event.stopPropagation(); openParameterHistoryModal('${r.id}')" class="text-slate-500 group-hover:text-blue-400 hover:text-blue-300 transition-colors p-0.5 focus:outline-none" title="Geschiedenis van aanpassingen">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                     </button>
                                 </span>
                             </td>

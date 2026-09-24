@@ -551,6 +551,15 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             handler._send_json({"status": "empty", "recommendations": []})
         return True
 
+    if path == "/api/model/parameter-history":
+        from layer2_calibration.parameter_history import ParameterHistoryManager
+        qp = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
+        param_id = qp.get("parameter_id", [qp.get("id", ["building_ua"])])[0]
+        timeframe = qp.get("timeframe", ["quarter"])[0]
+        data = ParameterHistoryManager.get_parameter_history(param_id, timeframe)
+        handler._send_json(data)
+        return True
+
     if path == "/api/model/status":
         if not GLOBAL_MODEL:
             handler._send_json({"status": "error", "message": "Model niet geladen"}, 500)
