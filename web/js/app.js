@@ -249,9 +249,16 @@
                     ctx.fillStyle = hatch;
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
 
-                    // Solid 3px red top accent bar
-                    ctx.fillStyle = '#EF4444';
-                    ctx.fillRect(bounds.left, chartArea.top, bounds.width, 3);
+                    // 1.5px dashed red top accent (matching amber style)
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([4, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(bounds.left, chartArea.top + 1);
+                    ctx.lineTo(bounds.left + bounds.width, chartArea.top + 1);
+                    ctx.stroke();
+                    ctx.restore();
                 });
 
                 // 3. Active Heating Ranges (Yellow / Amber)
