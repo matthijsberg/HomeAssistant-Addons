@@ -10,6 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.97] — 2026-09-24 (Controls & Filters Bar Relocation to Top Under Header Title)
+
+### UI & Navigatie-ergonomie
+- **Filters & Toggles Boven de KPI-Kaarten**: De sticky navigatie- en filterbalk (24u/48u horizon, 1 Uur/15 Min resolutie, Staven/Lijn en Herberekenen) is verplaatst naar de absolute top van zowel het tabblad Voorspelling als Historie, direct onder de paginatitel.
+  - Gebruikers kunnen direct bovenaan de horizon en resolutie kiezen, waarna de 4 KPI-kaarten en alle daaronder liggende grafieken synchroon mee updaten.
+  - Sticky styling behouden zodat de knoppen tijdens scrollen door de grafieken altijd binnen handbereik blijven.
+
 ## [0.103.96] — 2026-09-24 (Clean KPI Card Hierarchy & Equal Dynamic Card Heights)
 
 ### UI & Layout Symmetrie

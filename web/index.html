@@ -143,7 +143,7 @@
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.103.96</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.103.97</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -175,6 +175,40 @@
             <!-- TAB 0: INFRASTRUCTURE & CONNECTIVITY (LAAG 1) -->
                         <!-- TAB 5: ANALYTICS & REPORTING (BOVENAAN LAAG 5) -->
             <div id="view-prediction" class="tab-content active space-y-6">
+
+<!-- Sticky Category Header & Controls Bar -->
+                    <div class="sticky top-16 md:top-20 z-20 bg-[#0B0F17]/95 backdrop-blur-md py-2 -mx-4 px-4 sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 border-b border-purple-500/30 shadow-lg shadow-black/50 flex flex-wrap items-center justify-between gap-2 transition-all">
+                        <span id="prediction-horizon-badge" class="hidden"></span>
+                        <div class="flex items-center gap-2 text-xs flex-wrap">
+                            <!-- Tijdshorizon Toggle: 24u vs 48u -->
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
+                                <button id="btn-horizon-prediction-24h" data-horizon-group="prediction" data-horizon="24h" onclick="setPredictionHorizon('24h')" class="px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">24 Uur</button>
+                                <button id="btn-horizon-prediction-48h" data-horizon-group="prediction" data-horizon="48h" onclick="setPredictionHorizon('48h')" class="px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">48 Uur</button>
+                            </div>
+
+                            <!-- Diagram Type Toggle: Staven vs Lijn -->
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
+                                <button id="pred-btn-type-bar" onclick="setPredictionChartType('bar')" class="px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">📊 Staven</button>
+                                <button id="pred-btn-type-line" onclick="setPredictionChartType('line')" class="px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">📈 Lijn</button>
+                            </div>
+
+                            <!-- Interval / Resolutie Toggle -->
+                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
+                                <button id="btn-res-prediction-1h" data-res-group="prediction" data-res="1h" onclick="setPredictionResolution('1h')" class="res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
+                                <button id="btn-res-prediction-15m" data-res-group="prediction" data-res="15m" onclick="setPredictionResolution('15m')" class="res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
+                            </div>
+
+                            <button id="btn-force-recalculate" onclick="forceRecalculatePlan()" class="px-2.5 py-1 bg-purple-700 hover:bg-purple-600 text-white text-xs rounded-lg font-medium border border-purple-500 transition flex items-center gap-1.5 shadow" title="Dwing een directe herberekening af in Laag 3 (CentralPlanner) en PlanStore">
+                                <svg id="icon-recalculate" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                <span>Herberekenen</span>
+                            </button>
+
+                            <button onclick="loadChartData(); loadElectricityPricesChart(); renderDhwTemperatureChart(); renderHeatingForecastChart();" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5" title="Ververs grafieken met reeds gecachte gegevens">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                                <span>Verversen</span>
+                            </button>
+                        </div>
+                    </div>
 
                 <!-- 1. TOP 4 KPI METRIC CARDS (FORECAST 24H) -->
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 items-stretch">
@@ -220,40 +254,6 @@
                 <!-- CATEGORIE 1: VOORSPELLING (FORECAST)                                      -->
                 <!-- ========================================================================= -->
                 <div class="space-y-4 pt-2">
-                    <!-- Sticky Category Header & Controls Bar -->
-                    <div class="sticky top-16 md:top-20 z-20 bg-[#0B0F17]/95 backdrop-blur-md py-2 -mx-4 px-4 sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 border-b border-purple-500/30 shadow-lg shadow-black/50 flex flex-wrap items-center justify-between gap-2 transition-all">
-                        <span id="prediction-horizon-badge" class="hidden"></span>
-                        <div class="flex items-center gap-2 text-xs flex-wrap">
-                            <!-- Tijdshorizon Toggle: 24u vs 48u -->
-                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button id="btn-horizon-prediction-24h" data-horizon-group="prediction" data-horizon="24h" onclick="setPredictionHorizon('24h')" class="px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">24 Uur</button>
-                                <button id="btn-horizon-prediction-48h" data-horizon-group="prediction" data-horizon="48h" onclick="setPredictionHorizon('48h')" class="px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">48 Uur</button>
-                            </div>
-
-                            <!-- Diagram Type Toggle: Staven vs Lijn -->
-                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button id="pred-btn-type-bar" onclick="setPredictionChartType('bar')" class="px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">📊 Staven</button>
-                                <button id="pred-btn-type-line" onclick="setPredictionChartType('line')" class="px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">📈 Lijn</button>
-                            </div>
-
-                            <!-- Interval / Resolutie Toggle -->
-                            <div class="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-700 text-[10px] font-mono">
-                                <button id="btn-res-prediction-1h" data-res-group="prediction" data-res="1h" onclick="setPredictionResolution('1h')" class="res-btn-1h px-2.5 py-1 rounded transition font-medium bg-purple-600 text-white shadow">1 Uur</button>
-                                <button id="btn-res-prediction-15m" data-res-group="prediction" data-res="15m" onclick="setPredictionResolution('15m')" class="res-btn-15m px-2.5 py-1 rounded transition font-medium text-slate-400 hover:text-slate-200">15 Min</button>
-                            </div>
-
-                            <button id="btn-force-recalculate" onclick="forceRecalculatePlan()" class="px-2.5 py-1 bg-purple-700 hover:bg-purple-600 text-white text-xs rounded-lg font-medium border border-purple-500 transition flex items-center gap-1.5 shadow" title="Dwing een directe herberekening af in Laag 3 (CentralPlanner) en PlanStore">
-                                <svg id="icon-recalculate" class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                                <span>Herberekenen</span>
-                            </button>
-
-                            <button onclick="loadChartData(); loadElectricityPricesChart(); renderDhwTemperatureChart(); renderHeatingForecastChart();" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium border border-slate-700 transition flex items-center gap-1.5" title="Ververs grafieken met reeds gecachte gegevens">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                                <span>Verversen</span>
-                            </button>
-                        </div>
-                    </div>
-
                     <!-- Chart 1.0: Kosten Forecast (Cost & EPEX Forecast) -->
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
@@ -844,42 +844,8 @@
             </div>
 
             <div id="view-history" class="tab-content space-y-6">
-                <!-- TOP 4 KPI METRIC CARDS FOR HISTORIE -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-                    <!-- 1. Kosten Vandaag -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-blue-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('costs', 'history')">
-                        <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-costs-title" data-i18n="kpi.costs_today">Kosten Vandaag</span>
-                        <div class="text-xl font-bold text-white mt-1" id="hist-kpi-costs-main">€--</div>
-                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-costs-sub">-- kWh afname · -- kWh retour</span>
-                    </div>
-                    <!-- 2. Zonnepanelen Vandaag (met €) -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-amber-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('solar', 'history')">
-                        <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-solar-title" data-i18n="kpi.solar_today">Zonnepanelen Vandaag</span>
-                        <div class="text-xl font-bold text-amber-400 mt-1" id="hist-kpi-solar-main">€--</div>
-                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-solar-sub">-- benut · -- retour</span>
-                    </div>
-                    <!-- 3. Besparing Vandaag -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-emerald-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('savings', 'history')">
-                        <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-savings-title" data-i18n="kpi.savings_today">Besparing Vandaag</span>
-                        <div class="text-xl font-bold text-emerald-400 mt-1" id="hist-kpi-savings-main">€--</div>
-                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-savings-sub">-- vermeden in spits</span>
-                    </div>
-                    <!-- 4. Warmtepomp Vandaag -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-cyan-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('heatpump', 'history')">
-                        <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-hp-title" data-i18n="kpi.heatpump_today">Warmtepomp Vandaag</span>
-                        <div class="text-xl font-bold text-cyan-400 mt-1" id="hist-kpi-hp-main">-- kWh</div>
-                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-hp-sub">-- kWh th · SCOP --</span>
-                    </div>
-                </div>
 
-                <!-- CATEGORIE 2: HISTORIE (HISTORICAL DATA)                                   -->
-                <!-- ========================================================================= -->
-                <div class="space-y-4 pt-4">
-                    <!-- Sticky Category Header & Controls Bar -->
+<!-- Sticky Category Header & Controls Bar -->
                     <div class="sticky top-16 md:top-20 z-20 bg-[#0B0F17]/95 backdrop-blur-md py-2 -mx-4 px-4 sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 border-b border-emerald-500/30 shadow-lg shadow-black/50 flex flex-wrap items-center justify-between gap-2 transition-all">
                         <div class="flex items-center gap-2 text-xs flex-wrap">
                             <!-- Tijdshorizon Toggle: 24u vs 48u -->
@@ -915,7 +881,41 @@
                             </button>
                         </div>
                     </div>
+                <!-- TOP 4 KPI METRIC CARDS FOR HISTORIE -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+                    <!-- 1. Kosten Vandaag -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-blue-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('costs', 'history')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-costs-title" data-i18n="kpi.costs_today">Kosten Vandaag</span>
+                        <div class="text-xl font-bold text-white mt-1" id="hist-kpi-costs-main">€--</div>
+                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-costs-sub">-- kWh afname · -- kWh retour</span>
+                    </div>
+                    <!-- 2. Zonnepanelen Vandaag (met €) -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-amber-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('solar', 'history')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-solar-title" data-i18n="kpi.solar_today">Zonnepanelen Vandaag</span>
+                        <div class="text-xl font-bold text-amber-400 mt-1" id="hist-kpi-solar-main">€--</div>
+                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-solar-sub">-- benut · -- retour</span>
+                    </div>
+                    <!-- 3. Besparing Vandaag -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-emerald-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('savings', 'history')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-savings-title" data-i18n="kpi.savings_today">Besparing Vandaag</span>
+                        <div class="text-xl font-bold text-emerald-400 mt-1" id="hist-kpi-savings-main">€--</div>
+                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-savings-sub">-- vermeden in spits</span>
+                    </div>
+                    <!-- 4. Warmtepomp Vandaag -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-cyan-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('heatpump', 'history')">
+                        <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
+                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="hist-kpi-hp-title" data-i18n="kpi.heatpump_today">Warmtepomp Vandaag</span>
+                        <div class="text-xl font-bold text-cyan-400 mt-1" id="hist-kpi-hp-main">-- kWh</div>
+                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="hist-kpi-hp-sub">-- kWh th · SCOP --</span>
+                    </div>
+                </div>
 
+                <!-- CATEGORIE 2: HISTORIE (HISTORICAL DATA)                                   -->
+                <!-- ========================================================================= -->
+                <div class="space-y-4 pt-4">
                     <!-- Chart 2.0: Kosten Historie (Cost History) -->
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
@@ -3420,11 +3420,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
 
         <!-- MODULAR DOMAIN MODULES & CONTROLLERS -->
-    <script src="./js/i18n.js?v=0.103.96"></script>
-    <script src="./js/modules/modal_decision.js?v=0.103.96"></script>
-    <script src="./js/modules/modal_kpi_detail.js?v=0.103.96"></script>
-    <script src="./js/modules/modal_param_history.js?v=0.103.96"></script>
-    <script src="./js/modules/charts_thermal.js?v=0.103.96"></script>
-    <script src="./js/app.js?v=0.103.96"></script>
+    <script src="./js/i18n.js?v=0.103.97"></script>
+    <script src="./js/modules/modal_decision.js?v=0.103.97"></script>
+    <script src="./js/modules/modal_kpi_detail.js?v=0.103.97"></script>
+    <script src="./js/modules/modal_param_history.js?v=0.103.97"></script>
+    <script src="./js/modules/charts_thermal.js?v=0.103.97"></script>
+    <script src="./js/app.js?v=0.103.97"></script>
 </body>
 </html>
