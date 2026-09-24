@@ -88,6 +88,8 @@ def test_heating_forecast_resolution_parity():
     assert len(d15['indoor_temps_c']) == 100
     for s in d15['forced_off_ranges']:
         assert 0 <= s['start_idx'] <= s['end_idx'] < 100
+    for a in d15.get('advised_off_ranges', []):
+        assert 0 <= a['start_idx'] <= a['end_idx'] < 100
     for h in d15['heating_ranges']:
         assert 0 <= h['start_idx'] <= h['end_idx'] < 100
 
@@ -100,6 +102,8 @@ def test_heating_forecast_resolution_parity():
     assert len(d1['indoor_temps_c']) == 25
     for s in d1['forced_off_ranges']:
         assert 0 <= s['start_idx'] <= s['end_idx'] < 25
+    for a in d1.get('advised_off_ranges', []):
+        assert 0 <= a['start_idx'] <= a['end_idx'] < 25
     for h in d1['heating_ranges']:
         assert 0 <= h['start_idx'] <= h['end_idx'] < 25
 

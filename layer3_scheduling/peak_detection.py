@@ -255,6 +255,50 @@ def extract_plan_spitsblok_ranges(slots: List[Any], history_count: int = 0, is_1
     return ranges
 
 
+def extract_plan_soft_advice_ranges(slots: List[Any], history_count: int = 0, is_15m: bool = True) -> List[Dict[str, Any]]:
+    """
+    Unified Single Source of Truth builder for chart soft advice (advised_off) overlays.
+    Extracts contiguous shoulder windows (mode_code == 'advised_off') directly from canonical plan slots.
+    """
+    ranges = []
+    in_block = False
+    start_idx = 0
+    n = len(slots) if is_15m else len(slots) // 4
+    for i in range(n):
+        if is_15m:
+            is_soft = (slots[i].mode_code == "advised_off") or getattr(slots[i], "is_advised_off", False)
+        else:
+            is_soft = any(
+                (slots[i * 4 + k].mode_code == "advised_off" or getattr(slots[i * 4 + k], "is_advised_off", False))
+                for k in range(4) if (i * 4 + k) < len(slots)
+            )
+        if is_soft and not in_block:
+            in_block = True
+            start_idx = i
+        elif not is_soft and in_block:
+            in_block = False
+            s_lbl = slots[start_idx * 4 if not is_15m else start_idx].time_label
+            e_lbl = slots[(i - 1) * 4 if not is_15m else (i - 1)].time_label
+            ranges.append({
+                "start_idx": history_count + start_idx,
+                "end_idx": history_count + i - 1,
+                "start_label": s_lbl,
+                "end_label": e_lbl,
+                "name": "P75_ADVIES"
+            })
+    if in_block:
+        s_lbl = slots[start_idx * 4 if not is_15m else start_idx].time_label
+        e_lbl = slots[-1].time_label
+        ranges.append({
+            "start_idx": history_count + start_idx,
+            "end_idx": history_count + n - 1,
+            "start_label": s_lbl,
+            "end_label": e_lbl,
+            "name": "P75_ADVIES"
+        })
+    return ranges
+
+
 def extract_plan_heating_ranges(slots: List[Any], history_count: int = 0, is_15m: bool = True, domain: str = "both") -> List[Dict[str, Any]]:
     """
     Unified Single Source of Truth builder for chart active heating overlays.

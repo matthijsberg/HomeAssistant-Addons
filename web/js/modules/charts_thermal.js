@@ -234,6 +234,7 @@
             },
             options: {
                 spitsblokRanges: opts.spitsblokRanges,
+                advisedOffRanges: opts.advisedOffRanges,
                 heatingRanges: opts.heatingRanges,
                 responsive: true,
                 maintainAspectRatio: false,
@@ -489,6 +490,7 @@
                 ySuggestedMax: Math.ceil(maxT + 0.5),
                 y1SuggestedMax: (resMode === '15m') ? 1.5 : 4.0,
                 spitsblokRanges: d.forced_off_ranges,
+                advisedOffRanges: d.advised_off_ranges,
                 heatingRanges: d.heating_ranges,
                 tooltipHandler: customHeatingTooltipHandler,
                 extraLine: {
@@ -626,6 +628,7 @@
                 ySuggestedMax: ySuggestedMax,
                 y1SuggestedMax: (resMode === '15m') ? 1.5 : 4.0,
                 spitsblokRanges: data.forced_off_ranges,
+                advisedOffRanges: data.advised_off_ranges,
                 heatingRanges: data.heating_ranges,
                 tooltipHandler: customDhwTooltipHandler
             });
@@ -672,6 +675,7 @@
                 yMax: 65,
                 y1SuggestedMax: 2.0,
                 spitsblokRanges: data.forced_off_ranges,
+                advisedOffRanges: data.advised_off_ranges,
                 heatingRanges: data.heating_ranges,
                 tooltipHandler: customDhwTooltipHandler
             });
@@ -724,6 +728,7 @@
                 ySuggestedMax: 25,
                 y1SuggestedMax: 2.0,
                 spitsblokRanges: data.forced_off_ranges,
+                advisedOffRanges: data.advised_off_ranges,
                 heatingRanges: data.heating_ranges,
                 tooltipHandler: customHeatingTooltipHandler
             });

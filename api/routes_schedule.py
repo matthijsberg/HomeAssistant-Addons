@@ -725,8 +725,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         all_advices = hist_advices + advices
         all_dhw_timeline = hist_dhw_timeline + dhw_mode_timeline
 
-        from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges
+        from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_soft_advice_ranges
         forced_off_ranges = extract_plan_spitsblok_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m)
+        advised_off_ranges = extract_plan_soft_advice_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m)
 
         handler._send_json({
             "hours": all_labels,
@@ -739,6 +740,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "dhw_mode_timeline": all_dhw_timeline,
             "dynamic_peaks": dynamic_peaks,
             "forced_off_ranges": forced_off_ranges,
+            "advised_off_ranges": advised_off_ranges,
             "dhw_planning_summary": dhw_planning_summary,
             "active_dhw_status": active_dhw_status,
             "history_count": len(hist_pts),

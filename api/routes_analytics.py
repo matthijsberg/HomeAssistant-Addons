@@ -54,14 +54,16 @@ def resolve_analytics_time_range(tf: str):
     return t_start, t_end
 
 
-def fetch_actual_forced_off_ranges_from_db(
+def fetch_actual_ranges_from_db(
     t_start_iso: str,
     t_end_iso: str,
     slot_dts: List[datetime],
+    state_code: str = "forced_off",
+    range_name: str = "SPITSBLOK",
     interval_h: float = 0.25
 ) -> List[Dict[str, Any]]:
     """
-    Retrieves ACTUAL historical spitsblokken (forced_off hardware lockouts) from InfluxDB hems_annotations.
+    Retrieves ACTUAL historical state ranges (forced_off or advised_off) from InfluxDB hems_annotations.
     Zero synthetic / ad-hoc retroactive recalculations over sliding display slices.
     """
     if not slot_dts:
@@ -73,7 +75,7 @@ def fetch_actual_forced_off_ranges_from_db(
             return []
         q = (
             f'SELECT time, state_code, title FROM "hems_annotations" '
-            f'WHERE state_code = \'forced_off\' AND time >= \'{t_start_iso}\' AND time <= \'{t_end_iso}\' '
+            f'WHERE state_code = \'{state_code}\' AND time >= \'{t_start_iso}\' AND time <= \'{t_end_iso}\' '
             f'ORDER BY time ASC'
         )
         url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
@@ -100,13 +102,31 @@ def fetch_actual_forced_off_ranges_from_db(
                 if i == cur_end + 1:
                     cur_end = i
                 else:
-                    ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": "SPITSBLOK"})
+                    ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": range_name})
                     cur_start = i
                     cur_end = i
-            ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": "SPITSBLOK"})
+            ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": range_name})
         return ranges
     except Exception:
         return []
+
+
+def fetch_actual_forced_off_ranges_from_db(
+    t_start_iso: str,
+    t_end_iso: str,
+    slot_dts: List[datetime],
+    interval_h: float = 0.25
+) -> List[Dict[str, Any]]:
+    return fetch_actual_ranges_from_db(t_start_iso, t_end_iso, slot_dts, state_code="forced_off", range_name="SPITSBLOK", interval_h=interval_h)
+
+
+def fetch_actual_advised_off_ranges_from_db(
+    t_start_iso: str,
+    t_end_iso: str,
+    slot_dts: List[datetime],
+    interval_h: float = 0.25
+) -> List[Dict[str, Any]]:
+    return fetch_actual_ranges_from_db(t_start_iso, t_end_iso, slot_dts, state_code="advised_off", range_name="P75_ADVIES", interval_h=interval_h)
 
 
 def fetch_actual_heating_ranges_from_db(
@@ -874,6 +894,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             t_end_iso = t_end_dt.strftime("%Y-%m-%dT%H:%M:00Z")
             slot_dts = [datetime.fromisoformat(ts_s.replace("Z", "+00:00")).astimezone(AMS_TZ) for ts_s in sorted_ts]
             forced_off_ranges = fetch_actual_forced_off_ranges_from_db(t_start_iso, t_end_iso, slot_dts, interval_h=interval_h)
+            advised_off_ranges = fetch_actual_advised_off_ranges_from_db(t_start_iso, t_end_iso, slot_dts, interval_h=interval_h)
 
             res = {
                 "status": "success",
@@ -887,6 +908,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "prices": series_prices,
                 "export_prices": series_export_prices,
                 "forced_off_ranges": forced_off_ranges,
+                "advised_off_ranges": advised_off_ranges,
                 "stats": stats,
                 "kpi_cards": kpi_cards
             }
@@ -1182,6 +1204,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             # Historical DHW telemetry: retrieve actual recorded hardware lockouts and runs from database
             slot_dts = [datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ) for ts_str in sorted_ts]
             forced_off_ranges = fetch_actual_forced_off_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
+            advised_off_ranges = fetch_actual_advised_off_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
             heating_ranges = fetch_actual_heating_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
             hist_dhw_windows = load_historical_dhw_planned_windows(t_start_dt, t_end_dt)
             planned_heating_ranges = fetch_planned_dhw_ranges_from_db(slot_dts, hist_dhw_windows, interval_h=interval_h)
@@ -1192,6 +1215,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "temperatures_c": temps,
                 "demand_kwh_th": demands_kwh_th,
                 "forced_off_ranges": forced_off_ranges,
+                "advised_off_ranges": advised_off_ranges,
                 "heating_ranges": heating_ranges,
                 "planned_heating_ranges": planned_heating_ranges,
                 "interval_h": interval_h
@@ -1307,6 +1331,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             # Historical space heating telemetry: retrieve actual recorded hardware lockouts from database
             slot_dts = [s_dt.astimezone(AMS_TZ) for s_dt in slots]
             forced_off_ranges = fetch_actual_forced_off_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
+            advised_off_ranges = fetch_actual_advised_off_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
             spits_indices = set()
             for r in forced_off_ranges:
                 for idx_s in range(r.get("start_idx", 0), min(len(slots), r.get("end_idx", 0) + 1)):
@@ -1349,6 +1374,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "demand_kwh_th": demand_kwh_th,
                 "heating_kwh_el": [cv_map.get(s_dt.strftime("%Y-%m-%dT%H:%M:00Z"), 0.0) for s_dt in slots],
                 "forced_off_ranges": forced_off_ranges,
+                "advised_off_ranges": advised_off_ranges,
                 "heating_ranges": heating_ranges,
                 "interval_h": interval_h
             })

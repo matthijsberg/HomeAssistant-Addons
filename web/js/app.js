@@ -189,20 +189,105 @@
                     return { left, width };
                 }
 
-                // 1. Spitsblok Ranges (Red)
+                // Crisp repeating 45-degree diagonal pattern generator (Optie B)
+                function getHatchPattern(strokeColor, bgColor, spacing = 8, lineWidth = 1.3) {
+                    const pCanvas = document.createElement('canvas');
+                    pCanvas.width = spacing;
+                    pCanvas.height = spacing;
+                    const pctx = pCanvas.getContext('2d');
+                    if (bgColor && bgColor !== 'transparent') {
+                        pctx.fillStyle = bgColor;
+                        pctx.fillRect(0, 0, spacing, spacing);
+                    }
+                    pctx.strokeStyle = strokeColor;
+                    pctx.lineWidth = lineWidth;
+                    pctx.beginPath();
+                    pctx.moveTo(0, spacing);
+                    pctx.lineTo(spacing, 0);
+                    pctx.stroke();
+                    pctx.beginPath();
+                    pctx.moveTo(-1, 1);
+                    pctx.lineTo(1, -1);
+                    pctx.moveTo(spacing - 1, spacing + 1);
+                    pctx.lineTo(spacing + 1, spacing - 1);
+                    pctx.stroke();
+                    return ctx.createPattern(pCanvas, 'repeat');
+                }
+
+                // 1. Zacht Advies / P75 Schouders (Slate Diagonal Hatching)
+                const advisedRanges = (chart.options && chart.options.advisedOffRanges) || (chart.data && chart.data.advisedOffRanges) || [];
+                advisedRanges.forEach(r => {
+                    const bounds = getRangeBounds(r);
+                    if (!bounds) return;
+
+                    // Slate 45° diagonal hatching
+                    const hatch = getHatchPattern('rgba(148, 163, 184, 0.22)', 'rgba(15, 23, 42, 0.20)', 8, 1.2);
+                    ctx.fillStyle = hatch;
+                    ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
+
+                    // 2px dashed top accent
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(148, 163, 184, 0.50)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([4, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(bounds.left, chartArea.top + 1);
+                    ctx.lineTo(bounds.left + bounds.width, chartArea.top + 1);
+                    ctx.stroke();
+                    ctx.restore();
+
+                    // Subtle top badge if width permits
+                    if (bounds.width >= 35) {
+                        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+                        ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+                        const bw = Math.min(54, bounds.width - 4);
+                        const bx = bounds.left + (bounds.width - bw) / 2;
+                        ctx.beginPath();
+                        ctx.roundRect(bx, chartArea.top + 4, bw, 13, 2);
+                        ctx.fill();
+                        ctx.stroke();
+
+                        ctx.fillStyle = '#CBD5E1';
+                        ctx.font = '700 7px ui-sans-serif, system-ui, sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('⚠️ P75', bx + (bw / 2), chartArea.top + 13.5);
+                    }
+                });
+
+                // 2. Harde Spitsblok Ranges (Red Diagonal Hatching + Solid Red Top Bar)
                 const spitsRanges = (chart.options && chart.options.spitsblokRanges) || (chart.data && chart.data.spitsblokRanges) || [];
                 spitsRanges.forEach(r => {
                     const bounds = getRangeBounds(r);
                     if (!bounds) return;
 
-                    // Subtle background tint (0.12) + solid 3px top accent
-                    ctx.fillStyle = 'rgba(239, 68, 68, 0.12)';
+                    // Red 45° diagonal hatching
+                    const hatch = getHatchPattern('rgba(239, 68, 68, 0.28)', 'rgba(239, 68, 68, 0.06)', 8, 1.4);
+                    ctx.fillStyle = hatch;
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
-                    ctx.fillStyle = OpenHEMSModeCatalog.getColor('forced_off');
+
+                    // Solid 3px red top accent bar
+                    ctx.fillStyle = '#EF4444';
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, 3);
+
+                    // Red top badge
+                    if (bounds.width >= 35) {
+                        ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
+                        ctx.strokeStyle = 'rgba(239, 68, 68, 0.50)';
+                        const bw = Math.min(60, bounds.width - 4);
+                        const bx = bounds.left + (bounds.width - bw) / 2;
+                        ctx.beginPath();
+                        ctx.roundRect(bx, chartArea.top + 4, bw, 13, 2);
+                        ctx.fill();
+                        ctx.stroke();
+
+                        ctx.fillStyle = '#F87171';
+                        ctx.font = '700 7px ui-sans-serif, system-ui, sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('🔒 SPITS', bx + (bw / 2), chartArea.top + 13.5);
+                    }
                 });
 
-                // 2. Active Heating Ranges (Yellow / Amber)
+                // 3. Active Heating Ranges (Yellow / Amber)
                 const heatRanges = (chart.options && chart.options.heatingRanges) || (chart.data && chart.data.heatingRanges) || [];
                 heatRanges.forEach(r => {
                     const bounds = getRangeBounds(r);
@@ -215,7 +300,7 @@
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, 3);
                 });
 
-                // 3. Planned Heating Ranges (Cyan / Light Blue: Planned Stookvensters)
+                // 4. Planned Heating Ranges (Cyan / Light Blue: Planned Stookvensters)
                 const plannedRanges = (chart.options && chart.options.plannedHeatingRanges) || (chart.data && chart.data.plannedHeatingRanges) || [];
                 plannedRanges.forEach(r => {
                     const bounds = getRangeBounds(r);
@@ -2309,6 +2394,7 @@
                     }
                 };
                 chartConfig.options.spitsblokRanges = data.forced_off_ranges;
+                chartConfig.options.advisedOffRanges = data.advised_off_ranges;
 
                 // Render on Analytics Tab
                 const canvasAnalytics = document.getElementById('hemsChartAnalytics');
@@ -2498,6 +2584,7 @@
                         }
                     };
                     costConfig.options.spitsblokRanges = data.forced_off_ranges;
+                    costConfig.options.advisedOffRanges = data.advised_off_ranges;
 
                     costForecastChartInstance = new Chart(canvasCost.getContext('2d'), costConfig);
                     window.costForecastChartInstance = costForecastChartInstance;
@@ -3661,6 +3748,7 @@
                     },
                     options: {
                         spitsblokRanges: data.forced_off_ranges,
+                        advisedOffRanges: data.advised_off_ranges,
                         responsive: true,
                         maintainAspectRatio: false,
                         interaction: {
@@ -4282,6 +4370,7 @@
                     },
                     options: {
                         spitsblokRanges: data.forced_off_ranges,
+                        advisedOffRanges: data.advised_off_ranges,
                         responsive: true,
                         maintainAspectRatio: false,
                         interaction: {
@@ -4561,6 +4650,7 @@
                         }
                     };
                     costHistConfig.options.spitsblokRanges = data.forced_off_ranges;
+                    costHistConfig.options.advisedOffRanges = data.advised_off_ranges;
 
                     costHistoryChartInstance = new Chart(canvasCostHist.getContext('2d'), costHistConfig);
                     window.costHistoryChartInstance = costHistoryChartInstance;

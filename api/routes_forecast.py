@@ -145,9 +145,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             t_status = "Stookseizoen Actief (Centrale PlanStore)"
 
         # Extract lockout and heating ranges for visual overlay (offset by history_count)
-        from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
+        from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_heating_ranges, extract_plan_soft_advice_ranges
         future_slots_for_overlay = plan.slots[:n_sim] if (plan and plan.slots) else []
         forced_off_ranges = extract_plan_spitsblok_ranges(future_slots_for_overlay, history_count=len(hist_pts), is_15m=is_15m)
+        advised_off_ranges = extract_plan_soft_advice_ranges(future_slots_for_overlay, history_count=len(hist_pts), is_15m=is_15m)
         heating_ranges = extract_plan_heating_ranges(future_slots_for_overlay, history_count=len(hist_pts), is_15m=is_15m, domain="space_heating")
 
         # Build dynamic, human-readable decision explanation for space heating
@@ -195,6 +196,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "costs_eur": hist_costs + costs_eur,
             "history_count": len(hist_pts),
             "forced_off_ranges": forced_off_ranges,
+            "advised_off_ranges": advised_off_ranges,
             "heating_ranges": heating_ranges,
             "total_thermal_kwh": tot_th,
             "total_electrical_kwh": tot_el,
@@ -459,9 +461,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 unheated_traj["temperatures_p05_c"] = hist_temps + unheated_traj.get("temperatures_p05_c", [])
                 unheated_traj["temperatures_p95_c"] = hist_temps + unheated_traj.get("temperatures_p95_c", [])
 
-            from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_heating_ranges
+            from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_heating_ranges, extract_plan_soft_advice_ranges
             dhw_plan_slots = plan.slots[:int(hours_sim*4)] if (plan and plan.slots) else []
             forced_off_ranges = extract_plan_spitsblok_ranges(dhw_plan_slots, history_count=len(hist_pts), is_15m=is_15m)
+            advised_off_ranges = extract_plan_soft_advice_ranges(dhw_plan_slots, history_count=len(hist_pts), is_15m=is_15m)
             heating_ranges = extract_plan_heating_ranges(dhw_plan_slots, history_count=len(hist_pts), is_15m=is_15m, domain="dhw")
 
             handler._send_json({
@@ -472,6 +475,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "trajectory": traj,
                 "unheated_trajectory": unheated_traj,
                 "forced_off_ranges": forced_off_ranges,
+                "advised_off_ranges": advised_off_ranges,
                 "heating_ranges": heating_ranges,
                 "history_count": len(hist_pts)
             })

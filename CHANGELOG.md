@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.88] — 2026-09-24 (Visual Hatching Pattern for Dynamic Peaks & P75 Soft Shoulders)
+
+### UI & Grafische Rust
+- **Optie B Diagonaal Streepjespatroon (Hatching)**: Zowel de harde spitsblokkades als het zachte P75-advies worden nu gerenderd met een 45° diagonaal streepjespatroon in Chart.js via een dynamische canvas pattern generator:
+  - **Harde Spitsblokkades (SG1 / Lockout)**: Rood 45° streepjespatroon (`rgba(239, 68, 68, 0.28)`), 3px massieve rode top-accentbalk en een `🔒 SPITS` badge.
+  - **Zacht P75 Advies (Schouders)**: Neutraal leisteen/slate 45° streepjespatroon (`rgba(148, 163, 184, 0.22)`), 2px gestippelde leisteen top-lijn (`dashed`) en een `⚠️ P75` badge.
+  - **100% Leesbaarheid**: Geen oranje/geel overlap meer met de zonnestroom- en warmtepompstaven; alle onderliggende data blijft haarscherp zichtbaar.
+- **End-to-End Contracten & Historie**:
+  - `layer3_scheduling/peak_detection.py` introduceert `extract_plan_soft_advice_ranges()` voor consistente export naar API endpoints (`routes_schedule`, `routes_forecast`, `routes_analytics`).
+  - Historische telemetrie en analyses tonen terugkijkend exact wanneer zacht advies van toepassing was.
+
 ## [0.103.87] — 2026-09-24 (Financial Peak Dispatch with Strict Hard Lockout Cap & Soft Modulated Shoulders)
 
 ### Dispatch & Comfort Safeguards
