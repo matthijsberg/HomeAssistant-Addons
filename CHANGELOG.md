@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.91] — 2026-09-24 (Clean Chart Canvas: Badges & Emojis Removed from Price Overlays)
+
+### UI & Visuele Rust
+- **Verwijderen van Badges en Emojis uit Grafieken**: De badges met `🔒 SPITS` en `⚠️ ADVIES` zijn verwijderd uit `OpenHEMSSpitsblokPlugin`.
+- **Rustige, Minimale Overlay**: De spits- en adviesvensters worden nu puur weergegeven door:
+  - De fijne diagonale arcering (amber voor zacht advies, rood voor harde spits).
+  - De strakke top-accentlijn (1.5px dashed amber voor advies, 3px massief rood voor spits).
+  - Het canvas is hierdoor volledig strak en ontdaan van storende badges of overlappende teksten.
+
 ## [0.103.90] — 2026-09-24 (P75 Soft Advice in Electricity Prices Chart & Muted Amber Contrast)
 
 ### UI & Contrast Afstemming

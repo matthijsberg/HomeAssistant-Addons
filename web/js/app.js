@@ -236,23 +236,6 @@
                     ctx.lineTo(bounds.left + bounds.width, chartArea.top + 1);
                     ctx.stroke();
                     ctx.restore();
-
-                    // Subtle muted amber top badge if width permits
-                    if (bounds.width >= 35) {
-                        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-                        ctx.strokeStyle = 'rgba(217, 119, 6, 0.45)';
-                        const bw = Math.min(56, bounds.width - 4);
-                        const bx = bounds.left + (bounds.width - bw) / 2;
-                        ctx.beginPath();
-                        ctx.roundRect(bx, chartArea.top + 4, bw, 13, 2);
-                        ctx.fill();
-                        ctx.stroke();
-
-                        ctx.fillStyle = '#F59E0B';
-                        ctx.font = '700 7px ui-sans-serif, system-ui, sans-serif';
-                        ctx.textAlign = 'center';
-                        ctx.fillText('⚠️ ADVIES', bx + (bw / 2), chartArea.top + 13.5);
-                    }
                 });
 
                 // 2. Harde Spitsblok Ranges (Red Diagonal Hatching + Solid Red Top Bar)
@@ -269,23 +252,6 @@
                     // Solid 3px red top accent bar
                     ctx.fillStyle = '#EF4444';
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, 3);
-
-                    // Red top badge
-                    if (bounds.width >= 35) {
-                        ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
-                        ctx.strokeStyle = 'rgba(239, 68, 68, 0.60)';
-                        const bw = Math.min(60, bounds.width - 4);
-                        const bx = bounds.left + (bounds.width - bw) / 2;
-                        ctx.beginPath();
-                        ctx.roundRect(bx, chartArea.top + 4, bw, 13, 2);
-                        ctx.fill();
-                        ctx.stroke();
-
-                        ctx.fillStyle = '#F87171';
-                        ctx.font = '700 7px ui-sans-serif, system-ui, sans-serif';
-                        ctx.textAlign = 'center';
-                        ctx.fillText('🔒 SPITS', bx + (bw / 2), chartArea.top + 13.5);
-                    }
                 });
 
                 // 3. Active Heating Ranges (Yellow / Amber)
