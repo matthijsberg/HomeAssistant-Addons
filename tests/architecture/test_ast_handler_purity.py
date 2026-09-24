@@ -15,6 +15,8 @@ def _get_combined_backend_source():
     files = [
         repo_root / "daemon.py",
         repo_root / "api" / "routes_model.py",
+        repo_root / "api" / "routes_forecast.py",
+        repo_root / "api" / "routes_calibration.py",
         repo_root / "api" / "routes_system.py",
         repo_root / "api" / "routes_schedule.py",
         repo_root / "api" / "routes_analytics.py",

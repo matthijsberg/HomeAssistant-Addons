@@ -10,6 +10,14 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.86] — 2026-09-24 (Router Decompositie & Scoped Domain Routing)
+
+### Architectuur & Token Reductie
+- **Router Decompositie (`api/routes_forecast.py` & `api/routes_calibration.py`)**: `api/routes_model.py` (voorheen 780 regels) opgesplitst in twee gerichte, modulaire domeinrouters conform *Clean Architecture*:
+  - `api/routes_forecast.py` (~460 regels): Zuiver verantwoordelijk voor operationele prognoses (`/api/model/heating-forecast`, `/api/model/dhw-status`).
+  - `api/routes_calibration.py` (~290 regels): Zuiver verantwoordelijk voor parameterbeheer, OLS regressies en drift (`/api/model/recommendations`, `/api/model/parameter-history`, `/api/model/retrain`, etc.).
+- **Lean Facade (`api/routes_model.py`)**: Gereduceerd tot een compacte facade van 25 regels met 100% backward compatibility voor alle bestaande tests en aanroepers.
+
 ## [0.103.85] — 2026-09-24 (DTO Data Structures, Presenter Pattern & Web Hot-Reload)
 
 ### Architectuur & Token Reductie
