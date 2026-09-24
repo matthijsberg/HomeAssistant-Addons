@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.90] — 2026-09-24 (P75 Soft Advice in Electricity Prices Chart & Muted Amber Contrast)
+
+### UI & Contrast Afstemming
+- **Zacht P75 Advies in Stroom & Zon Grafiek**: In `api/routes_analytics.py` (`electricity_prices`) wordt nu uniform `extract_plan_soft_advice_ranges()` aangeroepen op de zichtbare horizon (`display_slots`), waardoor ook in deze grafiek de ochtendpiek (07:15–09:15) en avondschouders zichtbaar zijn als zacht advies.
+- **Getemperd Geel/Amber t.o.v. Rood**: De intensiteit van de gele/amber arcering in `OpenHEMSSpitsblokPlugin` is verfijnd:
+  - Amber stroke omlaag van `0.40` naar `rgba(217, 119, 6, 0.20)` met dunnere 1.1px strepen en `0.03` achtergrond.
+  - Rood (Harde Spits) versterkt naar `rgba(239, 68, 68, 0.35)` met 3px massieve rode top-balk en duidelijke `🔒 SPITS` badge.
+  - Dit herstelt de natuurlijke visuele hiërarchie: **Rood = harde stop (dominant)**, **Amber = zacht advies (ondergeschikt en rustig)**.
+
 ## [0.103.89] — 2026-09-24 (Amber Hatching for Advised Off & Chart Horizon Clamping Fix)
 
 ### UI & Modusplanning

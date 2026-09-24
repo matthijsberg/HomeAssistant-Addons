@@ -215,21 +215,21 @@
                     return ctx.createPattern(pCanvas, 'repeat');
                 }
 
-                // 1. Zacht Advies / P75 Schouders (Amber / Geel Diagonal Hatching)
+                // 1. Zacht Advies / P75 Schouders (Subtiel Amber / Muted Warm Yellow Diagonal Hatching)
                 const advisedRanges = (chart.options && chart.options.advisedOffRanges) || (chart.data && chart.data.advisedOffRanges) || [];
                 advisedRanges.forEach(r => {
                     const bounds = getRangeBounds(r);
                     if (!bounds) return;
 
-                    // Amber / Warm Yellow 45° diagonal hatching matching modus planning
-                    const hatch = getHatchPattern('rgba(245, 158, 11, 0.40)', 'rgba(245, 158, 11, 0.08)', 8, 1.4);
+                    // Muted, fine amber hatching (subordinate to red)
+                    const hatch = getHatchPattern('rgba(217, 119, 6, 0.20)', 'rgba(245, 158, 11, 0.03)', 9, 1.1);
                     ctx.fillStyle = hatch;
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
 
-                    // 2px dashed amber top accent
+                    // 1.5px dashed amber top accent
                     ctx.save();
-                    ctx.strokeStyle = 'rgba(245, 158, 11, 0.85)';
-                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = 'rgba(217, 119, 6, 0.55)';
+                    ctx.lineWidth = 1.5;
                     ctx.setLineDash([4, 3]);
                     ctx.beginPath();
                     ctx.moveTo(bounds.left, chartArea.top + 1);
@@ -237,10 +237,10 @@
                     ctx.stroke();
                     ctx.restore();
 
-                    // Subtle top badge if width permits
+                    // Subtle muted amber top badge if width permits
                     if (bounds.width >= 35) {
-                        ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
-                        ctx.strokeStyle = 'rgba(245, 158, 11, 0.65)';
+                        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+                        ctx.strokeStyle = 'rgba(217, 119, 6, 0.45)';
                         const bw = Math.min(56, bounds.width - 4);
                         const bx = bounds.left + (bounds.width - bw) / 2;
                         ctx.beginPath();
@@ -248,7 +248,7 @@
                         ctx.fill();
                         ctx.stroke();
 
-                        ctx.fillStyle = '#FBBF24';
+                        ctx.fillStyle = '#F59E0B';
                         ctx.font = '700 7px ui-sans-serif, system-ui, sans-serif';
                         ctx.textAlign = 'center';
                         ctx.fillText('⚠️ ADVIES', bx + (bw / 2), chartArea.top + 13.5);
@@ -261,8 +261,8 @@
                     const bounds = getRangeBounds(r);
                     if (!bounds) return;
 
-                    // Red 45° diagonal hatching
-                    const hatch = getHatchPattern('rgba(239, 68, 68, 0.28)', 'rgba(239, 68, 68, 0.06)', 8, 1.4);
+                    // Clear bold red hatching
+                    const hatch = getHatchPattern('rgba(239, 68, 68, 0.35)', 'rgba(239, 68, 68, 0.08)', 8, 1.4);
                     ctx.fillStyle = hatch;
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
 
@@ -273,7 +273,7 @@
                     // Red top badge
                     if (bounds.width >= 35) {
                         ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
-                        ctx.strokeStyle = 'rgba(239, 68, 68, 0.50)';
+                        ctx.strokeStyle = 'rgba(239, 68, 68, 0.60)';
                         const bw = Math.min(60, bounds.width - 4);
                         const bx = bounds.left + (bounds.width - bw) / 2;
                         ctx.beginPath();

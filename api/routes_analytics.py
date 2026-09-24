@@ -510,8 +510,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             avg_export = (sum(full_export_prices) / len(full_export_prices)) if full_export_prices else 0.0
 
             hist_offset = len(hist_pts)
-            from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges
-            forced_off_ranges = extract_plan_spitsblok_ranges(plan.slots, history_count=hist_offset, is_15m=is_15m) if plan else []
+            from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_soft_advice_ranges
+            display_slots = plan.slots[:(total_slots if is_15m else total_slots * 4)] if (plan and plan.slots) else []
+            forced_off_ranges = extract_plan_spitsblok_ranges(display_slots, history_count=hist_offset, is_15m=is_15m) if plan else []
+            advised_off_ranges = extract_plan_soft_advice_ranges(display_slots, history_count=hist_offset, is_15m=is_15m) if plan else []
 
             res = {
                 "status": "success",
@@ -525,6 +527,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "solar_cost": solar_cost,
                 "history_count": len(hist_pts),
                 "forced_off_ranges": forced_off_ranges,
+                "advised_off_ranges": advised_off_ranges,
                 "stats": {
                     "min_price": f"€{min_p:.4f}/kWh",
                     "min_time": min_time,
