@@ -10,6 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.85] — 2026-09-24 (DTO Data Structures, Presenter Pattern & Web Hot-Reload)
+
+### Architectuur & Token Reductie
+- **Getypeerde API DTO's (`models/api_dto.py`)**: Immutable dataclasses (`KpiCardItem`, `KpiBreakdownItem`, `DecisionExplanationDTO`) voor API contracts en frontend presentatie.
+- **Presenter Pattern (`layer5_analytics/kpi_presenter.py`)**: Berekening en formattering van 24u KPI-kaarten, specificaties en besparingen geëxtraheerd uit `api/routes_schedule.py` (~110 regels minder overhead).
+- **Zero-Rebuild Web Hot-Reload (`api/context.py` & `daemon.py`)**: Dynamische resolutie van de actieve webdirectory via `/config/addons/open-hems/web` en `/share/addons/open-hems/web`. Wijzigingen aan HTML, CSS of JS zijn direct live zonder container rebuild.
+
 ## [0.103.84] — 2026-09-24 (Fase 2 Thermische Grafiekmodule & Context-Optimalisatie)
 
 ### Architectuur & Token Reductie

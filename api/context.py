@@ -65,7 +65,21 @@ from api.energy_feed import (
     fetch_recent_telemetry_history, get_epex_tariffs_cached
 )
 from layer3_scheduling.plan_decision_evaluator import evaluate_and_log_planner_decisions
-WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+def get_web_dir() -> Path:
+    """Dynamically resolves the active web directory for instant hot-reloading during development."""
+    # 1. Direct host config mount (instant hot-reload if mapped)
+    live_config_web = Path("/config/addons/open-hems/web")
+    if (live_config_web / "index.html").exists():
+        return live_config_web
+    # 2. Shared storage mount
+    live_share_web = Path("/share/addons/open-hems/web")
+    if (live_share_web / "index.html").exists():
+        return live_share_web
+    # 3. Built-in container web dir fallback
+    return Path(__file__).resolve().parent.parent / "web"
+
+WEB_DIR = get_web_dir()
 INDEX_HTML_PATH = WEB_DIR / "index.html"
 
 

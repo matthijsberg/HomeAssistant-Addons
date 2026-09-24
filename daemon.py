@@ -36,7 +36,7 @@ from site_adapters.daikin_p1p2 import DaikinP1P2StateClassifier
 from layer3_scheduling.decision_audit import DecisionAuditLogger
 from api.context import (
     GLOBAL_COLLECTOR, GLOBAL_DHW_MODEL, GLOBAL_MODEL,
-    ensure_active_canonical_plan, INDEX_HTML_PATH, WEB_DIR
+    ensure_active_canonical_plan, INDEX_HTML_PATH, WEB_DIR, get_web_dir
 )
 from api.secrets_store import (
     CONFIG_FILE, PARAMS_FILE, SECRETS_FILE,
@@ -144,8 +144,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 clean_rel = clean_rel[4:]
             elif clean_rel.startswith("static/"):
                 clean_rel = clean_rel[7:]
-            file_path = (WEB_DIR / clean_rel).resolve()
-            if file_path.is_relative_to(WEB_DIR.resolve()) and file_path.is_file():
+            w_dir = get_web_dir()
+            file_path = (w_dir / clean_rel).resolve()
+            if file_path.is_relative_to(w_dir.resolve()) and file_path.is_file():
                 self._serve_static_file(file_path)
                 return
 
@@ -194,8 +195,9 @@ class HemsApiHandler(BaseHTTPRequestHandler):
     # =========================================================================
     def _serve_spa(self):
         try:
-            if INDEX_HTML_PATH.exists():
-                with open(INDEX_HTML_PATH, "rb") as f:
+            active_index = get_web_dir() / "index.html"
+            if active_index.exists():
+                with open(active_index, "rb") as f:
                     content = f.read()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -204,7 +206,7 @@ class HemsApiHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(content)
             else:
-                self._send_json({"error": f"web/index.html not found at {INDEX_HTML_PATH}"}, 404)
+                self._send_json({"error": f"web/index.html not found at {active_index}"}, 404)
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
 
