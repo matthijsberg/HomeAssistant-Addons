@@ -6,7 +6,7 @@
             _catalog: null,
             _modes: {
                 forced_off: { code: 'forced_off', label: 'Geforceerd uit (blok)', color_hex: '#EF4444', css_pattern: 'repeating-linear-gradient(45deg, #EF4444, #EF4444 2px, #B91C1C 2px, #B91C1C 4px)', tailwind_text: 'text-red-400', badge_label: 'Harde Spitsblokkade 🔒' },
-                advised_off: { code: 'advised_off', label: 'Geadviseerd uit', color_hex: '#F59E0B', css_pattern: 'none', tailwind_text: 'text-amber-400', badge_label: 'Verhoogd Tarief ⚠️' },
+                advised_off: { code: 'advised_off', label: 'Geadviseerd uit', color_hex: '#F59E0B', css_pattern: 'repeating-linear-gradient(45deg, #F59E0B, #F59E0B 2px, #B45309 2px, #B45309 4px)', tailwind_text: 'text-amber-400', badge_label: 'Verhoogd Tarief ⚠️' },
                 normal: { code: 'normal', label: 'Normaal', color_hex: '#1E293B', css_pattern: 'none', tailwind_text: 'text-slate-400', badge_label: 'Vrijloop 🔓' },
                 advised_on: { code: 'advised_on', label: 'Geadviseerd aan', color_hex: '#4ADE80', css_pattern: 'repeating-linear-gradient(45deg, #10B981, #10B981 2px, #86EFAC 2px, #86EFAC 4px)', tailwind_text: 'text-emerald-300', badge_label: 'Doorverwarmen ♨️' },
                 forced_on: { code: 'forced_on', label: 'Geforceerd aan', color_hex: '#10B981', css_pattern: 'none', tailwind_text: 'text-emerald-400', badge_label: 'Actieve Run ⚡' },
@@ -176,6 +176,7 @@
                 // Helper to validate and calculate pixel bounds strictly from integer indices
                 function getRangeBounds(r) {
                     if (typeof r.start_idx !== 'number' || typeof r.end_idx !== 'number') return null;
+                    if (r.start_idx >= totalSlots || r.end_idx < 0) return null;
                     const sIdx = Math.max(0, Math.min(r.start_idx, totalSlots - 1));
                     const eIdx = Math.max(0, Math.min(r.end_idx, totalSlots - 1));
                     if (sIdx > eIdx) return null;
@@ -214,20 +215,20 @@
                     return ctx.createPattern(pCanvas, 'repeat');
                 }
 
-                // 1. Zacht Advies / P75 Schouders (Slate Diagonal Hatching)
+                // 1. Zacht Advies / P75 Schouders (Amber / Geel Diagonal Hatching)
                 const advisedRanges = (chart.options && chart.options.advisedOffRanges) || (chart.data && chart.data.advisedOffRanges) || [];
                 advisedRanges.forEach(r => {
                     const bounds = getRangeBounds(r);
                     if (!bounds) return;
 
-                    // Slate 45° diagonal hatching
-                    const hatch = getHatchPattern('rgba(148, 163, 184, 0.22)', 'rgba(15, 23, 42, 0.20)', 8, 1.2);
+                    // Amber / Warm Yellow 45° diagonal hatching matching modus planning
+                    const hatch = getHatchPattern('rgba(245, 158, 11, 0.40)', 'rgba(245, 158, 11, 0.08)', 8, 1.4);
                     ctx.fillStyle = hatch;
                     ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
 
-                    // 2px dashed top accent
+                    // 2px dashed amber top accent
                     ctx.save();
-                    ctx.strokeStyle = 'rgba(148, 163, 184, 0.50)';
+                    ctx.strokeStyle = 'rgba(245, 158, 11, 0.85)';
                     ctx.lineWidth = 2;
                     ctx.setLineDash([4, 3]);
                     ctx.beginPath();
@@ -238,19 +239,19 @@
 
                     // Subtle top badge if width permits
                     if (bounds.width >= 35) {
-                        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-                        ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
-                        const bw = Math.min(54, bounds.width - 4);
+                        ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
+                        ctx.strokeStyle = 'rgba(245, 158, 11, 0.65)';
+                        const bw = Math.min(56, bounds.width - 4);
                         const bx = bounds.left + (bounds.width - bw) / 2;
                         ctx.beginPath();
                         ctx.roundRect(bx, chartArea.top + 4, bw, 13, 2);
                         ctx.fill();
                         ctx.stroke();
 
-                        ctx.fillStyle = '#CBD5E1';
+                        ctx.fillStyle = '#FBBF24';
                         ctx.font = '700 7px ui-sans-serif, system-ui, sans-serif';
                         ctx.textAlign = 'center';
-                        ctx.fillText('⚠️ P75', bx + (bw / 2), chartArea.top + 13.5);
+                        ctx.fillText('⚠️ ADVIES', bx + (bw / 2), chartArea.top + 13.5);
                     }
                 });
 

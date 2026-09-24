@@ -10,6 +10,12 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.89] — 2026-09-24 (Amber Hatching for Advised Off & Chart Horizon Clamping Fix)
+
+### UI & Modusplanning
+- **Amber Diagonale Arcering voor Geadviseerd Uit**: Het zachte advies (`advised_off` / P75) wordt nu zowel in de grafieken als in de 24-uurs modusplanning getoond als een warme amber/gele 45° diagonale arcering (`repeating-linear-gradient` met `#F59E0B` en `#B45309`).
+- **Fix Clamping Bug Horizon (Rechterrand Grafiek)**: Opgelost dat spitsblokkades van dag 2 (buiten de 24-uurs horizon, index >= 25) werden samengeknepen op de allerlaatste staaf van de grafiek. Zowel `getRangeBounds` in de frontend als `routes_schedule.py` in de backend filteren nu strikt op het actieve weergavevenster.
+
 ## [0.103.88] — 2026-09-24 (Visual Hatching Pattern for Dynamic Peaks & P75 Soft Shoulders)
 
 ### UI & Grafische Rust

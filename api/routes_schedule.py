@@ -726,8 +726,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         all_dhw_timeline = hist_dhw_timeline + dhw_mode_timeline
 
         from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_soft_advice_ranges
-        forced_off_ranges = extract_plan_spitsblok_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m)
-        advised_off_ranges = extract_plan_soft_advice_ranges(plan.slots, history_count=len(hist_pts), is_15m=is_15m)
+        n_future = len(advices)
+        display_slots = plan.slots[:(n_future if is_15m else n_future * 4)] if (plan and plan.slots) else []
+        forced_off_ranges = extract_plan_spitsblok_ranges(display_slots, history_count=len(hist_pts), is_15m=is_15m)
+        advised_off_ranges = extract_plan_soft_advice_ranges(display_slots, history_count=len(hist_pts), is_15m=is_15m)
 
         handler._send_json({
             "hours": all_labels,
