@@ -5527,6 +5527,23 @@
                         order: 0
                     }
                 });
+
+                // Update Heating Decision Explanation Box
+                const expl = d.decision_explanation;
+                if (expl) {
+                    const textEl = document.getElementById('heating-eval-comfort-text');
+                    if (textEl && expl.comfort_text) textEl.textContent = expl.comfort_text;
+                    const runsEl = document.getElementById('heating-box-runs-val');
+                    if (runsEl && expl.planned_runs_text) runsEl.textContent = expl.planned_runs_text;
+                    const bufEl = document.getElementById('heating-box-buffer-val');
+                    if (bufEl && expl.buffer_text) bufEl.textContent = expl.buffer_text;
+                    const lockEl = document.getElementById('heating-box-lockout-val');
+                    if (lockEl && expl.lockout_text) lockEl.textContent = expl.lockout_text;
+                    const pillEl = document.getElementById('heating-box-status-pill');
+                    if (pillEl && expl.status_badge) {
+                        pillEl.innerHTML = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-emerald-950 text-emerald-300 border border-emerald-800/40">${expl.status_badge}</span>`;
+                    }
+                }
             } catch (e) {
                 console.warn("Error rendering heating forecast chart:", e);
             }

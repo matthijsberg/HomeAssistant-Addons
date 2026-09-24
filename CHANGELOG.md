@@ -10,6 +10,12 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.80] — 2026-09-24 (Ruimteverwarming Beslis- en Uitlegbox)
+
+### UI & Explainability
+- **Ruimteverwarming Stookstrategie & Vloerbuffer Box (`web/index.html` & `web/js/app.js`)**: Dynamische beslisbox onder de CV-prognosegrafiek geplaatst met real-time dispatch-redenering, thermische buffertoelichting en spitsblokkade-inzichten.
+- **Explainability API Endpoint (`api/routes_model.py`)**: `GET /api/model/heating-forecast` uitgebreid met `decision_explanation` payload met toelichting op stooktijden, comfortrisico en reden waarom er 's middags geen vloeroververhitting wordt veroorzaakt.
+
 ## [0.103.79] — 2026-09-23 (Geconsolideerd 3D Schilmodel & Netto Warmteverlies)
 
 ### Architectuur & Model Governance

@@ -143,7 +143,7 @@
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.103.79</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.103.80</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -657,6 +657,37 @@
                         <!-- Canvas for Heating Forecast -->
                         <div class="relative w-full h-64 sm:h-72">
                             <canvas id="chart-heating-forecast"></canvas>
+                        </div>
+
+                        <!-- Stookstrategie & Besluitvorming Box -->
+                        <div class="bg-[#0B0F17]/90 border border-slate-800 rounded-xl p-3.5 space-y-2 font-sans text-xs text-slate-300 mt-3" id="heating-decision-box">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm">♨️</span>
+                                    <span class="font-bold text-white tracking-wide">Ruimteverwarming: Stookstrategie &amp; Vloerbuffer Redenering</span>
+                                </div>
+                                <div id="heating-box-status-pill">
+                                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-emerald-950 text-emerald-300 border border-emerald-800/40">Stookseizoen Actief</span>
+                                </div>
+                            </div>
+                            
+                            <div class="pt-1 text-[11px] leading-relaxed">
+                                <div class="space-y-2 bg-slate-900/50 p-3 rounded-lg border border-slate-800/70">
+                                    <div class="font-semibold text-amber-300 flex items-center justify-between">
+                                        <div class="flex items-center gap-1.5">
+                                            <span>💡</span> <span>Dispatch-Redenering &amp; Vloerbuffer Traject</span>
+                                        </div>
+                                    </div>
+                                    <p id="heating-eval-comfort-text" class="text-slate-200 leading-relaxed">
+                                        Laden van stookbesluit...
+                                    </p>
+                                    <div class="text-[10px] text-slate-400 font-mono space-y-1 pt-1.5 border-t border-slate-800/50">
+                                        <div>• Geplande Stookmomenten: <span class="text-amber-300 font-bold" id="heating-box-runs-val">--</span></div>
+                                        <div>• Thermische Bufferdynamiek: <span class="text-slate-300" id="heating-box-buffer-val">--</span></div>
+                                        <div>• Spitsblokkades: <span class="text-slate-300 font-bold" id="heating-box-lockout-val">--</span></div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -3215,7 +3246,7 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
     </div>
 
     <!-- CLIENT CONTROLLER & CHART.JS ENGINE -->
-    <script src="./js/i18n.js?v=0.103.79"></script>
-    <script src="./js/app.js?v=0.103.79"></script>
+    <script src="./js/i18n.js?v=0.103.80"></script>
+    <script src="./js/app.js?v=0.103.80"></script>
 </body>
 </html>

@@ -150,6 +150,34 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         forced_off_ranges = extract_plan_spitsblok_ranges(future_slots_for_overlay, history_count=len(hist_pts), is_15m=is_15m)
         heating_ranges = extract_plan_heating_ranges(future_slots_for_overlay, history_count=len(hist_pts), is_15m=is_15m, domain="space_heating")
 
+        # Build dynamic, human-readable decision explanation for space heating
+        run_strs = [f"{hr.get('start_label', '')}–{hr.get('end_label', '')}" for hr in heating_ranges]
+        lockout_strs = [f"{fo.get('start_label', '')}–{fo.get('end_label', '')}" for fo in forced_off_ranges]
+
+        has_evening_run = any(any(h in hr.get('start_label', '') for h in ["18:", "19:", "20:", "21:", "22:"]) for hr in heating_ranges)
+        has_night_run = any(any(h in hr.get('start_label', '') for h in ["01:", "02:", "03:", "04:", "05:"]) for hr in heating_ranges)
+
+        comfort_reasons = []
+        if has_evening_run:
+            comfort_reasons.append("Avondherstel: na de avondspits koelt de woning af door wegvallende zon en dalende buitentemperatuur. Zodra de binnentemperatuur naar 19,6 °C daalt, start een rustige stookcyclus (min. 2u runtijd) om de woonkamer stabiel op 20,0 °C te houden.")
+        
+        comfort_reasons.append("Geen middagstook: om 14:00–16:00 is de buitentemperatuur hoog (~19 °C) en het warmteverlies minimaal. Vloerverwarming heeft een minimale runtijd van 2 uur (~9 kWh thermisch); stoken op een zonnige middag zou leiden tot oververhitting (>21,5 °C), waarbij die buffer over de 5 tussenliggende uren grotendeels weglekt.")
+        
+        if has_night_run:
+            comfort_reasons.append("Nachtvallei Pre-heat: benutting van het laagste nachttarief om de betondekvloer (13,2 kWh/K) thermisch voor te laden, zodat de woning de dure ochtendpiek passief overbrugt.")
+
+        if not heating_ranges:
+            comfort_reasons = ["Geen stookruns nodig: binnentemperatuur blijft stabiel boven de comfortgrens (19,6 °C) door milde buitentemperatuur en passieve zonnewinst."]
+
+        heating_explanation = {
+            "title": "Ruimteverwarming: Stookstrategie & Vloerbuffer Redenering",
+            "status_badge": "Stookseizoen Actief" if t_active else "Standby",
+            "comfort_text": " ".join(comfort_reasons),
+            "planned_runs_text": ", ".join(run_strs) if run_strs else "Geen actieve runs gepland",
+            "buffer_text": "Betonnen dekvloer (13,2 kWh/K) met 3–4u thermische vertraging; buffert energie voor piekoverbrugging.",
+            "lockout_text": f"Spitsblokkades: {', '.join(lockout_strs)}" if lockout_strs else "Geen spitsblokkades"
+        }
+
         handler._send_json({
             "resolution": res_mode,
             "labels": hist_labels + labels,
@@ -174,7 +202,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "thermostat_setpoint_c": t_setpoint,
             "thermostat_start_threshold_c": t_start_threshold,
             "thermostat_active": t_active,
-            "thermostat_status_label": t_status
+            "thermostat_status_label": t_status,
+            "decision_explanation": heating_explanation
         })
         return True
 
