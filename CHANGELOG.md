@@ -10,6 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.84] — 2026-09-24 (Fase 2 Thermische Grafiekmodule & Context-Optimalisatie)
+
+### Architectuur & Token Reductie
+- **Extractie Thermische Trajecten (`web/js/modules/charts_thermal.js`)**: Volledige Chart.js rendering voor tapwater (DHW 350L) en ruimteverwarming (CV 2R1C) afgesplitst naar een zelfstandige, diepe module (~550 regels).
+- **Herbruikbare Chart Engine**: `createThermalTrajectoryChart`, tooltips (`customDhwTooltipHandler`, `customHeatingTooltipHandler`), en live renderers (`renderHeatingForecastChart`, `renderDhwTemperatureChart`, `loadDhwHistoryChart`, `loadHeatingHistoryChart`) gecentraliseerd.
+- **Drastische Slanking Hoofdcontroller**: `web/js/app.js` is gereduceerd van 6.800 regels naar 5.656 regels (meer dan 1.100 regels minder overhead voor AI interacties).
+
 ## [0.103.83] — 2026-09-24 (Fase 1 Modulaire UI Decompositie & Token Optimalisatie)
 
 ### Architectuur & Token Reductie
