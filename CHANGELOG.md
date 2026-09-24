@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.96] — 2026-09-24 (Clean KPI Card Hierarchy & Equal Dynamic Card Heights)
+
+### UI & Layout Symmetrie
+- **Verwijderen van Overbodige '(24U ROLLEND)'**: Titels van de 4 bovenste kaarten zijn nu strak en tijdloos: `KOSTEN`, `ZONNEPANELEN`, `BESPARING`, `WARMTEPOMP`.
+- **Eenvoudige & Consequente Subtekst-hiërarchie**:
+  - **KOSTEN (EUR)**: Sub toont direct de key indicator stroom: bijv. `-9.5 kWh netto`.
+  - **ZONNEPANELEN (EUR)**: Sub toont direct de opwekstroom: bijv. `27.3 kWh opwek`.
+  - **BESPARING (EUR)**: Sub toont direct de gestuurde stroom: bijv. `3.0 kWh gestuurd`.
+  - **WARMTEPOMP (kWh el)**: Sub toont direct de kosten: bijv. `~€0.46`.
+- **Gelijke Dynamische Hoogte**: Alle 4 kaarten hebben nu dezelfde `h-full flex flex-col justify-between` layout en 1-regelige subtitels, waardoor de Warmtepomp-kaart niet meer naar beneden uitsteekt.
+
 ## [0.103.95] — 2026-09-24 (Elimination of Additive Solar Arbitrage Double-Count in Savings)
 
 ### Wiskundige Zuiverheid & Eerlijke Besparing

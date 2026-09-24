@@ -143,7 +143,7 @@
         </div>
 
         <div class="p-4 border-t border-[#1E293B] bg-[#0A0D14]/80 text-[10px] text-slate-500 flex justify-between">
-            <span>Versie: <strong class="text-slate-400">v0.103.95</strong></span>
+            <span>Versie: <strong class="text-slate-400">v0.103.96</strong></span>
             <span>Multi-Instance Laag 1</span>
         </div>
     </aside>
@@ -177,34 +177,42 @@
             <div id="view-prediction" class="tab-content active space-y-6">
 
                 <!-- 1. TOP 4 KPI METRIC CARDS (FORECAST 24H) -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-                    <!-- 1. Kosten (24u Rollend) -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-blue-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('costs', 'prediction')">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 items-stretch">
+                    <!-- 1. Kosten -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-blue-500/60 hover:shadow-lg transition cursor-pointer relative group flex flex-col justify-between h-full" onclick="openKpiDetailModal('costs', 'prediction')">
                         <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-costs-title" data-i18n="kpi.costs_24h">Kosten (24u Rollend)</span>
-                        <div class="text-xl font-bold text-white mt-1" id="pred-kpi-costs-main">€--</div>
-                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="pred-kpi-costs-sub">-- kWh netto</span>
+                        <div>
+                            <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-costs-title">Kosten</span>
+                            <div class="text-xl font-bold text-white mt-1" id="pred-kpi-costs-main">€--</div>
+                        </div>
+                        <span class="text-[10px] text-slate-400 block mt-2" id="pred-kpi-costs-sub">-- kWh netto</span>
                     </div>
-                    <!-- 2. Zonnepanelen (24u Rollend) -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-amber-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('solar', 'prediction')">
+                    <!-- 2. Zonnepanelen -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-amber-500/60 hover:shadow-lg transition cursor-pointer relative group flex flex-col justify-between h-full" onclick="openKpiDetailModal('solar', 'prediction')">
                         <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-solar-title" data-i18n="kpi.solar_panels">Zonnepanelen (24u Rollend)</span>
-                        <div class="text-xl font-bold text-amber-400 mt-1" id="pred-kpi-solar-main">€--</div>
-                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="pred-kpi-solar-sub">-- benut · -- retour</span>
+                        <div>
+                            <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-solar-title">Zonnepanelen</span>
+                            <div class="text-xl font-bold text-amber-400 mt-1" id="pred-kpi-solar-main">€--</div>
+                        </div>
+                        <span class="text-[10px] text-slate-400 block mt-2" id="pred-kpi-solar-sub">-- kWh opwek</span>
                     </div>
-                    <!-- 3. HEMS Besparing (24u Rollend) -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-emerald-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('savings', 'prediction')">
+                    <!-- 3. HEMS Besparing -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-emerald-500/60 hover:shadow-lg transition cursor-pointer relative group flex flex-col justify-between h-full" onclick="openKpiDetailModal('savings', 'prediction')">
                         <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-savings-title" data-i18n="kpi.hems_savings">Besparing (24u Rollend)</span>
-                        <div class="text-xl font-bold text-emerald-400 mt-1" id="pred-kpi-savings-main">€--</div>
-                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="pred-kpi-savings-sub">-- verschoven naar dal/zon</span>
+                        <div>
+                            <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-savings-title">Besparing</span>
+                            <div class="text-xl font-bold text-emerald-400 mt-1" id="pred-kpi-savings-main">€--</div>
+                        </div>
+                        <span class="text-[10px] text-slate-400 block mt-2" id="pred-kpi-savings-sub">-- kWh gestuurd</span>
                     </div>
-                    <!-- 4. Warmtepomp (24u Rollend) -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-cyan-500/60 hover:shadow-lg transition cursor-pointer relative group" onclick="openKpiDetailModal('heatpump', 'prediction')">
+                    <!-- 4. Warmtepomp -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 shadow hover:border-cyan-500/60 hover:shadow-lg transition cursor-pointer relative group flex flex-col justify-between h-full" onclick="openKpiDetailModal('heatpump', 'prediction')">
                         <span class="absolute top-2.5 right-2.5 text-slate-500 group-hover:text-blue-400 text-xs transition" title="Specificatie"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg></span>
-                        <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-hp-title" data-i18n="kpi.heatpump">Warmtepomp (24u Rollend)</span>
-                        <div class="text-xl font-bold text-cyan-400 mt-1" id="pred-kpi-hp-main">-- kWh</div>
-                        <span class="text-[10px] text-slate-400 block mt-0.5 truncate" id="pred-kpi-hp-sub">-- kWh th (COP --)</span>
+                        <div>
+                            <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider" id="pred-kpi-hp-title">Warmtepomp</span>
+                            <div class="text-xl font-bold text-cyan-400 mt-1" id="pred-kpi-hp-main">-- kWh el</div>
+                        </div>
+                        <span class="text-[10px] text-slate-400 block mt-2" id="pred-kpi-hp-sub">~€--</span>
                     </div>
                 </div>
 
@@ -3412,11 +3420,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
 
         <!-- MODULAR DOMAIN MODULES & CONTROLLERS -->
-    <script src="./js/i18n.js?v=0.103.95"></script>
-    <script src="./js/modules/modal_decision.js?v=0.103.95"></script>
-    <script src="./js/modules/modal_kpi_detail.js?v=0.103.95"></script>
-    <script src="./js/modules/modal_param_history.js?v=0.103.95"></script>
-    <script src="./js/modules/charts_thermal.js?v=0.103.95"></script>
-    <script src="./js/app.js?v=0.103.95"></script>
+    <script src="./js/i18n.js?v=0.103.96"></script>
+    <script src="./js/modules/modal_decision.js?v=0.103.96"></script>
+    <script src="./js/modules/modal_kpi_detail.js?v=0.103.96"></script>
+    <script src="./js/modules/modal_param_history.js?v=0.103.96"></script>
+    <script src="./js/modules/charts_thermal.js?v=0.103.96"></script>
+    <script src="./js/app.js?v=0.103.96"></script>
 </body>
 </html>

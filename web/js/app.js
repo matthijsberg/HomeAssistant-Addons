@@ -1896,9 +1896,7 @@
                     const elSolarMain = document.getElementById('pred-kpi-solar-main');
                     const elSolarSub = document.getElementById('pred-kpi-solar-sub');
                     if (elSolarTitle && fk.solar.title) elSolarTitle.innerText = fk.solar.title;
-                    if (elSolarMain) {
-                        elSolarMain.innerHTML = `${fk.solar.main} <span class="text-xs text-slate-400 font-normal">${fk.solar.main_extra || ''}</span>`;
-                    }
+                    if (elSolarMain) elSolarMain.innerText = fk.solar.main;
                     if (elSolarSub) elSolarSub.innerText = fk.solar.sub;
 
                     const elSavTitle = document.getElementById('pred-kpi-savings-title');
@@ -1912,9 +1910,7 @@
                     const elHpMain = document.getElementById('pred-kpi-hp-main');
                     const elHpSub = document.getElementById('pred-kpi-hp-sub');
                     if (elHpTitle && fk.heatpump.title) elHpTitle.innerText = fk.heatpump.title;
-                    if (elHpMain) {
-                        elHpMain.innerHTML = `${fk.heatpump.main} <span class="text-xs text-slate-400 font-normal">${fk.heatpump.main_extra || ''}</span>`;
-                    }
+                    if (elHpMain) elHpMain.innerText = fk.heatpump.main;
                     if (elHpSub) elHpSub.innerText = fk.heatpump.sub;
                 }
 

@@ -79,10 +79,10 @@ class KpiPresenter:
 
         net_sign = "+" if net_kwh_balance > 0 else ""
         costs_card = KpiCardItem(
-            title="Kosten (24u Rollend)",
+            title="Kosten",
             main=f"€{net_cost_eur:.2f}",
-            sub=f"{net_sign}{net_kwh_balance:.1f} kWh el netto · inkoop €{avg_import_p:.2f}/kWh",
-            headline=f"Verwachte energiekosten: €{net_cost_eur:.2f} over 24 uur",
+            sub=f"{net_sign}{net_kwh_balance:.1f} kWh netto",
+            headline=f"Verwachte energiekosten: €{net_cost_eur:.2f}",
             explanation="Netto kosten bestaan uit huishoudelijk sluipverbruik, tapwater en CV, minus gratis zonne-energie en feed-in vergoeding.",
             footer=f"Totaal verbruik: {tot_cons_kwh:.1f} kWh el · Netto netafname: {net_kwh_balance:.1f} kWh el",
             breakdown=[
@@ -95,10 +95,10 @@ class KpiPresenter:
         )
 
         solar_card = KpiCardItem(
-            title="Zonnepanelen (24u Rollend)",
+            title="Zonnepanelen",
             main=f"€{solar_total_value_eur:.2f}",
-            main_extra=f"({tot_solar_kwh:.1f} kWh el)",
-            sub=f"€{solar_selfcons_eur:.2f} benut ({solar_selfcons_kwh:.1f} kWh el) · €{solar_export_eur:.2f} retour ({solar_export_kwh:.1f} kWh el)",
+            main_extra="",
+            sub=f"{tot_solar_kwh:.1f} kWh opwek",
             headline=f"Zonnepanelen Totale Waarde: €{solar_total_value_eur:.2f} ({tot_solar_kwh:.1f} kWh el)",
             explanation="Open HEMS maximaliseert het eigen verbruik door tapwater en vloerverwarming tijdens zonneschijn te sturen.",
             footer=f"Zelfconsumptie: {round((solar_selfcons_kwh / tot_solar_kwh * 100) if tot_solar_kwh > 0 else 0)}% · Vermeden netafname: €{solar_selfcons_eur:.2f}",
@@ -110,10 +110,10 @@ class KpiPresenter:
         )
 
         savings_card = KpiCardItem(
-            title="Besparing (24u Rollend)",
+            title="Besparing",
             main=f"€{tot_savings:.2f}",
-            sub=f"{shifted_el_kwh:.1f} kWh el ({shifted_th_kwh:.1f} kWh th) gestuurd",
-            headline=f"Totale HEMS Besparing: €{tot_savings:.2f} over 24 uur",
+            sub=f"{shifted_el_kwh:.1f} kWh gestuurd",
+            headline=f"Totale HEMS Besparing: €{tot_savings:.2f}",
             explanation="Berekend t.o.v. een ongeoptimaliseerde thermostaat die zonder rekening te houden met dynamische tarieven of spitsperiodes zou stoken.",
             footer=f"{shifted_el_kwh:.1f} kWh el stroom benut voor {shifted_th_kwh:.1f} kWh th warmte",
             breakdown=[
@@ -123,10 +123,10 @@ class KpiPresenter:
         )
 
         hp_card = KpiCardItem(
-            title="Warmtepomp (24u Rollend)",
+            title="Warmtepomp",
             main=f"{hp_tot_stroom_kwh:.1f} kWh el",
-            main_extra=f"(~€{hp_cost_eur:.2f})",
-            sub=f"{hp_tot_th:.1f} kWh th (COP {hp_cop:.1f}) · {dhw_hours:.1f}u SWW / {cv_hours:.1f}u CV",
+            main_extra="",
+            sub=f"~€{hp_cost_eur:.2f}",
             headline=f"Warmtepomp Totaal: {hp_tot_stroom_kwh:.1f} kWh el (~€{hp_cost_eur:.2f})",
             explanation="De Daikin Altherma levert zowel tapwater als vloerverwarming via een geoptimaliseerd Smart Grid relaisprofiel.",
             footer=f"Totale stookduur: {round(dhw_hours + cv_hours, 1)} uur · Thermische opbrengst: {hp_tot_th:.1f} kWh th",

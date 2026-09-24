@@ -57,15 +57,15 @@ def test_all_pages_overlay_invariants_across_resolutions():
                 assert i not in spits_set, f"ILLEGAL OVERLAP at slot {i} ({res_label}): active heating overlaps with spitsblok!"
 
 
-def test_forecast_kpi_cards_carry_explicit_24u_rollend_titles():
-    """Guarantee that forecast KPI cards declare 24u Rollend in their contracts."""
+def test_forecast_kpi_cards_carry_clean_titles():
+    """Guarantee that forecast KPI cards declare clean, uncluttered titles without redundant (24u Rollend)."""
     index_html = REPO_ROOT / "web" / "index.html"
     content = index_html.read_text(encoding="utf-8")
     assert 'id="pred-kpi-costs-title"' in content
-    assert 'Kosten (24u Rollend)' in content
-    assert 'Zonnepanelen (24u Rollend)' in content
-    assert 'Besparing (24u Rollend)' in content
-    assert 'Warmtepomp (24u Rollend)' in content
+    assert 'id="pred-kpi-solar-title"' in content
+    assert 'id="pred-kpi-savings-title"' in content
+    assert 'id="pred-kpi-hp-title"' in content
+    assert 'Kosten (24u Rollend)' not in content
 
 
 def test_heating_forecast_resolution_parity():
