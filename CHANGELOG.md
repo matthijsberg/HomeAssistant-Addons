@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.87] — 2026-09-24 (Financial Peak Dispatch with Strict Hard Lockout Cap & Soft Modulated Shoulders)
+
+### Dispatch & Comfort Safeguards
+- **Strikte Hard Lockout Begrenzing (120 min)**: De continue harde blokkade (`is_hard_lockout` / SG1) in `layer3_scheduling/peak_detection.py` is strikt gecapt op maximaal 120 minuten (2 uur) op de absolute piek-kam van de marktprijzen. Hierdoor wordt de thermische opslag van de betondekvloer (13,2 kWh/K) optimaal benut en blijft afkoeling beperkt tot maximaal 0,2–0,3 °C.
+- **Flank & Schouder Modulatiesturing (`advised_off`)**: Schouder-uren van de spits buiten de 2-uurs top-kam worden gemarkeerd als zacht economisch advies (`SOFT_ADVICE` / `advised_off`). In `layer3_scheduling/space_heating_policy.py`:
+  - Start niet onnodig bij milde temperatuurdips (`target - 0.35`).
+  - Grijpt pas in op minimale modulatiestand (~950 W) zodra de binnentemperatuur de werkelijke comfortgrens (`min_comfort_room = 19,6 °C`) nadert.
+  - Schakelt direct weer uit zodra het comfort (`min_comfort_room + 0,15 °C`) is hersteld.
+
 ## [0.103.86] — 2026-09-24 (Router Decompositie & Scoped Domain Routing)
 
 ### Architectuur & Token Reductie

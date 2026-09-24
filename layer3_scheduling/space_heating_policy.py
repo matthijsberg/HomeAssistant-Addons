@@ -336,9 +336,16 @@ class SpaceHeatingPolicy:
                 lockout_slots_count += 1
             else:
                 # Normal or Pre-heat window: evaluate state transitions
+                is_soft_advice = bool(peak_info and not is_hard_lockout)
                 if not is_running:
                     # Can we trigger a new run?
-                    comfort_trigger = (t_room <= target_room - 0.35)
+                    # During soft advice (P75 elevated price), avoid triggering on mild dips;
+                    # only trigger if room temperature approaches the true comfort boundary!
+                    if is_soft_advice:
+                        comfort_trigger = (t_room <= min_comfort_room)
+                    else:
+                        comfort_trigger = (t_room <= target_room - 0.35)
+
                     # Model Predictive Control (MPC) Pre-heat condition:
                     # 1. Deficit buffer: unheated coasting would violate comfort during upcoming peak
                     # 2. Solar buffer: free solar surplus (>=1.5 kW)
@@ -348,7 +355,7 @@ class SpaceHeatingPolicy:
                     )
                     is_solar_surplus = (solar_kw[i] >= 1.5)
 
-                    if is_solar_surplus or needs_deficit_buffer:
+                    if (is_solar_surplus or needs_deficit_buffer) and not is_soft_advice:
                         preheat_allowed = (t_room < max_preheat_room)
                     else:
                         preheat_allowed = False
@@ -383,7 +390,10 @@ class SpaceHeatingPolicy:
                             else:
                                 run_duration_slots += 1
                         else:
-                            if t_room >= target_room:
+                            if is_soft_advice and t_room >= min_comfort_room + 0.15:
+                                is_running = False
+                                run_duration_slots = 0
+                            elif t_room >= target_room:
                                 is_running = False
                                 run_duration_slots = 0
                             else:

@@ -28,7 +28,7 @@ def calc_percentile(data: List[float], p: float) -> float:
 def detect_dynamic_price_peaks(
     timeline_items: List[Dict[str, Any]],
     step_mins: int = 15,
-    max_lockout_mins: int = 150,
+    max_lockout_mins: int = 120,
     past_continuous_lockout_mins: int = 0,
     mins_since_last_lockout: int = 999
 ) -> Tuple[List[Dict[str, Any]], Dict[int, Dict[str, Any]]]:
