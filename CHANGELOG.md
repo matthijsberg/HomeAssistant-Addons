@@ -10,6 +10,14 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.95] — 2026-09-24 (Elimination of Additive Solar Arbitrage Double-Count in Savings)
+
+### Wiskundige Zuiverheid & Eerlijke Besparing
+- **Wegname van Additieve Zonnestroom Dubbeltelling**: Het claimen van een extra regel 'Zonnestroom Warmtepomp' (€0,82) bovenop 'Tapwater Spitsvermijding' (€0,69) voor exact dezelfde 2,3 kWh boilerrun is geëlimineerd.
+  - Zonne-zelfconsumptie staat al 100% verantwoord op de Zonnepanelen-kaart.
+  - De Besparings-kaart toont nu zuiver en eerlijk de daadwerkelijk door HEMS gerealiseerde spitsarbitrage (€0,69 door verschuiving naar dal/zon).
+  - Geen creatieve dubbeltellingen meer: wat je bespaart is wat je bespaart.
+
 ## [0.103.94] — 2026-09-24 (Separation of Electrical and Thermal Power & Clean Arbitrage Accounting)
 
 ### Wiskundige Saldering & Fysische Scheiding

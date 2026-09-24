@@ -61,7 +61,7 @@ class KpiPresenter:
         cv_kwh = round(hp_cv_kwh, 2)
         cv_cost = round(sum(h * p * step_h for h, p in zip(heating, prices)), 2)
 
-        # Savings & Arbitrage calculations
+        # Savings & Arbitrage calculations (Strictly non-overlapping HEMS dispatch savings)
         slots = plan.slots if (plan and hasattr(plan, "slots") and plan.slots) else []
         peak_prices = [p for p, slot in zip(prices, slots) if getattr(slot, 'is_peak_lockout', False)]
         avg_peak_price = (sum(peak_prices) / len(peak_prices)) if peak_prices else 0.45
@@ -71,14 +71,8 @@ class KpiPresenter:
         cv_lockout_hours = round(sum(step_h for slot in slots if getattr(slot, 'is_peak_lockout', False)), 1)
         cv_spitsblok_saving = round(cv_lockout_hours * 0.8 * max(0.05, avg_peak_price - 0.25), 2)
 
-        # Solar storage in heat pump: only the actual electricity absorbed by heat pump / boiler
-        hp_solar_el_kwh = round(min(hp_dhw_kwh + hp_cv_kwh, solar_selfcons_kwh), 1)
-        avg_grid_price = (pred_afname_eur / pred_afname_kwh) if pred_afname_kwh > 0.1 else 0.28
-        hp_solar_saving = round(hp_solar_el_kwh * max(0.05, avg_grid_price - 0.00605), 2)
-
-        tot_savings = round(dhw_arbitrage_saving + cv_spitsblok_saving + hp_solar_saving, 2)
-        if tot_savings < 0.25:
-            tot_savings = 0.25
+        # Zero double-counting: total HEMS arbitrage is purely the sum of DHW peak avoidance and CV lockout savings!
+        tot_savings = round(dhw_arbitrage_saving + cv_spitsblok_saving, 2)
 
         shifted_el_kwh = round(hp_dhw_kwh + hp_cv_kwh, 1)
         shifted_th_kwh = round(hp_tot_th, 1)
@@ -124,8 +118,7 @@ class KpiPresenter:
             footer=f"{shifted_el_kwh:.1f} kWh el stroom benut voor {shifted_th_kwh:.1f} kWh th warmte",
             breakdown=[
                 KpiBreakdownItem("Tapwater Spitsvermijding", "pink", dhw_kwh, dhw_arbitrage_saving, f"{dhw_kwh:.1f} kWh el ({round(dhw_kwh * 3.1, 1)} kWh th) op dal/zon (€{dhw_avg_p:.2f}/kWh) i.p.v. spits (€{avg_peak_price:.2f}/kWh)"),
-                KpiBreakdownItem("CV Spitsblokkades", "indigo", round(cv_lockout_hours * 0.8, 1), cv_spitsblok_saving, f"{cv_lockout_hours}u stookblokkades opgevangen door de 13,2 kWh/K dekvloer"),
-                KpiBreakdownItem("Zonnestroom Warmtepomp", "amber", hp_solar_el_kwh, hp_solar_saving, f"{hp_solar_el_kwh:.1f} kWh el ({round(hp_solar_el_kwh * 3.1, 1)} kWh th) in boiler gebufferd i.p.v. terugleveren")
+                KpiBreakdownItem("CV Spitsblokkades", "indigo", round(cv_lockout_hours * 0.8, 1), cv_spitsblok_saving, f"{cv_lockout_hours}u stookblokkades opgevangen door de 13,2 kWh/K dekvloer")
             ]
         )
 

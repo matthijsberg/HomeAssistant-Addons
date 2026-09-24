@@ -74,5 +74,5 @@ def test_kpi_presenter_build_forecast_kpis():
     # Validate breakdowns exist and contain expected items
     assert len(kpis["costs"]["breakdown"]) >= 5
     assert len(kpis["solar"]["breakdown"]) >= 3
-    assert len(kpis["savings"]["breakdown"]) >= 3
+    assert len(kpis["savings"]["breakdown"]) >= 2
     assert len(kpis["heatpump"]["breakdown"]) >= 3
