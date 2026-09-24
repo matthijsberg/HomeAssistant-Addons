@@ -10,6 +10,11 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.103.98] — 2026-09-24 (Elimination of Gap Above Controls Bar)
+
+### UI & Spacing Polish
+- **Naadloze Aansluiting van Filterbalk**: Door toevoegen van compenserende negatieve marges (`-mt-3 sm:-mt-5 md:-mt-8`) sluit de sticky filterbalk nu direct en naadloos aan op de onderkant van de header, waardoor de lege donkere rand vóór het scrollen volledig is verdwenen.
+
 ## [0.103.97] — 2026-09-24 (Controls & Filters Bar Relocation to Top Under Header Title)
 
 ### UI & Navigatie-ergonomie
