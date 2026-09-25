@@ -151,7 +151,7 @@ slot.device_dispatches["home_battery"] = DeviceSlotDispatch(
 
 * [x] **Fase 0 (Isolatie):** `WP-BAT0` (accu-stromen isoleren van baseload) in `daemon.py`.
 * [x] **Fase 1 (Registry & Contracten):** ADR-005, interfaces, registry en `DispatchPlanSlot.device_dispatches` (Schema 1.1.0).
-* [x] **Fase 2 (Rekenkern):** `layer3_scheduling/battery_policy.py` met 100% testdekking (7/7 unit tests).
+* [x] **Fase 2 (Rekenkern):** `layer3_scheduling/battery_policy.py` met 100% testdekking (12/12 unit tests, 177/177 totaal groen). Inclusief correcties op dubbele round-trip-correctie en economische piek-gate.
 * [ ] **Fase 3 (Planner Integratie):** Aanroep van `BatteryPolicy.optimize` in `layer3_scheduling/central_planner.py` op het residuele profiel na DHW en CV.
 * [ ] **Fase 4 (API & Presenter):** `api/routes_schedule.py` en `kpi_presenter.py` voeden met de werkelijke `device_dispatches["home_battery"]`.
 * [ ] **Fase 5 (Frontend):** UI batterijlijn, laad/ontlaadbalken en instellingen-slider in Web cockpit.
