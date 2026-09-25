@@ -61,13 +61,18 @@ Het HEMS-systeem is opgedeeld in vier helder herkenbare lagen:
 * **Vangrails & Clamping:** Exponentiële demping (80% oud + 20% nieuw) en harde fysische grenzen ($K(h) \in [0{,}5; 2{,}5]$, $UA \in [6; 11]$) voorkomen dat sensor-uitschieters het model ontregelen.
 
 ### Laag 3: HEMS Regie & Sturing (`layer3_scheduling`)
-* **De Vermogenswaterval:**  
-  1. Sluipverbruik (300 W)  
-  2. 350L SWW Boiler (3.000 W piek)  
-  3. CV Verwarming (warmtepomp stroom)  
-  4. Thuisaccu laden (vult traploos de restjes op)  
-  5. Net-teruglevering
-* **Hardware Matige Smart Grid Relais (S10S / S11S):**  
+* **De Prioriteiten-Waterval:**  
+  1. Baseload (~300 W continue huishoudafname)  
+  2. 350L SWW Boiler (Prioriteit 1: DP optimizer, COP ~3.1, 0 ct degradatie)  
+  3. CV Verwarming (Prioriteit 2: 2R1C schil- en vloermodel, COP ~4.5, 0 ct degradatie)  
+  4. Thuisbatterij (Prioriteit 3: 15 kWh LFP, loosely coupled optimizer, 87% roundtrip efficiency)  
+  5. Net-teruglevering (Feed-in tegen markttarief minus opslag)
+* **Thuisbatterij Slimme Sturing (`battery_policy.py`):**
+  * `CHARGE_SOLAR`: Gratis zonne-overschot opvangen tot 5 kW.
+  * `DISCHARGE_PEAK`: Spitsontlasting tijdens dure uren om netafname naar 0 W te drukken.
+  * `HOLD_RESERVE`: Accucapaciteit strategisch vasthouden voor een latere duurdere piek.
+  * `CHARGE_GRID`: In de winter 's nachts bijladen mits de spread groter is dan het roundtrip-verlies (13%) + slijtage (€0,078/kWh).
+* **Warmtepomp Smart Grid Relais (S10S / S11S):**  
   * `SG1 (Geforceerd uit)`: Blokkade tijdens ochtendspits (07:00–08:30) en avondspits (17:30–20:30).
   * `SG2 (Normaal)`: Rustig basisbedrijf op de weersafhankelijke stooklijn.
   * `SG3 (Geadviseerd aan)`: Thermische vloerbuffering (+1°C) tijdens zonne-uren.

@@ -10,6 +10,61 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.0] — 2026-09-25 (Batterij Rekenkern, Correcties op Energiebehoud & Capability-resolutie)
+
+### Layer 3 — Batterij Dispatch Rekenkern (Fase 2)
+- **`layer3_scheduling/battery_policy.py` opgeleverd**: `BatteryPolicy.optimize` plant elektrochemische opslag als strikte Prioriteit 3 op het residuele profiel (`P_unalloc + P_dhw + P_heat − P_solar`) over 96 tot 192 kwartierslots. Multi-pass: zonneabsorptie, daldetectie met voorwaartse spread, voorwaartse simulatie met piekreservering en financiële boekhouding.
+- **Dataklassen**: `BatterySpec` (fysieke en economische parameters, `frozen`), `BatterySlotResult` (dispatch per kwartier) en `BatteryPlanSummary` (kWh in/uit, SoC-verloop, netto besparing). Nul HA-entiteiten, nul merknamen — geborgd door `test_entity_isolation_in_battery_policy`.
+- **Zes dedicated modi**: `CHARGE_SOLAR`, `CHARGE_GRID`, `HOLD_RESERVE`, `DISCHARGE_PEAK`, `DISCHARGE_BUFFER`, `STANDBY`.
+- De module is nog **niet aangeroepen** vanuit `central_planner.py`; Fase 3 (planner-integratie) staat open. Deze release verandert daarmee geen enkel runtime-gedrag.
+
+### Fixed — Energiebehoud en omvormergrenzen
+- **Dubbele round-trip-correctie bij ontladen**: `act_kw` werd berekend als `dis_kwh / (step_hours * eta_one_way)` terwijl `dis_kwh` al AC-energie is. De boekhouding deelde vervolgens nóg eens door η. Gevolg: het gecommandeerde vermogen overschreed de omvormerlimiet met 1/η en de cel liep leeg met 1/η². Gemeten bij een huisvraag van 5,0 kW en een limiet van 5,0 kW:
+  - vóór: `-5,361 kW`, SoC-daling `11,495 kWh` voor `10,0 kWh` AC (impliciet rendement 0,870)
+  - ná: `-5,000 kW`, SoC-daling `10,721 kWh` voor `10,0 kWh` AC (impliciet rendement 0,9327 = √0,87)
+- **Testdekking die dit miste**: `test_soc_physical_bounds_enforced` assertte `s.power_kw <= 5.0` zonder `abs()`, waardoor een ontlading van −5,361 kW door de limiet glipte. Nu getoetst tegen `spec.max_charge_kw` én `spec.max_discharge_kw` in beide richtingen.
+
+### Fixed — Economische correctheid
+- **Economische poort op `DISCHARGE_PEAK`**: deze tak vuurde zonder enige rentabiliteitstoets, terwijl `DISCHARGE_BUFFER` die al had. Ontladen vereist nu `(p_in − degradatiekost) > p_export`, in beide takken identiek. Bij `p_in = 0,10`, degradatie `0,078` en export `0,05` blijft de accu nu op 90% staan in plaats van zichzelf leeg te draaien; bij `p_in = 0,22` ontlaadt hij onverminderd.
+- **Netto besparing telt laadkosten mee**: `net_financial_saving_eur` accumuleerde uitsluitend bij ontladen. De laadkosten gingen wél in `cost_impact_eur` per slot maar nooit in het totaal, wat de besparing structureel overrapporteerde (gemeten scenario: € 4,12 gerapporteerd tegen € 3,02 werkelijk, 36% te hoog). Het totaal is nu per definitie gelijk aan `−Σ cost_impact_eur` over alle slots, geborgd door een test.
+
+### Changed — State of Charge is een meting, geen aanname
+- **`initial_soc_pct` heeft geen default meer** (`Optional[float] = None`). Een plan op een aangenomen toestandsvariabele is open-loop en loopt binnen uren weg van de werkelijkheid; 50% verzinnen schendt Invariant 3.
+- Ontbreekt of veroudert de meting, dan retourneert `optimize` een neutraal plan: alle slots `STANDBY`, geen vermogen, geen financiële claim, met `is_active=False` en een expliciete `inactive_reason`. `BatteryPlanSummary` is hiervoor uitgebreid met beide velden.
+
+### Fixed — Capability-resolutie (REG1)
+- **`single_by_capability(CAN_STORE)` wierp een `ValueError`** omdat een thermische buffer óók opslag claimt: `Ambiguous device resolution: multiple active devices claim can_store: ['home_battery', 'daikin']`. Dat zou de planner-integratie in Fase 3 hebben laten crashen.
+- **`by_capabilities` en `single_by_capabilities`** toegevoegd met conjunctie-semantiek (alle opgegeven capabilities vereist). `by_capability` en `single_by_capability` zijn hier nu implementaties van; hun gedrag is ongewijzigd.
+- **`resolve_battery(cfg)`** toegevoegd als canonieke resolver: discriminator is `CAN_STORE ∧ CAN_EXPORT`. Een vat slaat op maar exporteert niet, zon exporteert maar slaat niet op; alleen een accu doet beide. Retourneert `None` zonder geconfigureerde accu.
+
+### Changed — Magische getallen naar de specificatie
+- Vijf drempels uit de passes verhuisd naar `BatterySpec`, conform de "zero magic numbers"-standaard van `DhwOptimizerParams`: `reserve_lookahead_slots` (32), `valley_lookahead_slots` (36), `peak_price_delta_eur_kwh` (0,08), `reserve_price_delta_eur_kwh` (0,12) en `grid_charge_soc_ceiling_pct` (85,0). Alle standaardwaarden gelijk aan het vorige gedrag.
+
+### Tests
+- Vijf nieuwe regressietests in `tests/unit/test_battery_policy.py`: `test_discharge_power_respects_inverter_ac_limit`, `test_energy_conservation_on_discharge`, `test_missing_soc_yields_inactive_plan`, `test_net_saving_includes_grid_charging_cost` en `test_no_discharge_when_avoided_import_below_degradation_floor`.
+- De tolerantie in de energiebehoudtest is 2e-3 kWh, afgeleid uit `round(act_kw, 3)` en `round(soc_kwh, 3)` in de dispatch (maximaal 8 × 0,0005 kW × 0,25 h).
+- **Verificatie**: batterijmodules 16/16 groen. De volledige suite moet in de add-oncontainer worden gedraaid (`PYTHONPATH=. pytest tests/`); de ontwikkelshell mist `numpy`, `node` en `pytest`, waardoor 16 modules daar niet importeerbaar zijn.
+
+### Bekende openstaande punten
+Bewust niet in deze release opgelost, zodat ze niet opnieuw ontdekt hoeven te worden:
+- De modi wijken af van `config/mode_catalog.json` archetype `battery_storage` (`CHARGE_SOLAR` versus `charge_solar`, en `HOLD_RESERVE` / `DISCHARGE_PEAK` / `DISCHARGE_BUFFER` / `STANDBY` bestaan daar niet). Nederlandse labels staan hardcoded in Python in plaats van in de catalogus — Invariant 1. Blokkeert Fase 4 en 5, die deze codes naar API en frontend doorgeven.
+- Twee enums met de naam `DeviceCapability`: `models/canonical.py` (`read_power`, `read_soc`, …) en `integrations/interfaces.py` (`can_store`, `can_export`, …), met disjuncte leden. De configuratie vult de eerste, het register matcht op de tweede.
+- Het `adapter`-veld resolveert in de praktijk nooit: devices declareren `deye_modbus_tcp`, de geregistreerde slug is `home_battery`. `find_adapter_for_device` valt stil terug op type-matching zonder waarschuwing.
+- `BatterySpec.usable_capacity_kwh` wordt nergens gelezen en staat op 13,5 kWh, terwijl 10–95% van 15 kWh 12,75 kWh is.
+- Pass 1 is dood: `peak_candidates` en `sim_soc_kwh` worden berekend en nooit gebruikt.
+- `valley_candidates` wordt op prijs gesorteerd en daarna in een `set` gezet, waardoor de sortering verdwijnt en élk slot met voldoende voorwaartse spread laadt in plaats van de goedkoopste.
+- Geen `from_config` op `BatterySpec`; alle parameters zijn code-defaults. De instellingen-slider voor `min_cycle_margin_eur_kwh` heeft daarmee nog geen bestemming.
+- Geen restwaarde aan het eind van de horizon, geen omvormer-sluipverbruik en geen minimale ontlaadvloer.
+
+## [0.103.99] — 2026-09-25 (Adapter Registry Foundation, Baseload Isolation & Plan Schema 1.1.0)
+
+### Architecture & Integrations (ADR-005, REG0, REG1, REG5)
+- **WP-BAT0 (Baseload Isolation)**: In `daemon.py` worden batterij laad- en ontlaadstromen nu wiskundig strikt geïsoleerd van `unallocated_w`, waardoor het 7×96 geleerde baseloadmodel nooit meer vervuild kan raken bij batterij-activiteit.
+- **REG0 (Adapter Interfaces & Contracten)**: `ADR-005-adapter-registry.md` vastgelegd. `integrations/interfaces.py` introduceert pure ABC's en dataclasses (`AdapterSpec`, `DeviceBinding`, `ITelemetryReader`, `IDeviceActuator`, `IInterlock`, `DeviceCapability`) met nul HA-entiteiten en strikte laag-isolatie.
+- **REG1 (Adapter Registry & Canonical Vocabulary)**: `integrations/registry.py` en `integrations/__init__.py` opgeleverd met expliciete registratie, canonieke type-normalisatie (`home_battery`, `solar_inverter`, `grid_meter`, `heat_pump`, `dhw_boiler`) en functionele resolutie (`by_capability`, `single_by_capability`). Ingebouwde drivers geregistreerd voor `daikin_altherma`, `generic_ha_sensor` en `home_battery`.
+- **REG5 (ADR-002 Device-Agnostic Dispatch Plan Slot)**: `DeviceSlotDispatch` toegevoegd aan `models/canonical.py`. `DispatchPlanSlot` uitgebreid met `device_dispatches: Dict[str, DeviceSlotDispatch]` en `CanonicalDispatchPlan.schema_version` verhoogd naar `1.1.0`. Volledig 100% achterwaarts compatibel met schema 1.0.0.
+- **Test Suite**: 18 nieuwe unit- en architectuurtests toegevoegd; testsuite groeit naar 165/165 tests groen.
+
 ## [0.103.98] — 2026-09-24 (Elimination of Gap Above Controls Bar)
 
 ### UI & Spacing Polish

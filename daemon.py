@@ -806,14 +806,17 @@ class HemsBackgroundCollector(threading.Thread):
 
             bat = get_val_w("sensor.battery_power") or 0.0
 
-            # Mathematical Triple Check:
+            # Mathematical Power Balance (Invariant: battery flows strictly isolated from unallocated load):
             # 1. Net Grid = Import - Export
             net_grid = p1_imp - p1_exp
-            # 2. Direct Consumed Solar = Solar produced minus what was pushed to the grid
+            # 2. Battery flows: positive = charge (absorbing power), negative = discharge (delivering power)
+            bat_charge = max(0.0, bat)
+            bat_discharge = max(0.0, -bat)
+            # 3. Direct Consumed Solar = Solar produced minus what was pushed to the grid
             dir_sol = max(0.0, sol - p1_exp)
-            # 3. Total Real Household Load = Net Grid Import + Solar
-            tot_house = max(0.0, net_grid + sol)
-            # 4. Unallocated Load = Total House Load - Heatpump - Battery charging
+            # 4. Total Real Household Load = Net Grid Import + Solar + Battery Discharge - Battery Charge
+            tot_house = max(0.0, net_grid + sol + bat_discharge - bat_charge)
+            # 5. Unallocated Load = Total House Load - Heatpump
             unalloc = max(50.0, tot_house - wp)
 
             hp_mode = self.live_hp_disagg.mode if self.live_hp_disagg else "STANDBY"

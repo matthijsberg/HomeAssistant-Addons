@@ -111,6 +111,20 @@ Het datamodel volgt de industriestandaarden voor energiebeheersystemen (IEC 6185
 
 ---
 
+### 2.3 Measurement: `battery_dispatch` (Thuisbatterij Optimalisatie & Dispatch — ADR-002 / ADR-005)
+*Interval: Elk kwartier (15m) berekend door de loosely coupled optimizer (`layer3_scheduling/battery_policy.py`).*
+
+| Tag / Veld | Datatype | Eenheid | Semantische Betekenis |
+| :--- | :--- | :--- | :--- |
+| `device_id` (tag) | `string` | — | `"home_battery"` |
+| `mode_code` (tag) | `string` | — | `CHARGE_SOLAR`, `CHARGE_GRID`, `HOLD_RESERVE`, `DISCHARGE_PEAK`, `DISCHARGE_BUFFER`, `STANDBY` |
+| `power_w` | `float` | $W$ | Gepland elektrisch vermogen (+ = laden/opname, - = ontladen/afgifte) |
+| `soc_pct` | `float` | $\%$ | Berekende State of Charge (SoC) aan het einde van het kwartier (10% - 95%) |
+| `soc_kwh` | `float` | $\text{kWh}$ | Aanwezige bruikbare energie in de accu |
+| `cost_impact_eur` | `float` | $€$ | Financiële besparing/kost in dit kwartier (vermeden stroom minus slijtage) |
+
+---
+
 ## 📈 3. Grafana Query Cookbook (Copy-Paste Query Voorbeelden)
 
 Met dit semantische datamodel kun je in Grafana direct de volgende InfluxQL queries gebruiken:

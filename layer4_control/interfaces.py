@@ -39,7 +39,12 @@ class ISafetyGuard(ABC):
 
 
 class IActuatorController(ABC):
-    """Abstract interface for executing hardware commands via RAM Smart Grid relays."""
+    """
+    Device-specific interface for Daikin Smart Grid relay actuation.
+    NOTE: This is a specialized device controller contract. The generalized,
+    device-agnostic hardware actuation contract for Open HEMS is IDeviceActuator
+    defined in `integrations.interfaces` (ADR-005).
+    """
 
     @abstractmethod
     def apply_smart_grid_mode(self, mode: str) -> bool:

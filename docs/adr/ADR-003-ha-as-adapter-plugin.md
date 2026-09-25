@@ -1,7 +1,7 @@
 # ADR-003: Home Assistant as an Optional Adapter Plugin
 
 ## Status
-Accepted
+Accepted — Implementation tracked in `docs/plans/PLAN-adapter-register.md` (2026-09-25)
 
 ## Context
 Initial code directly queried Home Assistant entities and services inside the daemon loop. This created a hard dependency on Home Assistant, making Open HEMS unusable on standalone Linux servers or Docker setups without Home Assistant.

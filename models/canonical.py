@@ -346,6 +346,33 @@ def __getattr__(name: str) -> Any:
 
 
 @dataclass
+class DeviceSlotDispatch:
+    """
+    Canonical per-device dispatch decision within a 15-minute slot (ADR-002, ADR-005).
+    """
+    device_id: str
+    device_type: str
+    mode_code: str                     # StandardizedState or archetype mode
+    mode_label: str                    # Human-readable mode description
+    electric_kw: float                 # Electrical power: + = load/charge, - = discharge/export
+    payload: Dict[str, Any] = field(default_factory=dict) # Subsystem specifics (e.g. soc, temp_target)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DeviceSlotDispatch":
+        return cls(
+            device_id=data["device_id"],
+            device_type=data["device_type"],
+            mode_code=data["mode_code"],
+            mode_label=data.get("mode_label", ""),
+            electric_kw=float(data.get("electric_kw", 0.0)),
+            payload=dict(data.get("payload", {})),
+        )
+
+
+@dataclass
 class DispatchPlanSlot:
     """A single canonical dispatch slot in the published plan."""
     slot_idx: int
@@ -362,6 +389,7 @@ class DispatchPlanSlot:
     color_hex: str = ""
     tailwind_class: str = ""
     description: str = ""
+    device_dispatches: Dict[str, DeviceSlotDispatch] = field(default_factory=dict)
 
     def __post_init__(self):
         if not isinstance(self.mode_code, StandardizedState):
@@ -459,6 +487,7 @@ class CanonicalDispatchPlan:
     slots: List[DispatchPlanSlot]
     dhw_summary: DHWPlanSummary
     dynamic_peaks: List[Dict[str, Any]]
+    schema_version: str = "1.1.0"
     heating_summary: Optional[SpaceHeatingPlanSummary] = None
     validation_issues: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)

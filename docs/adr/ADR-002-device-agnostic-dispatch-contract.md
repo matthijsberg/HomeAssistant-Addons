@@ -1,7 +1,7 @@
 # ADR-002: Device-Agnostic Dispatch Plan Contract
 
 ## Status
-Accepted
+Accepted — Implementation tracked in `docs/plans/PLAN-adapter-register.md` (2026-09-25)
 
 ## Context
 Early versions of `DispatchPlanSlot` contained hardcoded fields (`boiler_kw`, `heating_kw`), making it impossible to introduce home batteries, EV chargers, or secondary heat pumps without modifying the central data contract.
