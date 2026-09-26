@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.1] — 2026-09-25 (Continu Dispatch Loggen in InfluxDB & Complete Historische Overlays)
+
+### Historical Telemetry & Analytics Overlays (Invariant #7)
+- **Continu Dispatch Loggen (`device_dispatch_history`)**: In `daemon.py` wordt nu per minuut/kwartier de actieve toestand van de apparaten weggeschreven naar de nieuwe InfluxDB measurement `device_dispatch_history` (`device_id='heat_pump'`, `mode_code`, `is_lockout`, `is_soft_advice`, `power_w`). Hierdoor is de historie een continue tijdreeks van feiten in plaats van losse overgangsmomenten.
+- **Volledige Historische Overlays Hersteld**: `fetch_historical_overlay_ranges` in `api/routes_analytics.py` lost de weergavefout op:
+  - Fysieke hardware-lockouts (`forced_off`) beslaan nu hun daadwerkelijke volledige tijdsduur (bijv. van 18:31 tot 21:30) in plaats van 1 los kwartier.
+  - Zacht P75-advies (`advised_off` / amberkleurige arcering) en ochtendspitsen (07:15–08:45) worden nu betrouwbaar weergegeven in alle historische grafieken (`power_producers`, `dhw_history`, `heating_history`, `electricity_prices`).
+  - `electricity_prices` bevat nu zowel de historische als toekomstige piek- en adviesbanden.
+- **Tests**: `tests/unit/test_historical_overlay_ranges.py` toegevoegd (3 tests groen); testsuite gegroeid naar 180/180 groen.
+
 ## [0.104.0] — 2026-09-25 (Batterij Rekenkern, Correcties op Energiebehoud & Capability-resolutie)
 
 ### Layer 3 — Batterij Dispatch Rekenkern (Fase 2)

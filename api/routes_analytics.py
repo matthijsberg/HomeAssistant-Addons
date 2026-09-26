@@ -9,7 +9,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from api.context import (
     ensure_active_canonical_plan, GLOBAL_DHW_MODEL
@@ -26,6 +26,12 @@ from api.energy_feed import (
     get_epex_tariffs_cached, get_tariff_sources_map
 )
 from layer3_scheduling.decision_audit import DecisionAuditLogger
+from layer3_scheduling.peak_detection import (
+    detect_dynamic_price_peaks,
+    extract_plan_spitsblok_ranges,
+    extract_plan_soft_advice_ranges
+)
+from models.canonical import DispatchPlanSlot, StandardizedState
 
 _weather_history_cache: Dict[str, Any] = {'ts': 0, 'rad': {}, 'temp': {}}
 
@@ -54,79 +60,137 @@ def resolve_analytics_time_range(tf: str):
     return t_start, t_end
 
 
-def fetch_actual_ranges_from_db(
+def fetch_historical_overlay_ranges(
     t_start_iso: str,
     t_end_iso: str,
     slot_dts: List[datetime],
-    state_code: str = "forced_off",
-    range_name: str = "SPITSBLOK",
-    interval_h: float = 0.25
-) -> List[Dict[str, Any]]:
+    prices: Optional[List[float]] = None,
+    labels: Optional[List[str]] = None,
+    interval_h: float = 0.25,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
-    Retrieves ACTUAL historical state ranges (forced_off or advised_off) from InfluxDB hems_annotations.
-    Zero synthetic / ad-hoc retroactive recalculations over sliding display slices.
+    Unified Single Source of Truth builder for historical chart overlays.
+    Generates both 'forced_off_ranges' (red diagonal hatching) and 'advised_off_ranges' (amber diagonal hatching).
+
+    1. Deterministic calendar-day tariff peak & soft advice detection.
+    2. Merges actual hardware relay actuation intervals from InfluxDB hems_annotations.
     """
     if not slot_dts:
-        return []
+        return [], []
+
+    step_mins = int(round(interval_h * 60))
+    is_15m = (interval_h <= 0.25)
+    n_slots = len(slot_dts)
+    slot_modes = [StandardizedState.NORMAL] * n_slots
+
+    # 1. Deterministic calendar-day tariff peak & soft advice detection
+    if not prices or len(prices) != n_slots:
+        try:
+            _, p_map, _ = get_epex_tariffs_cached(is_15m=is_15m)
+            fmt = "%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00"
+            prices = [p_map.get(dt.strftime(fmt), 0.25) for dt in slot_dts]
+        except Exception:
+            prices = [0.25] * n_slots
+
+    if prices and len(prices) == n_slots:
+        days: Dict[str, List[Dict[str, Any]]] = {}
+        for i, (dt, p) in enumerate(zip(slot_dts, prices)):
+            d_str = dt.strftime("%Y-%m-%d")
+            days.setdefault(d_str, []).append({"idx": i, "dt": dt, "price": p})
+
+        for d_str, day_items in days.items():
+            peaks, lockout_map = detect_dynamic_price_peaks(day_items, step_mins=step_mins)
+            for it in day_items:
+                idx = it["idx"]
+                entry = lockout_map.get(idx)
+                if entry and entry.get("is_hard_lockout"):
+                    slot_modes[idx] = StandardizedState.FORCED_OFF
+                elif entry and not entry.get("is_hard_lockout"):
+                    slot_modes[idx] = StandardizedState.ADVISED_OFF
+
+    # 2. InfluxDB hardware relay intervals from hems_annotations (actual physical execution)
     try:
         sec = load_secrets()
         pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influx_password", "")
-        if not pwd:
-            return []
-        q = (
-            f'SELECT time, state_code, title FROM "hems_annotations" '
-            f'WHERE state_code = \'{state_code}\' AND time >= \'{t_start_iso}\' AND time <= \'{t_end_iso}\' '
-            f'ORDER BY time ASC'
-        )
-        url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
-        with urllib.request.urlopen(url, timeout=3) as r:
-            res = json.loads(r.read().decode())
-        series = res.get("results", [{}])[0].get("series", [])
-        if not series:
-            return []
-        rows = series[0].get("values", [])
-        active_indices = set()
-        step_sec = interval_h * 3600.0
-        for row in rows:
-            t_str = row[0]
-            dt = datetime.fromisoformat(t_str.replace("Z", "+00:00"))
-            for idx, s_dt in enumerate(slot_dts):
-                if abs((dt - s_dt).total_seconds()) < (step_sec / 2.0 + 60.0):
-                    active_indices.add(idx)
-        ranges = []
-        if active_indices:
-            sorted_idx = sorted(list(active_indices))
-            cur_start = sorted_idx[0]
-            cur_end = sorted_idx[0]
-            for i in sorted_idx[1:]:
-                if i == cur_end + 1:
-                    cur_end = i
-                else:
-                    ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": range_name})
-                    cur_start = i
-                    cur_end = i
-            ranges.append({"start_idx": cur_start, "end_idx": cur_end, "name": range_name})
-        return ranges
+        if pwd and t_start_iso and t_end_iso:
+            q = (
+                f'SELECT time, state_code, title, description, event_type FROM "hems_annotations" '
+                f'WHERE time >= \'{t_start_iso}\' - 6h AND time <= \'{t_end_iso}\' '
+                f'ORDER BY time ASC'
+            )
+            url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q=" + urllib.parse.quote(q)
+            with urllib.request.urlopen(url, timeout=3) as r:
+                res = json.loads(r.read().decode())
+            series = res.get("results", [{}])[0].get("series", [])
+            if series:
+                hw_events = []
+                for row in series[0].get("values", []):
+                    t_str, st, title, desc, ev_type = row[0], row[1], row[2], row[3], row[4]
+                    dt = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
+                    if title and ("Smart Grid Relais" in title or ev_type == "hardware_actuation" or st in ["forced_off", "normal"]):
+                        hw_events.append((dt, st))
+
+                for i, (dt, st) in enumerate(hw_events):
+                    if st == "forced_off":
+                        end_dt = hw_events[i + 1][0] if (i + 1 < len(hw_events)) else slot_dts[-1]
+                        for idx, s_dt in enumerate(slot_dts):
+                            if dt <= s_dt < end_dt:
+                                slot_modes[idx] = StandardizedState.FORCED_OFF
     except Exception:
-        return []
+        pass
+
+    # 3. Wrap in DispatchPlanSlot objects to use canonical overlay extractors
+    slots = []
+    for i in range(n_slots):
+        mode = slot_modes[i]
+        lbl = labels[i] if (labels and i < len(labels)) else slot_dts[i].strftime("%H:%M")
+        p = prices[i] if (prices and i < len(prices)) else 0.25
+        s = DispatchPlanSlot(
+            slot_idx=i,
+            time_label=lbl,
+            dt_iso=slot_dts[i].isoformat(),
+            price_eur=p,
+            solar_kw=0.0,
+            unallocated_kw=0.0,
+            heating_kw=0.0,
+            dhw_kw=0.0,
+            net_import_kw=0.0,
+            mode_code=mode,
+            mode_label=mode.value,
+        )
+        slots.append(s)
+
+    forced_off_ranges = extract_plan_spitsblok_ranges(slots, is_15m=is_15m)
+    advised_off_ranges = extract_plan_soft_advice_ranges(slots, is_15m=is_15m)
+    return forced_off_ranges, advised_off_ranges
 
 
 def fetch_actual_forced_off_ranges_from_db(
     t_start_iso: str,
     t_end_iso: str,
     slot_dts: List[datetime],
-    interval_h: float = 0.25
+    interval_h: float = 0.25,
+    prices: Optional[List[float]] = None,
+    labels: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    return fetch_actual_ranges_from_db(t_start_iso, t_end_iso, slot_dts, state_code="forced_off", range_name="SPITSBLOK", interval_h=interval_h)
+    forced, _ = fetch_historical_overlay_ranges(
+        t_start_iso, t_end_iso, slot_dts, prices=prices, labels=labels, interval_h=interval_h
+    )
+    return forced
 
 
 def fetch_actual_advised_off_ranges_from_db(
     t_start_iso: str,
     t_end_iso: str,
     slot_dts: List[datetime],
-    interval_h: float = 0.25
+    interval_h: float = 0.25,
+    prices: Optional[List[float]] = None,
+    labels: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    return fetch_actual_ranges_from_db(t_start_iso, t_end_iso, slot_dts, state_code="advised_off", range_name="P75_ADVIES", interval_h=interval_h)
+    _, advised = fetch_historical_overlay_ranges(
+        t_start_iso, t_end_iso, slot_dts, prices=prices, labels=labels, interval_h=interval_h
+    )
+    return advised
 
 
 def fetch_actual_heating_ranges_from_db(
@@ -510,10 +574,23 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             avg_export = (sum(full_export_prices) / len(full_export_prices)) if full_export_prices else 0.0
 
             hist_offset = len(hist_pts)
-            from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_soft_advice_ranges
             display_slots = plan.slots[:(total_slots if is_15m else total_slots * 4)] if (plan and plan.slots) else []
-            forced_off_ranges = extract_plan_spitsblok_ranges(display_slots, history_count=hist_offset, is_15m=is_15m) if plan else []
-            advised_off_ranges = extract_plan_soft_advice_ranges(display_slots, history_count=hist_offset, is_15m=is_15m) if plan else []
+            future_forced = extract_plan_spitsblok_ranges(display_slots, history_count=hist_offset, is_15m=is_15m) if plan else []
+            future_advised = extract_plan_soft_advice_ranges(display_slots, history_count=hist_offset, is_15m=is_15m) if plan else []
+
+            # Historical overlay for the past 24h section:
+            hist_slot_dts = [hp["dt"].astimezone(AMS_TZ) for hp in hist_pts]
+            hist_forced, hist_advised = fetch_historical_overlay_ranges(
+                hist_slot_dts[0].strftime("%Y-%m-%dT%H:%M:00Z") if hist_slot_dts else "",
+                hist_slot_dts[-1].strftime("%Y-%m-%dT%H:%M:00Z") if hist_slot_dts else "",
+                hist_slot_dts,
+                prices=hist_prices_all_in,
+                labels=hist_labels,
+                interval_h=(0.25 if is_15m else 1.0)
+            )
+
+            forced_off_ranges = hist_forced + future_forced
+            advised_off_ranges = hist_advised + future_advised
 
             res = {
                 "status": "success",
@@ -896,8 +973,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             t_start_iso = t_start_dt.strftime("%Y-%m-%dT%H:%M:00Z")
             t_end_iso = t_end_dt.strftime("%Y-%m-%dT%H:%M:00Z")
             slot_dts = [datetime.fromisoformat(ts_s.replace("Z", "+00:00")).astimezone(AMS_TZ) for ts_s in sorted_ts]
-            forced_off_ranges = fetch_actual_forced_off_ranges_from_db(t_start_iso, t_end_iso, slot_dts, interval_h=interval_h)
-            advised_off_ranges = fetch_actual_advised_off_ranges_from_db(t_start_iso, t_end_iso, slot_dts, interval_h=interval_h)
+            forced_off_ranges, advised_off_ranges = fetch_historical_overlay_ranges(
+                t_start_iso, t_end_iso, slot_dts, prices=series_prices, labels=labels, interval_h=interval_h
+            )
 
             res = {
                 "status": "success",
@@ -1206,8 +1284,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
             # Historical DHW telemetry: retrieve actual recorded hardware lockouts and runs from database
             slot_dts = [datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ) for ts_str in sorted_ts]
-            forced_off_ranges = fetch_actual_forced_off_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
-            advised_off_ranges = fetch_actual_advised_off_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
+            forced_off_ranges, advised_off_ranges = fetch_historical_overlay_ranges(
+                t_start, t_end, slot_dts, labels=labels, interval_h=interval_h
+            )
             heating_ranges = fetch_actual_heating_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
             hist_dhw_windows = load_historical_dhw_planned_windows(t_start_dt, t_end_dt)
             planned_heating_ranges = fetch_planned_dhw_ranges_from_db(slot_dts, hist_dhw_windows, interval_h=interval_h)
@@ -1333,8 +1412,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             # Detect price peaks across historical timeline
             # Historical space heating telemetry: retrieve actual recorded hardware lockouts from database
             slot_dts = [s_dt.astimezone(AMS_TZ) for s_dt in slots]
-            forced_off_ranges = fetch_actual_forced_off_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
-            advised_off_ranges = fetch_actual_advised_off_ranges_from_db(t_start, t_end, slot_dts, interval_h=interval_h)
+            forced_off_ranges, advised_off_ranges = fetch_historical_overlay_ranges(
+                t_start, t_end, slot_dts, labels=labels, interval_h=interval_h
+            )
             spits_indices = set()
             for r in forced_off_ranges:
                 for idx_s in range(r.get("start_idx", 0), min(len(slots), r.get("end_idx", 0) + 1)):

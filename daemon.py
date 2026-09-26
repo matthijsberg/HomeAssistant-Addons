@@ -898,6 +898,27 @@ class HemsBackgroundCollector(threading.Thread):
             f"total_house_w={b['total_house_w']:.1f},unallocated_w={b['unallocated_w']:.1f} {now_ns}"
         )
 
+        # Add continuous device dispatch state records to openhems (device_dispatch_history)
+        cur_hp_mode = "normal"
+        if hasattr(self, "last_actuation") and self.last_actuation:
+            cur_hp_mode = self.last_actuation.get("effective_mode") or self.last_actuation.get("requested_mode", "normal")
+        else:
+            try:
+                plan = ensure_active_canonical_plan()
+                if plan and plan.slots:
+                    val = getattr(plan.slots[0].mode_code, "value", plan.slots[0].mode_code)
+                    cur_hp_mode = str(val).strip().lower()
+            except Exception:
+                pass
+
+        is_hp_lockout = 1 if cur_hp_mode == "forced_off" else 0
+        is_hp_soft = 1 if cur_hp_mode == "advised_off" else 0
+        hp_power = b.get("heatpump_w", 0.0)
+        lines.append(
+            f"device_dispatch_history,device_id=heat_pump,device_type=heat_pump,mode_code={cur_hp_mode} "
+            f"is_lockout={is_hp_lockout}i,is_soft_advice={is_hp_soft}i,power_w={hp_power:.1f} {now_ns}"
+        )
+
         if not lines:
             return
 
