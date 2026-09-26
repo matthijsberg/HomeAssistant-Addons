@@ -10,6 +10,14 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.7] — 2026-09-25 (Verwijdering van maxTicksLimit: Uniforme Asweergave over Alle 9 Grafieken)
+
+### Frontend & Visuele Harmonie
+- **Eliminatie van `maxTicksLimit`**: `maxTicksLimit: 12/16` verwijderd uit `electricityPricesChart`, `powerProducersChart` en `createThermalTrajectoryChart` (`charts_thermal.js`). Dit voorkomt dat Chart.js willekeurige tussenstaven oversloeg waardoor `Nu (HH:MM)` en dagmarkeringen (`Za 00:00`, `Zo 00:00`) onzichtbaar werden.
+- **100% Identieke X-As Presentatie**: Alle 9 grafieken op zowel Voorspelling als Historie tonen nu exact dezelfde uren, `Nu`-labels en dagovergangen.
+
+---
+
 ## [0.104.6] — 2026-09-25 (Volledige Synchronisatie Thermische Voorspellingsgrafieken)
 
 ### Bug Fixes & Pariteit

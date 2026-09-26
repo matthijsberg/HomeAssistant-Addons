@@ -255,8 +255,7 @@
                         grid: { color: 'rgba(255, 255, 255, 0.05)' },
                         ticks: {
                             color: '#94a3b8',
-                            font: { size: 10, family: 'monospace' },
-                            maxTicksLimit: 16
+                            font: { size: 10, family: 'monospace' }
                         }
                     },
                     y: {

@@ -3747,8 +3747,7 @@
                                 grid: { color: OpenHEMSTokens.colors.gridLine },
                                 ticks: {
                                     color: OpenHEMSTokens.colors.textMuted,
-                                    font: { family: OpenHEMSTokens.fonts.mono, size: 10 },
-                                    maxTicksLimit: 12
+                                    font: { family: OpenHEMSTokens.fonts.mono, size: 10 }
                                 }
                             },
                             y: {
@@ -4018,8 +4017,7 @@
                             grid: { color: 'rgba(30, 41, 59, 0.4)' },
                             ticks: {
                                 color: '#94A3B8',
-                                font: { family: 'monospace', size: 10 },
-                                maxTicksLimit: 12
+                                font: { family: 'monospace', size: 10 }
                             }
                         },
                         y: {
@@ -4363,8 +4361,7 @@
                                 grid: { color: 'rgba(30, 41, 59, 0.4)' },
                                 ticks: { 
                                     color: '#94A3B8', 
-                                    font: { family: 'monospace', size: 10 },
-                                    maxTicksLimit: 12
+                                    font: { family: 'monospace', size: 10 }
                                 }
                             },
                             y: {
