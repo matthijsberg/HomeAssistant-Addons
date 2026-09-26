@@ -45,6 +45,9 @@ class BatterySlotResult:
     soc_pct: float
     soc_kwh: float
     cost_impact_eur: float                      # Monetary cost/saving in this slot (+ cost, - saving)
+    deficit_kw: float = 0.0                     # Unhedged house demand resulting in grid import
+    soc_p05_pct: float = 0.0                    # Conservative lower bound SoC
+    soc_p95_pct: float = 0.0                    # Optimistic upper bound SoC
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -62,6 +65,8 @@ class BatteryPlanSummary:
     min_projected_soc_pct: float
     max_projected_soc_pct: float
     slots: List[BatterySlotResult]
+    total_deficit_kwh: float = 0.0
+    autonomy_pct: float = 100.0
     is_active: bool = True
     inactive_reason: str = ""
 
@@ -292,10 +297,16 @@ class BatteryPolicy:
             # 3. Positive residual = House needs energy
             if res_kw > 0.05:
                 # Look ahead: Are there imminent higher-priced peaks?
-                # Only reserve if solar won't refill the battery before that peak!
+                # Only reserve if:
+                # 1. Upcoming peak price > p_in + peak_price_delta_eur_kwh (or forced lockout)
+                # 2. There is NO cheaper valley before that peak (where we could refill cheaper!)
+                # 3. Solar won't refill the battery before that peak!
                 future_lockouts = []
                 for j in range(i + 1, min(n_slots, i + spec.reserve_lookahead_slots)):
                     if (j in forced_lockouts or import_prices[j] > p_in + spec.peak_price_delta_eur_kwh) and residual_demand_kw[j] > 0.1:
+                        cheapest_between = min(import_prices[i+1:j]) if (j > i + 1) else p_in
+                        if cheapest_between < (p_in - 0.03):
+                            continue
                         solar_refill = sum(
                             abs(residual_demand_kw[k]) * step_hours
                             for k in range(i + 1, j)
@@ -309,9 +320,6 @@ class BatteryPolicy:
                     for j in future_lockouts
                 )
                 available_to_discharge_kwh = max(0.0, running_soc - min_kwh)
-
-                # Economische poort, gelijk aan die van DISCHARGE_BUFFER: ontladen moet de
-                # vermeden inkoop laten winnen van degradatie plus de exportwaarde van dezelfde kWh.
                 is_profitable = (p_in - spec.degradation_cost_eur_kwh) > p_ex
 
                 # If current slot is an explicit lockout OR there are no higher-priced peaks ahead:
@@ -319,7 +327,7 @@ class BatteryPolicy:
                     # Full Peak Shaving
                     req_kwh = min(res_kw, spec.max_discharge_kw) * step_hours
                     dis_kwh = min(req_kwh, available_to_discharge_kwh * eta_one_way)
-                    if dis_kwh > 0.02:
+                    if dis_kwh > 0.01:
                         act_kw = dis_kwh / step_hours
                         power_dispatch_kw[i] = -round(act_kw, 3)
                         mode_codes[i] = "DISCHARGE_PEAK"
@@ -329,11 +337,11 @@ class BatteryPolicy:
 
                 # Not a peak, but we have more energy than needed for future peaks:
                 excess_kwh = available_to_discharge_kwh - (future_critical_kwh / eta_one_way)
-                if excess_kwh > 0.05 and (p_in - spec.degradation_cost_eur_kwh) > p_ex:
+                if excess_kwh > 0.02 and is_profitable:
                     # Off-peak residual discharge (Nul-op-de-meter)
                     req_kwh = min(res_kw, spec.max_discharge_kw) * step_hours
                     dis_kwh = min(req_kwh, excess_kwh * eta_one_way)
-                    if dis_kwh > 0.02:
+                    if dis_kwh > 0.01:
                         act_kw = dis_kwh / step_hours
                         power_dispatch_kw[i] = -round(act_kw, 3)
                         mode_codes[i] = "DISCHARGE_BUFFER"
@@ -350,6 +358,32 @@ class BatteryPolicy:
             mode_codes[i] = "STANDBY"
             mode_labels[i] = "Standby"
 
+        # Simulation of P05 and P95 SoC bounds based on demand/solar uncertainty (±25%)
+        res_p95 = [round(r * 1.25, 3) if r > 0 else round(r * 0.75, 3) for r in residual_demand_kw]
+        res_p05 = [round(r * 0.75, 3) if r > 0 else round(r * 1.25, 3) for r in residual_demand_kw]
+
+        def _calc_soc_trajectory(res_list):
+            r_soc = cur_kwh
+            res_soc_pct = []
+            for j in range(n_slots):
+                r = res_list[j]
+                if r < -0.05:
+                    surplus = abs(r)
+                    head = max(0.0, max_kwh - r_soc)
+                    intake = min(min(surplus, spec.max_charge_kw) * step_hours * eta_one_way, head)
+                    r_soc += intake
+                elif r > 0.05:
+                    avail = max(0.0, r_soc - min_kwh)
+                    if (import_prices[j] - spec.degradation_cost_eur_kwh) > export_prices[j] and avail > 0.01:
+                        req = min(r, spec.max_discharge_kw) * step_hours
+                        dis = min(req, avail * eta_one_way)
+                        r_soc -= (dis / eta_one_way)
+                res_soc_pct.append(round((r_soc / spec.capacity_kwh) * 100.0, 1))
+            return res_soc_pct
+
+        p05_soc_list = _calc_soc_trajectory(res_p95)
+        p95_soc_list = _calc_soc_trajectory(res_p05)
+
         # -------------------------------------------------------------------
         # Build Results & Financial Accounting
         # -------------------------------------------------------------------
@@ -357,6 +391,7 @@ class BatteryPolicy:
         tot_ch_solar = 0.0
         tot_ch_grid = 0.0
         tot_dis = 0.0
+        tot_deficit = 0.0
         net_financial_saving = 0.0
 
         current_soc = cur_kwh
@@ -365,6 +400,7 @@ class BatteryPolicy:
 
         for i in range(n_slots):
             kw = power_dispatch_kw[i]
+            res = residual_demand_kw[i]
             code = mode_codes[i]
             label = mode_labels[i]
             p_in = import_prices[i]
@@ -392,6 +428,9 @@ class BatteryPolicy:
                 cost_impact = -(avoided_cost - degradation)
                 net_financial_saving -= cost_impact
 
+            deficit = max(0.0, res - max(0.0, -kw)) if res > 0.05 else 0.0
+            tot_deficit += deficit * step_hours
+
             soc_pct = round((current_soc / spec.capacity_kwh) * 100.0, 1)
             min_proj_soc = min(min_proj_soc, soc_pct)
             max_proj_soc = max(max_proj_soc, soc_pct)
@@ -405,8 +444,14 @@ class BatteryPolicy:
                     soc_pct=soc_pct,
                     soc_kwh=round(current_soc, 3),
                     cost_impact_eur=round(cost_impact, 4),
+                    deficit_kw=round(deficit, 3),
+                    soc_p05_pct=p05_soc_list[i],
+                    soc_p95_pct=p95_soc_list[i]
                 )
             )
+
+        tot_demand = tot_dis + tot_deficit
+        autonomy_pct = round((tot_dis / tot_demand) * 100.0, 1) if tot_demand > 0 else 100.0
 
         return BatteryPlanSummary(
             total_charged_solar_kwh=round(tot_ch_solar, 2),
@@ -418,6 +463,8 @@ class BatteryPolicy:
             min_projected_soc_pct=min_proj_soc,
             max_projected_soc_pct=max_proj_soc,
             slots=slot_results,
+            total_deficit_kwh=round(tot_deficit, 2),
+            autonomy_pct=autonomy_pct
         )
 
 

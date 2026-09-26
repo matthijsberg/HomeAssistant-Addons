@@ -291,4 +291,46 @@ def test_reusable_ui_and_chart_contracts():
     assert "gridCharge: '#8B5CF6'" in app_js
 
 
+def test_battery_status_bandwidth_autonomy_and_deficit():
+    """Verify that battery status delivers P05/P95 bandwidths, deficit tracking, autonomy, and rich explanation."""
+    from api.routes_forecast import handle_get
+
+    class DummyHandler:
+        def __init__(self, path):
+            self.path = path
+            self.response = None
+        def _send_json(self, data, status=200):
+            self.response = data
+
+    h = DummyHandler("/api/model/battery-status?resolution=15m&horizon=24h")
+    ok = handle_get(h, "/api/model/battery-status", {"resolution": ["15m"], "horizon": ["24h"]})
+    assert ok is True
+    d = h.response
+    assert d is not None
+    assert d.get("status") == "success"
+
+    traj = d.get("trajectory", {})
+    assert "soc_p05_pct" in traj
+    assert "soc_p95_pct" in traj
+    assert "deficit_kw" in traj
+    assert len(traj["soc_p05_pct"]) == 100
+    assert len(traj["soc_p95_pct"]) == 100
+    assert len(traj["deficit_kw"]) == 100
+
+    # P05 <= P95 at all forecast points
+    for i in range(4, 100):
+        assert traj["soc_p05_pct"][i] <= traj["soc_p95_pct"][i] + 0.1
+
+    # Autonomy and KPIs
+    kpi = d.get("kpi_cards", {})
+    assert "autonomy_pct" in kpi
+    assert 0.0 <= kpi["autonomy_pct"] <= 100.0
+
+    dec = d.get("decision", {})
+    assert "autonomy_pct" in dec
+    assert "explanation" in dec
+    assert len(dec["explanation"]) > 20
+
+
+
 

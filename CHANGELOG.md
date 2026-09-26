@@ -10,6 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.19] — 2026-09-25 (Thuisaccu Operating Envelope: P05–P95 Bandbreedte, Ongedekt Tekort, Autonomie & Rijke Besluitvorming)
+
+### Algoritmiek & Fysische Modellering
+- **P05–P95 State of Charge Bandbreedte Corridor**: In de accugrafiek is een fysisch onderbouwde onzekerheidsbandbreedte toegevoegd rond de P50 SoC-lijn, gemodelleerd op basis van stochastische variabiliteit in huishoudvraag en zonne-instraling (exact analoog aan de boilervat- en CV-grafieken).
+- **Nul-op-de-meter Prioriteit & Leegplannen tot 10%**:
+  - De optimizer reserveert geen onnodige 20% ondergrens meer als er vóór de piek goedkopere daltarieven of zonne-energie beschikbaar zijn om de accu te herladen.
+  - De batterij plant autonoom door tot de veilige 10% buffergrens om netafname maximaal af te wenden.
+- **Ongedekt Netverlies / Tekort Tracking**: Zodra de batterij leeg is (10% bereikt) of de vraag de 5 kW omvormerlimiet overstijgt, toont de grafiek het resterende huishoudtekort direct als **rode staven** (-kW onder de 0-as).
+- **Autonomie-graad KPI**: Nieuwe KPI-kaart en badge die de berekende nul-op-de-meter dekkingsgraad (% van totale woningvraag gedekt door zon + batterij) toont.
+- **Rijke Dispatch-Redenering & Besluitvorming**: Uitgebreide toelichtingsbox onder de batterijtijdlijn met contextuele uitleg over nachtontlading, zon-absorptie, daltarief en dekkingscijfers.
+
+---
+
 ## [0.104.18] — 2026-09-25 (Borging 24h/48h SOT Pariteit & Eliminatie Vroegtijdige Netlading)
 
 ### Algoritmiek & Architectuur

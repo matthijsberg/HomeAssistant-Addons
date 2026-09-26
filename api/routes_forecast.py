@@ -600,10 +600,13 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     ))
 
         soc_pct_list = [round(s.soc_pct, 1) for s in disp_slots]
+        soc_p05_list = [round(s.soc_p05_pct, 1) for s in disp_slots]
+        soc_p95_list = [round(s.soc_p95_pct, 1) for s in disp_slots]
         soc_kwh_list = [round(s.soc_kwh, 2) for s in disp_slots]
         power_kw_list = [round(s.power_kw, 2) for s in disp_slots]
         charge_kw_list = [round(max(0.0, s.power_kw), 2) for s in disp_slots]
         discharge_kw_list = [round(max(0.0, -s.power_kw), 2) for s in disp_slots]
+        deficit_disp = [round(s.deficit_kw, 2) for s in disp_slots]
         solar_charge_disp = [round(s.power_kw, 2) if s.mode_code == "CHARGE_SOLAR" and s.power_kw > 0 else 0.0 for s in disp_slots]
         grid_charge_disp = [round(s.power_kw, 2) if s.mode_code == "CHARGE_GRID" and s.power_kw > 0 else 0.0 for s in disp_slots]
 
@@ -628,6 +631,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         hist_power_kw = [0.0] * hist_count
         hist_charge_kw = [0.0] * hist_count
         hist_discharge_kw = [0.0] * hist_count
+        hist_deficit_kw = [0.0] * hist_count
         hist_solar_charge = [0.0] * hist_count
         hist_grid_charge = [0.0] * hist_count
 
@@ -671,14 +675,18 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             })
 
         explanation_parts = []
+        if summary_15m.total_discharged_kwh > 0.5:
+            explanation_parts.append(f"Nul-op-de-meter ontlading: De accu levert {summary_15m.total_discharged_kwh:.1f} kWh ter voorkoming van dure netafname (€0,25–€0,45/kWh), doorgaand tot de 10% buffergrens.")
         if summary_15m.total_charged_solar_kwh > 0.5:
             explanation_parts.append(f"Zonne-absorptie: {summary_15m.total_charged_solar_kwh:.1f} kWh gratis PV-overschot opgeslagen.")
         if summary_15m.total_charged_grid_kwh > 0.5:
-            explanation_parts.append(f"Daltarief netlading: {summary_15m.total_charged_grid_kwh:.1f} kWh geladen tegen laagste nachtprijzen.")
-        if summary_15m.total_discharged_kwh > 0.5:
-            explanation_parts.append(f"Piekontlasting: {summary_15m.total_discharged_kwh:.1f} kWh ontladen om dure netimport af te toppen.")
+            explanation_parts.append(f"Daltarief netlading: {summary_15m.total_charged_grid_kwh:.1f} kWh geladen tegen bodemprijzen.")
+        else:
+            explanation_parts.append("Geen netlading vereist: zon dekt het laadtarief overdag optimaal.")
+        if summary_15m.total_deficit_kwh > 0.1:
+            explanation_parts.append(f"Residuele netafname: {summary_15m.total_deficit_kwh:.1f} kWh kan niet uit de accu worden gedekt en wordt ingekocht.")
 
-        expl_text = " · ".join(explanation_parts) if explanation_parts else "Batterij in standby; tariefschommelingen en zonne-overschotten onder rendementsdrempel."
+        expl_text = " ".join(explanation_parts)
 
         handler._send_json({
             "status": "success",
@@ -690,10 +698,13 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "export_prices": all_export_prices,
             "trajectory": {
                 "soc_pct": hist_soc_pct + soc_pct_list,
+                "soc_p05_pct": hist_soc_pct + soc_p05_list,
+                "soc_p95_pct": hist_soc_pct + soc_p95_list,
                 "soc_kwh": hist_soc_kwh + soc_kwh_list,
                 "power_kw": hist_power_kw + power_kw_list,
                 "charge_power_kw": hist_charge_kw + charge_kw_list,
                 "discharge_power_kw": hist_discharge_kw + discharge_kw_list,
+                "deficit_kw": hist_deficit_kw + deficit_disp,
                 "solar_charge_kw": hist_solar_charge + solar_charge_disp,
                 "grid_charge_kw": hist_grid_charge + grid_charge_disp,
                 "import_prices": all_import_prices,
@@ -707,6 +718,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "solar_charged_kwh": summary_15m.total_charged_solar_kwh,
                 "grid_charged_kwh": summary_15m.total_charged_grid_kwh,
                 "discharged_kwh": summary_15m.total_discharged_kwh,
+                "deficit_kwh": summary_15m.total_deficit_kwh,
+                "autonomy_pct": summary_15m.autonomy_pct,
                 "net_saving_eur": summary_15m.net_financial_saving_eur,
                 "initial_soc_pct": summary_15m.initial_soc_pct,
                 "final_soc_pct": summary_15m.final_soc_pct,
@@ -714,8 +727,12 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "max_projected_soc_pct": summary_15m.max_projected_soc_pct
             },
             "decision": {
-                "box_title": "Thuisbatterij (15 kWh): 24-Uurs Dispatch Besluitvorming",
+                "box_title": "Thuisbatterij (15 kWh): Dispatch-Redenering & Operating Envelope",
                 "explanation": expl_text,
+                "autonomy_pct": summary_15m.autonomy_pct,
+                "total_deficit_kwh": summary_15m.total_deficit_kwh,
+                "total_discharged_kwh": summary_15m.total_discharged_kwh,
+                "total_charged_kwh": round(summary_15m.total_charged_solar_kwh + summary_15m.total_charged_grid_kwh, 2),
                 "mode_code": disp_slots[0].mode_code if disp_slots else "STANDBY"
             }
         })
