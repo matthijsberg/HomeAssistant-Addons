@@ -10,6 +10,20 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.24] — 2026-09-26 (Piecewise Linear Laadband, Ramping Smoothing & Tail-Horizon Reserve)
+
+### Wiskundige Refactoring & LP-Hardening (Review Ronde 3)
+- **Piecewise Linear Tweetraps-Laadband**: Total charge power ($P_{\text{ch}} = P_{\text{ch, solar}} + P_{\text{ch, grid}}$) opgeknipt rond een configureerbare knik `spec.charge_knee_kw` (2,5 kW) met een toeslag van €0,005/kWh op vermogen daarboven. Elimineert bang-bang hoekoplossingen en spreidt net- en zonneladen gelijkmatig uit op 2,5 kW over de middag.
+- **Ramping Penalty tegen Zigzaggen**: Lineaire strafterm ($r(t) \ge |P_{\text{ch}}(t) - P_{\text{ch}}(t-1)|$, €0,001/kW) toegevoegd aan de doelfunctie. Voorkomt abrupte setpointwisselingen via Modbus naar de Deye omvormer.
+- **Tail-Horizon Terminale Waardering**: $\lambda_{\text{term}}$ wordt berekend over de staart van de horizon (laatste 24u / 96 slots). Bij een dure maandagavond (€0,224 min) waardeert dit terminale energie op €0,235/DC-kWh, waardoor de accu op zondag doorlaadt tot het volle 95% SoC plafond en maandagnacht niet leeg (10%) achterlaat maar met een gezonde reserve (~44% SoC) aan dinsdagochtend overdraagt.
+- **Vier Nieuwe Dedicated Regressietests**:
+  1. `test_flat_price_window_spreads_charging`: Bewijst dat 8 kwartieren op gelijke prijs rustig uitgesmeerd laden op 2,5 kW zonder 5 -> 0 -> 5 sprongen.
+  2. `test_short_deep_valley_still_uses_full_power`: Bewijst dat een kort diep dal (1-2 kwartieren) wel degelijk op vol 5 kW vermogen laadt.
+  3. `test_expensive_tail_keeps_terminal_reserve`: Bewijst dat een dure staart leidt tot > 10 kWh netlading en behoud van terminale reserve (> 20% SoC).
+  4. `test_early_negative_price_does_not_zero_lambda`: Bewijst dat een negatieve prijs vroeg in de horizon de terminale reserve niet breekt.
+
+---
+
 ## [0.104.23] — 2026-09-26 (Wiskundige Hardening LP & TariffProvider Pariteit)
 
 ### Wiskundige Reparatie & Review-Hardening (Second Opinion Hercontrole)

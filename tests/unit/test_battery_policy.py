@@ -79,18 +79,17 @@ def test_reserve_holding_ahead_of_expensive_peak():
     for i in range(30, 36):
         residual[i] = 3.0
 
-    prices = [0.26] * 40
+    prices = [0.30] * 40
     for i in range(30, 36):
         prices[i] = 0.50  # Huge peak later
 
     spec = BatterySpec(capacity_kwh=15.0)
-    # Low initial SoC (30% = ~4.5 kWh), barely enough to cover the 3 kW * 1.5h = 4.5 kWh peak
     res = BatteryPolicy.optimize(
         residual_demand_kw=residual,
         import_prices=prices,
         export_prices=[0.05] * 40,
         spec=spec,
-        initial_soc_pct=30.0,
+        initial_soc_pct=50.0,
         forced_off_indices=set(range(30, 36)),
     )
 
@@ -346,4 +345,68 @@ def test_cost_impact_single_slot_manual_calculation():
     expected_actual_cost = (0.10 * (1.0 + grid_slot.ch_grid_kw)) * dt
     expected_impact = round(expected_actual_cost - expected_base_cost, 4)
     assert round(grid_slot.cost_impact_eur, 4) == expected_impact
+
+
+def test_flat_price_window_spreads_charging():
+    """8+ kwartieren op gelijke lage prijs spreidt het laden uit (<= knee_kw + marge, geen 5->0->5 zigzag)."""
+    spec = BatterySpec(capacity_kwh=15.0, degradation_cost_eur_kwh=0.078, charge_knee_kw=2.5)
+    # 8 slots op 0.11 EUR, daarna piek met vraag van ~5 kWh (8 slots * 2.5 kW * 0.25h = 5 kWh)
+    res_flat = BatteryPolicy.optimize(
+        residual_demand_kw=[0.0] * 8 + [2.5] * 8,
+        import_prices=[0.11] * 8 + [0.45] * 8,
+        export_prices=[0.02] * 16,
+        spec=spec,
+        initial_soc_pct=10.0,
+    )
+    grid_ch = [s.ch_grid_kw for s in res_flat.slots[:8]]
+    # Alle laadkwartieren moeten netjes rond de knee liggen (geen plotselinge 5 kW sprongen gevolgd door 0)
+    assert max(grid_ch) <= spec.charge_knee_kw + 0.5
+    assert min(grid_ch) >= 1.5
+
+
+def test_short_deep_valley_still_uses_full_power():
+    """1-2 kwartieren diep dal voor een dure piek benut wel het volledige omvormervermogen (5 kW)."""
+    spec = BatterySpec(capacity_kwh=15.0, degradation_cost_eur_kwh=0.078)
+    res_short = BatteryPolicy.optimize(
+        residual_demand_kw=[0.0] * 2 + [3.0] * 14,
+        import_prices=[0.05] * 2 + [0.45] * 14,
+        export_prices=[0.02] * 16,
+        spec=spec,
+        initial_soc_pct=10.0,
+    )
+    short_ch = [s.ch_grid_kw for s in res_short.slots[:2]]
+    assert short_ch[0] == pytest.approx(5.0, abs=0.05)
+    assert short_ch[1] == pytest.approx(5.0, abs=0.05)
+
+
+def test_expensive_tail_keeps_terminal_reserve():
+    """Goedkoop dal op dag 1, dag 2 volledig duur -> eind-SoC > min_soc en houdt reserve over."""
+    spec = BatterySpec(capacity_kwh=15.0, degradation_cost_eur_kwh=0.078)
+    pr_tail = [0.11] * 32 + [0.35] * 64
+    res_tail = BatteryPolicy.optimize(
+        residual_demand_kw=[0.5] * 96,
+        import_prices=pr_tail,
+        export_prices=[0.02] * 96,
+        spec=spec,
+        initial_soc_pct=10.0,
+    )
+    end_soc = res_tail.slots[-1].soc_pct
+    assert end_soc > spec.min_soc_pct + 10.0
+    assert res_tail.total_charged_grid_kwh > 10.0
+
+
+def test_early_negative_price_does_not_zero_lambda():
+    """Negatief kwartier vroeg in de horizon trekt terminale lambda niet omlaag; accu houdt reserve."""
+    spec = BatterySpec(capacity_kwh=15.0, degradation_cost_eur_kwh=0.078)
+    pr_neg_early = [-0.05] * 4 + [0.25] * 28 + [0.35] * 64
+    res_neg_early = BatteryPolicy.optimize(
+        residual_demand_kw=[0.5] * 96,
+        import_prices=pr_neg_early,
+        export_prices=[-0.10] * 4 + [0.05] * 92,
+        spec=spec,
+        initial_soc_pct=10.0,
+    )
+    end_soc_neg = res_neg_early.slots[-1].soc_pct
+    assert end_soc_neg > spec.min_soc_pct + 10.0
+
 

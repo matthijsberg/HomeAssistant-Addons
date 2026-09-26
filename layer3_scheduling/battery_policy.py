@@ -36,6 +36,9 @@ class BatterySpec:
     reserve_price_delta_eur_kwh: float = 0.12   # Minimaal prijsverschil voor netlaad-reservering
     grid_charge_soc_ceiling_pct: float = 85.0   # Netladen stopt hier; de rest is voor zon
     max_grid_import_kw: float = 17.25           # Main grid connection fuse limit (3x25A = ~17.25 kW)
+    charge_knee_kw: float = 2.5                 # Nominal piecewise linear knee for charging
+    charge_tier2_penalty_eur_kwh: float = 0.005 # Penalty per kWh above charge_knee_kw to encourage smoothing
+    charge_ramp_penalty_eur_kw: float = 0.001   # Penalty per kW step change to prevent zigzagging
 
 
 @dataclass
@@ -185,12 +188,27 @@ class BatteryPolicy:
         eta_dis = eta_one_way
         c_deg = spec.degradation_cost_eur_kwh
 
-        # Terminal valuation based on replacement/reload cost across the horizon (non-negative, 2% discount):
-        min_future_reload = float(np.min(import_prices))
-        lambda_term = (max(0.0, min_future_reload) / eta_ch) * 0.98
+        # Terminal valuation based on reload cost across the TAIL of the horizon:
+        # Multi-day/full horizons (>= 96 slots / 24h): last 24h tail captures Day 2 reload cost into Day 3.
+        # Short sub-day horizons (< 96 slots): global min prevents artificial terminal arbitrage.
+        if n_slots >= 96:
+            tail_slots = min(96, n_slots // 2)
+            min_tail_reload = float(np.min(import_prices[-tail_slots:]))
+        else:
+            min_tail_reload = float(np.min(import_prices))
+        lambda_term = (max(0.0, min_tail_reload) / eta_ch) * 0.98
 
         N = n_slots
-        c = np.zeros(5 * N)
+        # Decision variables (7 blocks of size N):
+        # 0*N: P_ch_solar (kW)
+        # 1*N: P_ch_grid (kW)
+        # 2*N: P_dis (kW)
+        # 3*N: P_imp (kW)
+        # 4*N: P_exp (kW)
+        # 5*N: P_ch_high (kW above knee_kw)
+        # 6*N: r (kW ramp step change)
+        n_vars = 7 * N
+        c = np.zeros(n_vars)
         for t in range(N):
             p_in = import_prices[t]
             p_ex = export_prices[t]
@@ -199,8 +217,10 @@ class BatteryPolicy:
             c[2*N + t] = (c_deg * dt + lambda_term * (dt / eta_dis)) - 1e-6 * (N - t) * dt
             c[3*N + t] = p_in * dt
             c[4*N + t] = -p_ex * dt
+            c[5*N + t] = spec.charge_tier2_penalty_eur_kwh * dt
+            c[6*N + t] = spec.charge_ramp_penalty_eur_kw
 
-        A_eq = np.zeros((N, 5 * N))
+        A_eq = np.zeros((N, n_vars))
         b_eq = np.zeros(N)
         for t in range(N):
             A_eq[t, 3*N + t] = 1.0   # P_imp
@@ -210,18 +230,57 @@ class BatteryPolicy:
             A_eq[t, 0*N + t] = -1.0  # -P_ch_solar
             b_eq[t] = residual_demand_kw[t]
 
-        A_ub = np.zeros((2 * N, 5 * N))
-        b_ub = np.zeros(2 * N)
+        # Inequality constraints:
+        # 1. SoC upper bound (N)
+        # 2. SoC lower bound (N)
+        # 3. Tier-2 knee: P_ch_solar(t) + P_ch_grid(t) - P_ch_high(t) <= charge_knee_kw (N)
+        # 4. Ramping up: P_ch(t+1) - P_ch(t) - r(t) <= 0 (N-1)
+        # 5. Ramping down: P_ch(t) - P_ch(t+1) - r(t) <= 0 (N-1)
+        n_ub = 3 * N + 2 * (N - 1)
+        A_ub = np.zeros((n_ub, n_vars))
+        b_ub = np.zeros(n_ub)
+
+        row = 0
         for t in range(N):
             for k in range(t + 1):
-                A_ub[t, 0*N + k] = dt * eta_ch
-                A_ub[t, 1*N + k] = dt * eta_ch
-                A_ub[t, 2*N + k] = -dt / eta_dis
-                A_ub[N + t, 0*N + k] = -dt * eta_ch
-                A_ub[N + t, 1*N + k] = -dt * eta_ch
-                A_ub[N + t, 2*N + k] = dt / eta_dis
-            b_ub[t] = max_kwh - cur_kwh
-            b_ub[N + t] = cur_kwh - min_kwh
+                A_ub[row, 0*N + k] = dt * eta_ch
+                A_ub[row, 1*N + k] = dt * eta_ch
+                A_ub[row, 2*N + k] = -dt / eta_dis
+            b_ub[row] = max_kwh - cur_kwh
+            row += 1
+
+        for t in range(N):
+            for k in range(t + 1):
+                A_ub[row, 0*N + k] = -dt * eta_ch
+                A_ub[row, 1*N + k] = -dt * eta_ch
+                A_ub[row, 2*N + k] = dt / eta_dis
+            b_ub[row] = cur_kwh - min_kwh
+            row += 1
+
+        for t in range(N):
+            A_ub[row, 0*N + t] = 1.0
+            A_ub[row, 1*N + t] = 1.0
+            A_ub[row, 5*N + t] = -1.0
+            b_ub[row] = spec.charge_knee_kw
+            row += 1
+
+        for t in range(N - 1):
+            A_ub[row, 0*N + t + 1] = 1.0
+            A_ub[row, 1*N + t + 1] = 1.0
+            A_ub[row, 0*N + t] = -1.0
+            A_ub[row, 1*N + t] = -1.0
+            A_ub[row, 6*N + t] = -1.0
+            b_ub[row] = 0.0
+            row += 1
+
+        for t in range(N - 1):
+            A_ub[row, 0*N + t] = 1.0
+            A_ub[row, 1*N + t] = 1.0
+            A_ub[row, 0*N + t + 1] = -1.0
+            A_ub[row, 1*N + t + 1] = -1.0
+            A_ub[row, 6*N + t] = -1.0
+            b_ub[row] = 0.0
+            row += 1
 
         bounds = []
         for t in range(N):
@@ -237,9 +296,12 @@ class BatteryPolicy:
             bounds.append((0, min(spec.max_discharge_kw, req)))
         for t in range(N):
             # Physical grid connection fuse limit from spec (default 17.25 kW for 3x25A)
-            # Add headroom above residual demand so extreme unhedged spikes do not cause solver infeasibility
             limit = max(spec.max_grid_import_kw, residual_demand_kw[t] + 1.0)
             bounds.append((0, limit))
+        for t in range(N):
+            bounds.append((0, None))
+        for t in range(N):
+            bounds.append((0, None))
         for t in range(N):
             bounds.append((0, None))
 
