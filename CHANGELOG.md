@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.17] — 2026-09-25 (Adoptie Term 'Operating Envelope' voor Warmtepomp en Accu)
+
+### UI & Taxonomie
+- **Terminologie-Harmonisatie**: De kaarten voor de tijdlijnen van warmtepomp en thuisbatterij zijn hernoemd naar de industriële standaardterm **Operating Envelope** (Dynamic Operating Envelopes / DOE):
+  - *Warmtepomp & Boiler: 24-Uurs Operating Envelope*
+  - *Thuisbatterij (15 kWh): 24-Uurs Operating Envelope*
+- **Subtitels**: Omschrijven nu expliciet de dynamische sturingskaders (spitsblokkades, zon-absorptie, daltarief-netladen en nul-op-de-meter afvlakking).
+
+---
+
 ## [0.104.16] — 2026-09-25 (Thuisaccu EPEX Inkoop & Teruglever Tarieflijnen op Dedicated Y-As)
 
 ### Frontend & Visuele Harmonie
