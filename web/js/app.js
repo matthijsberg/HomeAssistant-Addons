@@ -3785,6 +3785,35 @@
             }
         }
 
+        async function refreshPredictionView() {
+            const btn = document.getElementById('btn-refresh-prediction');
+            const icon = document.getElementById('icon-refresh-prediction');
+            if (btn) {
+                btn.disabled = true;
+                btn.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+            if (icon) icon.classList.add('animate-spin');
+
+            try {
+                const promises = [];
+                if (typeof loadChartData === 'function') promises.push(loadChartData());
+                if (typeof loadElectricityPricesChart === 'function') promises.push(loadElectricityPricesChart());
+                if (typeof renderDhwTemperatureChart === 'function') promises.push(renderDhwTemperatureChart());
+                if (typeof renderHeatingForecastChart === 'function') promises.push(renderHeatingForecastChart());
+                if (typeof renderBatteryTrajectoryChart === 'function') promises.push(renderBatteryTrajectoryChart());
+                await Promise.allSettled(promises);
+            } catch (err) {
+                console.error('Error refreshing prediction charts:', err);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+                if (icon) icon.classList.remove('animate-spin');
+            }
+        }
+        window.refreshPredictionView = refreshPredictionView;
+
         async function forceRecalculatePlan() {
             const btn = document.getElementById('btn-force-recalculate');
             const icon = document.getElementById('icon-recalculate');
@@ -3798,10 +3827,7 @@
                 const res = await fetch('./api/schedule/recalculate', { method: 'POST' });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    if (typeof loadChartData === 'function') await loadChartData();
-                    if (typeof loadElectricityPricesChart === 'function') await loadElectricityPricesChart();
-                    if (typeof renderDhwTemperatureChart === 'function') await renderDhwTemperatureChart();
-                    if (typeof renderHeatingForecastChart === 'function') await renderHeatingForecastChart();
+                    await refreshPredictionView();
                 } else {
                     console.error('Recalculate error:', data);
                 }

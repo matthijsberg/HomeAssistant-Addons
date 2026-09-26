@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.25] — 2026-09-26 (DHW Run Consolidatie, Ververs-Feedback & Header Opruiming)
+
+### Opgeloste Regressies & UI Verbeteringen
+- **DHW Run Consolidatie (`CentralPlanner._consolidate_dhw_runs`)**: Voorkomt dat de optimizer op zondagmiddag twee losse runs plant (13:30 en 15:30) met een tussenpauze. Gefragmenteerde runs binnen een venster van $\le 6$ kwartieren (1,5 uur) worden direct samengevoegd tot één continue, efficiënte verwarmingscyclus (van 13:00 tot 14:15).
+- **Visuele Feedback & Integrale Verversing (`refreshPredictionView`)**: Zowel de knop "Verversen" als "Herberekenen" tonen nu directe visuele feedback (spinner animatie op het icoon en disabled toestand tijdens het laden). Ververst nu synchroon alle 5 voorspellingsgrafieken inclusief de thuisbatterij (`renderBatteryTrajectoryChart`).
+- **Verwijdering Redundante Refresh-Knop**: De dubbele ronde blauwe knop rechtsboven in de hoofdheader is verwijderd conform gebruikersverzoek.
+
+---
+
 ## [0.104.24] — 2026-09-26 (Piecewise Linear Laadband, Ramping Smoothing & Tail-Horizon Reserve)
 
 ### Wiskundige Refactoring & LP-Hardening (Review Ronde 3)

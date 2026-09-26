@@ -89,8 +89,10 @@ class DhwOptimizerParams:
         min_m = max(0.0, min(5.0, min_m))
         fixed_m = float(cm.get("fixed_margin_c", 2.0))
         fixed_m = max(0.0, min(10.0, fixed_m))
+        c_start_val = float(opt_cfg.get("c_start", 0.05))
 
         return cls(
+            c_start=c_start_val,
             comfort_margin_mode=mode,
             use_dynamic_margin=(mode in ("p60", "p95")),
             tap_stress_factor=factor,

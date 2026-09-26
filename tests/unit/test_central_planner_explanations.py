@@ -90,3 +90,19 @@ def test_no_contradiction_when_target_reaches_60c():
     # Legacy artifact phrases that must never reappear
     assert "doorkoken naar 60" not in comfort_text
     assert "doorkoken naar 60" not in finance_text
+
+
+def test_consolidate_dhw_runs_merges_fragmented_cycles():
+    """
+    Verifies that CentralPlanner._consolidate_dhw_runs merges nearby fragmented runs
+    on the same afternoon into a continuous run, preventing short-cycling.
+    """
+    # Two runs separated by 4 idle slots (1 hour gap)
+    fragmented_slots = [57, 58, 59, 60, 65, 66, 67, 153, 154, 155]
+    consolidated = CentralPlanner._consolidate_dhw_runs(fragmented_slots, max_gap_slots=6)
+
+    # First run on Sunday should now be contiguous from 57 to 63 (4 + 3 slots)
+    assert consolidated[:7] == [57, 58, 59, 60, 61, 62, 63]
+    # Monday run remains unchanged
+    assert consolidated[7:] == [153, 154, 155]
+

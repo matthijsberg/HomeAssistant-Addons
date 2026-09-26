@@ -46,6 +46,41 @@ class CentralPlanner:
     DHW_STANDBY_LOSS_KW = 0.055             # ~1.3 kWh/24h standing loss
 
     @classmethod
+    def _consolidate_dhw_runs(cls, planned_slots: List[int], max_gap_slots: int = 6) -> List[int]:
+        """
+        Consolidates fragmented DHW runs occurring within a short idle window (gap <= max_gap_slots)
+        into a single continuous cycle, preventing unnecessary compressor restarts.
+        """
+        if not planned_slots:
+            return []
+        sorted_slots = sorted(planned_slots)
+        runs = []
+        current_run = [sorted_slots[0]]
+        for s in sorted_slots[1:]:
+            if s == current_run[-1] + 1:
+                current_run.append(s)
+            else:
+                runs.append(current_run)
+                current_run = [s]
+        runs.append(current_run)
+
+        consolidated_runs = [runs[0]]
+        for next_run in runs[1:]:
+            prev_run = consolidated_runs[-1]
+            gap = next_run[0] - prev_run[-1] - 1
+            if 0 < gap <= max_gap_slots:
+                run_len = len(next_run)
+                new_run = list(range(prev_run[0], prev_run[-1] + 1 + run_len))
+                consolidated_runs[-1] = new_run
+            else:
+                consolidated_runs.append(next_run)
+
+        res = []
+        for r in consolidated_runs:
+            res.extend(r)
+        return res
+
+    @classmethod
     def plan(
         cls,
         frame: CleanTelemetryFrame,
@@ -326,6 +361,9 @@ class CentralPlanner:
                     run_state0=run_state0
                 )
                 daytime_arbitrage_audit["shadow_comparison"] = shadow_record
+
+        # Consolidate fragmented runs on the same afternoon to prevent compressor short-cycling
+        planned_dhw_slots = cls._consolidate_dhw_runs(planned_dhw_slots, max_gap_slots=6)
 
         # Avoid hard peak lockout for DHW runs
         final_dhw_slots = []
