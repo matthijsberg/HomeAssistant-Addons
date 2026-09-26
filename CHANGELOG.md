@@ -10,6 +10,14 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.26] — 2026-09-26 (Correctie Deficit Boekhouding Batterij)
+
+### Bugfixes & Optimalisatie
+- **Zuivere Deficit-Definitie**: `deficit_kw` in `BatteryPolicy` meet nu uitsluitend ongedekte huishoudelijke vraag ($\max(0, P_{\text{residual}} - P_{\text{dis}})$) in plaats van de totale netafname. Netlaadvermogen voor de batterij wordt niet langer foutief als "tekort" of ongedekt verlies geboekt.
+- **Autonomie KPI Verfijnd**: Door de zuivere deficit-berekening geeft de autonomie KPI nu exact het percentage aan van de effectieve huishoudelijke vraag dat door zon en accu wordt opgevangen.
+
+---
+
 ## [0.104.25] — 2026-09-26 (DHW Run Consolidatie, Ververs-Feedback & Header Opruiming)
 
 ### Opgeloste Regressies & UI Verbeteringen

@@ -410,7 +410,7 @@ class BatteryPolicy:
             min_proj_soc = min(min_proj_soc, soc_pct)
             max_proj_soc = max(max_proj_soc, soc_pct)
 
-            deficit = max(0.0, float(imp)) if res_kw > 0.05 else 0.0
+            deficit = max(0.0, float(res_kw - dis)) if res_kw > 0.05 else 0.0
             tot_deficit += deficit * dt
 
             slot_results.append(
