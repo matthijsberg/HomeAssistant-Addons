@@ -736,7 +736,222 @@
         }
     }
 
+    // =========================================================================
+    // 7. BATTERY TRAJECTORY & DISPATCH RENDERER
+    // =========================================================================
+    let batteryChartInstance = null;
+
+    async function renderBatteryTrajectoryChart() {
+        const canvas = document.getElementById('chart-battery-trajectory');
+        if (!canvas) return;
+        try {
+            const horizonVal = window.OpenHEMSChartEngine ? window.OpenHEMSChartEngine.getHorizon('prediction') : '24h';
+            const resMode = window.OpenHEMSChartEngine ? window.OpenHEMSChartEngine.getResolution('prediction') : (window.predictionResolution || '1h');
+            const res = await fetch('./api/model/battery-status?resolution=' + encodeURIComponent(resMode) + '&horizon=' + encodeURIComponent(horizonVal));
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.status !== 'success') return;
+
+            const traj = data.trajectory || {};
+            const labels = data.labels || [];
+            const socPct = traj.soc_pct || [];
+            const socKwh = traj.soc_kwh || [];
+            const powerKw = traj.power_kw || [];
+
+            // Update Timeline Bar
+            const tlContainer = document.getElementById('battery-timeline-bar');
+            const ticksContainer = document.getElementById('battery-timeline-ticks');
+            if (tlContainer && data.battery_mode_timeline) {
+                tlContainer.innerHTML = '';
+                data.battery_mode_timeline.forEach(seg => {
+                    const block = document.createElement('div');
+                    block.className = 'flex-1 h-full rounded-sm transition-all duration-150 cursor-pointer relative group';
+                    block.style.backgroundColor = seg.color || '#1E293B';
+                    block.style.backgroundImage = (seg.css_pattern && seg.css_pattern !== 'none') ? seg.css_pattern : 'none';
+                    block.style.border = 'none';
+                    block.title = `${seg.time} | ${seg.label}\n${seg.description || ''}`;
+                    tlContainer.appendChild(block);
+                });
+            }
+            if (ticksContainer && labels && labels.length > 0) {
+                ticksContainer.innerHTML = '';
+                const totalL = labels.length;
+                const step = Math.max(1, Math.floor(totalL / 8));
+                for (let t_i = 0; t_i < totalL; t_i += step) {
+                    const s = document.createElement('span');
+                    s.innerText = labels[t_i];
+                    ticksContainer.appendChild(s);
+                }
+                if (ticksContainer.children.length < 9 && totalL > 0) {
+                    const sEnd = document.createElement('span');
+                    sEnd.innerText = labels[totalL - 1];
+                    ticksContainer.appendChild(sEnd);
+                }
+            }
+
+            // Update KPI cards
+            const kpi = data.kpi_cards || {};
+            if (document.getElementById('bat-kpi-solar-kwh')) document.getElementById('bat-kpi-solar-kwh').innerText = `${(kpi.solar_charged_kwh || 0).toFixed(1)} kWh`;
+            if (document.getElementById('bat-kpi-grid-kwh')) document.getElementById('bat-kpi-grid-kwh').innerText = `${(kpi.grid_charged_kwh || 0).toFixed(1)} kWh`;
+            if (document.getElementById('bat-kpi-discharged-kwh')) document.getElementById('bat-kpi-discharged-kwh').innerText = `${(kpi.discharged_kwh || 0).toFixed(1)} kWh`;
+            if (document.getElementById('bat-kpi-saving-eur')) document.getElementById('bat-kpi-saving-eur').innerText = `€${(kpi.net_saving_eur || 0).toFixed(2)}`;
+            if (document.getElementById('bat-status-pill') && socPct.length > 0) document.getElementById('bat-status-pill').innerText = `SoC: ${socPct[0]}%`;
+            if (document.getElementById('bat-kwh-pill') && socKwh.length > 0) document.getElementById('bat-kwh-pill').innerText = `${socKwh[0]} / 15.0 kWh`;
+
+            // Update Decision text
+            const dec = data.decision || {};
+            if (document.getElementById('battery-eval-explanation') && dec.explanation) {
+                document.getElementById('battery-eval-explanation').innerText = dec.explanation;
+            }
+
+            // Render Chart
+            if (batteryChartInstance) batteryChartInstance.destroy();
+            const ctx = canvas.getContext('2d');
+
+            const datasets = [
+                // 1. Primary Line: State of Charge (%)
+                {
+                    label: 'State of Charge (%)',
+                    data: socPct,
+                    yAxisID: 'y',
+                    borderColor: '#10B981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                    fill: true,
+                    borderWidth: 2.5,
+                    tension: 0.25,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    order: 2
+                },
+                // 2. Secondary Line: Netto Vermogen (kW)
+                {
+                    label: 'Laad- / Ontlaadvermogen (kW)',
+                    data: powerKw,
+                    yAxisID: 'y1',
+                    borderColor: '#06B6D4',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.8,
+                    stepped: true,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    order: 1
+                },
+                // 3. Min SoC Reference (10%)
+                {
+                    label: 'Min SoC (10%)',
+                    data: Array(labels.length).fill(10),
+                    yAxisID: 'y',
+                    borderColor: 'rgba(239, 68, 68, 0.65)',
+                    borderDash: [5, 5],
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    order: 4
+                },
+                // 4. Max SoC Reference (95%)
+                {
+                    label: 'Max SoC (95%)',
+                    data: Array(labels.length).fill(95),
+                    yAxisID: 'y',
+                    borderColor: 'rgba(16, 185, 129, 0.65)',
+                    borderDash: [5, 5],
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    order: 5
+                }
+            ];
+
+            batteryChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    spitsblokRanges: data.discharge_ranges, // diagonal amber/red hatching for discharge
+                    advisedOffRanges: data.charge_ranges,   // soft hatching for charge
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            enabled: true,
+                            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                            titleColor: '#F8FAFC',
+                            bodyColor: '#CBD5E1',
+                            borderColor: '#334155',
+                            borderWidth: 1,
+                            callbacks: {
+                                label: function(c) {
+                                    const val = c.raw;
+                                    if (c.dataset.label.includes('State of Charge')) {
+                                        const idx = c.dataIndex;
+                                        const kwh = socKwh[idx] !== undefined ? ` (${socKwh[idx]} kWh)` : '';
+                                        return `🔋 Lading: ${val}%${kwh}`;
+                                    }
+                                    if (c.dataset.label.includes('Laad- / Ontlaadvermogen')) {
+                                        return val >= 0 ? `🔌 Laden: +${val.toFixed(2)} kW` : `⚡ Ontladen: ${val.toFixed(2)} kW`;
+                                    }
+                                    return `${c.dataset.label}: ${val}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: {
+                                color: '#94a3b8',
+                                font: { size: 10, family: 'monospace' }
+                            }
+                        },
+                        y: {
+                            position: 'left',
+                            min: 0,
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: 'State of Charge (%)',
+                                color: '#10B981',
+                                font: { size: 10, weight: 'bold' }
+                            },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: {
+                                color: '#10B981',
+                                font: { size: 10, family: 'monospace' },
+                                callback: v => `${v}%`
+                            }
+                        },
+                        y1: {
+                            position: 'right',
+                            min: -5.0,
+                            max: 5.0,
+                            grid: { drawOnChartArea: false },
+                            title: {
+                                display: true,
+                                text: 'Vermogen: Ontladen (-kW) < 0 < Laden (+kW)',
+                                color: '#06B6D4',
+                                font: { size: 10, weight: 'bold' }
+                            },
+                            ticks: {
+                                color: '#06B6D4',
+                                font: { size: 10, family: 'monospace' },
+                                callback: v => (v >= 0 ? `+${v.toFixed(1)}` : `${v.toFixed(1)}`) + ' kW'
+                            }
+                        }
+                    }
+                }
+            });
+            window.batteryChartInstance = batteryChartInstance;
+        } catch (err) {
+            console.error('Failed to render battery trajectory chart:', err);
+        }
+    }
+
     // Expose public API
+    window.renderBatteryTrajectoryChart = renderBatteryTrajectoryChart;
     window.createThermalTrajectoryChart = createThermalTrajectoryChart;
     window.customDhwTooltipHandler = customDhwTooltipHandler;
     window.customHeatingTooltipHandler = customHeatingTooltipHandler;

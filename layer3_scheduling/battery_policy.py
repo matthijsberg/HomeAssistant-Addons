@@ -27,9 +27,9 @@ class BatterySpec:
     roundtrip_efficiency: float = 0.87          # AC-DC-AC roundtrip efficiency
     degradation_cost_eur_kwh: float = 0.078     # LCOC based on €6000 / 76500 kWh throughput
     min_cycle_margin_eur_kwh: float = 0.085     # In-device adjustable profit margin slider
-    # Lookahead & drempels (voorheen magische getallen in de passes)
-    reserve_lookahead_slots: int = 32           # 8 uur vooruitkijken voor piekreservering
-    valley_lookahead_slots: int = 36            # 9 uur vooruitkijken voor daldetectie
+    # Lookahead & drempels (volledige 24-uurs planhorizon ipv starre 8-9 uur)
+    reserve_lookahead_slots: int = 96           # 24 uur vooruitkijken voor piekreservering
+    valley_lookahead_slots: int = 96            # 24 uur vooruitkijken voor daldetectie
     peak_price_delta_eur_kwh: float = 0.08      # Minimaal prijsverschil dat een slot 'piek' maakt
     reserve_price_delta_eur_kwh: float = 0.12   # Minimaal prijsverschil voor netlaad-reservering
     grid_charge_soc_ceiling_pct: float = 85.0   # Netladen stopt hier; de rest is voor zon
@@ -380,3 +380,70 @@ class BatteryPolicy:
             max_projected_soc_pct=max_proj_soc,
             slots=slot_results,
         )
+
+
+def extract_battery_overlay_ranges(slots: List[BatterySlotResult], is_15m: bool = True) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Unified overlay extractor for battery operation windows (charging, discharging, holding).
+    Guarantees 15m vs 1h parity without double downsampling.
+    """
+    if not slots:
+        return {"charge": [], "discharge": [], "hold": []}
+
+    needs_downsample = (not is_15m) and len(slots) > 48
+    n = len(slots) // 4 if needs_downsample else len(slots)
+
+    def scan_ranges(predicate, category_name):
+        res = []
+        in_block = False
+        start_idx = 0
+        cur_modes = []
+        cur_powers = []
+        for i in range(n):
+            if not needs_downsample:
+                matches = predicate(slots[i])
+                mode = slots[i].mode_code
+                p = slots[i].power_kw
+            else:
+                block_slots = [slots[i * 4 + k] for k in range(4) if (i * 4 + k) < len(slots)]
+                matches = any(predicate(s) for s in block_slots)
+                mode = max(set(s.mode_code for s in block_slots), key=lambda m: sum(1 for s in block_slots if s.mode_code == m)) if block_slots else "STANDBY"
+                p = sum(s.power_kw for s in block_slots) / len(block_slots) if block_slots else 0.0
+
+            if matches and not in_block:
+                in_block = True
+                start_idx = i
+                cur_modes = [mode]
+                cur_powers = [p]
+            elif matches and in_block:
+                cur_modes.append(mode)
+                cur_powers.append(p)
+            elif not matches and in_block:
+                in_block = False
+                res.append({
+                    "start_idx": start_idx,
+                    "end_idx": i - 1,
+                    "mode_code": cur_modes[0],
+                    "power_kw": round(sum(cur_powers) / len(cur_powers), 2),
+                    "name": category_name
+                })
+        if in_block:
+            res.append({
+                "start_idx": start_idx,
+                "end_idx": n - 1,
+                "mode_code": cur_modes[0],
+                "power_kw": round(sum(cur_powers) / len(cur_powers), 2),
+                "name": category_name
+            })
+        return res
+
+    charge_ranges = scan_ranges(lambda s: s.mode_code in ["CHARGE_SOLAR", "CHARGE_GRID"], "BATTERY_CHARGE")
+    discharge_ranges = scan_ranges(lambda s: s.mode_code in ["DISCHARGE_PEAK", "DISCHARGE_BUFFER"], "BATTERY_DISCHARGE")
+    hold_ranges = scan_ranges(lambda s: s.mode_code == "HOLD_RESERVE", "HOLD_RESERVE")
+
+    return {
+        "charge": charge_ranges,
+        "discharge": discharge_ranges,
+        "hold": hold_ranges
+    }
+

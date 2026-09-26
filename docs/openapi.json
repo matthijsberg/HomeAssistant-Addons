@@ -219,6 +219,50 @@
         }
       }
     },
+    "/api/model/battery-status": {
+      "get": {
+        "tags": [
+          "Models & Forecasts"
+        ],
+        "summary": "Get 15 kWh electrochemical battery storage 24h/48h dispatch plan",
+        "description": "Returns state of charge trajectory (SoC % and kWh), charging/discharging power (kW), overlay operation windows (CHARGE_SOLAR, CHARGE_GRID, DISCHARGE_PEAK, DISCHARGE_BUFFER, HOLD_RESERVE), and financial savings calculated using multi-pass dynamic shadow pricing.",
+        "parameters": [
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Aggregation resolution (15m or 1h)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h"
+              ],
+              "default": "15m"
+            }
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "description": "Planning horizon (24h or 48h)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "24h",
+                "48h"
+              ],
+              "default": "24h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Battery dispatch schedule and state-of-charge trajectory"
+          }
+        }
+      }
+    },
     "/api/model/dhw-status": {
       "get": {
         "tags": [

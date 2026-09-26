@@ -10,6 +10,18 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.8] — 2026-09-25 (Thuisbatterij 24h Tijdlijn, SoC/Vermogensgrafiek & Resolutie Pariteit)
+
+### Features: Thuisbatterij (15 kWh) Integratie
+- **24-Uurs Horizon in Rekenkern (`layer3_scheduling/battery_policy.py`)**: Starre 8–9u parameters uitgebreid naar de volledige 24u/48u horizon (`reserve_lookahead_slots=96`, `valley_lookahead_slots=96`).
+- **REST Endpoint `/api/model/battery-status`**: Berekent integraal de 6 batterijmodi over het netto restprofiel, inclusief State of Charge (SoC % en kWh), laad-/ontlaadvermogen (kW), gearceerde overlays (`charge_ranges`, `discharge_ranges`, `hold_ranges`), en netto financiële besparings-KPI's.
+- **MCP & OpenAPI Pariteit**: `/api/model/battery-status` toegevoegd aan `docs/openapi.json` en blootgesteld als `openhems_get_battery_status` in `mcp_server.py`.
+- **UI: Accu Modusplanning (Tijdlijn)**: Horizontale gesegmenteerde tijdlijnbalk toegevoegd met de 6 standen (Zonneladen ☀️, Netladen 🔌, Piekreservering 🛡️, Spitsontlading ⚡, Bufferontlading 🔋, Standby ⏸️) en KPI-kaarten voor zon-opslag, net-opslag en netto besparing.
+- **UI: Thuisaccu Voorspelling (SoC & Vermogen Grafiek)**: Dual-axis grafiek (`chart-battery-trajectory`) met State of Charge (0%–100%) op links, vermogen (-5 kW tot +5 kW) op rechts, en gearceerde overlays voor actieve laad- en ontlaadvlakken.
+- **Fix 15m/1h Filter Pariteit (`app.js` & `charts_thermal.js`)**: `window.OpenHEMSChartEngine` en `window.predictionResolution` globaal geëxporteerd. Alle 5 voorspellingsgrafieken (inclusief DHW, CV en Accu) schakelen nu 100% synchroon mee met de 1-uur / 15-minuten toggle.
+
+---
+
 ## [0.104.7] — 2026-09-25 (Verwijdering van maxTicksLimit: Uniforme Asweergave over Alle 9 Grafieken)
 
 ### Frontend & Visuele Harmonie

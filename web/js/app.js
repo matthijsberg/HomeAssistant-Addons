@@ -342,11 +342,14 @@
                 this._resolutions[pageId] = res;
                 if (pageId === 'prediction') {
                     predictionResolution = res;
+                    window.predictionResolution = res;
                     localStorage.setItem('openhems_resolution', res);
                 } else if (pageId === 'history') {
                     powerProducersResolution = res;
+                    window.powerProducersResolution = res;
                 } else if (pageId === 'validation') {
                     validationResolution = res;
+                    window.validationResolution = res;
                 }
 
                 this.syncResolutionButtons(pageId, res);
@@ -487,6 +490,7 @@
                 if (typeof loadElectricityPricesChart === 'function') loadElectricityPricesChart();
                 if (typeof renderDhwTemperatureChart === 'function') renderDhwTemperatureChart();
                 if (typeof renderHeatingForecastChart === 'function') renderHeatingForecastChart();
+                if (typeof renderBatteryTrajectoryChart === 'function') renderBatteryTrajectoryChart();
                 if (typeof renderModelDecompositionChart === 'function') renderModelDecompositionChart();
                 if (typeof loadDecisionAuditLog === 'function') loadDecisionAuditLog();
             },
@@ -497,9 +501,12 @@
 
                 const savedRes = this.getResolution('prediction');
                 predictionResolution = savedRes;
+                window.predictionResolution = savedRes;
                 this._resolutions.prediction = savedRes;
                 this._resolutions.history = (typeof powerProducersResolution !== 'undefined' && powerProducersResolution) ? powerProducersResolution : '1h';
+                window.powerProducersResolution = this._resolutions.history;
                 this._resolutions.validation = (typeof validationResolution !== 'undefined' && validationResolution) ? validationResolution : '15m';
+                window.validationResolution = this._resolutions.validation;
 
                 this.syncResolutionButtons('prediction', savedRes);
                 this.syncResolutionButtons('history', this._resolutions.history);
@@ -512,6 +519,7 @@
                 this.syncHorizonButtons('history', this._horizons.history);
             }
         };
+        window.OpenHEMSChartEngine = OpenHEMSChartEngine;
 
         function setPredictionHorizon(horizon) {
             OpenHEMSChartEngine.setHorizon(horizon, 'prediction');
@@ -733,6 +741,7 @@
                 loadElectricityPricesChart();
                 renderDhwTemperatureChart();
                 renderHeatingForecastChart();
+                if (typeof renderBatteryTrajectoryChart === 'function') renderBatteryTrajectoryChart();
                 loadDecisionAuditLog();
             }
             if (tabId === 'history') {

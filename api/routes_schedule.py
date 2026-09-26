@@ -31,6 +31,7 @@ from api.energy_feed import (
 from layer3_scheduling.plan_decision_evaluator import evaluate_and_apply_dhw_run_merger
 from models.canonical import StandardizedState
 from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
+from layer3_scheduling.battery_policy import BatteryPolicy, BatterySpec
 
 def handle_get(handler, path: str, qp: dict) -> bool:
     if path == "/api/control/status":
@@ -90,6 +91,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         is_48h = (horizon_mode == "48h")
         total_slots = (192 if is_15m else 48) if is_48h else (96 if is_15m else 24)
         step_mins = 15 if is_15m else 60
+        step_h = 0.25 if is_15m else 1.0
         start_minute = (now_ams.minute // 15) * 15 if is_15m else 0
         base_dt = now_ams.replace(minute=start_minute, second=0, microsecond=0)
 
@@ -463,56 +465,37 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         if not is_battery_active:
             bat_msg = "Geen thuisaccu geactiveerd (zuiver echte apparaten)."
         else:
-            price_delta = max_item["price"] - min_item["price"]
-            deadband = float(cfg.get("battery_deadband_eur_kwh", 0.115))
-            bat_slots = 4 if is_15m else 1
-            daylight_slots = [it for it in timeline_items if 10 <= it["dt"].hour <= 16]
+            # Full physical & economic optimization via BatteryPolicy
+            residual_kw = [round(u + b + h - s, 3) for u, b, h, s in zip(unallocated, boiler, heating, solar)]
+            spec = BatterySpec(
+                capacity_kwh=15.0,
+                usable_capacity_kwh=13.5,
+                max_charge_kw=5.0,
+                max_discharge_kw=5.0,
+                reserve_lookahead_slots=total_slots,
+                valley_lookahead_slots=total_slots
+            )
+            forced_lockouts = {
+                i for i in range(total_slots)
+                if advices[i] == "Geforceerd uit (spits)" or (plan and i < len(plan.slots) and plan.slots[i].mode_code == "forced_off")
+            }
+            bat_summary = BatteryPolicy.optimize(
+                residual_demand_kw=residual_kw,
+                import_prices=prices,
+                export_prices=export_prices,
+                spec=spec,
+                initial_soc_pct=50.0,
+                step_hours=step_h,
+                forced_off_indices=forced_lockouts
+            )
+            for s_idx, b_slot in enumerate(bat_summary.slots):
+                if s_idx < total_slots:
+                    if b_slot.power_kw > 0:
+                        battery_charge[s_idx] = round(b_slot.power_kw, 2)
+                    elif b_slot.power_kw < 0:
+                        battery_discharge[s_idx] = round(-b_slot.power_kw, 2)
 
-            # Check if there is significant solar surplus available tomorrow
-            if peak_solar_it["solar"] >= 1.5:
-                # Mode A: Solar Buffer Priority — charge exclusively from free solar surplus
-                surplus_candidates = [
-                    it for it in daylight_slots
-                    if (it["solar"] - (unallocated[it["idx"]] + boiler[it["idx"]])) >= 0.5
-                ]
-                if surplus_candidates:
-                    charge_slot = max(surplus_candidates, key=lambda x: (x["solar"] - (unallocated[x["idx"]] + boiler[x["idx"]])))
-                    avail_surplus = charge_slot["solar"] - (unallocated[charge_slot["idx"]] + boiler[charge_slot["idx"]])
-                    charge_kw = round(min(2.5, max(1.0, avail_surplus)), 2)
-                else:
-                    charge_slot = peak_solar_it
-                    charge_kw = 2.0
-
-                for b_i in range(charge_slot["idx"], min(total_slots, charge_slot["idx"] + bat_slots)):
-                    battery_charge[b_i] = charge_kw
-
-                # Discharge during expensive evening peak (18:00 - 23:00 or morning)
-                evening_slots = [it for it in timeline_items if (18 <= it["dt"].hour <= 23 or 0 <= it["dt"].hour <= 1)]
-                if evening_slots:
-                    best_discharge = max(evening_slots, key=lambda x: x["price"])
-                    for d_i in range(best_discharge["idx"], min(total_slots, best_discharge["idx"] + bat_slots)):
-                        battery_discharge[d_i] = 2.0
-                    other_evening = [it for it in evening_slots if it["idx"] != best_discharge["idx"]]
-                    if other_evening:
-                        second_dis = max(other_evening, key=lambda x: x["price"])
-                        for d2_i in range(second_dis["idx"], min(total_slots, second_dis["idx"] + bat_slots)):
-                            battery_discharge[d2_i] = 1.5
-                    bat_msg = f"☀️ Zonne-Buffer: Accu laadt op gratis zonne-overschot om {charge_slot['label']} ({charge_kw} kW) en ontlaadt in de avondpiek ({best_discharge['label']}, €{best_discharge['price']:.2f}/kWh)."
-                else:
-                    bat_msg = f"☀️ Zonne-Buffer: Accu laadt op gratis zonne-overschot om {charge_slot['label']} ({charge_kw} kW)."
-            elif price_delta >= deadband:
-                # Mode B: Winter/Cloudy Tariff Arbitrage — charge from grid at lowest price, discharge at highest
-                for b_i in range(min_item["idx"], min(total_slots, min_item["idx"] + bat_slots)):
-                    battery_charge[b_i] = 2.0
-                for d_i in range(max_item["idx"], min(total_slots, max_item["idx"] + bat_slots)):
-                    battery_discharge[d_i] = 2.0
-                expensive_slots = sorted(timeline_items, key=lambda x: x["price"], reverse=True)
-                if len(expensive_slots) > 1 and expensive_slots[1]["idx"] != min_item["idx"]:
-                    for d2_i in range(expensive_slots[1]["idx"], min(total_slots, expensive_slots[1]["idx"] + bat_slots)):
-                        battery_discharge[d2_i] = 1.5
-                bat_msg = f"🔋 Accu-Arbitrage (Bewolkt/Winter): Laden om {min_item['label']} (€{min_item['price']:.2f}), Ontladen om {max_item['label']} (€{max_item['price']:.2f}) [Spread €{price_delta:.3f} > €{deadband:.3f}]."
-            else:
-                bat_msg = f"⏸️ Accu Stand-by: Onvoldoende zonne-overschot en prijsdelta €{price_delta:.3f} onder drempel."
+            bat_msg = f"🔋 Thuisaccu (15 kWh): {bat_summary.total_charged_solar_kwh:.1f} kWh zon geladen, {bat_summary.total_discharged_kwh:.1f} kWh ontladen (Besparing €{bat_summary.net_financial_saving_eur:.2f})."
 
         # Calculate Dual-Polarity Datasets
         # Negative stack: Solar generation and Battery discharge (< 0 kW)

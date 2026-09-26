@@ -27,6 +27,9 @@ from api.energy_feed import (
 )
 from layer3_scheduling.plan_decision_evaluator import evaluate_and_apply_dhw_run_merger
 from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
+from layer3_scheduling.battery_policy import (
+    BatteryPolicy, BatterySpec, extract_battery_overlay_ranges, BatterySlotResult
+)
 
 def handle_get(handler, path: str, qp: dict) -> bool:
     if path.startswith("/api/model/heating-forecast"):
@@ -477,6 +480,178 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             })
         else:
             handler._send_json({"status": "error", "message": "DHW model niet geladen"}, 500)
+        return True
+
+    if path.startswith("/api/model/battery-status"):
+        qp = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
+        res_mode = qp.get("resolution", ["15m"])[0]
+        horizon_mode = qp.get("horizon", ["24h"])[0]
+        is_48h = (horizon_mode == "48h")
+        is_15m = (res_mode == "15m")
+        hours_sim = 48 if is_48h else 24
+        total_slots = hours_sim * (4 if is_15m else 1)
+        step_mins = 15 if is_15m else 60
+
+        plan = ensure_active_canonical_plan()
+        if not plan or not plan.slots:
+            handler._send_json({"status": "error", "message": "Geen actief plan beschikbaar"}, 500)
+            return True
+
+        slots_to_eval = plan.slots[:(hours_sim * 4)]
+        n_15m_slots = len(slots_to_eval)
+
+        unalloc = [s.unallocated_kw for s in slots_to_eval]
+        dhw = [s.dhw_kw for s in slots_to_eval]
+        heat = [s.heating_kw for s in slots_to_eval]
+        solar = [s.solar_kw for s in slots_to_eval]
+        prices = [s.price_eur for s in slots_to_eval]
+        export_prices = [max(0.0, round((p / 1.21) - 0.11085 - 0.0121 - 0.00605, 4)) for p in prices]
+        residual_15m = [round(u + d + h - s, 3) for u, d, h, s in zip(unalloc, dhw, heat, solar)]
+
+        forced_lockouts = {
+            i for i, s in enumerate(slots_to_eval)
+            if s.mode_code == "forced_off" or getattr(s, "is_lockout", False)
+        }
+
+        live_soc = 50.0
+        try:
+            ha_url, ha_tok = get_ha_client_config()
+            if ha_tok and ha_url:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(
+                    f"{ha_url}/api/states/sensor.battery_state_of_charge",
+                    headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=2, context=ctx) as r:
+                    st = json.loads(r.read().decode())
+                    live_soc = float(st.get("state", 50.0))
+        except Exception:
+            live_soc = 50.0
+
+        spec = BatterySpec(
+            capacity_kwh=15.0,
+            usable_capacity_kwh=13.5,
+            max_charge_kw=5.0,
+            max_discharge_kw=5.0,
+            reserve_lookahead_slots=n_15m_slots,
+            valley_lookahead_slots=n_15m_slots
+        )
+
+        summary_15m = BatteryPolicy.optimize(
+            residual_demand_kw=residual_15m,
+            import_prices=prices,
+            export_prices=export_prices,
+            spec=spec,
+            initial_soc_pct=live_soc,
+            step_hours=0.25,
+            forced_off_indices=forced_lockouts
+        )
+
+        now_ams = datetime.now(AMS_TZ)
+        start_min = (now_ams.minute // 15) * 15 if is_15m else 0
+        base_dt = now_ams.replace(minute=start_min, second=0, microsecond=0)
+
+        slot_dts = [base_dt + timedelta(minutes=step_mins * i) for i in range(total_slots)]
+        labels = format_chart_timeline_labels(slot_dts, is_15m=is_15m, now_idx=0)
+
+        if is_15m:
+            disp_slots = summary_15m.slots[:total_slots]
+        else:
+            disp_slots = []
+            for h_i in range(total_slots):
+                q_slice = summary_15m.slots[h_i * 4:(h_i + 1) * 4]
+                if q_slice:
+                    avg_p = sum(s.power_kw for s in q_slice) / len(q_slice)
+                    mode = max(set(s.mode_code for s in q_slice), key=lambda m: sum(1 for s in q_slice if s.mode_code == m))
+                    label = max(set(s.mode_label for s in q_slice), key=lambda l: sum(1 for s in q_slice if s.mode_label == l))
+                    end_soc_pct = q_slice[-1].soc_pct
+                    end_soc_kwh = q_slice[-1].soc_kwh
+                    tot_cost = sum(s.cost_impact_eur for s in q_slice)
+                    disp_slots.append(BatterySlotResult(
+                        slot_idx=h_i,
+                        power_kw=round(avg_p, 3),
+                        mode_code=mode,
+                        mode_label=label,
+                        soc_pct=end_soc_pct,
+                        soc_kwh=end_soc_kwh,
+                        cost_impact_eur=round(tot_cost, 4)
+                    ))
+
+        soc_pct_list = [round(s.soc_pct, 1) for s in disp_slots]
+        soc_kwh_list = [round(s.soc_kwh, 2) for s in disp_slots]
+        power_kw_list = [round(s.power_kw, 2) for s in disp_slots]
+        charge_kw_list = [round(max(0.0, s.power_kw), 2) for s in disp_slots]
+        discharge_kw_list = [round(max(0.0, -s.power_kw), 2) for s in disp_slots]
+
+        ranges = extract_battery_overlay_ranges(summary_15m.slots, is_15m=is_15m)
+
+        mode_meta = {
+            "CHARGE_SOLAR": {"color": "#10B981", "css": "repeating-linear-gradient(45deg, #10B981, #10B981 2px, #059669 2px, #059669 4px)", "name": "Zonneladen ☀️"},
+            "CHARGE_GRID": {"color": "#3B82F6", "css": "repeating-linear-gradient(45deg, #3B82F6, #3B82F6 2px, #2563EB 2px, #2563EB 4px)", "name": "Netladen (Dal) 🔌"},
+            "DISCHARGE_PEAK": {"color": "#F59E0B", "css": "repeating-linear-gradient(45deg, #F59E0B, #F59E0B 2px, #D97706 2px, #D97706 4px)", "name": "Spitsontlading ⚡"},
+            "DISCHARGE_BUFFER": {"color": "#06B6D4", "css": "none", "name": "Eigen Verbruik Buffer 🔋"},
+            "HOLD_RESERVE": {"color": "#8B5CF6", "css": "none", "name": "Piekreservering 🛡️"},
+            "STANDBY": {"color": "#1E293B", "css": "none", "name": "Standby ⏸️"}
+        }
+
+        timeline_items = []
+        for i, s in enumerate(disp_slots):
+            meta = mode_meta.get(s.mode_code, mode_meta["STANDBY"])
+            timeline_items.append({
+                "time": labels[i] if i < len(labels) else f"T+{i}",
+                "mode": s.mode_code,
+                "label": meta["name"],
+                "color": meta["color"],
+                "css_pattern": meta["css"],
+                "power_kw": s.power_kw,
+                "soc_pct": s.soc_pct,
+                "description": f"{meta['name']}: {abs(s.power_kw):.2f} kW · SoC {s.soc_pct:.1f}%"
+            })
+
+        explanation_parts = []
+        if summary_15m.total_charged_solar_kwh > 0.5:
+            explanation_parts.append(f"Zonne-absorptie: {summary_15m.total_charged_solar_kwh:.1f} kWh gratis PV-overschot opgeslagen.")
+        if summary_15m.total_charged_grid_kwh > 0.5:
+            explanation_parts.append(f"Daltarief netlading: {summary_15m.total_charged_grid_kwh:.1f} kWh geladen tegen laagste nachtprijzen.")
+        if summary_15m.total_discharged_kwh > 0.5:
+            explanation_parts.append(f"Piekontlasting: {summary_15m.total_discharged_kwh:.1f} kWh ontladen om dure netimport af te toppen.")
+
+        expl_text = " · ".join(explanation_parts) if explanation_parts else "Batterij in standby; tariefschommelingen en zonne-overschotten onder rendementsdrempel."
+
+        handler._send_json({
+            "status": "success",
+            "resolution": res_mode,
+            "horizon": horizon_mode,
+            "labels": labels,
+            "trajectory": {
+                "soc_pct": soc_pct_list,
+                "soc_kwh": soc_kwh_list,
+                "power_kw": power_kw_list,
+                "charge_power_kw": charge_kw_list,
+                "discharge_power_kw": discharge_kw_list
+            },
+            "charge_ranges": ranges["charge"],
+            "discharge_ranges": ranges["discharge"],
+            "hold_ranges": ranges["hold"],
+            "battery_mode_timeline": timeline_items,
+            "kpi_cards": {
+                "solar_charged_kwh": summary_15m.total_charged_solar_kwh,
+                "grid_charged_kwh": summary_15m.total_charged_grid_kwh,
+                "discharged_kwh": summary_15m.total_discharged_kwh,
+                "net_saving_eur": summary_15m.net_financial_saving_eur,
+                "initial_soc_pct": summary_15m.initial_soc_pct,
+                "final_soc_pct": summary_15m.final_soc_pct,
+                "min_projected_soc_pct": summary_15m.min_projected_soc_pct,
+                "max_projected_soc_pct": summary_15m.max_projected_soc_pct
+            },
+            "decision": {
+                "box_title": "Thuisbatterij (15 kWh): 24-Uurs Dispatch Besluitvorming",
+                "explanation": expl_text,
+                "mode_code": disp_slots[0].mode_code if disp_slots else "STANDBY"
+            }
+        })
         return True
 
     if path == "/api/model/algorithm-config":

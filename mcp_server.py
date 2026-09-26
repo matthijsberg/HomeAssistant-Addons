@@ -103,6 +103,21 @@ def openhems_get_dhw_status(resolution: str = "15m") -> str:
 
 
 @mcp.tool()
+def openhems_get_battery_status(resolution: str = "15m", horizon: str = "24h") -> str:
+    """Get 15 kWh electrochemical battery storage 24h/48h dispatch plan and state of charge trajectory.
+
+    Args:
+        resolution: Aggregation resolution: '15m' or '1h'.
+        horizon: Planning horizon: '24h' or '48h'.
+    Returns:
+        JSON with state of charge trajectory (SoC % and kWh), charging/discharging power (kW),
+        overlay operation windows, and financial savings calculated using multi-pass dynamic shadow pricing.
+    """
+    res = _api_request("/api/model/battery-status", params={"resolution": resolution, "horizon": horizon})
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
 def openhems_get_heating_forecast(resolution: str = "15m") -> str:
     """Get space heating (CV) 2R1C building thermal forecast and pre-heat recommendations.
 

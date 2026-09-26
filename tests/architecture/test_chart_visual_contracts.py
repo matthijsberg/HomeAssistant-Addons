@@ -182,3 +182,44 @@ def test_all_chart_endpoints_resolution_parity_and_alignment():
             h_1 = int(f1[0]["start_label"][:2])
             assert abs(h_15 - h_1) <= 1, f"Peak start hour desync on {ep}: 15m={h_15} vs 1h={h_1}"
 
+
+def test_battery_status_resolution_parity():
+    """Invariant #8: Enforces 15m vs 1h parity and alignment on the battery dispatch endpoint."""
+    from api.routes_forecast import handle_get
+
+    class DummyHandler:
+        def __init__(self, path):
+            self.path = path
+            self.response = None
+        def _send_json(self, data, status=200):
+            self.response = data
+
+    h15 = DummyHandler("/api/model/battery-status?resolution=15m&horizon=24h")
+    ok15 = handle_get(h15, "/api/model/battery-status", {"resolution": ["15m"], "horizon": ["24h"]})
+    assert ok15 is True
+    d15 = h15.response
+    assert d15 is not None
+    assert d15.get("status") == "success"
+    assert len(d15.get("labels", [])) == 96
+    assert len(d15.get("trajectory", {}).get("soc_pct", [])) == 96
+
+    h1 = DummyHandler("/api/model/battery-status?resolution=1h&horizon=24h")
+    ok1 = handle_get(h1, "/api/model/battery-status", {"resolution": ["1h"], "horizon": ["24h"]})
+    assert ok1 is True
+    d1 = h1.response
+    assert d1 is not None
+    assert d1.get("status") == "success"
+    assert len(d1.get("labels", [])) == 24
+    assert len(d1.get("trajectory", {}).get("soc_pct", [])) == 24
+
+    # Verify ranges are within bounds
+    for r in d15.get("charge_ranges", []):
+        assert 0 <= r["start_idx"] <= r["end_idx"] < 96
+    for r in d15.get("discharge_ranges", []):
+        assert 0 <= r["start_idx"] <= r["end_idx"] < 96
+    for r in d1.get("charge_ranges", []):
+        assert 0 <= r["start_idx"] <= r["end_idx"] < 24
+    for r in d1.get("discharge_ranges", []):
+        assert 0 <= r["start_idx"] <= r["end_idx"] < 24
+
+

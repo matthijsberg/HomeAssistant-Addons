@@ -55,6 +55,7 @@ def test_mcp_high_level_tools_coverage():
     critical_mappings = {
         "/api/schedule/chart-data": "openhems_get_schedule",
         "/api/schedule/recalculate": "openhems_recalculate_schedule",
+        "/api/model/battery-status": "openhems_get_battery_status",
         "/api/model/dhw-status": "openhems_get_dhw_status",
         "/api/model/heating-forecast": "openhems_get_heating_forecast",
         "/api/model/parameter-history": "openhems_get_parameter_history",
