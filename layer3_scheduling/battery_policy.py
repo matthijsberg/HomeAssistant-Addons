@@ -50,6 +50,8 @@ class BatterySlotResult:
     deficit_kw: float = 0.0                     # Unhedged house demand resulting in grid import
     soc_p05_pct: float = 0.0                    # Conservative lower bound SoC
     soc_p95_pct: float = 0.0                    # Optimistic upper bound SoC
+    ch_solar_kw: float = 0.0                    # Active solar charging power
+    ch_grid_kw: float = 0.0                     # Active grid charging power
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -288,46 +290,50 @@ class BatteryPolicy:
         max_proj_soc = initial_soc_pct
 
         for i in range(n_slots):
-            ch_s = p_ch_solar[i]
-            ch_g = p_ch_grid[i]
-            dis = p_dis[i]
-            imp = p_imp[i]
-            exp = p_exp[i]
+            ch_s = max(0.0, float(p_ch_solar[i]))
+            ch_g = max(0.0, float(p_ch_grid[i]))
+            dis = max(0.0, float(p_dis[i]))
+            imp = max(0.0, float(p_imp[i]))
+            exp = max(0.0, float(p_exp[i]))
             p_in = import_prices[i]
             p_ex = export_prices[i]
             res_kw = residual_demand_kw[i]
 
-            if ch_s > 0.02:
-                pwr = round(float(ch_s), 3)
-                code = 'CHARGE_SOLAR'
-                label = 'Zon-absorptie'
-                tot_ch_solar += pwr * dt
-                delta_soc = pwr * dt * eta_ch
-            elif ch_g > 0.02:
-                pwr = round(float(ch_g), 3)
-                code = 'CHARGE_GRID'
-                label = 'Netladen (Dal)'
-                tot_ch_grid += pwr * dt
-                delta_soc = pwr * dt * eta_ch
+            tot_ch_solar += ch_s * dt
+            tot_ch_grid += ch_g * dt
+            tot_dis += dis * dt
+
+            total_ch = ch_s + ch_g
+            if total_ch > 0.02:
+                pwr = round(float(total_ch), 3)
+                if ch_s > 0.02 and ch_g > 0.02:
+                    code = "CHARGE_GRID" if ch_g >= ch_s else "CHARGE_SOLAR"
+                    label = "Zon + Netladen"
+                elif ch_g > 0.02:
+                    code = "CHARGE_GRID"
+                    label = "Netladen (Dal)"
+                else:
+                    code = "CHARGE_SOLAR"
+                    label = "Zon-absorptie"
+                delta_soc = total_ch * dt * eta_ch
             elif dis > 0.02:
                 pwr = -round(float(dis), 3)
                 if i in forced_lockouts or p_in >= 0.28:
-                    code = 'DISCHARGE_PEAK'
-                    label = 'Spitsontlasting'
+                    code = "DISCHARGE_PEAK"
+                    label = "Spitsontlasting"
                 else:
-                    code = 'DISCHARGE_BUFFER'
-                    label = 'Huisontlasting'
-                tot_dis += abs(pwr) * dt
-                delta_soc = -(abs(pwr) * dt / eta_dis)
+                    code = "DISCHARGE_BUFFER"
+                    label = "Huisontlasting"
+                delta_soc = -(dis * dt / eta_dis)
             else:
                 pwr = 0.0
                 delta_soc = 0.0
                 if current_soc > (min_kwh + 0.5) and any(p_dis[k] > 0.1 for k in range(i + 1, n_slots)):
-                    code = 'HOLD_RESERVE'
-                    label = 'Reserveren'
+                    code = "HOLD_RESERVE"
+                    label = "Reserveren"
                 else:
-                    code = 'STANDBY'
-                    label = 'Standby'
+                    code = "STANDBY"
+                    label = "Standby"
 
             base_imp = max(0.0, res_kw)
             base_exp = max(0.0, -res_kw)
@@ -354,7 +360,9 @@ class BatteryPolicy:
                     cost_impact_eur=cost_impact,
                     deficit_kw=round(deficit, 3),
                     soc_p05_pct=p05_soc_list[i],
-                    soc_p95_pct=p95_soc_list[i]
+                    soc_p95_pct=p95_soc_list[i],
+                    ch_solar_kw=round(ch_s, 3),
+                    ch_grid_kw=round(ch_g, 3)
                 )
             )
 

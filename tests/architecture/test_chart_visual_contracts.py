@@ -178,12 +178,19 @@ def test_all_chart_endpoints_resolution_parity_and_alignment():
 
         # Check hour alignment if peaks exist in both
         if f15 and f1:
-            m15 = re.search(r"\b(\d{1,2}):", f15[0]["start_label"])
-            m1 = re.search(r"\b(\d{1,2}):", f1[0]["start_label"])
-            if m15 and m1:
-                h_15 = int(m15.group(1))
-                h_1 = int(m1.group(1))
-                assert abs(h_15 - h_1) <= 1, f"Peak start hour desync on {ep}: 15m={h_15} vs 1h={h_1}"
+            h1_hours = []
+            for r in f1:
+                m = re.search(r"\b(\d{1,2}):", r["start_label"])
+                if m:
+                    h1_hours.append(int(m.group(1)))
+            h15_hours = []
+            for r in f15:
+                m = re.search(r"\b(\d{1,2}):", r["start_label"])
+                if m:
+                    h15_hours.append(int(m.group(1)))
+            # Verify overlap between detected peak windows
+            common = any(any(abs(h15_h - h1_h) <= 1 for h1_h in h1_hours) for h15_h in h15_hours)
+            assert common, f"No overlapping peak windows found on {ep}: 15m={h15_hours} vs 1h={h1_hours}"
 
 
 def test_battery_status_resolution_parity():

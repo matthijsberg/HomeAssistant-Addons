@@ -10,6 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.21] — 2026-09-26 (Volledige Zonne- & Netlaadfusie tot 95% SoC)
+
+### Bugfixes & Algoritmiek
+- **Eliminatie Grid Charging Drop in Dispatch Accounting**:
+  - In `layer3_scheduling/battery_policy.py` overschreef `if ch_s > 0.02` eerder de variabele `pwr` en werd de gelijktijdige netlading `ch_g` genegeerd.
+  - Zonne- (`ch_solar_kw`) en netlaadvermogens (`ch_grid_kw`) worden nu simultaan opgeteld (`pwr = ch_s + ch_g`) en afzonderlijk gerapporteerd in de telemetrie.
+- **Volledige Batterijlading tot 95% SoC bij Bodemprijzen**:
+  - Tijdens de zondagmiddagdaluren (€0,108–€0,113/kWh) laadt de batterij nu met 5,0 kW netstroom (bovenop de zonnestroom) door tot aan de fysieke limiet van **95% SoC (14,25 kWh)**.
+  - Hierdoor worden zowel de ochtendpiek als de avondpiek van maandag (€0,55/kWh) volledig afgedekt vanuit goedkope opslag.
+- **1-Uurs Downsampling Pariteit**: `api/routes_forecast.py` behoudt nu de afzonderlijke zon- en netlaadstaven in de 1-uurs weergave zodat paarse en oranje staven correct op elkaar stapelen.
+
+---
+
 ## [0.104.20] — 2026-09-26 (Linear Programming Global Dispatch & Eliminatie Netlaad-Blokkade)
 
 ### Algoritmiek & Wiskundige Optimalisatie

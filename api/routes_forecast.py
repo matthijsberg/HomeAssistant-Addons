@@ -589,6 +589,11 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     end_soc_pct = q_slice[-1].soc_pct
                     end_soc_kwh = q_slice[-1].soc_kwh
                     tot_cost = sum(s.cost_impact_eur for s in q_slice)
+                    avg_ch_s = sum(s.ch_solar_kw for s in q_slice) / len(q_slice)
+                    avg_ch_g = sum(s.ch_grid_kw for s in q_slice) / len(q_slice)
+                    avg_def = sum(s.deficit_kw for s in q_slice) / len(q_slice)
+                    end_p05 = q_slice[-1].soc_p05_pct
+                    end_p95 = q_slice[-1].soc_p95_pct
                     disp_slots.append(BatterySlotResult(
                         slot_idx=h_i,
                         power_kw=round(avg_p, 3),
@@ -596,7 +601,12 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                         mode_label=label,
                         soc_pct=end_soc_pct,
                         soc_kwh=end_soc_kwh,
-                        cost_impact_eur=round(tot_cost, 4)
+                        cost_impact_eur=round(tot_cost, 4),
+                        deficit_kw=round(avg_def, 3),
+                        soc_p05_pct=end_p05,
+                        soc_p95_pct=end_p95,
+                        ch_solar_kw=round(avg_ch_s, 3),
+                        ch_grid_kw=round(avg_ch_g, 3)
                     ))
 
         soc_pct_list = [round(s.soc_pct, 1) for s in disp_slots]
@@ -607,8 +617,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         charge_kw_list = [round(max(0.0, s.power_kw), 2) for s in disp_slots]
         discharge_kw_list = [round(max(0.0, -s.power_kw), 2) for s in disp_slots]
         deficit_disp = [round(s.deficit_kw, 2) for s in disp_slots]
-        solar_charge_disp = [round(s.power_kw, 2) if s.mode_code == "CHARGE_SOLAR" and s.power_kw > 0 else 0.0 for s in disp_slots]
-        grid_charge_disp = [round(s.power_kw, 2) if s.mode_code == "CHARGE_GRID" and s.power_kw > 0 else 0.0 for s in disp_slots]
+        solar_charge_disp = [round(s.ch_solar_kw, 2) for s in disp_slots]
+        grid_charge_disp = [round(s.ch_grid_kw, 2) for s in disp_slots]
 
         init_soc_pct = summary_15m.initial_soc_pct
         init_soc_kwh = round(init_soc_pct / 100.0 * 15.0, 2)
