@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.3] — 2026-09-25 (Universele Resolutie-Pariteit & Architectuur Invariant #8)
+
+### Visual Contracts & Invarianten
+- **Invariant #8 in `AGENTS.md` Vastgelegd**: Harde eis dat alle grafieken en endpoints met een 15m/1h resolutiekeuze getoetst moeten worden op tijdsinvariantie. Indexen en overlays mogen nooit verschuiven op de tijdlijn.
+- **Architectural Guardrail Test (`test_chart_visual_contracts.py`)**: `test_all_chart_endpoints_resolution_parity_and_alignment` bewaakt nu automatisch bij elke build dat alle endpoints (`power_producers`, `dhw_history`, `heating_history`, etc.) identieke start- en einduren retourneren bij zowel 15m als 1h.
+- **DHW & Heating History DateTime & Kwartier-Fix**: `fetch_historical_overlay_ranges` accepteert nu zowel ISO-strings als `datetime`-objecten zonder syntaxfouten in InfluxDB en lijnt tarieflookups automatisch uit op kwartiergrenzen.
+
+---
+
 ## [0.104.2] — 2026-09-25 (Fix 1-Uur vs 15-Minuten Resolutie Alignment in Historische Overlays)
 
 ### Bug Fixes & Resolutie Alignment

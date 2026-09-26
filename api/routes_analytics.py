@@ -83,12 +83,25 @@ def fetch_historical_overlay_ranges(
     n_slots = len(slot_dts)
     slot_modes = [StandardizedState.NORMAL] * n_slots
 
+    if isinstance(t_start_iso, datetime):
+        t_start_iso = t_start_iso.strftime("%Y-%m-%dT%H:%M:00Z")
+    if isinstance(t_end_iso, datetime):
+        t_end_iso = t_end_iso.strftime("%Y-%m-%dT%H:%M:00Z")
+
     # 1. Deterministic calendar-day tariff peak & soft advice detection
     if not prices or len(prices) != n_slots:
         try:
             _, p_map, _ = get_epex_tariffs_cached(is_15m=is_15m)
-            fmt = "%Y-%m-%d %H:%M" if is_15m else "%Y-%m-%d %H:00"
-            prices = [p_map.get(dt.strftime(fmt), 0.25) for dt in slot_dts]
+            prices = []
+            for dt in slot_dts:
+                if is_15m:
+                    m15 = (dt.minute // 15) * 15
+                    dt_al = dt.replace(minute=m15, second=0, microsecond=0)
+                    k = dt_al.strftime("%Y-%m-%d %H:%M")
+                else:
+                    dt_al = dt.replace(minute=0, second=0, microsecond=0)
+                    k = dt_al.strftime("%Y-%m-%d %H:00")
+                prices.append(p_map.get(k, 0.25))
         except Exception:
             prices = [0.25] * n_slots
 

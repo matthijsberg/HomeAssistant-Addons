@@ -14,6 +14,10 @@ Before presenting any code changes or committing:
 - [ ] **5. API & MCP Lockstep Parity:** Any change, addition, or retirement of a REST API endpoint MUST be declared in `docs/openapi.json` and simultaneously exposed in `mcp_server.py`. Architectural guardrail `tests/architecture/test_api_mcp_lockstep.py` enforces 100% parity.
 - [ ] **6. GUI & Frontend Verification via Headless Browser:** When modifying the WebUI, HTML, CSS, JavaScript, or dashboard charts, the QA agent must use the headless browser (via `browser_exec` with `capture_screenshot()` and DOM/console error inspection) to perform visual and live data verification before marking work complete.
 - [ ] **7. Historical Telemetry Fidelity (Feiten vs. Redeneren):** Alle data voor historische grafieken (actuaties, staten, vermogens, spitsblokken) moet direct worden opgehaald uit de persistente opslag (InfluxDB telemetrie en annotaties), NOOIT ter plekke synthetisch worden geredeneerd of achteraf berekend met voorspellende modellen (zoals `detect_dynamic_price_peaks` over een willekeurig zoomvenster). Redeneren en modelleren over historische data is uitsluitend toegestaan voor afgeleide data (zoals thermische vermogensafleidingen, trendanalyses, kalibraties en samenvattingen), mits voorzien van fysische ruisbewaking.
+- [ ] **8. 15m vs. 1h Resolution Parity & Auto-Downsample Guardrail:** Wanneer je werkt aan grafieken, controllers of API-endpoints met een resolutiekeuze (15m vs 1h):
+  - **Tijdsuitlijning:** Verifieer ALTIJD dat pieken, spitsblokken, adviesbanden en actuaties op exact dezelfde kalenderuren blijven staan bij het schakelen tussen 15m en 1h.
+  - **Auto-Downsampling:** Deel NOOIT blindelings door 4 (`// 4`). Controleer altijd of de invoerreeks al uursgewijs is (`len <= 48` bij een 24/48h venster).
+  - **Dual-Resolution QA:** Voer vóór afronding altijd een visuele verificatie uit in de headless browser met screenshots op ZOWEL 15m ALS 1h resolutie.
 
 ---
 

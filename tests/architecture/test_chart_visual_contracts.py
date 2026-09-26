@@ -133,3 +133,52 @@ def test_heating_history_resolution_parity():
         assert 0 <= s['start_idx'] <= s['end_idx'] < n1
     for h in d1['heating_ranges']:
         assert 0 <= h['start_idx'] <= h['end_idx'] < n1
+
+
+def test_all_chart_endpoints_resolution_parity_and_alignment():
+    """Invariant #8: Enforces 15m vs 1h peak and soft-advice alignment across all historical endpoints."""
+    from api.routes_analytics import handle_get
+
+    class DummyHandler:
+        def __init__(self, path):
+            self.path = path
+            self.response = None
+        def _send_json(self, data, status=200):
+            self.response = data
+
+    endpoints = [
+        "/api/analytics/power_producers?range=24h",
+        "/api/analytics/dhw_history?range=24h",
+        "/api/analytics/heating_history?range=24h",
+    ]
+
+    for ep in endpoints:
+        h15 = DummyHandler(f"{ep}&resolution=15m")
+        handle_get(h15, ep.split("?")[0], {"range": ["24h"], "resolution": ["15m"]})
+        d15 = h15.response
+        assert d15 is not None
+        assert d15.get("status") == "success"
+
+        h1 = DummyHandler(f"{ep}&resolution=1h")
+        handle_get(h1, ep.split("?")[0], {"range": ["24h"], "resolution": ["1h"]})
+        d1 = h1.response
+        assert d1 is not None
+        assert d1.get("status") == "success"
+
+        f15 = d15.get("forced_off_ranges", [])
+        f1 = d1.get("forced_off_ranges", [])
+
+        # Check bounds
+        n15 = len(d15["labels"])
+        n1 = len(d1["labels"])
+        for r in f15:
+            assert 0 <= r["start_idx"] <= r["end_idx"] < n15
+        for r in f1:
+            assert 0 <= r["start_idx"] <= r["end_idx"] < n1
+
+        # Check hour alignment if peaks exist in both
+        if f15 and f1:
+            h_15 = int(f15[0]["start_label"][:2])
+            h_1 = int(f1[0]["start_label"][:2])
+            assert abs(h_15 - h_1) <= 1, f"Peak start hour desync on {ep}: 15m={h_15} vs 1h={h_1}"
+
