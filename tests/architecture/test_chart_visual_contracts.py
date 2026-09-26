@@ -200,8 +200,10 @@ def test_battery_status_resolution_parity():
     d15 = h15.response
     assert d15 is not None
     assert d15.get("status") == "success"
-    assert len(d15.get("labels", [])) == 96
-    assert len(d15.get("trajectory", {}).get("soc_pct", [])) == 96
+    assert len(d15.get("labels", [])) == 100
+    assert d15.get("history_count") == 4
+    assert len(d15.get("trajectory", {}).get("soc_pct", [])) == 100
+    assert d15.get("labels", [])[4].startswith("Nu")
 
     h1 = DummyHandler("/api/model/battery-status?resolution=1h&horizon=24h")
     ok1 = handle_get(h1, "/api/model/battery-status", {"resolution": ["1h"], "horizon": ["24h"]})
@@ -209,18 +211,20 @@ def test_battery_status_resolution_parity():
     d1 = h1.response
     assert d1 is not None
     assert d1.get("status") == "success"
-    assert len(d1.get("labels", [])) == 24
-    assert len(d1.get("trajectory", {}).get("soc_pct", [])) == 24
+    assert len(d1.get("labels", [])) == 25
+    assert d1.get("history_count") == 1
+    assert len(d1.get("trajectory", {}).get("soc_pct", [])) == 25
+    assert d1.get("labels", [])[1].startswith("Nu")
 
     # Verify ranges are within bounds
     for r in d15.get("charge_ranges", []):
-        assert 0 <= r["start_idx"] <= r["end_idx"] < 96
+        assert 0 <= r["start_idx"] <= r["end_idx"] < 100
     for r in d15.get("discharge_ranges", []):
-        assert 0 <= r["start_idx"] <= r["end_idx"] < 96
+        assert 0 <= r["start_idx"] <= r["end_idx"] < 100
     for r in d1.get("charge_ranges", []):
-        assert 0 <= r["start_idx"] <= r["end_idx"] < 24
+        assert 0 <= r["start_idx"] <= r["end_idx"] < 25
     for r in d1.get("discharge_ranges", []):
-        assert 0 <= r["start_idx"] <= r["end_idx"] < 24
+        assert 0 <= r["start_idx"] <= r["end_idx"] < 25
 
 
 def test_reusable_ui_and_chart_contracts():

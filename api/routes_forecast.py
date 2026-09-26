@@ -553,8 +553,14 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         start_min = (now_ams.minute // 15) * 15 if is_15m else 0
         base_dt = now_ams.replace(minute=start_min, second=0, microsecond=0)
 
-        slot_dts = [base_dt + timedelta(minutes=step_mins * i) for i in range(total_slots)]
-        labels = format_chart_timeline_labels(slot_dts, is_15m=is_15m, now_idx=0)
+        # Prepend 1 hour of history for parity with all other forecast charts
+        hist_pts = fetch_recent_telemetry_history(is_15m, base_dt)
+        hist_count = len(hist_pts)
+
+        hist_dts = [hp["dt"] for hp in hist_pts]
+        future_dts = [base_dt + timedelta(minutes=step_mins * i) for i in range(total_slots)]
+        all_dts = hist_dts + future_dts
+        labels = format_chart_timeline_labels(all_dts, is_15m=is_15m, now_idx=hist_count)
 
         if is_15m:
             disp_slots = summary_15m.slots[:total_slots]
@@ -596,8 +602,34 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         power_kw_list = [round(s.power_kw, 2) for s in disp_slots]
         charge_kw_list = [round(max(0.0, s.power_kw), 2) for s in disp_slots]
         discharge_kw_list = [round(max(0.0, -s.power_kw), 2) for s in disp_slots]
+        solar_charge_disp = [round(s.power_kw, 2) if s.mode_code == "CHARGE_SOLAR" and s.power_kw > 0 else 0.0 for s in disp_slots]
+        grid_charge_disp = [round(s.power_kw, 2) if s.mode_code == "CHARGE_GRID" and s.power_kw > 0 else 0.0 for s in disp_slots]
 
-        ranges = extract_battery_overlay_ranges(summary_15m.slots, is_15m=is_15m)
+        init_soc_pct = summary_15m.initial_soc_pct
+        init_soc_kwh = round(init_soc_pct / 100.0 * 15.0, 2)
+
+        hist_soc_pct = [init_soc_pct] * hist_count
+        hist_soc_kwh = [init_soc_kwh] * hist_count
+        hist_power_kw = [0.0] * hist_count
+        hist_charge_kw = [0.0] * hist_count
+        hist_discharge_kw = [0.0] * hist_count
+        hist_solar_charge = [0.0] * hist_count
+        hist_grid_charge = [0.0] * hist_count
+
+        hist_timeline = []
+        for i in range(hist_count):
+            hist_timeline.append({
+                "time": labels[i] if i < len(labels) else f"T-{hist_count-i}",
+                "mode": "STANDBY",
+                "label": f"Historie ({labels[i]})",
+                "color": "#1E293B",
+                "css_pattern": "none",
+                "power_kw": 0.0,
+                "soc_pct": init_soc_pct,
+                "description": f"Historisch uur vóór simulatiestart: Batterij gereed · SoC {init_soc_pct:.1f}%"
+            })
+
+        ranges = extract_battery_overlay_ranges(summary_15m.slots, history_count=hist_count, is_15m=is_15m)
 
         mode_meta = {
             "CHARGE_SOLAR": {"color": "#F59E0B", "css": "repeating-linear-gradient(45deg, #F59E0B, #F59E0B 2px, #D97706 2px, #D97706 4px)", "name": "Zonneladen ☀️"},
@@ -611,8 +643,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         timeline_items = []
         for i, s in enumerate(disp_slots):
             meta = mode_meta.get(s.mode_code, mode_meta["STANDBY"])
+            t_idx = i + hist_count
             timeline_items.append({
-                "time": labels[i] if i < len(labels) else f"T+{i}",
+                "time": labels[t_idx] if t_idx < len(labels) else f"T+{i}",
                 "mode": s.mode_code,
                 "label": meta["name"],
                 "color": meta["color"],
@@ -632,27 +665,25 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
         expl_text = " · ".join(explanation_parts) if explanation_parts else "Batterij in standby; tariefschommelingen en zonne-overschotten onder rendementsdrempel."
 
-        solar_charge_disp = [round(s.power_kw, 2) if s.mode_code == "CHARGE_SOLAR" and s.power_kw > 0 else 0.0 for s in disp_slots]
-        grid_charge_disp = [round(s.power_kw, 2) if s.mode_code == "CHARGE_GRID" and s.power_kw > 0 else 0.0 for s in disp_slots]
-
         handler._send_json({
             "status": "success",
             "resolution": res_mode,
             "horizon": horizon_mode,
             "labels": labels,
+            "history_count": hist_count,
             "trajectory": {
-                "soc_pct": soc_pct_list,
-                "soc_kwh": soc_kwh_list,
-                "power_kw": power_kw_list,
-                "charge_power_kw": charge_kw_list,
-                "discharge_power_kw": discharge_kw_list,
-                "solar_charge_kw": solar_charge_disp,
-                "grid_charge_kw": grid_charge_disp
+                "soc_pct": hist_soc_pct + soc_pct_list,
+                "soc_kwh": hist_soc_kwh + soc_kwh_list,
+                "power_kw": hist_power_kw + power_kw_list,
+                "charge_power_kw": hist_charge_kw + charge_kw_list,
+                "discharge_power_kw": hist_discharge_kw + discharge_kw_list,
+                "solar_charge_kw": hist_solar_charge + solar_charge_disp,
+                "grid_charge_kw": hist_grid_charge + grid_charge_disp
             },
             "charge_ranges": ranges["charge"],
             "discharge_ranges": ranges["discharge"],
             "hold_ranges": ranges["hold"],
-            "battery_mode_timeline": timeline_items,
+            "battery_mode_timeline": hist_timeline + timeline_items,
             "kpi_cards": {
                 "solar_charged_kwh": summary_15m.total_charged_solar_kwh,
                 "grid_charged_kwh": summary_15m.total_charged_grid_kwh,

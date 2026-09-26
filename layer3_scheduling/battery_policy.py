@@ -389,10 +389,10 @@ class BatteryPolicy:
         )
 
 
-def extract_battery_overlay_ranges(slots: List[BatterySlotResult], is_15m: bool = True) -> Dict[str, List[Dict[str, Any]]]:
+def extract_battery_overlay_ranges(slots: List[BatterySlotResult], history_count: int = 0, is_15m: bool = True) -> Dict[str, List[Dict[str, Any]]]:
     """
     Unified overlay extractor for battery operation windows (charging, discharging, holding).
-    Guarantees 15m vs 1h parity without double downsampling.
+    Guarantees 15m vs 1h parity without double downsampling, with optional history_count offset.
     """
     if not slots:
         return {"charge": [], "discharge": [], "hold": []}
@@ -428,16 +428,16 @@ def extract_battery_overlay_ranges(slots: List[BatterySlotResult], is_15m: bool 
             elif not matches and in_block:
                 in_block = False
                 res.append({
-                    "start_idx": start_idx,
-                    "end_idx": i - 1,
+                    "start_idx": start_idx + history_count,
+                    "end_idx": i - 1 + history_count,
                     "mode_code": default_mode or cur_modes[0],
                     "power_kw": round(sum(cur_powers) / len(cur_powers), 2),
                     "name": category_name
                 })
         if in_block:
             res.append({
-                "start_idx": start_idx,
-                "end_idx": n - 1,
+                "start_idx": start_idx + history_count,
+                "end_idx": n - 1 + history_count,
                 "mode_code": default_mode or cur_modes[0],
                 "power_kw": round(sum(cur_powers) / len(cur_powers), 2),
                 "name": category_name

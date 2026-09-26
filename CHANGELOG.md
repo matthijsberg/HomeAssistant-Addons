@@ -10,6 +10,18 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.14] — 2026-09-25 (Thuisaccu Historisch Uur, NU-Stippellijn & Shading Pariteit)
+
+### Frontend & Visuele Harmonie
+- **1-Uur Historie Prepend**: Aan de linkerkant van de batterijvoorspelling (`/api/model/battery-status`) wordt nu exact 1 uur actuele historie voorafgegaan (4 kwartieren in 15m, 1 uur in 1h mode), conform alle overige voorspellingsgrafieken.
+- **NU-Stippellijn, Shading & Badges**: Door de uitlijning op `now_idx = history_count` activeert `OpenHEMSHistoryPlugin` automatisch:
+  - De donkere arcering van de historische zone links (`rgba(3, 7, 18, 0.70)`).
+  - De paarse gestippelde verticale scheidingslijn op het overgangsmoment.
+  - De badges `◀ 1U HIST` en `NU ▶`.
+- **Tijdlijn & Overlay Synchronisatie**: De horizontale modus-tijdlijnbalk en de gearceerde achtergrondoverlays zijn synchroon met `history_count` verschoven, zodat verleden, heden en toekomst exact verticaal uitlijnen.
+
+---
+
 ## [0.104.13] — 2026-09-25 (Consolidatie Frontend Componenten: OpenHEMSTokens, OpenHEMSUI & Chart Engine Presets)
 
 ### Architectuur & Componentisatie
