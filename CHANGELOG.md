@@ -10,6 +10,14 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.6] — 2026-09-25 (Volledige Synchronisatie Thermische Voorspellingsgrafieken)
+
+### Bug Fixes & Pariteit
+- **Kwartieruitlijning & Centrale Labels in DHW en Verwarming Voorspelling**: In `api/routes_forecast.py` (`dhw-status` en `heating-forecast`) werd `base_sim_dt` voorheen niet uitgelijnd op kwartieren (resulterend in willekeurige minuten zoals `:23`, `:38`). Nu strikt uitgelijnd op het kwartier (`09:00`, `09:15`) en aangesloten op `format_chart_timeline_labels`.
+- **Frontend Resolutie-koppeling (`charts_thermal.js`)**: `renderDhwTemperatureChart` en `renderHeatingForecastChart` lazen voorheen de niet-bestaande `window.predictionResolution` uit (waardoor ze altijd op 15m bleven hangen). Nu gekoppeld aan `window.OpenHEMSChartEngine.getResolution()`, waardoor alle 9 grafieken synchroon mee wisselen tussen 1h en 15m.
+
+---
+
 ## [0.104.5] — 2026-09-25 (Centrale Tijdlijn- & Datumnotatie over Alle Grafieken)
 
 ### Frontend & API Presentatie Pariteit

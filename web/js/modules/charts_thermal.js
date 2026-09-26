@@ -414,7 +414,7 @@
         if (!canvas) return;
         try {
             const horizonVal = window.OpenHEMSChartEngine ? window.OpenHEMSChartEngine.getHorizon('prediction') : '24h';
-            const resMode = window.predictionResolution || '15m';
+            const resMode = window.OpenHEMSChartEngine ? window.OpenHEMSChartEngine.getResolution('prediction') : (window.predictionResolution || '1h');
             const res = await fetch('./api/model/heating-forecast?resolution=' + encodeURIComponent(resMode) + '&horizon=' + encodeURIComponent(horizonVal));
             if (!res.ok) return;
             const d = await res.json();
@@ -534,7 +534,7 @@
         try {
             const lang = window.OpenHEMSi18n ? window.OpenHEMSi18n.getLang() : 'nl';
             const horizonVal = window.OpenHEMSChartEngine ? window.OpenHEMSChartEngine.getHorizon('prediction') : '24h';
-            const resMode = window.predictionResolution || '15m';
+            const resMode = window.OpenHEMSChartEngine ? window.OpenHEMSChartEngine.getResolution('prediction') : (window.predictionResolution || '1h');
             const res = await fetch('./api/model/dhw-status?resolution=' + encodeURIComponent(resMode) + '&horizon=' + encodeURIComponent(horizonVal) + '&lang=' + encodeURIComponent(lang));
             if (!res.ok) return;
             const data = await res.json();
@@ -647,7 +647,7 @@
         try {
             const rangeSelect = document.getElementById('pp-range-select');
             const rangeVal = rangeSelect ? rangeSelect.value : '24h';
-            const resVal = (typeof window.powerProducersResolution !== 'undefined' && window.powerProducersResolution) ? window.powerProducersResolution : '1h';
+            const resVal = window.OpenHEMSChartEngine ? window.OpenHEMSChartEngine.getResolution('history') : (window.powerProducersResolution || '1h');
             const res = await fetch('./api/analytics/dhw_history?range=' + encodeURIComponent(rangeVal) + '&resolution=' + encodeURIComponent(resVal));
             const data = await res.json();
             if (data.status !== 'success') {
@@ -691,7 +691,7 @@
         try {
             const rangeSelect = document.getElementById('pp-range-select');
             const rangeVal = rangeSelect ? rangeSelect.value : '24h';
-            const resVal = (typeof window.powerProducersResolution !== 'undefined' && window.powerProducersResolution) ? window.powerProducersResolution : '1h';
+            const resVal = window.OpenHEMSChartEngine ? window.OpenHEMSChartEngine.getResolution('history') : (window.powerProducersResolution || '1h');
             const res = await fetch('./api/analytics/heating_history?range=' + encodeURIComponent(rangeVal) + '&resolution=' + encodeURIComponent(resVal));
             const data = await res.json();
             if (data.status !== 'success') {

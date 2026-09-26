@@ -23,7 +23,7 @@ from integrations.homeassistant.client import (
     get_ha_client_config, get_ha_states_map
 )
 from api.energy_feed import (
-    AMS_TZ, format_slot_label, calculate_poa_solar_kw, fetch_recent_telemetry_history
+    AMS_TZ, format_slot_label, format_chart_timeline_labels, calculate_poa_solar_kw, fetch_recent_telemetry_history
 )
 from layer3_scheduling.plan_decision_evaluator import evaluate_and_apply_dhw_run_merger
 from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
@@ -88,7 +88,6 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
             if not is_15m:
                 # Aggregate to 1-hour slots
-                labels = []
                 out_temps = []
                 in_temps = []
                 unheated_temps = []
@@ -101,13 +100,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 th_loss_kw = []
                 el_power_kw = []
                 costs_eur = []
-                prev_h_dt = None
-                for h_i in range(min(n_future_slots, n_sim // 4)):
+                n_hours = min(n_future_slots, n_sim // 4)
+                for h_i in range(n_hours):
                     idx = h_i * 4
-                    h_dt = base_dt + timedelta(hours=h_i)
-                    labels.append(format_slot_label(h_dt, prev_h_dt, h_i == 0, False))
-                    prev_h_dt = h_dt
-
                     out_temps.append(round(sum(raw_out_temps[idx:idx+4]) / 4.0, 1))
                     in_temps.append(round(sum(raw_in_temps[idx:idx+4]) / 4.0, 1))
                     unheated_temps.append(round(sum(raw_unh[idx:idx+4]) / 4.0, 1))
@@ -120,23 +115,31 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     th_loss_kw.append(round(sum(raw_th_loss_kw[idx:idx+4]) / 4.0, 2))
                     el_power_kw.append(round(sum(raw_el_power_kw[idx:idx+4]) / 4.0, 2))
                     costs_eur.append(round(sum(raw_costs_eur[idx:idx+4]), 3))
+
+                fc_dts = [base_dt + timedelta(hours=h_i) for h_i in range(n_hours)]
+                all_dts = [hp["dt"] for hp in hist_pts] + fc_dts
+                all_labels = format_chart_timeline_labels(all_dts, is_15m=False, now_idx=len(hist_pts))
             else:
-                labels = raw_labels[:n_future_slots]
-                out_temps = raw_out_temps[:n_future_slots]
-                in_temps = raw_in_temps[:n_future_slots]
-                unheated_temps = raw_unh[:n_future_slots]
-                in_p05 = raw_in_p05[:n_future_slots]
-                in_p95 = raw_in_p95[:n_future_slots]
-                unh_p05 = raw_unh_p05[:n_future_slots]
-                unh_p95 = raw_unh_p95[:n_future_slots]
-                floor_temps = raw_floor_temps[:n_future_slots]
-                cops = raw_cops[:n_future_slots]
-                th_loss_kw = raw_th_loss_kw[:n_future_slots]
-                el_power_kw = raw_el_power_kw[:n_future_slots]
-                costs_eur = raw_costs_eur[:n_future_slots]
+                n_q = min(n_future_slots, len(raw_labels))
+                out_temps = raw_out_temps[:n_q]
+                in_temps = raw_in_temps[:n_q]
+                unheated_temps = raw_unh[:n_q]
+                in_p05 = raw_in_p05[:n_q]
+                in_p95 = raw_in_p95[:n_q]
+                unh_p05 = raw_unh_p05[:n_q]
+                unh_p95 = raw_unh_p95[:n_q]
+                floor_temps = raw_floor_temps[:n_q]
+                cops = raw_cops[:n_q]
+                th_loss_kw = raw_th_loss_kw[:n_q]
+                el_power_kw = raw_el_power_kw[:n_q]
+                costs_eur = raw_costs_eur[:n_q]
+
+                fc_dts = [base_dt + timedelta(minutes=15 * q_i) for q_i in range(n_q)]
+                all_dts = [hp["dt"] for hp in hist_pts] + fc_dts
+                all_labels = format_chart_timeline_labels(all_dts, is_15m=True, now_idx=len(hist_pts))
         else:
             n_sim = 0
-            labels, out_temps, in_temps, floor_temps, cops, th_loss_kw, el_power_kw, costs_eur = [], [], [], [], [], [], [], []
+            all_labels, out_temps, in_temps, floor_temps, cops, th_loss_kw, el_power_kw, costs_eur = [], [], [], [], [], [], [], []
             unheated_temps, in_p05, in_p95, unh_p05, unh_p95 = [], [], [], [], []
             tot_th, tot_el, tot_cost = 0.0, 0.0, 0.0
             t_setpoint = 20.0
@@ -181,7 +184,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
         handler._send_json({
             "resolution": res_mode,
-            "labels": hist_labels + labels,
+            "labels": all_labels,
             "outdoor_temps_c": hist_outdoor + out_temps,
             "indoor_temps_c": hist_indoor + in_temps,
             "unheated_temps_c": hist_indoor + unheated_temps,
@@ -279,11 +282,10 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 raw_unh_p05 = raw_unh_p05[:target_slots]
                 raw_unh_p95 = raw_unh_p95[:target_slots]
 
-                base_sim_dt = now_ams
-                raw_lbls = [
-                    format_slot_label(base_sim_dt + timedelta(minutes=15 * i), None, i == 0, True)
-                    for i in range(len(raw_temps))
-                ]
+                start_min = (now_ams.minute // 15) * 15 if is_15m else 0
+                base_sim_dt = now_ams.replace(minute=start_min, second=0, microsecond=0)
+                raw_dts = [base_sim_dt + timedelta(minutes=15 * i) for i in range(len(raw_temps))]
+                raw_lbls = format_chart_timeline_labels(raw_dts, is_15m=True, now_idx=0)
                 traj = {
                     "labels": raw_lbls,
                     "temperatures_c": raw_temps,
@@ -307,7 +309,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 c_power = plan.dhw_summary.power_kw if plan.dhw_summary else spec.heat_pump_electric_kw
                 c_target = plan.dhw_summary.target_temp_c if plan.dhw_summary else spec.target_setpoint_c
 
-                base_sim_dt = now_ams
+                start_min = (now_ams.minute // 15) * 15 if is_15m else 0
+                base_sim_dt = now_ams.replace(minute=start_min, second=0, microsecond=0)
                 traj = GLOBAL_DHW_MODEL.simulate_trajectory(
                     t_live,
                     base_sim_dt,
@@ -338,14 +341,13 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
                 if not is_15m:
                     # Aggregate 96 quarters to 24 hours
-                    h_labels, h_temps, h_p05, h_p95, h_demand = [], [], [], [], []
+                    n_h = min(hours_sim, len(raw_lbls) // 4)
+                    h_dts = [base_sim_dt + timedelta(hours=h_i) for h_i in range(n_h)]
+                    h_labels = format_chart_timeline_labels(h_dts, is_15m=False, now_idx=0)
+                    h_temps, h_p05, h_p95, h_demand = [], [], [], []
                     h_unh_temps, h_unh_p05, h_unh_p95 = [], [], []
-                    prev_h_dt = None
-                    for h_i in range(min(hours_sim, len(raw_lbls) // 4)):
+                    for h_i in range(n_h):
                         idx = h_i * 4
-                        h_dt = base_sim_dt + timedelta(hours=h_i)
-                        h_labels.append(format_slot_label(h_dt, prev_h_dt, h_i == 0, False))
-                        prev_h_dt = h_dt
                         h_temps.append(round(sum(raw_temps[idx:idx+4]) / 4.0, 1))
                         h_p05.append(round(sum(raw_p05[idx:idx+4]) / 4.0, 1))
                         h_p95.append(round(sum(raw_p95[idx:idx+4]) / 4.0, 1))
@@ -384,14 +386,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                         "morning_dip_time": raw_unh_dip_time
                     }
                 else:
-                    # Ensure 15m labels have clean format_slot_label applied
-                    q_labels = []
-                    prev_q_dt = None
-                    for q_i in range(len(raw_lbls)):
-                        q_dt = base_sim_dt + timedelta(minutes=15 * q_i)
-                        q_labels.append(format_slot_label(q_dt, prev_q_dt, q_i == 0, True))
-                        prev_q_dt = q_dt
-                    traj["labels"] = q_labels
+                    q_dts = [base_sim_dt + timedelta(minutes=15 * q_i) for q_i in range(len(raw_lbls))]
+                    traj["labels"] = format_chart_timeline_labels(q_dts, is_15m=True, now_idx=0)
 
             # === Unified Buffer Efficiëntie & Laadbesluit Analysis ===
             is_daytime = (7 <= now_ams.hour < 19)
