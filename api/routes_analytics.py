@@ -160,8 +160,10 @@ def fetch_historical_overlay_ranges(
         )
         slots.append(s)
 
-    forced_off_ranges = extract_plan_spitsblok_ranges(slots, is_15m=is_15m)
-    advised_off_ranges = extract_plan_soft_advice_ranges(slots, is_15m=is_15m)
+    # slots is ALREADY 1:1 aligned with slot_dts and the chart labels (whether 15m or 1h).
+    # Using is_15m=True ensures 1:1 slot-to-index mapping without dividing by 4.
+    forced_off_ranges = extract_plan_spitsblok_ranges(slots, is_15m=True)
+    advised_off_ranges = extract_plan_soft_advice_ranges(slots, is_15m=True)
     return forced_off_ranges, advised_off_ranges
 
 

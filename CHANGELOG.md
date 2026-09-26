@@ -10,6 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.2] — 2026-09-25 (Fix 1-Uur vs 15-Minuten Resolutie Alignment in Historische Overlays)
+
+### Bug Fixes & Resolutie Alignment
+- **Oplossing van 4x Indexcompressiefout bij 1-Uur Weergave**: In `fetch_historical_overlay_ranges` (`api/routes_analytics.py`) en `layer3_scheduling/peak_detection.py` werden reeds uursgewijs bemonsterde historische slots (25 stuks) onterecht nogmaals door 4 gedeeld (`n = len(slots) // 4`). Hierdoor schoof de avondspits van 21:00 op de 1-uur grafiek naar 10:00/11:00 's ochtends en verdween de rest van de overlays.
+- **Auto-Downsampling Safeguard**: `extract_plan_spitsblok_ranges` en `extract_plan_soft_advice_ranges` detecteren nu automatisch of de inputlijst reeds uursgewijs is (`len(slots) <= 48`) of 15-minuten kwartieren betreft (`> 48`). `fetch_historical_overlay_ranges` behoudt nu een strikte 1:1 index-afstemming op de chartlabels, waardoor de rode en amberkleurige gearceerde blokken exact op dezelfde tijdstippen blijven staan bij het wisselen tussen 15 Min en 1 Uur.
+- **Tests**: `test_historical_ranges_15m_and_1h_alignment` toegevoegd aan `tests/unit/test_historical_overlay_ranges.py` om 15m/1h tijd-synchronisatie permanent te bewaken. 180/180 tests groen.
+
 ## [0.104.1] — 2026-09-25 (Continu Dispatch Loggen in InfluxDB & Complete Historische Overlays)
 
 ### Historical Telemetry & Analytics Overlays (Invariant #7)

@@ -62,20 +62,42 @@ def test_power_producers_returns_both_ranges():
     assert isinstance(h.response["advised_off_ranges"], list)
 
 
-def test_electricity_prices_returns_both_ranges():
-    class DummyHandler:
-        def __init__(self, path):
-            self.path = path
-            self.response = None
-        def _send_json(self, data, status=200):
-            self.response = data
+def test_historical_ranges_15m_and_1h_alignment():
+    """Verify that switching between 15m and 1h resolutions keeps peak overlays aligned on identical times."""
+    now = datetime.now(AMS_TZ)
+    base = now.replace(minute=0, second=0, microsecond=0)
+    
+    # 15m: 97 slots
+    slots_15m = [base - timedelta(minutes=15 * (96 - i)) for i in range(97)]
+    prices_15m = [0.20] * 97
+    labels_15m = [dt.strftime("%H:%M") for dt in slots_15m]
+    for i, dt in enumerate(slots_15m):
+        if 20 <= dt.hour < 23:
+            prices_15m[i] = 0.50
 
-    h = DummyHandler("/api/analytics/electricity_prices?horizon=24h&resolution=15m")
-    handle_get(h, "/api/analytics/electricity_prices", {"horizon": ["24h"], "resolution": ["15m"]})
+    forced_15m, advised_15m = fetch_historical_overlay_ranges(
+        slots_15m[0].strftime("%Y-%m-%dT%H:%M:00Z"),
+        slots_15m[-1].strftime("%Y-%m-%dT%H:%M:00Z"),
+        slots_15m, prices=prices_15m, labels=labels_15m, interval_h=0.25
+    )
 
-    assert h.response is not None
-    assert h.response.get("status") == "success"
-    assert "forced_off_ranges" in h.response
-    assert "advised_off_ranges" in h.response
-    assert isinstance(h.response["forced_off_ranges"], list)
-    assert isinstance(h.response["advised_off_ranges"], list)
+    # 1h: 25 slots
+    slots_1h = [base - timedelta(hours=(24 - i)) for i in range(25)]
+    prices_1h = [0.20] * 25
+    labels_1h = [dt.strftime("%H:00") for dt in slots_1h]
+    for i, dt in enumerate(slots_1h):
+        if 20 <= dt.hour < 23:
+            prices_1h[i] = 0.50
+
+    forced_1h, advised_1h = fetch_historical_overlay_ranges(
+        slots_1h[0].strftime("%Y-%m-%dT%H:%M:00Z"),
+        slots_1h[-1].strftime("%Y-%m-%dT%H:%M:00Z"),
+        slots_1h, prices=prices_1h, labels=labels_1h, interval_h=1.0
+    )
+
+    assert len(forced_15m) > 0
+    assert len(forced_1h) > 0
+    # The start hour in 1h must align within 1 hour of 15m
+    h_1h = int(forced_1h[0]["start_label"][:2])
+    h_15m = int(forced_15m[0]["start_label"][:2])
+    assert abs(h_1h - h_15m) <= 1

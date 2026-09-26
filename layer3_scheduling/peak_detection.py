@@ -219,9 +219,11 @@ def extract_plan_spitsblok_ranges(slots: List[Any], history_count: int = 0, is_1
     ranges = []
     in_block = False
     start_idx = 0
-    n = len(slots) if is_15m else len(slots) // 4
+    # Auto-detect if slots are already hourly (e.g. len <= 48) vs 15m quarters (> 48)
+    needs_downsample = (not is_15m) and len(slots) > 48
+    n = len(slots) // 4 if needs_downsample else len(slots)
     for i in range(n):
-        if is_15m:
+        if not needs_downsample:
             is_locked = (slots[i].mode_code == "forced_off") or getattr(slots[i], "is_lockout", False)
         else:
             is_locked = any(
@@ -233,8 +235,8 @@ def extract_plan_spitsblok_ranges(slots: List[Any], history_count: int = 0, is_1
             start_idx = i
         elif not is_locked and in_block:
             in_block = False
-            s_lbl = slots[start_idx * 4 if not is_15m else start_idx].time_label
-            e_lbl = slots[(i - 1) * 4 if not is_15m else (i - 1)].time_label
+            s_lbl = slots[start_idx * 4 if needs_downsample else start_idx].time_label
+            e_lbl = slots[(i - 1) * 4 if needs_downsample else (i - 1)].time_label
             ranges.append({
                 "start_idx": history_count + start_idx,
                 "end_idx": history_count + i - 1,
@@ -243,7 +245,7 @@ def extract_plan_spitsblok_ranges(slots: List[Any], history_count: int = 0, is_1
                 "name": "SPITSBLOK"
             })
     if in_block:
-        s_lbl = slots[start_idx * 4 if not is_15m else start_idx].time_label
+        s_lbl = slots[start_idx * 4 if needs_downsample else start_idx].time_label
         e_lbl = slots[-1].time_label
         ranges.append({
             "start_idx": history_count + start_idx,
@@ -263,9 +265,11 @@ def extract_plan_soft_advice_ranges(slots: List[Any], history_count: int = 0, is
     ranges = []
     in_block = False
     start_idx = 0
-    n = len(slots) if is_15m else len(slots) // 4
+    # Auto-detect if slots are already hourly (e.g. len <= 48) vs 15m quarters (> 48)
+    needs_downsample = (not is_15m) and len(slots) > 48
+    n = len(slots) // 4 if needs_downsample else len(slots)
     for i in range(n):
-        if is_15m:
+        if not needs_downsample:
             is_soft = (slots[i].mode_code == "advised_off") or getattr(slots[i], "is_advised_off", False)
         else:
             is_soft = any(
@@ -277,8 +281,8 @@ def extract_plan_soft_advice_ranges(slots: List[Any], history_count: int = 0, is
             start_idx = i
         elif not is_soft and in_block:
             in_block = False
-            s_lbl = slots[start_idx * 4 if not is_15m else start_idx].time_label
-            e_lbl = slots[(i - 1) * 4 if not is_15m else (i - 1)].time_label
+            s_lbl = slots[start_idx * 4 if needs_downsample else start_idx].time_label
+            e_lbl = slots[(i - 1) * 4 if needs_downsample else (i - 1)].time_label
             ranges.append({
                 "start_idx": history_count + start_idx,
                 "end_idx": history_count + i - 1,
@@ -287,7 +291,7 @@ def extract_plan_soft_advice_ranges(slots: List[Any], history_count: int = 0, is
                 "name": "P75_ADVIES"
             })
     if in_block:
-        s_lbl = slots[start_idx * 4 if not is_15m else start_idx].time_label
+        s_lbl = slots[start_idx * 4 if needs_downsample else start_idx].time_label
         e_lbl = slots[-1].time_label
         ranges.append({
             "start_idx": history_count + start_idx,
