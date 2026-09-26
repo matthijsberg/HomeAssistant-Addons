@@ -808,38 +808,54 @@
             if (batteryChartInstance) batteryChartInstance.destroy();
             const ctx = canvas.getContext('2d');
 
+            const chargeKw = (traj.charge_power_kw || powerKw.map(p => Math.max(0.0, p)));
+            const dischargeKwNeg = (traj.discharge_power_kw || powerKw.map(p => Math.max(0.0, -p))).map(v => -Math.abs(v));
+
             const datasets = [
                 // 1. Primary Line: State of Charge (%)
                 {
                     label: 'State of Charge (%)',
                     data: socPct,
+                    type: 'line',
                     yAxisID: 'y',
-                    borderColor: '#10B981',
-                    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                    borderColor: '#38BDF8',
+                    backgroundColor: 'rgba(56, 189, 248, 0.08)',
                     fill: true,
                     borderWidth: 2.5,
                     tension: 0.25,
                     pointRadius: 0,
                     pointHoverRadius: 4,
-                    order: 2
-                },
-                // 2. Secondary Line: Netto Vermogen (kW)
-                {
-                    label: 'Laad- / Ontlaadvermogen (kW)',
-                    data: powerKw,
-                    yAxisID: 'y1',
-                    borderColor: '#06B6D4',
-                    backgroundColor: 'transparent',
-                    borderWidth: 1.8,
-                    stepped: true,
-                    pointRadius: 0,
-                    pointHoverRadius: 4,
                     order: 1
                 },
-                // 3. Min SoC Reference (10%)
+                // 2. Bar: Laden (+kW in groen)
+                {
+                    label: 'Laden (kW)',
+                    data: chargeKw,
+                    type: 'bar',
+                    yAxisID: 'y1',
+                    backgroundColor: 'rgba(16, 185, 129, 0.75)',
+                    borderColor: '#059669',
+                    borderWidth: 1,
+                    borderRadius: 2,
+                    order: 2
+                },
+                // 3. Bar: Ontladen (-kW in oranje/amber)
+                {
+                    label: 'Ontladen (kW)',
+                    data: dischargeKwNeg,
+                    type: 'bar',
+                    yAxisID: 'y1',
+                    backgroundColor: 'rgba(245, 158, 11, 0.80)',
+                    borderColor: '#D97706',
+                    borderWidth: 1,
+                    borderRadius: 2,
+                    order: 2
+                },
+                // 4. Min SoC Reference (10%)
                 {
                     label: 'Min SoC (10%)',
                     data: Array(labels.length).fill(10),
+                    type: 'line',
                     yAxisID: 'y',
                     borderColor: 'rgba(239, 68, 68, 0.65)',
                     borderDash: [5, 5],
@@ -848,10 +864,11 @@
                     pointRadius: 0,
                     order: 4
                 },
-                // 4. Max SoC Reference (95%)
+                // 5. Max SoC Reference (95%)
                 {
                     label: 'Max SoC (95%)',
                     data: Array(labels.length).fill(95),
+                    type: 'line',
                     yAxisID: 'y',
                     borderColor: 'rgba(16, 185, 129, 0.65)',
                     borderDash: [5, 5],
@@ -862,8 +879,14 @@
                 }
             ];
 
+            const allBatteryRanges = [
+                ...(data.charge_ranges || []),
+                ...(data.discharge_ranges || []),
+                ...(data.hold_ranges || [])
+            ];
+
             batteryChartInstance = new Chart(ctx, {
-                type: 'line',
+                type: 'bar',
                 data: {
                     labels: labels,
                     datasets: datasets
@@ -871,8 +894,7 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    spitsblokRanges: data.discharge_ranges, // diagonal amber/red hatching for discharge
-                    advisedOffRanges: data.charge_ranges,   // soft hatching for charge
+                    batteryOverlayRanges: allBatteryRanges, // custom battery ranges: green, orange/amber, blue, purple (NO red!)
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { display: false },
@@ -891,8 +913,13 @@
                                         const kwh = socKwh[idx] !== undefined ? ` (${socKwh[idx]} kWh)` : '';
                                         return `🔋 Lading: ${val}%${kwh}`;
                                     }
-                                    if (c.dataset.label.includes('Laad- / Ontlaadvermogen')) {
-                                        return val >= 0 ? `🔌 Laden: +${val.toFixed(2)} kW` : `⚡ Ontladen: ${val.toFixed(2)} kW`;
+                                    if (c.dataset.label.includes('Laden')) {
+                                        if (Math.abs(val) < 0.01) return null;
+                                        return `☀️ Laden: +${Math.abs(val).toFixed(2)} kW`;
+                                    }
+                                    if (c.dataset.label.includes('Ontladen')) {
+                                        if (Math.abs(val) < 0.01) return null;
+                                        return `⚡ Ontladen: -${Math.abs(val).toFixed(2)} kW`;
                                     }
                                     return `${c.dataset.label}: ${val}`;
                                 }
@@ -914,12 +941,12 @@
                             title: {
                                 display: true,
                                 text: 'State of Charge (%)',
-                                color: '#10B981',
+                                color: '#38BDF8',
                                 font: { size: 10, weight: 'bold' }
                             },
                             grid: { color: 'rgba(255, 255, 255, 0.05)' },
                             ticks: {
-                                color: '#10B981',
+                                color: '#38BDF8',
                                 font: { size: 10, family: 'monospace' },
                                 callback: v => `${v}%`
                             }
@@ -928,15 +955,18 @@
                             position: 'right',
                             min: -5.0,
                             max: 5.0,
-                            grid: { drawOnChartArea: false },
+                            grid: {
+                                color: (ctx) => ctx.tick && ctx.tick.value === 0 ? 'rgba(148, 163, 184, 0.35)' : 'rgba(255, 255, 255, 0.03)',
+                                lineWidth: (ctx) => ctx.tick && ctx.tick.value === 0 ? 1.5 : 1
+                            },
                             title: {
                                 display: true,
                                 text: 'Vermogen: Ontladen (-kW) < 0 < Laden (+kW)',
-                                color: '#06B6D4',
+                                color: '#94A3B8',
                                 font: { size: 10, weight: 'bold' }
                             },
                             ticks: {
-                                color: '#06B6D4',
+                                color: '#94A3B8',
                                 font: { size: 10, family: 'monospace' },
                                 callback: v => (v >= 0 ? `+${v.toFixed(1)}` : `${v.toFixed(1)}`) + ' kW'
                             }

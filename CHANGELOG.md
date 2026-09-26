@@ -10,6 +10,20 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.9] — 2026-09-25 (Accugrafiek Staven & Kleurharmonisatie met Tijdlijn)
+
+### Frontend & Visuele Harmonie
+- **Groen & Oranje Vermogensstaven (Bars)**: Laadvermogen (+kW) wordt nu als groene staven (`rgba(16, 185, 129, 0.75)`) boven de 0-as getekend, en ontlaadvermogen (-kW) als warme oranje/amber staven (`rgba(245, 158, 11, 0.80)`) onder de 0-as. State of Charge (%) blijft als vloeiende blauwe lijn (`#38BDF8`) op de linker as zichtbaar.
+- **Kleurharmonisatie met Tijdlijn (Geen Rood Meer)**: De achtergrondarcering in de accugrafiek gebruikt nu exact dezelfde kleuren als de tijdlijnbalk:
+  - Groen: Zonneladen (`CHARGE_SOLAR`)
+  - Blauw: Netladen Daltarief (`CHARGE_GRID`)
+  - Oranje: Spitsontlading (`DISCHARGE_PEAK`)
+  - Cyaan: Bufferontlading (`DISCHARGE_BUFFER`)
+  - Paars: Piekreservering (`HOLD_RESERVE`)
+  Rode spitsblok-arcering is volledig verwijderd uit de batterijgrafiek.
+
+---
+
 ## [0.104.8] — 2026-09-25 (Thuisbatterij 24h Tijdlijn, SoC/Vermogensgrafiek & Resolutie Pariteit)
 
 ### Features: Thuisbatterij (15 kWh) Integratie

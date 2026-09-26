@@ -287,6 +287,53 @@
                     ctx.fillRect(bounds.left, chartArea.bottom - 3, bounds.width, 3);
                 });
 
+                // 5. Battery Operation Ranges (Green Zonneladen, Blue Netladen, Amber Spits, Cyan Buffer, Purple Hold)
+                const batteryRanges = (chart.options && chart.options.batteryOverlayRanges) || (chart.data && chart.data.batteryOverlayRanges) || [];
+                batteryRanges.forEach(r => {
+                    const bounds = getRangeBounds(r);
+                    if (!bounds) return;
+                    const mode = r.mode_code || '';
+                    let stroke = 'rgba(16, 185, 129, 0.30)';
+                    let fill = 'rgba(16, 185, 129, 0.05)';
+                    let topColor = '#10B981';
+
+                    if (mode === 'CHARGE_SOLAR') {
+                        stroke = 'rgba(16, 185, 129, 0.30)'; // Emerald green
+                        fill = 'rgba(16, 185, 129, 0.05)';
+                        topColor = '#10B981';
+                    } else if (mode === 'CHARGE_GRID') {
+                        stroke = 'rgba(59, 130, 246, 0.30)'; // Blue
+                        fill = 'rgba(59, 130, 246, 0.05)';
+                        topColor = '#3B82F6';
+                    } else if (mode === 'DISCHARGE_PEAK') {
+                        stroke = 'rgba(245, 158, 11, 0.35)'; // Amber / Orange
+                        fill = 'rgba(245, 158, 11, 0.06)';
+                        topColor = '#F59E0B';
+                    } else if (mode === 'DISCHARGE_BUFFER') {
+                        stroke = 'rgba(6, 182, 212, 0.25)'; // Cyan
+                        fill = 'rgba(6, 182, 212, 0.05)';
+                        topColor = '#06B6D4';
+                    } else if (mode === 'HOLD_RESERVE') {
+                        stroke = 'rgba(139, 92, 246, 0.25)'; // Purple
+                        fill = 'rgba(139, 92, 246, 0.05)';
+                        topColor = '#8B5CF6';
+                    }
+
+                    const hatch = getHatchPattern(stroke, fill, 8, 1.3);
+                    ctx.fillStyle = hatch;
+                    ctx.fillRect(bounds.left, chartArea.top, bounds.width, chartArea.height);
+
+                    ctx.save();
+                    ctx.strokeStyle = topColor;
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([4, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(bounds.left, chartArea.top + 1);
+                    ctx.lineTo(bounds.left + bounds.width, chartArea.top + 1);
+                    ctx.stroke();
+                    ctx.restore();
+                });
+
                 ctx.restore();
             }
         };
