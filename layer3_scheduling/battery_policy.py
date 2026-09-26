@@ -234,14 +234,20 @@ class BatteryPolicy:
 
             # 2. Opportunistic Grid Valley Charging (Winter night charging)
             if i in valley_slots and running_soc < (max_kwh * (spec.grid_charge_soc_ceiling_pct / 100.0)):
-                # Calculate needed reserve for upcoming peaks
+                # Calculate needed reserve for upcoming peaks minus expected solar surplus
+                upcoming_solar = sum(
+                    abs(residual_demand_kw[k]) * step_hours
+                    for k in range(i + 1, min(n_slots, i + spec.reserve_lookahead_slots))
+                    if residual_demand_kw[k] < -0.05
+                )
                 upcoming_peak_energy = sum(
                     residual_demand_kw[j] * step_hours
                     for j in range(i + 1, min(n_slots, i + spec.reserve_lookahead_slots))
                     if j in forced_lockouts or import_prices[j] >= p_in + spec.reserve_price_delta_eur_kwh
                 )
+                net_peak_energy = max(0.0, upcoming_peak_energy - upcoming_solar)
                 headroom_kwh = max(0.0, max_kwh - running_soc)
-                charge_target_kwh = min(headroom_kwh, upcoming_peak_energy)
+                charge_target_kwh = min(headroom_kwh, net_peak_energy)
                 if charge_target_kwh > 0.5:
                     charge_kw = min(spec.max_charge_kw, charge_target_kwh / step_hours)
                     in_kwh = min(charge_kw * step_hours * eta_one_way, headroom_kwh)
@@ -253,12 +259,19 @@ class BatteryPolicy:
 
             # 3. Positive residual = House needs energy
             if res_kw > 0.05:
-                # Look ahead: Are there imminent higher-priced peaks within next 8 hours?
-                future_lockouts = [
-                    j for j in range(i + 1, min(n_slots, i + spec.reserve_lookahead_slots))
-                    if (j in forced_lockouts or import_prices[j] > p_in + spec.peak_price_delta_eur_kwh)
-                    and residual_demand_kw[j] > 0.1
-                ]
+                # Look ahead: Are there imminent higher-priced peaks?
+                # Only reserve if solar won't refill the battery before that peak!
+                future_lockouts = []
+                for j in range(i + 1, min(n_slots, i + spec.reserve_lookahead_slots)):
+                    if (j in forced_lockouts or import_prices[j] > p_in + spec.peak_price_delta_eur_kwh) and residual_demand_kw[j] > 0.1:
+                        solar_refill = sum(
+                            abs(residual_demand_kw[k]) * step_hours
+                            for k in range(i + 1, j)
+                            if residual_demand_kw[k] < -0.05
+                        )
+                        if solar_refill < (spec.usable_capacity_kwh * 0.4):
+                            future_lockouts.append(j)
+
                 future_critical_kwh = sum(
                     min(residual_demand_kw[j], spec.max_discharge_kw) * step_hours
                     for j in future_lockouts
@@ -275,9 +288,6 @@ class BatteryPolicy:
                     req_kwh = min(res_kw, spec.max_discharge_kw) * step_hours
                     dis_kwh = min(req_kwh, available_to_discharge_kwh * eta_one_way)
                     if dis_kwh > 0.02:
-                        # dis_kwh is AC-energie; act_kw is dus AC-vermogen.
-                        # Delen door eta hier zou de omvormerlimiet met 1/eta overschrijden
-                        # en de cel met 1/eta^2 legen (de boekhouding deelt al door eta).
                         act_kw = dis_kwh / step_hours
                         power_dispatch_kw[i] = -round(act_kw, 3)
                         mode_codes[i] = "DISCHARGE_PEAK"
@@ -287,18 +297,15 @@ class BatteryPolicy:
 
                 # Not a peak, but we have more energy than needed for future peaks:
                 excess_kwh = available_to_discharge_kwh - (future_critical_kwh / eta_one_way)
-                if excess_kwh > 0.5 and (p_in - spec.degradation_cost_eur_kwh) > p_ex:
-                    # Off-peak residual discharge
+                if excess_kwh > 0.05 and (p_in - spec.degradation_cost_eur_kwh) > p_ex:
+                    # Off-peak residual discharge (Nul-op-de-meter)
                     req_kwh = min(res_kw, spec.max_discharge_kw) * step_hours
                     dis_kwh = min(req_kwh, excess_kwh * eta_one_way)
                     if dis_kwh > 0.02:
-                        # dis_kwh is AC-energie; act_kw is dus AC-vermogen.
-                        # Delen door eta hier zou de omvormerlimiet met 1/eta overschrijden
-                        # en de cel met 1/eta^2 legen (de boekhouding deelt al door eta).
                         act_kw = dis_kwh / step_hours
                         power_dispatch_kw[i] = -round(act_kw, 3)
                         mode_codes[i] = "DISCHARGE_BUFFER"
-                        mode_labels[i] = "Restontlading"
+                        mode_labels[i] = "Huisontlasting"
                         running_soc -= (dis_kwh / eta_one_way)
                         continue
                 elif future_critical_kwh > 0.5 and available_to_discharge_kwh > 0:

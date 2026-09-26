@@ -564,8 +564,20 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 q_slice = summary_15m.slots[h_i * 4:(h_i + 1) * 4]
                 if q_slice:
                     avg_p = sum(s.power_kw for s in q_slice) / len(q_slice)
-                    mode = max(set(s.mode_code for s in q_slice), key=lambda m: sum(1 for s in q_slice if s.mode_code == m))
-                    label = max(set(s.mode_label for s in q_slice), key=lambda l: sum(1 for s in q_slice if s.mode_label == l))
+                    if avg_p > 0.05:
+                        charge_modes = [s.mode_code for s in q_slice if s.power_kw > 0.01]
+                        mode = max(set(charge_modes), key=charge_modes.count) if charge_modes else "CHARGE_SOLAR"
+                        label = "Zonneladen" if mode == "CHARGE_SOLAR" else "Netladen (Dal)"
+                    elif avg_p < -0.05:
+                        dis_modes = [s.mode_code for s in q_slice if s.power_kw < -0.01]
+                        mode = max(set(dis_modes), key=dis_modes.count) if dis_modes else "DISCHARGE_PEAK"
+                        label = "Spitsontlasting" if mode == "DISCHARGE_PEAK" else "Huisontlasting"
+                    elif any(s.mode_code == "HOLD_RESERVE" for s in q_slice):
+                        mode = "HOLD_RESERVE"
+                        label = "Piekreservering"
+                    else:
+                        mode = "STANDBY"
+                        label = "Standby"
                     end_soc_pct = q_slice[-1].soc_pct
                     end_soc_kwh = q_slice[-1].soc_kwh
                     tot_cost = sum(s.cost_impact_eur for s in q_slice)
@@ -591,7 +603,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "CHARGE_SOLAR": {"color": "#10B981", "css": "repeating-linear-gradient(45deg, #10B981, #10B981 2px, #059669 2px, #059669 4px)", "name": "Zonneladen ☀️"},
             "CHARGE_GRID": {"color": "#3B82F6", "css": "repeating-linear-gradient(45deg, #3B82F6, #3B82F6 2px, #2563EB 2px, #2563EB 4px)", "name": "Netladen (Dal) 🔌"},
             "DISCHARGE_PEAK": {"color": "#F59E0B", "css": "repeating-linear-gradient(45deg, #F59E0B, #F59E0B 2px, #D97706 2px, #D97706 4px)", "name": "Spitsontlading ⚡"},
-            "DISCHARGE_BUFFER": {"color": "#06B6D4", "css": "none", "name": "Eigen Verbruik Buffer 🔋"},
+            "DISCHARGE_BUFFER": {"color": "#F59E0B", "css": "none", "name": "Huisontlasting (Nul-op-Meter) 🔋"},
             "HOLD_RESERVE": {"color": "#8B5CF6", "css": "none", "name": "Piekreservering 🛡️"},
             "STANDBY": {"color": "#1E293B", "css": "none", "name": "Standby ⏸️"}
         }

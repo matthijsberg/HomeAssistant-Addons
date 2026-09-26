@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.10] — 2026-09-25 (Kleurharmonisatie 24h vs 48h, Nul-op-de-Meter Ontlading & Standby-eliminatie)
+
+### Optimalisatie & Algoritmiek
+- **Kleurharmonisatie tussen Horizonten (24h vs 48h)**: `DISCHARGE_BUFFER` (huisontlasting / nul-op-meter) en `DISCHARGE_PEAK` (spitsontlasting) gebruiken nu beide het canonieke warme amber/oranje kleurenpallet (`#F59E0B`), waardoor de nachtkleuren niet meer verspringen tussen 24 uur en 48 uur.
+- **Zonne-aftrek bij Nachtelijk Netladen**: Nachtelijk netladen (dal) trekt nu het verwachte zonne-overschot overdag af van de laadbehoefte, zodat de batterij overdag maximaal gratis zon kan opnemen in plaats van onnodig vol te lopen met netstroom.
+- **Standby-aggregatie Fix**: In de 1-uurs weergave wint een actieve modus (laden of ontladen) nu altijd van `STANDBY` zodra er netto vermogen vloeit ($|P| > 0,05$ kW).
+- **Zon-geïnformeerde Piekreservering**: De batterij houdt 's avonds en 's nachts alleen capaciteit vast voor toekomstige pieken als er tussen nu en die piek géén zonnestroom beschikbaar is om de accu weer vol te laden. Zo wordt de meter 's nachts maximaal op 0 gehouden.
+
+---
+
 ## [0.104.9] — 2026-09-25 (Accugrafiek Staven & Kleurharmonisatie met Tijdlijn)
 
 ### Frontend & Visuele Harmonie

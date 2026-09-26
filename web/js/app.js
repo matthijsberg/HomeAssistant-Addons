@@ -310,9 +310,9 @@
                         fill = 'rgba(245, 158, 11, 0.06)';
                         topColor = '#F59E0B';
                     } else if (mode === 'DISCHARGE_BUFFER') {
-                        stroke = 'rgba(6, 182, 212, 0.25)'; // Cyan
-                        fill = 'rgba(6, 182, 212, 0.05)';
-                        topColor = '#06B6D4';
+                        stroke = 'rgba(245, 158, 11, 0.25)'; // Amber / Orange (Nul-op-meter)
+                        fill = 'rgba(245, 158, 11, 0.04)';
+                        topColor = '#F59E0B';
                     } else if (mode === 'HOLD_RESERVE') {
                         stroke = 'rgba(139, 92, 246, 0.25)'; // Purple
                         fill = 'rgba(139, 92, 246, 0.05)';
