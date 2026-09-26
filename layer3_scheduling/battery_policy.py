@@ -184,17 +184,17 @@ class BatteryPolicy:
         eta_dis = eta_one_way
         c_deg = spec.degradation_cost_eur_kwh
 
-        # Terminal valuation to properly value stored energy against upcoming cycles
-        lambda_term = max(0.20, float(np.mean(import_prices)) - c_deg)
+        # Terminal valuation based on replacement/reload cost across the horizon:
+        lambda_term = float(np.min(import_prices)) * 0.85
 
         N = n_slots
         c = np.zeros(5 * N)
         for t in range(N):
             p_in = import_prices[t]
             p_ex = export_prices[t]
-            c[0*N + t] = -lambda_term * dt * eta_ch - 0.05 * dt + 1e-6 * t
-            c[1*N + t] = -lambda_term * dt * eta_ch + 1e-6 * t
-            c[2*N + t] = (c_deg * dt + lambda_term * (dt / eta_dis)) + 1e-6 * t
+            c[0*N + t] = -lambda_term * dt * eta_ch - 1e-5 * dt + (1e-7 * t * dt)
+            c[1*N + t] = -lambda_term * dt * eta_ch + (1e-7 * t * dt)
+            c[2*N + t] = (c_deg * dt + lambda_term * (dt / eta_dis)) - 1e-6 * (N - t) * dt
             c[3*N + t] = p_in * dt
             c[4*N + t] = -p_ex * dt
 
@@ -232,12 +232,10 @@ class BatteryPolicy:
                 bounds.append((0, spec.max_charge_kw))
         for t in range(N):
             req = max(0.0, residual_demand_kw[t])
-            if (import_prices[t] - c_deg) <= export_prices[t]:
-                bounds.append((0, 0))
-            else:
-                bounds.append((0, min(spec.max_discharge_kw, req)))
+            bounds.append((0, min(spec.max_discharge_kw, req)))
         for t in range(N):
-            bounds.append((0, None))
+            # Physical grid connection fuse limit (3x25A = ~17.25 kW)
+            bounds.append((0, 17.25))
         for t in range(N):
             bounds.append((0, None))
 
@@ -338,7 +336,7 @@ class BatteryPolicy:
             base_imp = max(0.0, res_kw)
             base_exp = max(0.0, -res_kw)
             base_cost = (p_in * base_imp - p_ex * base_exp) * dt
-            actual_cost = (p_in * imp - p_ex * exp + p_in * ch_g + p_ex * ch_s + c_deg * dis) * dt
+            actual_cost = (p_in * imp - p_ex * exp + c_deg * dis) * dt
             cost_impact = round(actual_cost - base_cost, 4)
 
             current_soc = min(max_kwh, max(min_kwh, current_soc + delta_soc))

@@ -27,6 +27,7 @@ from api.energy_feed import (
 )
 from layer3_scheduling.plan_decision_evaluator import evaluate_and_apply_dhw_run_merger
 from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
+from layer3_scheduling.tariff_provider import TariffProvider
 from layer3_scheduling.battery_policy import (
     BatteryPolicy, BatterySpec, extract_battery_overlay_ranges, BatterySlotResult
 )
@@ -507,7 +508,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         heat = [s.heating_kw for s in full_slots]
         solar = [s.solar_kw for s in full_slots]
         prices = [s.price_eur for s in full_slots]
-        export_prices = [max(0.0, round((p / 1.21) - 0.11085 - 0.0121 - 0.00605, 4)) for p in prices]
+        tp = TariffProvider()
+        export_prices = [round(tp.calculate_export_value_from_import(p), 4) for p in prices]
         residual_15m = [round(u + d + h - s, 3) for u, d, h, s in zip(unalloc, dhw, heat, solar)]
 
         forced_lockouts = {

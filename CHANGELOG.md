@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.22] — 2026-09-26 (Correctie Dubbeltelling, Dynamische Terminalwaarde & TariffProvider Pariteit)
+
+### Wiskundige Refactoring & Bugfixes (Second Opinion Review)
+- **Eliminatie Dubbeltelling in Kostenrapportage**: `actual_cost` in `layer3_scheduling/battery_policy.py` rekent nu zuiver met `(p_in*imp - p_ex*exp + c_deg*dis)*dt`. De eerdere dubbeltelling (`+ p_in*ch_g + p_ex*ch_s`) die de gerapporteerde besparingen kunstmatig drukte, is geëlimineerd.
+- **Herlaadwaarde-gestuurde Terminale Waarde ($\lambda_{\text{term}}$)**: $\lambda_{\text{term}}$ is ontkoppeld van de statische gemiddelde prijs en gekoppeld aan de werkelijke herlaadkost ($\min(p_{\text{in}}) \times 0{,}85$). Hierdoor ontlaadt de batterij rationeel vanaf het zuivere break-even punt (€0,204/kWh) zonder onnodig energie te hamsteren.
+- **Single Source of Truth Exporttarieven**: `api/routes_forecast.py` gebruikt nu direct `TariffProvider.calculate_export_value_from_import()` conform Invariant #1 in plaats van een inline hardcoded formule.
+- **Fysische Netinvoerbegrenzing**: $P_{\text{imp}}$ is begrensd op de 3×25A hoofdzekering (17,25 kW).
+- **Tie-Breaker Harmoniserering**: De kunstmatige solar-bonus van €0,05 is vervangen door een subtiele $1\text{e-}5\cdot dt$ prioriteit en tijdsvoorkeur.
+
+---
+
 ## [0.104.21] — 2026-09-26 (Volledige Zonne- & Netlaadfusie tot 95% SoC)
 
 ### Bugfixes & Algoritmiek
