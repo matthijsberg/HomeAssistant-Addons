@@ -10,6 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.5] — 2026-09-25 (Centrale Tijdlijn- & Datumnotatie over Alle Grafieken)
+
+### Frontend & API Presentatie Pariteit
+- **Centrale Tijdlijn Label Generator (`format_chart_timeline_labels`)**: Geïmplementeerd in `api/energy_feed.py` als de Single Source of Truth voor datum- en tijdstipnotatie over alle grafieken.
+- **Uniforme Notatie (Voorspelling & Historie)**:
+  - `Nu (HH:MM)` marker op het huidige moment (eerste voorspellingslot of laatste historieslot).
+  - Dagovergangen om middernacht automatisch gelabeld (`Za 00:00`, `Zo 00:00`, etc.).
+  - Meerdagse grafieken (48h / 7d) tonen op het eerste startpunt de begindag (`Do 09:00`, `Vr 09:00`) voor directe oriëntatie.
+  - Tussenliggende staven strak en rustig zonder herhaling van datumnummers.
+- **Endpoints Gemigreerd**: `power_producers`, `dhw_history`, `heating_history`, `cost_history` en `electricity_prices` gebruiken nu allemaal dezelfde centrale generator.
+
+---
+
 ## [0.104.4] — 2026-09-25 (Fix 48-Uurs Multi-Day Index Verschuiving in Historische Overlays)
 
 ### Bug Fixes & Multi-Day Alignment

@@ -38,6 +38,47 @@ def format_slot_label(dt_slot: datetime, prev_dt: Optional[datetime], is_first: 
     return time_str
 
 
+def format_chart_timeline_labels(
+    dts: List[datetime],
+    is_15m: bool = True,
+    now_idx: Optional[int] = None,
+    is_historical: bool = False
+) -> List[str]:
+    """
+    Unified Single Source of Truth for Dutch chart timeline X-axis labels across Open HEMS.
+    - Format: HH:MM (15m) or HH:00 (1h)
+    - Midnight / Day transitions: 'Ma 00:00', 'Di 00:00', etc.
+    - Multi-day chart start (idx 0): 'Vr 09:00' for instant date orientation
+    - Current moment (now_idx or end of history): 'Nu (HH:MM)'
+    """
+    if not dts:
+        return []
+
+    n = len(dts)
+    if now_idx is None and is_historical:
+        now_idx = n - 1
+
+    labels = []
+    prev_dt = None
+    multi_day = (dts[-1].date() != dts[0].date())
+
+    for i, dt in enumerate(dts):
+        time_str = dt.strftime("%H:%M" if is_15m else "%H:00")
+        day_str = DUTCH_DAYS_SHORT[dt.weekday()]
+
+        if now_idx is not None and i == now_idx:
+            labels.append(f"Nu ({time_str})")
+        elif i == 0 and multi_day and (now_idx is None or i != now_idx):
+            labels.append(f"{day_str} {time_str}")
+        elif prev_dt is not None and dt.day != prev_dt.day:
+            labels.append(f"{day_str} {time_str}")
+        else:
+            labels.append(time_str)
+        prev_dt = dt
+
+    return labels
+
+
 def calculate_poa_solar_kw(
     dt_ams: datetime,
     ghi_w_m2: float,

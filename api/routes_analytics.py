@@ -21,7 +21,7 @@ from integrations.homeassistant.client import (
     get_ha_client_config, get_ha_states_map
 )
 from api.energy_feed import (
-    AMS_TZ, DUTCH_DAYS_SHORT, format_slot_label,
+    AMS_TZ, DUTCH_DAYS_SHORT, format_slot_label, format_chart_timeline_labels,
     calculate_poa_solar_kw, fetch_recent_telemetry_history,
     get_epex_tariffs_cached, get_tariff_sources_map
 )
@@ -711,6 +711,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     interval_h = 2.0
                     time_fmt = "%a %d %H:00"
 
+            is_15m = (interval_h <= 0.25)
+
             # Query 100% strictly from openhems canonical database with fill(none)
             q = f"""
             SELECT mean("power_w") as afname_w FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND {time_filter} GROUP BY time({bucket_sz}) fill(none);
@@ -807,23 +809,18 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             tot_verbruik_eur = 0.0
             tot_selfcons_eur = 0.0
             tot_hp_eur = 0.0
-            prev_pp_dt = None
+            dts = []
+            for ts_str in sorted_ts:
+                try:
+                    dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
+                except Exception:
+                    dt = datetime.now(AMS_TZ)
+                dts.append(dt)
+
+            labels = format_chart_timeline_labels(dts, is_15m=is_15m, is_historical=True)
 
             for ts_str in sorted_ts:
                 m = ts_map[ts_str]
-                try:
-                    dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
-                    if prev_pp_dt is not None and dt.day != prev_pp_dt.day:
-                        day_str = DUTCH_DAYS_SHORT[dt.weekday()]
-                        time_label = f"{day_str} {dt.strftime(time_fmt)}"
-                    else:
-                        time_label = dt.strftime(time_fmt)
-                    prev_pp_dt = dt
-                except Exception:
-                    time_label = ts_str[11:16]
-
-                labels.append(time_label)
-
                 afname = m.get("afname", 0.0)
                 terug = m.get("terug", 0.0)
                 solar = m.get("solar", 0.0)
@@ -1282,23 +1279,16 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 interval_h=interval_h
             )
 
-            for ts_str in sorted_ts:
-                dt_ams = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ)
-                if prev_dt is not None and dt_ams.day != prev_dt.day:
-                    day_str = DUTCH_DAYS_SHORT[dt_ams.weekday()]
-                    lbl = f"{day_str} {dt_ams.strftime('%H:%M' if bucket_sz == '15m' else '%H:00')}"
-                else:
-                    lbl = dt_ams.strftime("%H:%M" if bucket_sz == "15m" else "%H:00")
-                prev_dt = dt_ams
-                labels.append(lbl)
+            slot_dts = [datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ) for ts_str in sorted_ts]
+            labels = format_chart_timeline_labels(slot_dts, is_15m=(bucket_sz == "15m"), is_historical=True)
 
+            for ts_str in sorted_ts:
                 t_val = t_map.get(ts_str)
                 if t_val is not None:
                     last_t = round(float(t_val), 1)
                 temps.append(last_t)
 
             # Historical DHW telemetry: retrieve actual recorded hardware lockouts and runs from database
-            slot_dts = [datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ) for ts_str in sorted_ts]
             forced_off_ranges, advised_off_ranges = fetch_historical_overlay_ranges(
                 t_start, t_end, slot_dts, labels=labels, interval_h=interval_h
             )
@@ -1406,17 +1396,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             except Exception:
                 pass
 
-            labels = []
-            prev_dt = None
-            for s_dt in slots:
-                dt_ams = s_dt.astimezone(AMS_TZ)
-                if prev_dt is not None and dt_ams.day != prev_dt.day:
-                    day_str = DUTCH_DAYS_SHORT[dt_ams.weekday()]
-                    lbl = f"{day_str} {dt_ams.strftime('%H:%M' if bucket_sz == '15m' else '%H:00')}"
-                else:
-                    lbl = dt_ams.strftime("%H:%M" if bucket_sz == "15m" else "%H:00")
-                prev_dt = dt_ams
-                labels.append(lbl)
+            slot_dts = [s_dt.astimezone(AMS_TZ) for s_dt in slots]
+            labels = format_chart_timeline_labels(slot_dts, is_15m=(bucket_sz == "15m"), is_historical=True)
 
             # Demand in kWh thermal = UA * max(0, T_room - T_out) * interval_h
             from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
