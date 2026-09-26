@@ -600,11 +600,11 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         ranges = extract_battery_overlay_ranges(summary_15m.slots, is_15m=is_15m)
 
         mode_meta = {
-            "CHARGE_SOLAR": {"color": "#10B981", "css": "repeating-linear-gradient(45deg, #10B981, #10B981 2px, #059669 2px, #059669 4px)", "name": "Zonneladen ☀️"},
-            "CHARGE_GRID": {"color": "#3B82F6", "css": "repeating-linear-gradient(45deg, #3B82F6, #3B82F6 2px, #2563EB 2px, #2563EB 4px)", "name": "Netladen (Dal) 🔌"},
-            "DISCHARGE_PEAK": {"color": "#F59E0B", "css": "repeating-linear-gradient(45deg, #F59E0B, #F59E0B 2px, #D97706 2px, #D97706 4px)", "name": "Spitsontlading ⚡"},
-            "DISCHARGE_BUFFER": {"color": "#F59E0B", "css": "none", "name": "Huisontlasting (Nul-op-Meter) 🔋"},
-            "HOLD_RESERVE": {"color": "#8B5CF6", "css": "none", "name": "Piekreservering 🛡️"},
+            "CHARGE_SOLAR": {"color": "#F59E0B", "css": "repeating-linear-gradient(45deg, #F59E0B, #F59E0B 2px, #D97706 2px, #D97706 4px)", "name": "Zonneladen ☀️"},
+            "CHARGE_GRID": {"color": "#8B5CF6", "css": "repeating-linear-gradient(45deg, #8B5CF6, #8B5CF6 2px, #7C3AED 2px, #7C3AED 4px)", "name": "Netladen (Dal) 🔌"},
+            "DISCHARGE_PEAK": {"color": "#10B981", "css": "repeating-linear-gradient(45deg, #10B981, #10B981 2px, #059669 2px, #059669 4px)", "name": "Spitsontlasting ⚡"},
+            "DISCHARGE_BUFFER": {"color": "#10B981", "css": "none", "name": "Huisontlasting (Nul-op-Meter) 🔋"},
+            "HOLD_RESERVE": {"color": "#3B82F6", "css": "none", "name": "Piekreservering 🛡️"},
             "STANDBY": {"color": "#1E293B", "css": "none", "name": "Standby ⏸️"}
         }
 
@@ -632,6 +632,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
         expl_text = " · ".join(explanation_parts) if explanation_parts else "Batterij in standby; tariefschommelingen en zonne-overschotten onder rendementsdrempel."
 
+        solar_charge_disp = [round(s.power_kw, 2) if s.mode_code == "CHARGE_SOLAR" and s.power_kw > 0 else 0.0 for s in disp_slots]
+        grid_charge_disp = [round(s.power_kw, 2) if s.mode_code == "CHARGE_GRID" and s.power_kw > 0 else 0.0 for s in disp_slots]
+
         handler._send_json({
             "status": "success",
             "resolution": res_mode,
@@ -642,7 +645,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "soc_kwh": soc_kwh_list,
                 "power_kw": power_kw_list,
                 "charge_power_kw": charge_kw_list,
-                "discharge_power_kw": discharge_kw_list
+                "discharge_power_kw": discharge_kw_list,
+                "solar_charge_kw": solar_charge_disp,
+                "grid_charge_kw": grid_charge_disp
             },
             "charge_ranges": ranges["charge"],
             "discharge_ranges": ranges["discharge"],

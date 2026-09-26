@@ -298,25 +298,21 @@
                     let topColor = '#10B981';
 
                     if (mode === 'CHARGE_SOLAR') {
-                        stroke = 'rgba(16, 185, 129, 0.30)'; // Emerald green
-                        fill = 'rgba(16, 185, 129, 0.05)';
-                        topColor = '#10B981';
+                        stroke = 'rgba(245, 158, 11, 0.30)'; // Orange (Solar charge)
+                        fill = 'rgba(245, 158, 11, 0.05)';
+                        topColor = '#F59E0B';
                     } else if (mode === 'CHARGE_GRID') {
-                        stroke = 'rgba(59, 130, 246, 0.30)'; // Blue
-                        fill = 'rgba(59, 130, 246, 0.05)';
-                        topColor = '#3B82F6';
-                    } else if (mode === 'DISCHARGE_PEAK') {
-                        stroke = 'rgba(245, 158, 11, 0.35)'; // Amber / Orange
-                        fill = 'rgba(245, 158, 11, 0.06)';
-                        topColor = '#F59E0B';
-                    } else if (mode === 'DISCHARGE_BUFFER') {
-                        stroke = 'rgba(245, 158, 11, 0.25)'; // Amber / Orange (Nul-op-meter)
-                        fill = 'rgba(245, 158, 11, 0.04)';
-                        topColor = '#F59E0B';
-                    } else if (mode === 'HOLD_RESERVE') {
-                        stroke = 'rgba(139, 92, 246, 0.25)'; // Purple
+                        stroke = 'rgba(139, 92, 246, 0.30)'; // Purple (Grid charge)
                         fill = 'rgba(139, 92, 246, 0.05)';
                         topColor = '#8B5CF6';
+                    } else if (mode === 'DISCHARGE' || mode === 'DISCHARGE_PEAK' || mode === 'DISCHARGE_BUFFER') {
+                        stroke = 'rgba(16, 185, 129, 0.35)'; // Green (Discharge / Nul-op-meter)
+                        fill = 'rgba(16, 185, 129, 0.06)';
+                        topColor = '#10B981';
+                    } else if (mode === 'HOLD_RESERVE') {
+                        stroke = 'rgba(59, 130, 246, 0.25)'; // Blue (Hold)
+                        fill = 'rgba(59, 130, 246, 0.05)';
+                        topColor = '#3B82F6';
                     }
 
                     const hatch = getHatchPattern(stroke, fill, 8, 1.3);

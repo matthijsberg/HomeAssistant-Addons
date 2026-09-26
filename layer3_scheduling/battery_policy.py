@@ -400,7 +400,7 @@ def extract_battery_overlay_ranges(slots: List[BatterySlotResult], is_15m: bool 
     needs_downsample = (not is_15m) and len(slots) > 48
     n = len(slots) // 4 if needs_downsample else len(slots)
 
-    def scan_ranges(predicate, category_name):
+    def scan_ranges(predicate, category_name, default_mode=None):
         res = []
         in_block = False
         start_idx = 0
@@ -430,7 +430,7 @@ def extract_battery_overlay_ranges(slots: List[BatterySlotResult], is_15m: bool 
                 res.append({
                     "start_idx": start_idx,
                     "end_idx": i - 1,
-                    "mode_code": cur_modes[0],
+                    "mode_code": default_mode or cur_modes[0],
                     "power_kw": round(sum(cur_powers) / len(cur_powers), 2),
                     "name": category_name
                 })
@@ -438,18 +438,21 @@ def extract_battery_overlay_ranges(slots: List[BatterySlotResult], is_15m: bool 
             res.append({
                 "start_idx": start_idx,
                 "end_idx": n - 1,
-                "mode_code": cur_modes[0],
+                "mode_code": default_mode or cur_modes[0],
                 "power_kw": round(sum(cur_powers) / len(cur_powers), 2),
                 "name": category_name
             })
         return res
 
-    charge_ranges = scan_ranges(lambda s: s.mode_code in ["CHARGE_SOLAR", "CHARGE_GRID"], "BATTERY_CHARGE")
-    discharge_ranges = scan_ranges(lambda s: s.mode_code in ["DISCHARGE_PEAK", "DISCHARGE_BUFFER"], "BATTERY_DISCHARGE")
-    hold_ranges = scan_ranges(lambda s: s.mode_code == "HOLD_RESERVE", "HOLD_RESERVE")
+    solar_charge_ranges = scan_ranges(lambda s: s.mode_code == "CHARGE_SOLAR", "BATTERY_SOLAR_CHARGE", "CHARGE_SOLAR")
+    grid_charge_ranges = scan_ranges(lambda s: s.mode_code == "CHARGE_GRID", "BATTERY_GRID_CHARGE", "CHARGE_GRID")
+    discharge_ranges = scan_ranges(lambda s: s.mode_code in ["DISCHARGE_PEAK", "DISCHARGE_BUFFER"], "BATTERY_DISCHARGE", "DISCHARGE")
+    hold_ranges = scan_ranges(lambda s: s.mode_code == "HOLD_RESERVE", "HOLD_RESERVE", "HOLD_RESERVE")
 
     return {
-        "charge": charge_ranges,
+        "charge": solar_charge_ranges + grid_charge_ranges,
+        "solar_charge": solar_charge_ranges,
+        "grid_charge": grid_charge_ranges,
         "discharge": discharge_ranges,
         "hold": hold_ranges
     }

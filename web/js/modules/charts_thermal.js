@@ -808,7 +808,8 @@
             if (batteryChartInstance) batteryChartInstance.destroy();
             const ctx = canvas.getContext('2d');
 
-            const chargeKw = (traj.charge_power_kw || powerKw.map(p => Math.max(0.0, p)));
+            const solarChargeKw = traj.solar_charge_kw || (traj.charge_power_kw || powerKw.map(p => Math.max(0.0, p)));
+            const gridChargeKw = traj.grid_charge_kw || [];
             const dischargeKwNeg = (traj.discharge_power_kw || powerKw.map(p => Math.max(0.0, -p))).map(v => -Math.abs(v));
 
             const datasets = [
@@ -827,23 +828,14 @@
                     pointHoverRadius: 4,
                     order: 1
                 },
-                // 2. Bar: Laden (+kW in groen)
+                // 2. Bar: Zonneladen (+kW in oranje)
                 {
-                    label: 'Laden (kW)',
-                    data: chargeKw,
+                    label: 'Zonneladen (kW)',
+                    data: solarChargeKw,
                     type: 'bar',
-                    yAxisID: 'y1',
-                    backgroundColor: 'rgba(16, 185, 129, 0.75)',
-                    borderColor: '#059669',
-                    borderWidth: 1,
-                    borderRadius: 2,
-                    order: 2
-                },
-                // 3. Bar: Ontladen (-kW in oranje/amber)
-                {
-                    label: 'Ontladen (kW)',
-                    data: dischargeKwNeg,
-                    type: 'bar',
+                    stack: 'battery_power',
+                    barPercentage: 0.9,
+                    categoryPercentage: 0.9,
                     yAxisID: 'y1',
                     backgroundColor: 'rgba(245, 158, 11, 0.80)',
                     borderColor: '#D97706',
@@ -851,7 +843,37 @@
                     borderRadius: 2,
                     order: 2
                 },
-                // 4. Min SoC Reference (10%)
+                // 3. Bar: Netladen (+kW in paars)
+                {
+                    label: 'Netladen (kW)',
+                    data: gridChargeKw,
+                    type: 'bar',
+                    stack: 'battery_power',
+                    barPercentage: 0.9,
+                    categoryPercentage: 0.9,
+                    yAxisID: 'y1',
+                    backgroundColor: 'rgba(139, 92, 246, 0.80)',
+                    borderColor: '#7C3AED',
+                    borderWidth: 1,
+                    borderRadius: 2,
+                    order: 2
+                },
+                // 4. Bar: Ontladen (-kW in groen)
+                {
+                    label: 'Ontladen (kW)',
+                    data: dischargeKwNeg,
+                    type: 'bar',
+                    stack: 'battery_power',
+                    barPercentage: 0.9,
+                    categoryPercentage: 0.9,
+                    yAxisID: 'y1',
+                    backgroundColor: 'rgba(16, 185, 129, 0.80)',
+                    borderColor: '#059669',
+                    borderWidth: 1,
+                    borderRadius: 2,
+                    order: 2
+                },
+                // 5. Min SoC Reference (10%)
                 {
                     label: 'Min SoC (10%)',
                     data: Array(labels.length).fill(10),
@@ -864,7 +886,7 @@
                     pointRadius: 0,
                     order: 4
                 },
-                // 5. Max SoC Reference (95%)
+                // 6. Max SoC Reference (95%)
                 {
                     label: 'Max SoC (95%)',
                     data: Array(labels.length).fill(95),
@@ -894,7 +916,7 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    batteryOverlayRanges: allBatteryRanges, // custom battery ranges: green, orange/amber, blue, purple (NO red!)
+                    batteryOverlayRanges: allBatteryRanges, // custom battery ranges: green, orange, purple, blue (NO red!)
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { display: false },
@@ -913,9 +935,13 @@
                                         const kwh = socKwh[idx] !== undefined ? ` (${socKwh[idx]} kWh)` : '';
                                         return `🔋 Lading: ${val}%${kwh}`;
                                     }
-                                    if (c.dataset.label.includes('Laden')) {
+                                    if (c.dataset.label.includes('Zonneladen')) {
                                         if (Math.abs(val) < 0.01) return null;
-                                        return `☀️ Laden: +${Math.abs(val).toFixed(2)} kW`;
+                                        return `☀️ Zonneladen: +${Math.abs(val).toFixed(2)} kW`;
+                                    }
+                                    if (c.dataset.label.includes('Netladen')) {
+                                        if (Math.abs(val) < 0.01) return null;
+                                        return `🔌 Netladen: +${Math.abs(val).toFixed(2)} kW`;
                                     }
                                     if (c.dataset.label.includes('Ontladen')) {
                                         if (Math.abs(val) < 0.01) return null;
@@ -928,6 +954,7 @@
                     },
                     scales: {
                         x: {
+                            stacked: true,
                             grid: { color: 'rgba(255, 255, 255, 0.05)' },
                             ticks: {
                                 color: '#94a3b8',
@@ -952,6 +979,7 @@
                             }
                         },
                         y1: {
+                            stacked: true,
                             position: 'right',
                             min: -5.0,
                             max: 5.0,

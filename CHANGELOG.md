@@ -10,6 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.11] — 2026-09-25 (Kleurharmonisatie Thuisaccu: Groen Ontladen, Oranje Zonneladen, Paars Netladen & Gecentreerde Staven)
+
+### Frontend & Visuele Harmonie
+- **Kleurschema Wisseling (Color Swap)**:
+  - ⚡ **Ontladen (Discharge)**: Volledig **Groen** (`#10B981`) voor staven, achtergrond arcering en tijdlijnbalk.
+  - ☀️ **Zonneladen (Charge from Solar)**: Volledig **Warm Oranje** (`#F59E0B` / `#D97706`) voor staven, achtergrond arcering en tijdlijnbalk.
+  - 🔌 **Netladen (Charge from Grid)**: Volledig **Paars** (`#8B5CF6` / `#7C3AED`) voor staven, achtergrond arcering en tijdlijnbalk.
+  - 🛡️ **Piekreservering (Hold)**: **Blauw** (`#3B82F6`).
+- **Uniforme Stavenbreedte & Centering**: Alle vermogensstaven (`stack: 'battery_power'`, `barPercentage: 0.9`, `categoryPercentage: 0.9`) zijn nu exact op de tijd-ticks gecentreerd met de standaard afmetingen conform alle andere grafieken.
+- **KPI-cards Harmonisatie**: De metrische kaarten boven de tijdlijn zijn afgestemd op de nieuwe kleuren (Oranje voor Zonne-lading, Paars voor Netlading, Groen voor Ontlading).
+
+---
+
 ## [0.104.10] — 2026-09-25 (Kleurharmonisatie 24h vs 48h, Nul-op-de-Meter Ontlading & Standby-eliminatie)
 
 ### Optimalisatie & Algoritmiek
