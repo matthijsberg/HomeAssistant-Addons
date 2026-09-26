@@ -608,6 +608,19 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         init_soc_pct = summary_15m.initial_soc_pct
         init_soc_kwh = round(init_soc_pct / 100.0 * 15.0, 2)
 
+        if is_15m:
+            disp_prices = [round(p, 4) for p in prices[:total_slots]]
+            disp_export_prices = [round(p, 4) for p in export_prices[:total_slots]]
+        else:
+            disp_prices = [round(sum(prices[h*4:(h+1)*4]) / 4.0, 4) for h in range(total_slots)]
+            disp_export_prices = [round(sum(export_prices[h*4:(h+1)*4]) / 4.0, 4) for h in range(total_slots)]
+
+        hist_prices = [round(prices[0] if prices else 0.25, 4)] * hist_count
+        hist_export_prices = [round(export_prices[0] if export_prices else 0.0, 4)] * hist_count
+
+        all_import_prices = hist_prices + disp_prices
+        all_export_prices = hist_export_prices + disp_export_prices
+
         hist_soc_pct = [init_soc_pct] * hist_count
         hist_soc_kwh = [init_soc_kwh] * hist_count
         hist_power_kw = [0.0] * hist_count
@@ -671,6 +684,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "horizon": horizon_mode,
             "labels": labels,
             "history_count": hist_count,
+            "prices": all_import_prices,
+            "export_prices": all_export_prices,
             "trajectory": {
                 "soc_pct": hist_soc_pct + soc_pct_list,
                 "soc_kwh": hist_soc_kwh + soc_kwh_list,
@@ -678,7 +693,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "charge_power_kw": hist_charge_kw + charge_kw_list,
                 "discharge_power_kw": hist_discharge_kw + discharge_kw_list,
                 "solar_charge_kw": hist_solar_charge + solar_charge_disp,
-                "grid_charge_kw": hist_grid_charge + grid_charge_disp
+                "grid_charge_kw": hist_grid_charge + grid_charge_disp,
+                "import_prices": all_import_prices,
+                "export_prices": all_export_prices
             },
             "charge_ranges": ranges["charge"],
             "discharge_ranges": ranges["discharge"],

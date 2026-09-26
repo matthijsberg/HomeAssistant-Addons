@@ -827,6 +827,8 @@
             const solarChargeKw = traj.solar_charge_kw || (traj.charge_power_kw || powerKw.map(p => Math.max(0.0, p)));
             const gridChargeKw = traj.grid_charge_kw || [];
             const dischargeKwNeg = (traj.discharge_power_kw || powerKw.map(p => Math.max(0.0, -p))).map(v => -Math.abs(v));
+            const importPrices = traj.import_prices || data.prices || [];
+            const exportPrices = traj.export_prices || data.export_prices || [];
 
             const datasets = [
                 // 1. Primary Line: State of Charge (%)
@@ -913,7 +915,36 @@
                     borderRadius: 2,
                     order: 2
                 }),
-                // 5. Min SoC Reference (10%)
+                // 5. Line: EPEX Inkoop (€/kWh)
+                {
+                    label: 'Inkoop (€/kWh)',
+                    data: importPrices,
+                    type: 'line',
+                    yAxisID: 'yPrice',
+                    borderColor: '#3B82F6',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    stepped: 'before',
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    order: 3
+                },
+                // 6. Line: EPEX Teruglevering (€/kWh)
+                {
+                    label: 'Teruglevering (€/kWh)',
+                    data: exportPrices,
+                    type: 'line',
+                    yAxisID: 'yPrice',
+                    borderColor: '#06B6D4',
+                    borderDash: [3, 3],
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.2,
+                    stepped: 'before',
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    order: 3
+                },
+                // 7. Min SoC Reference (10%)
                 {
                     label: 'Min SoC (10%)',
                     data: Array(labels.length).fill(10),
@@ -926,7 +957,7 @@
                     pointRadius: 0,
                     order: 4
                 },
-                // 6. Max SoC Reference (95%)
+                // 8. Max SoC Reference (95%)
                 {
                     label: 'Max SoC (95%)',
                     data: Array(labels.length).fill(95),
@@ -980,6 +1011,12 @@
                             if (Math.abs(val) < 0.01) return null;
                             return `⚡ Ontladen: -${Math.abs(val).toFixed(2)} kW`;
                         }
+                        if (c.dataset.label.includes('Inkoop')) {
+                            return `💶 Inkoop: €${Number(val).toFixed(4)} / kWh`;
+                        }
+                        if (c.dataset.label.includes('Teruglevering')) {
+                            return `💶 Teruglevering: €${Number(val).toFixed(4)} / kWh`;
+                        }
                         return `${c.dataset.label}: ${val}`;
                     }
                 }
@@ -990,6 +1027,29 @@
                 interaction: { mode: 'index', intersect: false },
                 plugins: { legend: { display: false } }
             };
+
+            // Configure yPrice axis
+            if (chartOptions.scales) {
+                const maxPriceVal = Math.max(...importPrices.map(Number), 0.35);
+                const maxPriceCeil = Math.ceil(maxPriceVal * 10) / 10;
+                chartOptions.scales.yPrice = {
+                    position: 'right',
+                    min: 0.0,
+                    max: maxPriceCeil,
+                    grid: { drawOnChartArea: false },
+                    title: {
+                        display: true,
+                        text: 'Tarief (€/kWh)',
+                        color: '#06B6D4',
+                        font: { size: 10, weight: 'bold' }
+                    },
+                    ticks: {
+                        color: '#06B6D4',
+                        font: { size: 10, family: 'monospace' },
+                        callback: v => '€' + Number(v).toFixed(2)
+                    }
+                };
+            }
 
             batteryChartInstance = new Chart(ctx, {
                 type: 'bar',
@@ -1008,6 +1068,8 @@
                     { type: 'bar', color: T.solarCharge, label: 'Zonneladen (+kW)' },
                     { type: 'bar', color: T.gridCharge, label: 'Netladen (+kW)' },
                     { type: 'bar', color: T.discharge, label: 'Ontladen (-kW)' },
+                    { type: 'line', color: '#3B82F6', label: 'EPEX Inkoop (€/kWh)' },
+                    { type: 'dashed', color: '#06B6D4', label: 'Teruglevering (€/kWh)', bold: false },
                     { type: 'dashed', color: '#EF4444', label: 'Min SoC (10%)', bold: false },
                     { type: 'dashed', color: '#10B981', label: 'Max SoC (95%)', bold: false }
                 ]);

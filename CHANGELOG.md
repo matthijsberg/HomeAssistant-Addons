@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.16] — 2026-09-25 (Thuisaccu EPEX Inkoop & Teruglever Tarieflijnen op Dedicated Y-As)
+
+### Frontend & Visuele Harmonie
+- **EPEX Inkoop & Teruglevering Tarieflijnen**: In `/api/model/battery-status` en `chart-battery-trajectory` zijn nu de dynamische stroomtarieven geïntegreerd:
+  - **Inkoop (€/kWh)**: Helderblauwe getrapte lijn (`#3B82F6`) op de secundaire rechter Y-as (`yPrice`).
+  - **Teruglevering (€/kWh)**: Cyaan gestippelde getrapte lijn (`#06B6D4`).
+- **Dedicated Schaalverdeling (`yPrice`)**: De tarief-as (€0,00 tot €0,50/kWh) is op de rechterkant geplaatst met verborgen gridlijnen om conflict met de kW-as te voorkomen.
+- **Tooltip & Legenda Verrijking**: Tooltip toont nu direct `💶 Inkoop: €0.xxx / kWh` en `💶 Teruglevering: €0.xxx / kWh`, en de gestandaardiseerde legenda chips bevatten de bijbehorende tariefindicatoren.
+
+---
+
 ## [0.104.15] — 2026-09-25 (Historische Grafiek Layout: Rechterkant NU-Stippellijn & Badge)
 
 ### Frontend & Visuele Harmonie
