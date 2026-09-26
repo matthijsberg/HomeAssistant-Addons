@@ -713,12 +713,12 @@
                                     <p class="text-[11px] text-slate-400">Verdeling over de dag: zonne-absorptie, daltarief-netladen, piekreservering en spitsontlading.</p>
                                 </div>
                             </div>
-                            <div class="flex items-center gap-2.5 text-[11px] font-mono flex-wrap">
-                                <span class="flex items-center gap-1.5 text-amber-400"><span class="w-3 h-2 rounded-sm" style="background: repeating-linear-gradient(45deg, #F59E0B, #F59E0B 2px, #D97706 2px, #D97706 4px)"></span> Zonneladen ☀️</span>
-                                <span class="flex items-center gap-1.5 text-purple-400"><span class="w-3 h-2 rounded-sm" style="background: repeating-linear-gradient(45deg, #8B5CF6, #8B5CF6 2px, #7C3AED 2px, #7C3AED 4px)"></span> Netladen (Dal) 🔌</span>
-                                <span class="flex items-center gap-1.5 text-blue-400"><span class="w-3 h-2 bg-blue-600 rounded-sm"></span> Piekreservering 🛡️</span>
-                                <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-3 h-2 rounded-sm" style="background: repeating-linear-gradient(45deg, #10B981, #10B981 2px, #059669 2px, #059669 4px)"></span> Ontlading ⚡</span>
-                                <span class="flex items-center gap-1.5 text-slate-400"><span class="w-3 h-2 bg-slate-700 rounded-sm"></span> Standby ⏸️</span>
+                            <div class="flex items-center gap-4 text-xs font-mono flex-wrap">
+                                <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded" style="background: repeating-linear-gradient(45deg, #F59E0B, #F59E0B 2px, #D97706 2px, #D97706 4px)"></span> <span class="text-amber-400 font-bold">Zonneladen ☀️</span></div>
+                                <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded" style="background: repeating-linear-gradient(45deg, #8B5CF6, #8B5CF6 2px, #7C3AED 2px, #7C3AED 4px)"></span> <span class="text-purple-400 font-bold">Netladen (Dal) 🔌</span></div>
+                                <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded" style="background: repeating-linear-gradient(45deg, #10B981, #10B981 2px, #059669 2px, #059669 4px)"></span> <span class="text-emerald-400 font-bold">Ontlading ⚡</span></div>
+                                <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-600"></span> <span class="text-blue-400 font-medium">Piekreservering 🛡️</span></div>
+                                <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-slate-700"></span> <span class="text-slate-400 font-medium">Standby ⏸️</span></div>
                             </div>
                         </div>
 
@@ -776,6 +776,16 @@
                         <!-- Canvas for Battery Trajectory -->
                         <div class="relative w-full h-64 sm:h-72">
                             <canvas id="chart-battery-trajectory"></canvas>
+                        </div>
+
+                        <!-- Legend Chips -->
+                        <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-5 text-xs font-mono">
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-[#38BDF8] rounded"></span> <span class="text-[#38BDF8] font-bold">State of Charge (%)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-amber-400 font-bold">Zonneladen (+kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-purple-500"></span> <span class="text-purple-400 font-bold">Netladen (+kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-emerald-400 font-bold">Ontladen (-kW)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-0 border-t border-dashed border-red-500"></span> <span class="text-red-400 font-medium">Min SoC (10%)</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-0 border-t border-dashed border-emerald-500"></span> <span class="text-emerald-400 font-medium">Max SoC (95%)</span></div>
                         </div>
 
                         <!-- Battery Decision Box -->

@@ -10,6 +10,14 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.12] — 2026-09-25 (Legenda Look-and-Feel Harmonisatie Thuisaccu Grafieken)
+
+### Frontend & Visuele Harmonie
+- **Gestandaardiseerde Legend Chips Balk**: Onder het canvas van `chart-battery-trajectory` is nu exact dezelfde gestandaardiseerde legenda-balk (`border-t border-slate-800/80 flex flex-wrap items-center gap-5 text-xs font-mono`) geplaatst zoals in de *Kosten Forecast* en *Kosten Historie* grafieken.
+- **Tijdlijn Legenda Harmonisatie**: De moduslegenda in de header van de tijdlijnbalk volgt nu exact dezelfde strakke chips-stijl met `w-3 h-3 rounded`, font-bold en monospace spacing.
+
+---
+
 ## [0.104.11] — 2026-09-25 (Kleurharmonisatie Thuisaccu: Groen Ontladen, Oranje Zonneladen, Paars Netladen & Gecentreerde Staven)
 
 ### Frontend & Visuele Harmonie
