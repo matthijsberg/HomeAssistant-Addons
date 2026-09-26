@@ -156,61 +156,109 @@
                 }
                 if (!histCount || histCount <= 0) return;
 
-                const xNu = scales.x.getPixelForValue(histCount);
-                const xPrev = scales.x.getPixelForValue(histCount - 1);
-                const xBoundary = (xPrev !== undefined && !isNaN(xPrev) && xNu !== undefined && !isNaN(xNu)) ? (xPrev + xNu) / 2 : (xNu || chartArea.left);
+                const totalSlots = labels.length;
+                const isRightEnd = (histCount >= totalSlots - 2);
 
-                ctx.save();
+                if (isRightEnd) {
+                    // === HISTORICAL CHART: "Nu" is at the right edge ===
+                    const xNu = scales.x.getPixelForValue(histCount);
+                    if (xNu === undefined || isNaN(xNu)) return;
 
-                // 1. Darker shaded background for historical zone
-                const histWidth = xBoundary - chartArea.left;
-                if (histWidth > 0) {
-                    ctx.fillStyle = 'rgba(3, 7, 18, 0.70)';
-                    ctx.fillRect(chartArea.left, chartArea.top, histWidth, chartArea.height);
-                }
+                    ctx.save();
 
-                // 2. Crisp dashed vertical divider at the boundary
-                ctx.beginPath();
-                ctx.strokeStyle = 'rgba(168, 85, 247, 0.65)';
-                ctx.lineWidth = 1.5;
-                ctx.setLineDash([4, 3]);
-                ctx.moveTo(xBoundary, chartArea.top);
-                ctx.lineTo(xBoundary, chartArea.bottom);
-                ctx.stroke();
-
-                // 3. Clean, non-colliding pill markers
-                ctx.setLineDash([]);
-
-                // Historical label on the left of boundary if enough space
-                if (histWidth >= 55) {
-                    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-                    ctx.strokeStyle = 'rgba(148, 163, 184, 0.30)';
-                    const hBadgeW = Math.min(68, histWidth - 10);
-                    const hBadgeX = xBoundary - hBadgeW - 4;
+                    // Crisp dashed vertical divider at Nu
                     ctx.beginPath();
-                    ctx.roundRect(hBadgeX, chartArea.top + 6, hBadgeW, 16, 3);
-                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(168, 85, 247, 0.65)';
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([4, 3]);
+                    ctx.moveTo(xNu, chartArea.top);
+                    ctx.lineTo(xNu, chartArea.bottom);
                     ctx.stroke();
 
-                    ctx.fillStyle = '#94A3B8';
+                    ctx.setLineDash([]);
+
+                    // "◀ NU" pill badge placed to the left of the line
+                    const badgeW = 34;
+                    const badgeX = Math.max(chartArea.left + 4, xNu - badgeW - 4);
+                    ctx.fillStyle = 'rgba(168, 85, 247, 0.90)';
+                    ctx.beginPath();
+                    ctx.roundRect(badgeX, chartArea.top + 6, badgeW, 16, 3);
+                    ctx.fill();
+
+                    ctx.fillStyle = '#FFFFFF';
                     ctx.font = '700 8.5px ui-sans-serif, system-ui, sans-serif';
                     ctx.textAlign = 'center';
-                    ctx.fillText('◀ 1U HIST', hBadgeX + (hBadgeW / 2), chartArea.top + 17.5);
+                    ctx.fillText('◀ NU', badgeX + (badgeW / 2), chartArea.top + 17.5);
+                    ctx.textAlign = 'start';
+
+                    // If there are forecast slots extending to the right of Nu, shade them
+                    if (histCount < totalSlots - 1) {
+                        const rightWidth = chartArea.right - xNu;
+                        if (rightWidth > 0) {
+                            ctx.fillStyle = 'rgba(15, 23, 42, 0.45)';
+                            ctx.fillRect(xNu, chartArea.top, rightWidth, chartArea.height);
+                        }
+                    }
+
+                    ctx.restore();
+                } else {
+                    // === FORECAST CHART: "Nu" is on the left after history ===
+                    const xNu = scales.x.getPixelForValue(histCount);
+                    const xPrev = scales.x.getPixelForValue(histCount - 1);
+                    const xBoundary = (xPrev !== undefined && !isNaN(xPrev) && xNu !== undefined && !isNaN(xNu)) ? (xPrev + xNu) / 2 : (xNu || chartArea.left);
+
+                    ctx.save();
+
+                    // 1. Darker shaded background for historical zone on the left
+                    const histWidth = xBoundary - chartArea.left;
+                    if (histWidth > 0) {
+                        ctx.fillStyle = 'rgba(3, 7, 18, 0.70)';
+                        ctx.fillRect(chartArea.left, chartArea.top, histWidth, chartArea.height);
+                    }
+
+                    // 2. Crisp dashed vertical divider at the boundary
+                    ctx.beginPath();
+                    ctx.strokeStyle = 'rgba(168, 85, 247, 0.65)';
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([4, 3]);
+                    ctx.moveTo(xBoundary, chartArea.top);
+                    ctx.lineTo(xBoundary, chartArea.bottom);
+                    ctx.stroke();
+
+                    // 3. Clean, non-colliding pill markers
+                    ctx.setLineDash([]);
+
+                    // Historical label on the left of boundary if enough space
+                    if (histWidth >= 55) {
+                        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+                        ctx.strokeStyle = 'rgba(148, 163, 184, 0.30)';
+                        const hBadgeW = Math.min(68, histWidth - 10);
+                        const hBadgeX = xBoundary - hBadgeW - 4;
+                        ctx.beginPath();
+                        ctx.roundRect(hBadgeX, chartArea.top + 6, hBadgeW, 16, 3);
+                        ctx.fill();
+                        ctx.stroke();
+
+                        ctx.fillStyle = '#94A3B8';
+                        ctx.font = '700 8.5px ui-sans-serif, system-ui, sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('◀ 1U HIST', hBadgeX + (hBadgeW / 2), chartArea.top + 17.5);
+                    }
+
+                    // "NU ▶" marker tag to the right of boundary line
+                    ctx.fillStyle = 'rgba(168, 85, 247, 0.90)';
+                    ctx.beginPath();
+                    ctx.roundRect(xBoundary + 4, chartArea.top + 6, 34, 16, 3);
+                    ctx.fill();
+
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.font = '700 8.5px ui-sans-serif, system-ui, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('NU ▶', xBoundary + 21, chartArea.top + 17.5);
+                    ctx.textAlign = 'start';
+
+                    ctx.restore();
                 }
-
-                // "NU ▶" marker tag to the right of boundary line
-                ctx.fillStyle = 'rgba(168, 85, 247, 0.90)';
-                ctx.beginPath();
-                ctx.roundRect(xBoundary + 4, chartArea.top + 6, 34, 16, 3);
-                ctx.fill();
-
-                ctx.fillStyle = '#FFFFFF';
-                ctx.font = '700 8.5px ui-sans-serif, system-ui, sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText('NU ▶', xBoundary + 21, chartArea.top + 17.5);
-                ctx.textAlign = 'start';
-
-                ctx.restore();
             }
         };
         Chart.register(OpenHEMSHistoryPlugin);

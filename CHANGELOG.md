@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.15] — 2026-09-25 (Historische Grafiek Layout: Rechterkant NU-Stippellijn & Badge)
+
+### Frontend & Visuele Harmonie
+- **Historische Grafiek Layout**: `OpenHEMSHistoryPlugin` herkent nu automatisch wanneer `Nu (HH:MM)` aan de rechterkant van een grafiek staat (zoals bij de historische analyses op `#history`).
+- **Rechterkant Divider & Badge**: In historische modus tekent de plugin nu:
+  - De paarse gestippelde scheidingslijn op de `Nu`-positie aan de rechterkant.
+  - De paarse badge `◀ NU` links van de lijn (binnen het canvas).
+  - Geen donkere blackout van de hele historische tijdreeks meer, waardoor historische data helder en duidelijk gemarkeerd blijft.
+
+---
+
 ## [0.104.14] — 2026-09-25 (Thuisaccu Historisch Uur, NU-Stippellijn & Shading Pariteit)
 
 ### Frontend & Visuele Harmonie
