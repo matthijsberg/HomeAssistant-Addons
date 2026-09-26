@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.18] — 2026-09-25 (Borging 24h/48h SOT Pariteit & Eliminatie Vroegtijdige Netlading)
+
+### Algoritmiek & Architectuur
+- **4-Layer SOT Invariant #9 (Perfecte 24h vs 48h Pariteit)**: De batterij-optimalisatie draait nu altijd integraal over de volledige canonieke planhorizon (48 uur / 192 kwartieren). De 24-uurs weergave is een zuivere slice van de eerste 24 uur van diezelfde canonieke berekening, waardoor de eerste 24 uur tussen beide weergaven 100% identiek zijn.
+- **Lokale Dalminimum & Zonne-prioriteit in `BatteryPolicy`**:
+  - Netladen (dal) controleert nu of er tussen het huidige kwartier en de prijspiek een goedkoper daltarief ($p < p_{\text{nu}} - 0,02$) of zonne-overschot beschikbaar is.
+  - Vroegtijdig netladen op zondagochtend (08:00–10:00 tegen €0,25/kWh) is geëlimineerd; de batterij wacht op de veel goedkopere middagprijzen (€0,11/kWh) en gratis zonnestroom.
+- **Automated Regression Guard**: Nieuwe test `test_battery_status_24h_vs_48h_perfect_alignment` borgt dat 24h en 48h op zowel 15m als 1h resoluties voor altijd bit-for-bit parallel blijven lopen.
+
+---
+
 ## [0.104.17] — 2026-09-25 (Adoptie Term 'Operating Envelope' voor Warmtepomp en Accu)
 
 ### UI & Taxonomie

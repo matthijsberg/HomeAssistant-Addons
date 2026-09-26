@@ -497,19 +497,21 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             handler._send_json({"status": "error", "message": "Geen actief plan beschikbaar"}, 500)
             return True
 
-        slots_to_eval = plan.slots[:(hours_sim * 4)]
-        n_15m_slots = len(slots_to_eval)
+        # 4-Layer SOT Invariant: Optimize over full canonical horizon (up to 48h / 192 slots)
+        # Slicing for 24h vs 48h is done purely as a Dumb View over this canonical optimization.
+        max_canonical_slots = min(len(plan.slots), 192)
+        full_slots = plan.slots[:max_canonical_slots]
 
-        unalloc = [s.unallocated_kw for s in slots_to_eval]
-        dhw = [s.dhw_kw for s in slots_to_eval]
-        heat = [s.heating_kw for s in slots_to_eval]
-        solar = [s.solar_kw for s in slots_to_eval]
-        prices = [s.price_eur for s in slots_to_eval]
+        unalloc = [s.unallocated_kw for s in full_slots]
+        dhw = [s.dhw_kw for s in full_slots]
+        heat = [s.heating_kw for s in full_slots]
+        solar = [s.solar_kw for s in full_slots]
+        prices = [s.price_eur for s in full_slots]
         export_prices = [max(0.0, round((p / 1.21) - 0.11085 - 0.0121 - 0.00605, 4)) for p in prices]
         residual_15m = [round(u + d + h - s, 3) for u, d, h, s in zip(unalloc, dhw, heat, solar)]
 
         forced_lockouts = {
-            i for i, s in enumerate(slots_to_eval)
+            i for i, s in enumerate(full_slots)
             if s.mode_code == "forced_off" or getattr(s, "is_lockout", False)
         }
 
@@ -535,8 +537,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             usable_capacity_kwh=13.5,
             max_charge_kw=5.0,
             max_discharge_kw=5.0,
-            reserve_lookahead_slots=n_15m_slots,
-            valley_lookahead_slots=n_15m_slots
+            reserve_lookahead_slots=max_canonical_slots,
+            valley_lookahead_slots=max_canonical_slots
         )
 
         summary_15m = BatteryPolicy.optimize(
@@ -642,7 +644,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "description": f"Historisch uur vóór simulatiestart: Batterij gereed · SoC {init_soc_pct:.1f}%"
             })
 
-        ranges = extract_battery_overlay_ranges(summary_15m.slots, history_count=hist_count, is_15m=is_15m)
+        ranges = extract_battery_overlay_ranges(summary_15m.slots[:(hours_sim * 4)], history_count=hist_count, is_15m=is_15m)
 
         mode_meta = {
             "CHARGE_SOLAR": {"color": "#F59E0B", "css": "repeating-linear-gradient(45deg, #F59E0B, #F59E0B 2px, #D97706 2px, #D97706 4px)", "name": "Zonneladen ☀️"},

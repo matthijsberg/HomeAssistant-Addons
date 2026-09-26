@@ -227,6 +227,40 @@ def test_battery_status_resolution_parity():
         assert 0 <= r["start_idx"] <= r["end_idx"] < 25
 
 
+def test_battery_status_24h_vs_48h_perfect_alignment():
+    """Invariant #9: 24h view MUST be a bit-for-bit identical slice of the 48h canonical optimization."""
+    from api.routes_forecast import handle_get
+
+    class DummyHandler:
+        def __init__(self, path):
+            self.path = path
+            self.response = None
+        def _send_json(self, data, status=200):
+            self.response = data
+
+    for res in ["15m", "1h"]:
+        h24 = DummyHandler(f"/api/model/battery-status?resolution={res}&horizon=24h")
+        handle_get(h24, "/api/model/battery-status", {"resolution": [res], "horizon": ["24h"]})
+        d24 = h24.response
+
+        h48 = DummyHandler(f"/api/model/battery-status?resolution={res}&horizon=48h")
+        handle_get(h48, "/api/model/battery-status", {"resolution": [res], "horizon": ["48h"]})
+        d48 = h48.response
+
+        assert d24 and d48, "Responses must not be None"
+        n24 = len(d24["labels"])
+        for key in ["soc_pct", "power_kw", "charge_power_kw", "discharge_power_kw", "prices", "export_prices"]:
+            arr24 = d24["trajectory"].get(key, d24.get(key, []))
+            arr48 = d48["trajectory"].get(key, d48.get(key, []))
+            assert arr24 == arr48[:n24], f"24h vs 48h mismatch on {key} ({res})!"
+
+        # Modes must be identical
+        modes24 = [x["mode"] for x in d24["battery_mode_timeline"]]
+        modes48 = [x["mode"] for x in d48["battery_mode_timeline"][:n24]]
+        assert modes24 == modes48, f"24h vs 48h timeline mode mismatch ({res})!"
+
+
+
 def test_reusable_ui_and_chart_contracts():
     """Guarantee that OpenHEMSUI, OpenHEMSTokens, and OpenHEMSChartEngine exist, are globally exported, and define standardized components."""
     app_js = (REPO_ROOT / "web" / "js" / "app.js").read_text(encoding="utf-8")

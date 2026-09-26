@@ -189,21 +189,53 @@ class BatteryPolicy:
         sim_soc_kwh = cur_kwh
 
         # Identify valley hours suitable for grid pre-charging in winter
-        # Find minimum price in the upcoming 12 hours
         valley_candidates = []
         for i in range(n_slots):
             p_in = import_prices[i]
+            if residual_demand_kw[i] < -0.05:
+                continue  # Solar surplus is available, charge from sun instead!
+
             # Check if this hour is a distinct valley compared to future peak prices
             future_peaks = [
-                import_prices[j]
-                for j in range(i + 1, min(n_slots, i + spec.valley_lookahead_slots))
+                j for j in range(i + 1, min(n_slots, i + spec.valley_lookahead_slots))
                 if residual_demand_kw[j] > 0.1
             ]
-            if future_peaks:
-                max_future_p = max(future_peaks)
-                spread = max_future_p - (p_in / spec.roundtrip_efficiency) - spec.degradation_cost_eur_kwh
-                if spread >= spec.min_cycle_margin_eur_kwh:
-                    valley_candidates.append((p_in, spread, i))
+            if not future_peaks:
+                continue
+
+            valid_peaks = [
+                j for j in future_peaks
+                if (import_prices[j] - (p_in / spec.roundtrip_efficiency) - spec.degradation_cost_eur_kwh) >= spec.min_cycle_margin_eur_kwh
+            ]
+            if not valid_peaks:
+                continue
+
+            target_peak = valid_peaks[0]
+
+            # Gate 1: Local minimum - is there a significantly cheaper slot between now and the peak?
+            cheaper_slots = [
+                k for k in range(i + 1, target_peak)
+                if import_prices[k] < (p_in - 0.02)
+            ]
+            if cheaper_slots:
+                continue  # Wait for the cheaper slot!
+
+            # Gate 2: Solar surplus check - does upcoming solar between now and peak already cover the peak?
+            solar_before_peak = sum(
+                abs(residual_demand_kw[k]) * step_hours
+                for k in range(i + 1, target_peak)
+                if residual_demand_kw[k] < -0.05
+            )
+            peak_demand = sum(
+                residual_demand_kw[k] * step_hours
+                for k in range(i + 1, min(n_slots, target_peak + 8))
+                if residual_demand_kw[k] > 0.1 and import_prices[k] >= p_in + spec.reserve_price_delta_eur_kwh
+            )
+            if solar_before_peak >= peak_demand:
+                continue  # Free solar will refill battery, no paid grid charging needed!
+
+            spread = import_prices[target_peak] - (p_in / spec.roundtrip_efficiency) - spec.degradation_cost_eur_kwh
+            valley_candidates.append((p_in, spread, i))
 
         valley_slots = {idx for _, _, idx in sorted(valley_candidates, key=lambda x: x[0])}
 
