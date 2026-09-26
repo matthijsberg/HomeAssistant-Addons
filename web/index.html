@@ -275,13 +275,8 @@
                             <canvas id="costForecastChart"></canvas>
                         </div>
 
-                        <!-- Legend Chips -->
-                        <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-5 text-xs font-mono">
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-amber-400 font-bold">Netto Kosten (€)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500 rounded"></span> <span class="text-red-400 font-bold">Netto Verbruik (kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-blue-500 rounded"></span> <span class="text-blue-400 font-medium">EPEX / Stroomvoorspeller (€/kWh)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-cyan-400 rounded border-dashed"></span> <span class="text-cyan-400 font-medium">Teruglevering (€/kWh)</span></div>
-                        </div>
+                        <!-- Reusable Legend Chips Container -->
+                        <div id="cost-forecast-legend"></div>
                     </div>
 
                     <!-- Chart 1.1: Verbruiksvoorspelling (Stacked 24h Prediction) -->
@@ -778,15 +773,8 @@
                             <canvas id="chart-battery-trajectory"></canvas>
                         </div>
 
-                        <!-- Legend Chips -->
-                        <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-5 text-xs font-mono">
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-[#38BDF8] rounded"></span> <span class="text-[#38BDF8] font-bold">State of Charge (%)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-amber-400 font-bold">Zonneladen (+kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-purple-500"></span> <span class="text-purple-400 font-bold">Netladen (+kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-500"></span> <span class="text-emerald-400 font-bold">Ontladen (-kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-0 border-t border-dashed border-red-500"></span> <span class="text-red-400 font-medium">Min SoC (10%)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-0 border-t border-dashed border-emerald-500"></span> <span class="text-emerald-400 font-medium">Max SoC (95%)</span></div>
-                        </div>
+                        <!-- Reusable Legend Chips Container -->
+                        <div id="battery-trajectory-legend"></div>
 
                         <!-- Battery Decision Box -->
                         <div class="bg-[#0B0F17]/90 border border-slate-800 rounded-xl p-3.5 space-y-2 font-sans text-xs text-slate-300 mt-3" id="battery-decision-box">
@@ -1039,13 +1027,8 @@
                             <canvas id="costHistoryChart"></canvas>
                         </div>
 
-                        <!-- Legend Chips -->
-                        <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-5 text-xs font-mono">
-                            <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-400"></span> <span class="text-amber-400 font-bold">Netto Kosten (€)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-red-500 rounded"></span> <span class="text-red-400 font-bold">Netto Verbruik (kW)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-blue-500 rounded"></span> <span class="text-blue-400 font-medium">EPEX Inkoop All-in (€/kWh)</span></div>
-                            <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-cyan-400 rounded border-dashed"></span> <span class="text-cyan-400 font-medium">EPEX Teruglevering (€/kWh)</span></div>
-                        </div>
+                        <!-- Reusable Legend Chips Container -->
+                        <div id="cost-history-legend"></div>
                     </div>
 
                     <!-- Chart 2.1: Verbruikshistorie (Power Producers & Netstromen) -->

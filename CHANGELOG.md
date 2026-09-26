@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.13] — 2026-09-25 (Consolidatie Frontend Componenten: OpenHEMSTokens, OpenHEMSUI & Chart Engine Presets)
+
+### Architectuur & Componentisatie
+- **Globale Kleurtokens (`window.OpenHEMSTokens`)**: Kleurtokens voor de thuisbatterij (zonneladen, netladen, ontladen, hold, standby, soc) zijn nu globaal geëxporteerd en beschikbaar voor alle modules.
+- **Herbruikbare Legenda Component (`window.OpenHEMSUI.renderLegend`)**: De handmatige HTML-legenda's onder de grafieken zijn vervangen door één centrale component (`OpenHEMSUI.renderLegend(containerId, items)`), die uniform de iconen (`w-3 h-3`), stijlen en fonts genereert.
+- **Chart.js Preset Factory (`OpenHEMSChartEngine.createDualAxisOptions` & `createBarDataset`)**: Centrale helpers borgen dat hybride staaf/lijn grafieken altijd de juiste centering, bar-breedte (`barPercentage: 0.9`), gestapelde assen en tooltip-stijlen hanteren.
+- **Architectuurbewaking**: Nieuwe test `test_reusable_ui_and_chart_contracts` borgt dat grafieken en legenda's aan deze componentstandaarden blijven voldoen.
+
+---
+
 ## [0.104.12] — 2026-09-25 (Legenda Look-and-Feel Harmonisatie Thuisaccu Grafieken)
 
 ### Frontend & Visuele Harmonie

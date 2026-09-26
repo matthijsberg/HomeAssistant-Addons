@@ -223,3 +223,34 @@ def test_battery_status_resolution_parity():
         assert 0 <= r["start_idx"] <= r["end_idx"] < 24
 
 
+def test_reusable_ui_and_chart_contracts():
+    """Guarantee that OpenHEMSUI, OpenHEMSTokens, and OpenHEMSChartEngine exist, are globally exported, and define standardized components."""
+    app_js = (REPO_ROOT / "web" / "js" / "app.js").read_text(encoding="utf-8")
+    index_html = (REPO_ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    charts_thermal_js = (REPO_ROOT / "web" / "js" / "modules" / "charts_thermal.js").read_text(encoding="utf-8")
+
+    # 1. Global Exports
+    assert "window.OpenHEMSTokens = OpenHEMSTokens;" in app_js
+    assert "window.OpenHEMSUI = OpenHEMSUI;" in app_js
+    assert "window.OpenHEMSChartEngine = OpenHEMSChartEngine;" in app_js
+
+    # 2. Standardized Legend Component
+    assert "renderLegend(containerOrId, items)" in app_js
+    assert 'id="battery-trajectory-legend"' in index_html
+    assert 'id="cost-forecast-legend"' in index_html
+    assert 'id="cost-history-legend"' in index_html
+    assert "OpenHEMSUI.renderLegend('battery-trajectory-legend'" in charts_thermal_js
+
+    # 3. Standardized Chart.js Preset Factory
+    assert "createDualAxisOptions" in app_js
+    assert "createBarDataset" in app_js
+    assert "barPercentage: 0.9" in app_js
+    assert "categoryPercentage: 0.9" in app_js
+
+    # 4. Color Tokens Consistency
+    assert "solarCharge: '#F59E0B'" in app_js
+    assert "discharge: '#10B981'" in app_js
+    assert "gridCharge: '#8B5CF6'" in app_js
+
+
+

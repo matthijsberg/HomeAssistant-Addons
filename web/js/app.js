@@ -70,8 +70,8 @@
                 dhwBg: 'rgba(236, 72, 153, 0.80)',
                 heating: '#6366F1',            // Indigo 500: CV Vloerverwarming
                 heatingBg: 'rgba(99, 102, 241, 0.80)',
-                batteryCharge: OpenHEMSModeCatalog.getColor('forced_on'),      // Emerald 500: Thuisbatterij Laden
-                batteryDischarge: '#14B8A6',   // Teal 500: Thuisbatterij Ontladen
+                batteryCharge: '#F59E0B',      // Amber 500: Thuisbatterij Zonneladen
+                batteryDischarge: '#10B981',   // Emerald 500: Thuisbatterij Ontladen
                 netto: OpenHEMSModeCatalog.getColor('forced_off'),              // Red 500: Verwacht Netto
                 solarCost: '#EAB308',          // Yellow 500: Zon Kostprijs (€0.06/kWh)
                 gridLine: 'rgba(30, 41, 59, 0.4)',
@@ -79,13 +79,67 @@
                 textMuted: '#94A3B8',
                 textLight: '#E2E8F0',
                 tooltipBg: '#0B0F17',
-                tooltipBorder: '#334155'
+                tooltipBorder: '#334155',
+                battery: {
+                    discharge: '#10B981',
+                    dischargeBg: 'rgba(16, 185, 129, 0.80)',
+                    dischargeBorder: '#059669',
+                    solarCharge: '#F59E0B',
+                    solarChargeBg: 'rgba(245, 158, 11, 0.80)',
+                    solarChargeBorder: '#D97706',
+                    gridCharge: '#8B5CF6',
+                    gridChargeBg: 'rgba(139, 92, 246, 0.80)',
+                    gridChargeBorder: '#7C3AED',
+                    hold: '#3B82F6',
+                    standby: '#1E293B',
+                    socLine: '#38BDF8',
+                    socArea: 'rgba(56, 189, 248, 0.08)',
+                    minSoc: 'rgba(239, 68, 68, 0.65)',
+                    maxSoc: 'rgba(16, 185, 129, 0.65)'
+                }
             },
             fonts: {
                 mono: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
                 sans: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
             }
         };
+        window.OpenHEMSTokens = OpenHEMSTokens;
+
+        // Universal UI Components Engine
+        const OpenHEMSUI = {
+            renderLegend(containerOrId, items) {
+                const el = typeof containerOrId === 'string' ? document.getElementById(containerOrId) : containerOrId;
+                if (!el) return;
+
+                let html = '<div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-5 text-xs font-mono">';
+                (items || []).forEach(item => {
+                    let indicator = '';
+                    const col = item.color || '#94A3B8';
+                    const isBold = item.bold !== false;
+                    const weightClass = isBold ? 'font-bold' : 'font-medium';
+                    const textClass = item.textClass || '';
+
+                    if (item.type === 'bar') {
+                        indicator = `<span class="w-3 h-3 rounded" style="background-color: ${col}"></span>`;
+                    } else if (item.type === 'line') {
+                        indicator = `<span class="w-3.5 h-1 rounded" style="background-color: ${col}"></span>`;
+                    } else if (item.type === 'dashed') {
+                        indicator = `<span class="w-3.5 h-0 border-t border-dashed" style="border-color: ${col}"></span>`;
+                    } else if (item.type === 'striped') {
+                        const bg = item.bg || col;
+                        const stripe = item.stripe || '#000000';
+                        indicator = `<span class="w-3 h-3 rounded" style="background: repeating-linear-gradient(45deg, ${bg}, ${bg} 2px, ${stripe} 2px, ${stripe} 4px)"></span>`;
+                    } else {
+                        indicator = `<span class="w-3 h-3 rounded" style="background-color: ${col}"></span>`;
+                    }
+
+                    html += `<div class="flex items-center gap-1.5">${indicator} <span class="${weightClass} ${textClass}" style="color: ${col}">${item.label}</span></div>`;
+                });
+                html += '</div>';
+                el.innerHTML = html;
+            }
+        };
+        window.OpenHEMSUI = OpenHEMSUI;
 
         // Universal Chart.js Shading Plugin for Open HEMS
         const OpenHEMSHistoryPlugin = {
@@ -560,6 +614,121 @@
                 this._horizons.history = this.getHorizon('history');
                 this.syncHorizonButtons('prediction', savedHorizon);
                 this.syncHorizonButtons('history', this._horizons.history);
+            },
+
+            /**
+             * Creates standardized dual-axis Chart.js options for Open HEMS
+             */
+            createDualAxisOptions({
+                leftTitle = '',
+                rightTitle = '',
+                leftMin = undefined,
+                leftMax = undefined,
+                rightMin = undefined,
+                rightMax = undefined,
+                leftTickCallback = null,
+                rightTickCallback = null,
+                leftColor = '#38BDF8',
+                rightColor = '#94A3B8',
+                stacked = true,
+                batteryOverlayRanges = null,
+                tooltipCallbacks = null
+            } = {}) {
+                return {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    batteryOverlayRanges: batteryOverlayRanges,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            enabled: true,
+                            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                            titleColor: '#F8FAFC',
+                            bodyColor: '#CBD5E1',
+                            borderColor: '#334155',
+                            borderWidth: 1,
+                            callbacks: tooltipCallbacks || {}
+                        }
+                    },
+                    scales: {
+                        x: {
+                            stacked: stacked,
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: {
+                                color: '#94a3b8',
+                                font: { size: 10, family: 'monospace' }
+                            }
+                        },
+                        y: {
+                            position: 'left',
+                            min: leftMin,
+                            max: leftMax,
+                            title: leftTitle ? {
+                                display: true,
+                                text: leftTitle,
+                                color: leftColor,
+                                font: { size: 10, weight: 'bold' }
+                            } : { display: false },
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: {
+                                color: leftColor,
+                                font: { size: 10, family: 'monospace' },
+                                callback: leftTickCallback || (v => v)
+                            }
+                        },
+                        y1: {
+                            position: 'right',
+                            stacked: stacked,
+                            min: rightMin,
+                            max: rightMax,
+                            title: rightTitle ? {
+                                display: true,
+                                text: rightTitle,
+                                color: rightColor,
+                                font: { size: 10, weight: 'bold' }
+                            } : { display: false },
+                            grid: {
+                                color: (ctx) => ctx.tick && ctx.tick.value === 0 ? 'rgba(148, 163, 184, 0.35)' : 'rgba(255, 255, 255, 0.03)',
+                                lineWidth: (ctx) => ctx.tick && ctx.tick.value === 0 ? 1.5 : 1
+                            },
+                            ticks: {
+                                color: rightColor,
+                                font: { size: 10, family: 'monospace' },
+                                callback: rightTickCallback || (v => v)
+                            }
+                        }
+                    }
+                };
+            },
+
+            /**
+             * Returns standardized bar dataset configuration
+             */
+            createBarDataset({
+                label,
+                data,
+                color,
+                borderColor = null,
+                stack = 'default_bar_stack',
+                yAxisID = 'y1',
+                order = 2,
+                borderRadius = 2
+            }) {
+                return {
+                    label: label,
+                    data: data,
+                    type: 'bar',
+                    stack: stack,
+                    barPercentage: 0.9,
+                    categoryPercentage: 0.9,
+                    yAxisID: yAxisID,
+                    backgroundColor: color,
+                    borderColor: borderColor || color,
+                    borderWidth: 1,
+                    borderRadius: borderRadius,
+                    order: order
+                };
             }
         };
         window.OpenHEMSChartEngine = OpenHEMSChartEngine;
@@ -2610,6 +2779,14 @@
 
                     costForecastChartInstance = new Chart(canvasCost.getContext('2d'), costConfig);
                     window.costForecastChartInstance = costForecastChartInstance;
+
+                    // Render standardized Legend Chips
+                    OpenHEMSUI.renderLegend('cost-forecast-legend', [
+                        { type: 'bar', color: '#F59E0B', label: 'Netto Kosten (€)' },
+                        { type: 'line', color: '#EF4444', label: 'Netto Verbruik (kW)' },
+                        { type: 'line', color: '#3B82F6', label: 'EPEX / Stroomvoorspeller (€/kWh)' },
+                        { type: 'dashed', color: '#22D3EE', label: 'Teruglevering (€/kWh)', bold: false }
+                    ]);
                 }
 
                 // Add mouseleave & tap dismissal listeners to cleanly hide tooltip when leaving graph
@@ -4673,6 +4850,14 @@
 
                     costHistoryChartInstance = new Chart(canvasCostHist.getContext('2d'), costHistConfig);
                     window.costHistoryChartInstance = costHistoryChartInstance;
+
+                    // Render standardized Legend Chips
+                    OpenHEMSUI.renderLegend('cost-history-legend', [
+                        { type: 'bar', color: '#F59E0B', label: 'Netto Kosten (€)' },
+                        { type: 'line', color: '#EF4444', label: 'Netto Verbruik (kW)' },
+                        { type: 'line', color: '#3B82F6', label: 'EPEX Inkoop All-in (€/kWh)' },
+                        { type: 'dashed', color: '#22D3EE', label: 'EPEX Teruglevering (€/kWh)', bold: false }
+                    ]);
                 }
             } catch (err) {
                 console.error('Failed to load power producers chart:', err);

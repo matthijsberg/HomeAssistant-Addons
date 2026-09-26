@@ -808,6 +808,22 @@
             if (batteryChartInstance) batteryChartInstance.destroy();
             const ctx = canvas.getContext('2d');
 
+            const T = (window.OpenHEMSTokens && window.OpenHEMSTokens.colors && window.OpenHEMSTokens.colors.battery) || {
+                discharge: '#10B981',
+                dischargeBg: 'rgba(16, 185, 129, 0.80)',
+                dischargeBorder: '#059669',
+                solarCharge: '#F59E0B',
+                solarChargeBg: 'rgba(245, 158, 11, 0.80)',
+                solarChargeBorder: '#D97706',
+                gridCharge: '#8B5CF6',
+                gridChargeBg: 'rgba(139, 92, 246, 0.80)',
+                gridChargeBorder: '#7C3AED',
+                socLine: '#38BDF8',
+                socArea: 'rgba(56, 189, 248, 0.08)',
+                minSoc: 'rgba(239, 68, 68, 0.65)',
+                maxSoc: 'rgba(16, 185, 129, 0.65)'
+            };
+
             const solarChargeKw = traj.solar_charge_kw || (traj.charge_power_kw || powerKw.map(p => Math.max(0.0, p)));
             const gridChargeKw = traj.grid_charge_kw || [];
             const dischargeKwNeg = (traj.discharge_power_kw || powerKw.map(p => Math.max(0.0, -p))).map(v => -Math.abs(v));
@@ -819,8 +835,8 @@
                     data: socPct,
                     type: 'line',
                     yAxisID: 'y',
-                    borderColor: '#38BDF8',
-                    backgroundColor: 'rgba(56, 189, 248, 0.08)',
+                    borderColor: T.socLine,
+                    backgroundColor: T.socArea,
                     fill: true,
                     borderWidth: 2.5,
                     tension: 0.25,
@@ -829,7 +845,15 @@
                     order: 1
                 },
                 // 2. Bar: Zonneladen (+kW in oranje)
-                {
+                (window.OpenHEMSChartEngine?.createBarDataset ? window.OpenHEMSChartEngine.createBarDataset({
+                    label: 'Zonneladen (kW)',
+                    data: solarChargeKw,
+                    color: T.solarChargeBg,
+                    borderColor: T.solarChargeBorder,
+                    stack: 'battery_power',
+                    yAxisID: 'y1',
+                    order: 2
+                }) : {
                     label: 'Zonneladen (kW)',
                     data: solarChargeKw,
                     type: 'bar',
@@ -837,14 +861,22 @@
                     barPercentage: 0.9,
                     categoryPercentage: 0.9,
                     yAxisID: 'y1',
-                    backgroundColor: 'rgba(245, 158, 11, 0.80)',
-                    borderColor: '#D97706',
+                    backgroundColor: T.solarChargeBg,
+                    borderColor: T.solarChargeBorder,
                     borderWidth: 1,
                     borderRadius: 2,
                     order: 2
-                },
+                }),
                 // 3. Bar: Netladen (+kW in paars)
-                {
+                (window.OpenHEMSChartEngine?.createBarDataset ? window.OpenHEMSChartEngine.createBarDataset({
+                    label: 'Netladen (kW)',
+                    data: gridChargeKw,
+                    color: T.gridChargeBg,
+                    borderColor: T.gridChargeBorder,
+                    stack: 'battery_power',
+                    yAxisID: 'y1',
+                    order: 2
+                }) : {
                     label: 'Netladen (kW)',
                     data: gridChargeKw,
                     type: 'bar',
@@ -852,14 +884,22 @@
                     barPercentage: 0.9,
                     categoryPercentage: 0.9,
                     yAxisID: 'y1',
-                    backgroundColor: 'rgba(139, 92, 246, 0.80)',
-                    borderColor: '#7C3AED',
+                    backgroundColor: T.gridChargeBg,
+                    borderColor: T.gridChargeBorder,
                     borderWidth: 1,
                     borderRadius: 2,
                     order: 2
-                },
+                }),
                 // 4. Bar: Ontladen (-kW in groen)
-                {
+                (window.OpenHEMSChartEngine?.createBarDataset ? window.OpenHEMSChartEngine.createBarDataset({
+                    label: 'Ontladen (kW)',
+                    data: dischargeKwNeg,
+                    color: T.dischargeBg,
+                    borderColor: T.dischargeBorder,
+                    stack: 'battery_power',
+                    yAxisID: 'y1',
+                    order: 2
+                }) : {
                     label: 'Ontladen (kW)',
                     data: dischargeKwNeg,
                     type: 'bar',
@@ -867,19 +907,19 @@
                     barPercentage: 0.9,
                     categoryPercentage: 0.9,
                     yAxisID: 'y1',
-                    backgroundColor: 'rgba(16, 185, 129, 0.80)',
-                    borderColor: '#059669',
+                    backgroundColor: T.dischargeBg,
+                    borderColor: T.dischargeBorder,
                     borderWidth: 1,
                     borderRadius: 2,
                     order: 2
-                },
+                }),
                 // 5. Min SoC Reference (10%)
                 {
                     label: 'Min SoC (10%)',
                     data: Array(labels.length).fill(10),
                     type: 'line',
                     yAxisID: 'y',
-                    borderColor: 'rgba(239, 68, 68, 0.65)',
+                    borderColor: T.minSoc,
                     borderDash: [5, 5],
                     backgroundColor: 'transparent',
                     borderWidth: 1.5,
@@ -892,7 +932,7 @@
                     data: Array(labels.length).fill(95),
                     type: 'line',
                     yAxisID: 'y',
-                    borderColor: 'rgba(16, 185, 129, 0.65)',
+                    borderColor: T.maxSoc,
                     borderDash: [5, 5],
                     backgroundColor: 'transparent',
                     borderWidth: 1.5,
@@ -907,102 +947,71 @@
                 ...(data.hold_ranges || [])
             ];
 
+            const chartOptions = window.OpenHEMSChartEngine?.createDualAxisOptions ? window.OpenHEMSChartEngine.createDualAxisOptions({
+                leftTitle: 'State of Charge (%)',
+                rightTitle: 'Vermogen: Ontladen (-kW) < 0 < Laden (+kW)',
+                leftMin: 0,
+                leftMax: 100,
+                rightMin: -5.0,
+                rightMax: 5.0,
+                leftTickCallback: v => `${v}%`,
+                rightTickCallback: v => (v >= 0 ? `+${v.toFixed(1)}` : `${v.toFixed(1)}`) + ' kW',
+                leftColor: T.socLine,
+                rightColor: '#94A3B8',
+                stacked: true,
+                batteryOverlayRanges: allBatteryRanges,
+                tooltipCallbacks: {
+                    label: function(c) {
+                        const val = c.raw;
+                        if (c.dataset.label.includes('State of Charge')) {
+                            const idx = c.dataIndex;
+                            const kwh = socKwh[idx] !== undefined ? ` (${socKwh[idx]} kWh)` : '';
+                            return `🔋 Lading: ${val}%${kwh}`;
+                        }
+                        if (c.dataset.label.includes('Zonneladen')) {
+                            if (Math.abs(val) < 0.01) return null;
+                            return `☀️ Zonneladen: +${Math.abs(val).toFixed(2)} kW`;
+                        }
+                        if (c.dataset.label.includes('Netladen')) {
+                            if (Math.abs(val) < 0.01) return null;
+                            return `🔌 Netladen: +${Math.abs(val).toFixed(2)} kW`;
+                        }
+                        if (c.dataset.label.includes('Ontladen')) {
+                            if (Math.abs(val) < 0.01) return null;
+                            return `⚡ Ontladen: -${Math.abs(val).toFixed(2)} kW`;
+                        }
+                        return `${c.dataset.label}: ${val}`;
+                    }
+                }
+            }) : {
+                responsive: true,
+                maintainAspectRatio: false,
+                batteryOverlayRanges: allBatteryRanges,
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { display: false } }
+            };
+
             batteryChartInstance = new Chart(ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,
                     datasets: datasets
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    batteryOverlayRanges: allBatteryRanges, // custom battery ranges: green, orange, purple, blue (NO red!)
-                    interaction: { mode: 'index', intersect: false },
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            enabled: true,
-                            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                            titleColor: '#F8FAFC',
-                            bodyColor: '#CBD5E1',
-                            borderColor: '#334155',
-                            borderWidth: 1,
-                            callbacks: {
-                                label: function(c) {
-                                    const val = c.raw;
-                                    if (c.dataset.label.includes('State of Charge')) {
-                                        const idx = c.dataIndex;
-                                        const kwh = socKwh[idx] !== undefined ? ` (${socKwh[idx]} kWh)` : '';
-                                        return `🔋 Lading: ${val}%${kwh}`;
-                                    }
-                                    if (c.dataset.label.includes('Zonneladen')) {
-                                        if (Math.abs(val) < 0.01) return null;
-                                        return `☀️ Zonneladen: +${Math.abs(val).toFixed(2)} kW`;
-                                    }
-                                    if (c.dataset.label.includes('Netladen')) {
-                                        if (Math.abs(val) < 0.01) return null;
-                                        return `🔌 Netladen: +${Math.abs(val).toFixed(2)} kW`;
-                                    }
-                                    if (c.dataset.label.includes('Ontladen')) {
-                                        if (Math.abs(val) < 0.01) return null;
-                                        return `⚡ Ontladen: -${Math.abs(val).toFixed(2)} kW`;
-                                    }
-                                    return `${c.dataset.label}: ${val}`;
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            stacked: true,
-                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                            ticks: {
-                                color: '#94a3b8',
-                                font: { size: 10, family: 'monospace' }
-                            }
-                        },
-                        y: {
-                            position: 'left',
-                            min: 0,
-                            max: 100,
-                            title: {
-                                display: true,
-                                text: 'State of Charge (%)',
-                                color: '#38BDF8',
-                                font: { size: 10, weight: 'bold' }
-                            },
-                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                            ticks: {
-                                color: '#38BDF8',
-                                font: { size: 10, family: 'monospace' },
-                                callback: v => `${v}%`
-                            }
-                        },
-                        y1: {
-                            stacked: true,
-                            position: 'right',
-                            min: -5.0,
-                            max: 5.0,
-                            grid: {
-                                color: (ctx) => ctx.tick && ctx.tick.value === 0 ? 'rgba(148, 163, 184, 0.35)' : 'rgba(255, 255, 255, 0.03)',
-                                lineWidth: (ctx) => ctx.tick && ctx.tick.value === 0 ? 1.5 : 1
-                            },
-                            title: {
-                                display: true,
-                                text: 'Vermogen: Ontladen (-kW) < 0 < Laden (+kW)',
-                                color: '#94A3B8',
-                                font: { size: 10, weight: 'bold' }
-                            },
-                            ticks: {
-                                color: '#94A3B8',
-                                font: { size: 10, family: 'monospace' },
-                                callback: v => (v >= 0 ? `+${v.toFixed(1)}` : `${v.toFixed(1)}`) + ' kW'
-                            }
-                        }
-                    }
-                }
+                options: chartOptions
             });
             window.batteryChartInstance = batteryChartInstance;
+
+            // Render standardized Legend Chips
+            if (window.OpenHEMSUI && typeof window.OpenHEMSUI.renderLegend === 'function') {
+                window.OpenHEMSUI.renderLegend('battery-trajectory-legend', [
+                    { type: 'line', color: T.socLine, label: 'State of Charge (%)' },
+                    { type: 'bar', color: T.solarCharge, label: 'Zonneladen (+kW)' },
+                    { type: 'bar', color: T.gridCharge, label: 'Netladen (+kW)' },
+                    { type: 'bar', color: T.discharge, label: 'Ontladen (-kW)' },
+                    { type: 'dashed', color: '#EF4444', label: 'Min SoC (10%)', bold: false },
+                    { type: 'dashed', color: '#10B981', label: 'Max SoC (95%)', bold: false }
+                ]);
+            }
         } catch (err) {
             console.error('Failed to render battery trajectory chart:', err);
         }
