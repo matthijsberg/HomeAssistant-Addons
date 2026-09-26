@@ -10,6 +10,7 @@ RUN apk add --no-cache \
     py3-requests \
     py3-yaml \
     py3-numpy \
+    py3-scipy \
     curl \
     jq \
     bash

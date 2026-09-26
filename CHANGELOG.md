@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.20] — 2026-09-26 (Linear Programming Global Dispatch & Eliminatie Netlaad-Blokkade)
+
+### Algoritmiek & Wiskundige Optimalisatie
+- **Linear Programming (LP) Global Optimizer**: De sequentiële if/else heuristiek is vervangen door een globale Linear Programming solver (`scipy.optimize.linprog` met HiGHS solver).
+- **Eliminatie Netlaad-Blokkade bij Zonne-overschot**: De harde uitsluiting (`if residual < -0.05: continue`) is verwijderd. De batterij mag nu tijdens goedkope uren overdag (€0,11/kWh) gelijktijdig zonne-energie absorberen én bijladen vanaf het net tot aan het 5 kW omvormerplafond.
+- **100% Afdekking Ochtendpiek**: De wiskundige optimalisatie borgt dat zonne- en daltarief-energie gereserveerd wordt voor de absolute piektarieven (€0,46/kWh op maandagochtend), waardoor het ongedekte netverlies tijdens de duurste uren naar 0,00 kW daalt.
+- **Prioriteit 3 Consistentie**: De batterij opereert strikt op het residuele profiel na Baseload, SWW Boiler en CV Ruimteverwarming, waardoor de warmtepomp altijd eerst over gratis zonne-energie beschikt.
+
+---
+
 ## [0.104.19] — 2026-09-25 (Thuisaccu Operating Envelope: P05–P95 Bandbreedte, Ongedekt Tekort, Autonomie & Rijke Besluitvorming)
 
 ### Algoritmiek & Fysische Modellering

@@ -13,6 +13,8 @@ INVARIANTS:
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Any, Optional, Set
 import math
+import numpy as np
+from scipy.optimize import linprog
 
 
 @dataclass(frozen=True)
@@ -173,216 +175,105 @@ class BatteryPolicy:
         cur_kwh = max(min_kwh, min(max_kwh, spec.capacity_kwh * (initial_soc_pct / 100.0)))
 
         # -------------------------------------------------------------------
-        # Multi-Pass Optimization
+        # Linear Programming (LP) Global Optimization (Priority 3)
         # -------------------------------------------------------------------
-        # Pre-allocate dispatch arrays
-        power_dispatch_kw = [0.0] * n_slots
-        mode_codes = ["STANDBY"] * n_slots
-        mode_labels = ["Standby"] * n_slots
+        dt = step_hours
+        eta_ch = eta_one_way
+        eta_dis = eta_one_way
+        c_deg = spec.degradation_cost_eur_kwh
 
-        # --- PASS 1: Identify High-Value Peak Discharge Hours ---
-        # Sort positive residual slots by import price descending
-        peak_candidates = []
-        for i in range(n_slots):
-            if residual_demand_kw[i] > 0.05:
-                # Prioritize explicit forced lockouts or high prices
-                is_lockout = i in forced_lockouts
-                peak_candidates.append((import_prices[i], is_lockout, i))
+        # Terminal valuation to properly value stored energy against upcoming cycles
+        lambda_term = max(0.20, float(np.mean(import_prices)) - c_deg)
 
-        # --- PASS 2: Simulate Solar Absorptions and Opportunistic Grid Valleys ---
-        # We perform forward simulation with lookahead reserving
-        sim_soc_kwh = cur_kwh
+        N = n_slots
+        c = np.zeros(5 * N)
+        for t in range(N):
+            p_in = import_prices[t]
+            p_ex = export_prices[t]
+            c[0*N + t] = -lambda_term * dt * eta_ch - 0.05 * dt + 1e-6 * t
+            c[1*N + t] = -lambda_term * dt * eta_ch + 1e-6 * t
+            c[2*N + t] = (c_deg * dt + lambda_term * (dt / eta_dis)) + 1e-6 * t
+            c[3*N + t] = p_in * dt
+            c[4*N + t] = -p_ex * dt
 
-        # Identify valley hours suitable for grid pre-charging in winter
-        valley_candidates = []
-        for i in range(n_slots):
-            p_in = import_prices[i]
-            if residual_demand_kw[i] < -0.05:
-                continue  # Solar surplus is available, charge from sun instead!
+        A_eq = np.zeros((N, 5 * N))
+        b_eq = np.zeros(N)
+        for t in range(N):
+            A_eq[t, 3*N + t] = 1.0   # P_imp
+            A_eq[t, 4*N + t] = -1.0  # -P_exp
+            A_eq[t, 2*N + t] = 1.0   # +P_dis
+            A_eq[t, 1*N + t] = -1.0  # -P_ch_grid
+            A_eq[t, 0*N + t] = -1.0  # -P_ch_solar
+            b_eq[t] = residual_demand_kw[t]
 
-            # Check if this hour is a distinct valley compared to future peak prices
-            future_peaks = [
-                j for j in range(i + 1, min(n_slots, i + spec.valley_lookahead_slots))
-                if residual_demand_kw[j] > 0.1
-            ]
-            if not future_peaks:
-                continue
+        A_ub = np.zeros((2 * N, 5 * N))
+        b_ub = np.zeros(2 * N)
+        for t in range(N):
+            for k in range(t + 1):
+                A_ub[t, 0*N + k] = dt * eta_ch
+                A_ub[t, 1*N + k] = dt * eta_ch
+                A_ub[t, 2*N + k] = -dt / eta_dis
+                A_ub[N + t, 0*N + k] = -dt * eta_ch
+                A_ub[N + t, 1*N + k] = -dt * eta_ch
+                A_ub[N + t, 2*N + k] = dt / eta_dis
+            b_ub[t] = max_kwh - cur_kwh
+            b_ub[N + t] = cur_kwh - min_kwh
 
-            valid_peaks = [
-                j for j in future_peaks
-                if (import_prices[j] - (p_in / spec.roundtrip_efficiency) - spec.degradation_cost_eur_kwh) >= spec.min_cycle_margin_eur_kwh
-            ]
-            if not valid_peaks:
-                continue
+        bounds = []
+        for t in range(N):
+            surplus = max(0.0, -residual_demand_kw[t])
+            bounds.append((0, min(spec.max_charge_kw, surplus)))
+        for t in range(N):
+            if t in forced_lockouts:
+                bounds.append((0, 0))
+            else:
+                bounds.append((0, spec.max_charge_kw))
+        for t in range(N):
+            req = max(0.0, residual_demand_kw[t])
+            if (import_prices[t] - c_deg) <= export_prices[t]:
+                bounds.append((0, 0))
+            else:
+                bounds.append((0, min(spec.max_discharge_kw, req)))
+        for t in range(N):
+            bounds.append((0, None))
+        for t in range(N):
+            bounds.append((0, None))
 
-            target_peak = valid_peaks[0]
+        res = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs')
+        if not res.success:
+            return cls._inactive_plan(n_slots, f"LP solver failed: {res.message}")
 
-            # Gate 1: Local minimum - is there a significantly cheaper slot between now and the peak?
-            cheaper_slots = [
-                k for k in range(i + 1, target_peak)
-                if import_prices[k] < (p_in - 0.02)
-            ]
-            if cheaper_slots:
-                continue  # Wait for the cheaper slot!
+        p_ch_solar = res.x[0*N:1*N]
+        p_ch_grid = res.x[1*N:2*N]
+        p_dis = res.x[2*N:3*N]
+        p_imp = res.x[3*N:4*N]
+        p_exp = res.x[4*N:5*N]
 
-            # Gate 2: Solar surplus check - does upcoming solar between now and peak already cover the peak?
-            solar_before_peak = sum(
-                abs(residual_demand_kw[k]) * step_hours
-                for k in range(i + 1, target_peak)
-                if residual_demand_kw[k] < -0.05
-            )
-            peak_demand = sum(
-                residual_demand_kw[k] * step_hours
-                for k in range(i + 1, min(n_slots, target_peak + 8))
-                if residual_demand_kw[k] > 0.1 and import_prices[k] >= p_in + spec.reserve_price_delta_eur_kwh
-            )
-            if solar_before_peak >= peak_demand:
-                continue  # Free solar will refill battery, no paid grid charging needed!
-
-            spread = import_prices[target_peak] - (p_in / spec.roundtrip_efficiency) - spec.degradation_cost_eur_kwh
-            valley_candidates.append((p_in, spread, i))
-
-        valley_slots = {idx for _, _, idx in sorted(valley_candidates, key=lambda x: x[0])}
-
-        # --- PASS 3: Forward Simulation with Strategic Reservation ---
-        running_soc = cur_kwh
-
-        for i in range(n_slots):
-            res_kw = residual_demand_kw[i]
-            p_in = import_prices[i]
-            p_ex = export_prices[i]
-            is_lockout = i in forced_lockouts
-
-            # 1. Negative residual = Solar Surplus available
-            if res_kw < -0.05:
-                surplus_kw = abs(res_kw)
-                max_intake_kw = min(surplus_kw, spec.max_charge_kw)
-                # Headroom in battery
-                headroom_kwh = max(0.0, max_kwh - running_soc)
-                intake_kwh = min(max_intake_kw * step_hours * eta_one_way, headroom_kwh)
-                act_kw = (intake_kwh / (step_hours * eta_one_way)) if step_hours > 0 else 0.0
-
-                if act_kw > 0.05:
-                    power_dispatch_kw[i] = round(act_kw, 3)
-                    mode_codes[i] = "CHARGE_SOLAR"
-                    mode_labels[i] = "Zon-absorptie"
-                    running_soc += intake_kwh
-                    continue
-
-            # 2. Opportunistic Grid Valley Charging (Winter night charging)
-            if i in valley_slots and running_soc < (max_kwh * (spec.grid_charge_soc_ceiling_pct / 100.0)):
-                # Calculate needed reserve for upcoming peaks minus expected solar surplus
-                upcoming_solar = sum(
-                    abs(residual_demand_kw[k]) * step_hours
-                    for k in range(i + 1, min(n_slots, i + spec.reserve_lookahead_slots))
-                    if residual_demand_kw[k] < -0.05
-                )
-                upcoming_peak_energy = sum(
-                    residual_demand_kw[j] * step_hours
-                    for j in range(i + 1, min(n_slots, i + spec.reserve_lookahead_slots))
-                    if j in forced_lockouts or import_prices[j] >= p_in + spec.reserve_price_delta_eur_kwh
-                )
-                net_peak_energy = max(0.0, upcoming_peak_energy - upcoming_solar)
-                headroom_kwh = max(0.0, max_kwh - running_soc)
-                charge_target_kwh = min(headroom_kwh, net_peak_energy)
-                if charge_target_kwh > 0.5:
-                    charge_kw = min(spec.max_charge_kw, charge_target_kwh / step_hours)
-                    in_kwh = min(charge_kw * step_hours * eta_one_way, headroom_kwh)
-                    power_dispatch_kw[i] = round(charge_kw, 3)
-                    mode_codes[i] = "CHARGE_GRID"
-                    mode_labels[i] = "Nachtladen (Dal)"
-                    running_soc += in_kwh
-                    continue
-
-            # 3. Positive residual = House needs energy
-            if res_kw > 0.05:
-                # Look ahead: Are there imminent higher-priced peaks?
-                # Only reserve if:
-                # 1. Upcoming peak price > p_in + peak_price_delta_eur_kwh (or forced lockout)
-                # 2. There is NO cheaper valley before that peak (where we could refill cheaper!)
-                # 3. Solar won't refill the battery before that peak!
-                future_lockouts = []
-                for j in range(i + 1, min(n_slots, i + spec.reserve_lookahead_slots)):
-                    if (j in forced_lockouts or import_prices[j] > p_in + spec.peak_price_delta_eur_kwh) and residual_demand_kw[j] > 0.1:
-                        cheapest_between = min(import_prices[i+1:j]) if (j > i + 1) else p_in
-                        if cheapest_between < (p_in - 0.03):
-                            continue
-                        solar_refill = sum(
-                            abs(residual_demand_kw[k]) * step_hours
-                            for k in range(i + 1, j)
-                            if residual_demand_kw[k] < -0.05
-                        )
-                        if solar_refill < (spec.usable_capacity_kwh * 0.4):
-                            future_lockouts.append(j)
-
-                future_critical_kwh = sum(
-                    min(residual_demand_kw[j], spec.max_discharge_kw) * step_hours
-                    for j in future_lockouts
-                )
-                available_to_discharge_kwh = max(0.0, running_soc - min_kwh)
-                is_profitable = (p_in - spec.degradation_cost_eur_kwh) > p_ex
-
-                # If current slot is an explicit lockout OR there are no higher-priced peaks ahead:
-                if is_profitable and (is_lockout or not future_lockouts):
-                    # Full Peak Shaving
-                    req_kwh = min(res_kw, spec.max_discharge_kw) * step_hours
-                    dis_kwh = min(req_kwh, available_to_discharge_kwh * eta_one_way)
-                    if dis_kwh > 0.01:
-                        act_kw = dis_kwh / step_hours
-                        power_dispatch_kw[i] = -round(act_kw, 3)
-                        mode_codes[i] = "DISCHARGE_PEAK"
-                        mode_labels[i] = "Spitsontlasting"
-                        running_soc -= (dis_kwh / eta_one_way)
-                        continue
-
-                # Not a peak, but we have more energy than needed for future peaks:
-                excess_kwh = available_to_discharge_kwh - (future_critical_kwh / eta_one_way)
-                if excess_kwh > 0.02 and is_profitable:
-                    # Off-peak residual discharge (Nul-op-de-meter)
-                    req_kwh = min(res_kw, spec.max_discharge_kw) * step_hours
-                    dis_kwh = min(req_kwh, excess_kwh * eta_one_way)
-                    if dis_kwh > 0.01:
-                        act_kw = dis_kwh / step_hours
-                        power_dispatch_kw[i] = -round(act_kw, 3)
-                        mode_codes[i] = "DISCHARGE_BUFFER"
-                        mode_labels[i] = "Huisontlasting"
-                        running_soc -= (dis_kwh / eta_one_way)
-                        continue
-                elif future_critical_kwh > 0.5 and available_to_discharge_kwh > 0:
-                    # Explicit reservation for upcoming higher peak
-                    mode_codes[i] = "HOLD_RESERVE"
-                    mode_labels[i] = "Reserveren"
-                    continue
-
-            # Standby default
-            mode_codes[i] = "STANDBY"
-            mode_labels[i] = "Standby"
-
-        # Simulation of P05 and P95 SoC bounds based on demand/solar uncertainty (±25%)
+        # Calculate P05 and P95 SoC bounds based on load/solar uncertainty (±25%)
         res_p95 = [round(r * 1.25, 3) if r > 0 else round(r * 0.75, 3) for r in residual_demand_kw]
         res_p05 = [round(r * 0.75, 3) if r > 0 else round(r * 1.25, 3) for r in residual_demand_kw]
 
-        def _calc_soc_trajectory(res_list):
+        def _sim_path(res_list):
             r_soc = cur_kwh
-            res_soc_pct = []
-            for j in range(n_slots):
+            res_soc = []
+            for j in range(N):
                 r = res_list[j]
                 if r < -0.05:
-                    surplus = abs(r)
+                    surp = abs(r)
                     head = max(0.0, max_kwh - r_soc)
-                    intake = min(min(surplus, spec.max_charge_kw) * step_hours * eta_one_way, head)
+                    intake = min(min(surp, spec.max_charge_kw) * dt * eta_ch, head)
                     r_soc += intake
                 elif r > 0.05:
                     avail = max(0.0, r_soc - min_kwh)
-                    if (import_prices[j] - spec.degradation_cost_eur_kwh) > export_prices[j] and avail > 0.01:
-                        req = min(r, spec.max_discharge_kw) * step_hours
-                        dis = min(req, avail * eta_one_way)
-                        r_soc -= (dis / eta_one_way)
-                res_soc_pct.append(round((r_soc / spec.capacity_kwh) * 100.0, 1))
-            return res_soc_pct
+                    if (import_prices[j] - c_deg) > export_prices[j] and avail > 0.01:
+                        rq = min(r, spec.max_discharge_kw) * dt
+                        d_kwh = min(rq, avail * eta_dis)
+                        r_soc -= (d_kwh / eta_dis)
+                res_soc.append(round((r_soc / spec.capacity_kwh) * 100.0, 1))
+            return res_soc
 
-        p05_soc_list = _calc_soc_trajectory(res_p95)
-        p95_soc_list = _calc_soc_trajectory(res_p05)
+        p05_soc_list = _sim_path(res_p95)
+        p95_soc_list = _sim_path(res_p05)
 
         # -------------------------------------------------------------------
         # Build Results & Financial Accounting
@@ -392,58 +283,75 @@ class BatteryPolicy:
         tot_ch_grid = 0.0
         tot_dis = 0.0
         tot_deficit = 0.0
-        net_financial_saving = 0.0
-
         current_soc = cur_kwh
         min_proj_soc = initial_soc_pct
         max_proj_soc = initial_soc_pct
 
         for i in range(n_slots):
-            kw = power_dispatch_kw[i]
-            res = residual_demand_kw[i]
-            code = mode_codes[i]
-            label = mode_labels[i]
+            ch_s = p_ch_solar[i]
+            ch_g = p_ch_grid[i]
+            dis = p_dis[i]
+            imp = p_imp[i]
+            exp = p_exp[i]
             p_in = import_prices[i]
             p_ex = export_prices[i]
+            res_kw = residual_demand_kw[i]
 
-            cost_impact = 0.0
-            if kw > 0:  # Charging
-                kwh_in = kw * step_hours
-                current_soc = min(max_kwh, current_soc + kwh_in * eta_one_way)
-                if code == "CHARGE_SOLAR":
-                    tot_ch_solar += kwh_in
-                    # Opportunity cost = lost feed-in
-                    cost_impact = kwh_in * p_ex
+            if ch_s > 0.02:
+                pwr = round(float(ch_s), 3)
+                code = 'CHARGE_SOLAR'
+                label = 'Zon-absorptie'
+                tot_ch_solar += pwr * dt
+                delta_soc = pwr * dt * eta_ch
+            elif ch_g > 0.02:
+                pwr = round(float(ch_g), 3)
+                code = 'CHARGE_GRID'
+                label = 'Netladen (Dal)'
+                tot_ch_grid += pwr * dt
+                delta_soc = pwr * dt * eta_ch
+            elif dis > 0.02:
+                pwr = -round(float(dis), 3)
+                if i in forced_lockouts or p_in >= 0.28:
+                    code = 'DISCHARGE_PEAK'
+                    label = 'Spitsontlasting'
                 else:
-                    tot_ch_grid += kwh_in
-                    cost_impact = kwh_in * p_in
-                net_financial_saving -= cost_impact
-            elif kw < 0:  # Discharging
-                kwh_out = abs(kw) * step_hours
-                current_soc = max(min_kwh, current_soc - (kwh_out / eta_one_way))
-                tot_dis += kwh_out
-                # Avoided retail grid import
-                avoided_cost = kwh_out * p_in
-                degradation = kwh_out * spec.degradation_cost_eur_kwh
-                cost_impact = -(avoided_cost - degradation)
-                net_financial_saving -= cost_impact
+                    code = 'DISCHARGE_BUFFER'
+                    label = 'Huisontlasting'
+                tot_dis += abs(pwr) * dt
+                delta_soc = -(abs(pwr) * dt / eta_dis)
+            else:
+                pwr = 0.0
+                delta_soc = 0.0
+                if current_soc > (min_kwh + 0.5) and any(p_dis[k] > 0.1 for k in range(i + 1, n_slots)):
+                    code = 'HOLD_RESERVE'
+                    label = 'Reserveren'
+                else:
+                    code = 'STANDBY'
+                    label = 'Standby'
 
-            deficit = max(0.0, res - max(0.0, -kw)) if res > 0.05 else 0.0
-            tot_deficit += deficit * step_hours
+            base_imp = max(0.0, res_kw)
+            base_exp = max(0.0, -res_kw)
+            base_cost = (p_in * base_imp - p_ex * base_exp) * dt
+            actual_cost = (p_in * imp - p_ex * exp + p_in * ch_g + p_ex * ch_s + c_deg * dis) * dt
+            cost_impact = round(actual_cost - base_cost, 4)
 
+            current_soc = min(max_kwh, max(min_kwh, current_soc + delta_soc))
             soc_pct = round((current_soc / spec.capacity_kwh) * 100.0, 1)
             min_proj_soc = min(min_proj_soc, soc_pct)
             max_proj_soc = max(max_proj_soc, soc_pct)
 
+            deficit = max(0.0, float(imp)) if res_kw > 0.05 else 0.0
+            tot_deficit += deficit * dt
+
             slot_results.append(
                 BatterySlotResult(
                     slot_idx=i,
-                    power_kw=kw,
+                    power_kw=pwr,
                     mode_code=code,
                     mode_label=label,
                     soc_pct=soc_pct,
                     soc_kwh=round(current_soc, 3),
-                    cost_impact_eur=round(cost_impact, 4),
+                    cost_impact_eur=cost_impact,
                     deficit_kw=round(deficit, 3),
                     soc_p05_pct=p05_soc_list[i],
                     soc_p95_pct=p95_soc_list[i]
@@ -452,12 +360,13 @@ class BatteryPolicy:
 
         tot_demand = tot_dis + tot_deficit
         autonomy_pct = round((tot_dis / tot_demand) * 100.0, 1) if tot_demand > 0 else 100.0
+        net_financial_saving = round(-sum(s.cost_impact_eur for s in slot_results), 2)
 
         return BatteryPlanSummary(
             total_charged_solar_kwh=round(tot_ch_solar, 2),
             total_charged_grid_kwh=round(tot_ch_grid, 2),
             total_discharged_kwh=round(tot_dis, 2),
-            net_financial_saving_eur=round(net_financial_saving, 2),
+            net_financial_saving_eur=net_financial_saving,
             initial_soc_pct=round(initial_soc_pct, 1),
             final_soc_pct=round((current_soc / spec.capacity_kwh) * 100.0, 1),
             min_projected_soc_pct=min_proj_soc,
