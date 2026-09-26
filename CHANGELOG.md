@@ -10,6 +10,20 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.23] — 2026-09-26 (Wiskundige Hardening LP & TariffProvider Pariteit)
+
+### Wiskundige Reparatie & Review-Hardening (Second Opinion Hercontrole)
+- **Robuuste Terminale Waardering ($\lambda_{\text{term}} \ge 0$)**: $\lambda_{\text{term}} = \frac{\max(0{,}0, \min(p_{\text{in}}))}{\eta_{\text{ch}}} \times 0{,}98$. Voorkomt dat negatieve energieprijzen $\lambda_{\text{term}}$ negatief maken (wat zonneladen zou ontmoedigen of terminale accu-energie negatief zou waarderen).
+- **Correcte Exportprijzen bij Negatieve Spotprijzen**: De kunstmatige `max(0.0, ...)` afkappingen in `TariffProvider.calculate_spot_from_import()` en `TariffProvider.calculate_export_value_from_import()` zijn verwijderd. Negatieve terugleverprijzen (terugleverboete/kosten bij zonne-overschot) bereiken nu zuiver de LP, waardoor de batterij maximaal gestimuleerd wordt zonnestroom op te slaan in plaats van te exporteren.
+- **Netaansluiting Hoofdzekering naar `BatterySpec`**: De 17,25 kW fysieke netlimiet (3×25A) is overgeheveld naar `BatterySpec.max_grid_import_kw` en flexibel beschermd tegen onoplosbaarheid bij uitzonderlijke pieken.
+- **Vier Nieuwe Dedicated Unit-Tests**:
+  1. `test_discharge_hurdle_follows_degradation_and_terminal_valuation`: Ontlaaddrempel volgt $c_{\text{deg}} + \lambda/\eta$ bij vlakke prijs versus piek.
+  2. `test_no_hamster_grid_charging_without_future_demand`: Geen hamsteren: zonder latere vraag wordt er niet netgeladen.
+  3. `test_negative_price_absorbs_solar_and_keeps_lambda_non_negative`: Bij negatieve prijzen wordt zonne-energie geabsorbeerd en blijft $\lambda \ge 0$.
+  4. `test_cost_impact_single_slot_manual_calculation`: Handmatige verificatie van cost impact zonder dubbeltelling.
+
+---
+
 ## [0.104.22] — 2026-09-26 (Correctie Dubbeltelling, Dynamische Terminalwaarde & TariffProvider Pariteit)
 
 ### Wiskundige Refactoring & Bugfixes (Second Opinion Review)

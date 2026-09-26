@@ -35,6 +35,7 @@ class BatterySpec:
     peak_price_delta_eur_kwh: float = 0.08      # Minimaal prijsverschil dat een slot 'piek' maakt
     reserve_price_delta_eur_kwh: float = 0.12   # Minimaal prijsverschil voor netlaad-reservering
     grid_charge_soc_ceiling_pct: float = 85.0   # Netladen stopt hier; de rest is voor zon
+    max_grid_import_kw: float = 17.25           # Main grid connection fuse limit (3x25A = ~17.25 kW)
 
 
 @dataclass
@@ -184,8 +185,9 @@ class BatteryPolicy:
         eta_dis = eta_one_way
         c_deg = spec.degradation_cost_eur_kwh
 
-        # Terminal valuation based on replacement/reload cost across the horizon:
-        lambda_term = float(np.min(import_prices)) * 0.85
+        # Terminal valuation based on replacement/reload cost across the horizon (non-negative, 2% discount):
+        min_future_reload = float(np.min(import_prices))
+        lambda_term = (max(0.0, min_future_reload) / eta_ch) * 0.98
 
         N = n_slots
         c = np.zeros(5 * N)
@@ -234,8 +236,10 @@ class BatteryPolicy:
             req = max(0.0, residual_demand_kw[t])
             bounds.append((0, min(spec.max_discharge_kw, req)))
         for t in range(N):
-            # Physical grid connection fuse limit (3x25A = ~17.25 kW)
-            bounds.append((0, 17.25))
+            # Physical grid connection fuse limit from spec (default 17.25 kW for 3x25A)
+            # Add headroom above residual demand so extreme unhedged spikes do not cause solver infeasibility
+            limit = max(spec.max_grid_import_kw, residual_demand_kw[t] + 1.0)
+            bounds.append((0, limit))
         for t in range(N):
             bounds.append((0, None))
 

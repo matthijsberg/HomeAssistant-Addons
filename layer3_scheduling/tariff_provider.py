@@ -53,17 +53,17 @@ class TariffProvider:
         """
         vat_factor = 1.0 + self.config.vat_rate
         spot = (price_all_in / vat_factor) - self.config.supplier_markup_eur - self.config.energy_tax_eur
-        return max(0.0, spot)
+        return spot
 
     def calculate_export_value_from_import(self, price_all_in: float) -> float:
         """
         Calculates the net avoided feed-in price (opportunity cost of self-consuming solar)
         directly from the current slot's all-in price.
-        Formula: max(0, spot - feed_in_penalty + export_markup)
+        Formula: spot - feed_in_penalty + export_markup (can be negative if spot is deeply negative)
         """
         spot = self.calculate_spot_from_import(price_all_in)
         net_export = spot - self.config.feed_in_penalty_eur + self.config.export_fixed_markup_eur
-        return max(0.0, net_export)
+        return net_export
 
     def calculate_import_price(self, spot_eur_per_kwh: float) -> float:
         """

@@ -79,7 +79,7 @@ def test_reserve_holding_ahead_of_expensive_peak():
     for i in range(30, 36):
         residual[i] = 3.0
 
-    prices = [0.38] * 40
+    prices = [0.26] * 40
     for i in range(30, 36):
         prices[i] = 0.50  # Huge peak later
 
@@ -262,3 +262,88 @@ def test_no_discharge_when_avoided_import_below_degradation_floor():
     )
     assert res.total_discharged_kwh == 0.0
     assert all(s.mode_code != "DISCHARGE_PEAK" for s in res.slots)
+
+
+def test_discharge_hurdle_follows_degradation_and_terminal_valuation():
+    """Ontlaaddrempel volgt c_deg + lambda/eta bij een vlakke prijs versus piek."""
+    spec = BatterySpec(capacity_kwh=15.0, degradation_cost_eur_kwh=0.078)
+    # Bij vlakke prijs onder de drempel ontlaadt de batterij niet onnodig
+    res_flat = BatteryPolicy.optimize(
+        residual_demand_kw=[1.0] * 24,
+        import_prices=[0.15] * 24,
+        export_prices=[0.02] * 24,
+        spec=spec,
+        initial_soc_pct=50.0
+    )
+    assert res_flat.total_discharged_kwh == 0.0
+
+    # Bij een piek die boven de drempel uitstijgt ontlaadt de batterij exact om vraag te dekken
+    pr = [0.11] * 24
+    pr[10:14] = [0.35, 0.35, 0.35, 0.35]
+    res_peak = BatteryPolicy.optimize(
+        residual_demand_kw=[1.0] * 24,
+        import_prices=pr,
+        export_prices=[0.02] * 24,
+        spec=spec,
+        initial_soc_pct=50.0
+    )
+    peak_powers = [res_peak.slots[i].power_kw for i in range(10, 14)]
+    assert all(p == -1.0 for p in peak_powers)
+
+
+def test_no_hamster_grid_charging_without_future_demand():
+    """Geen hamsteren: zonder latere vraag wordt er niet netgeladen, ongeacht daltarief."""
+    spec = BatterySpec(capacity_kwh=15.0, degradation_cost_eur_kwh=0.078)
+    res_no_demand = BatteryPolicy.optimize(
+        residual_demand_kw=[0.0] * 24,
+        import_prices=[0.05] * 12 + [0.30] * 12,
+        export_prices=[0.01] * 24,
+        spec=spec,
+        initial_soc_pct=15.0
+    )
+    assert res_no_demand.total_charged_grid_kwh == 0.0
+
+
+def test_negative_price_absorbs_solar_and_keeps_lambda_non_negative():
+    """Bij negatieve prijzen wordt zonne-energie volledig geabsorbeerd en blijft lambda >= 0."""
+    spec = BatterySpec(capacity_kwh=15.0, degradation_cost_eur_kwh=0.078)
+    res_neg = BatteryPolicy.optimize(
+        residual_demand_kw=[-2.0] * 8 + [1.0] * 16,
+        import_prices=[-0.05] * 8 + [0.25] * 16,
+        export_prices=[-0.10] * 8 + [0.05] * 16,
+        spec=spec,
+        initial_soc_pct=15.0
+    )
+    # Zonne-overschot (2.0 kW * 8 slots * 0.25h = 4.0 kWh) moet 100% in de batterij zijn geladen
+    assert res_neg.total_charged_solar_kwh == 4.0
+    # Geen export wanneer terugleveren geld kost
+    for slot in res_neg.slots[:8]:
+        assert slot.ch_solar_kw == 2.0
+
+
+def test_cost_impact_single_slot_manual_calculation():
+    """Handmatige verificatie van cost_impact_eur voor één kwartier met netladen (geen dubbeltelling)."""
+    spec = BatterySpec(capacity_kwh=15.0, degradation_cost_eur_kwh=0.078)
+    # Setup met 1.0 kW residu, netladen 2.0 kW, p_in = 0.10 EUR/kWh, dt = 0.25h
+    # Base cost: 1.0 kW * 0.10 * 0.25 = 0.025 EUR
+    # P_imp = 1.0 kW + 2.0 kW = 3.0 kW
+    # Actual cost: (0.10 * 3.0 kW - 0.0 + 0.0) * 0.25 = 0.075 EUR
+    # Cost impact = actual_cost - base_cost = 0.075 - 0.025 = +0.050 EUR (extra inkoop voor laden)
+    # Zonder de fix (met dubbeltelling) zou actual cost zijn: (0.10*3 + 0.10*2)*0.25 = 0.125 EUR (impact +0.100 EUR).
+    pr = [0.10] * 10 + [0.45] * 14
+    res = [1.0] * 24
+    plan = BatteryPolicy.optimize(
+        residual_demand_kw=res,
+        import_prices=pr,
+        export_prices=[0.02] * 24,
+        spec=spec,
+        initial_soc_pct=10.0
+    )
+    # Zoek een slot met pure netlading
+    grid_slot = next(s for s in plan.slots if s.ch_grid_kw > 1.0)
+    dt = 0.25
+    expected_base_cost = (0.10 * 1.0) * dt
+    expected_actual_cost = (0.10 * (1.0 + grid_slot.ch_grid_kw)) * dt
+    expected_impact = round(expected_actual_cost - expected_base_cost, 4)
+    assert round(grid_slot.cost_impact_eur, 4) == expected_impact
+
