@@ -101,3 +101,31 @@ def test_historical_ranges_15m_and_1h_alignment():
     h_1h = int(forced_1h[0]["start_label"][:2])
     h_15m = int(forced_15m[0]["start_label"][:2])
     assert abs(h_1h - h_15m) <= 1
+
+
+def test_historical_ranges_24h_vs_48h_multi_day_alignment():
+    """Verify that multi-day 48h range does not offset day-2 peaks onto morning/night hours."""
+    now = datetime(2026, 9, 26, 12, 0, 0, tzinfo=AMS_TZ)
+
+    # 48h slots (49 hourly slots)
+    slots_48h = [now - timedelta(hours=(48 - i)) for i in range(49)]
+    prices_48h = [0.20] * 49
+    labels_48h = [dt.strftime("%d %H:00") for dt in slots_48h]
+
+    # Set evening peak on day 2 (Sep 25) between 19:00 and 22:00
+    for i, dt in enumerate(slots_48h):
+        if dt.day == 25 and 19 <= dt.hour <= 22:
+            prices_48h[i] = 0.50
+
+    forced_48h, advised_48h = fetch_historical_overlay_ranges(
+        slots_48h[0].strftime("%Y-%m-%dT%H:%M:00Z"),
+        slots_48h[-1].strftime("%Y-%m-%dT%H:%M:00Z"),
+        slots_48h, prices=prices_48h, labels=labels_48h, interval_h=1.0
+    )
+
+    assert len(forced_48h) > 0
+    # Ensure the detected peak on the 25th starts in the evening (hour >= 18), NOT in early morning (02:00-05:00)
+    for r in forced_48h:
+        hour = int(r["start_label"].split()[1].split(":")[0])
+        assert hour >= 17, f"48h peak offset bug: peak detected at hour {hour}, expected evening >= 17"
+

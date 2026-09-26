@@ -113,13 +113,13 @@ def fetch_historical_overlay_ranges(
 
         for d_str, day_items in days.items():
             peaks, lockout_map = detect_dynamic_price_peaks(day_items, step_mins=step_mins)
-            for it in day_items:
-                idx = it["idx"]
-                entry = lockout_map.get(idx)
+            for local_idx, it in enumerate(day_items):
+                global_idx = it["idx"]
+                entry = lockout_map.get(local_idx)
                 if entry and entry.get("is_hard_lockout"):
-                    slot_modes[idx] = StandardizedState.FORCED_OFF
+                    slot_modes[global_idx] = StandardizedState.FORCED_OFF
                 elif entry and not entry.get("is_hard_lockout"):
-                    slot_modes[idx] = StandardizedState.ADVISED_OFF
+                    slot_modes[global_idx] = StandardizedState.ADVISED_OFF
 
     # 2. InfluxDB hardware relay intervals from hems_annotations (actual physical execution)
     try:

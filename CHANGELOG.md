@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.4] — 2026-09-25 (Fix 48-Uurs Multi-Day Index Verschuiving in Historische Overlays)
+
+### Bug Fixes & Multi-Day Alignment
+- **Oplossing van Lokale vs Globale Dagindex-Mismatch**: In `fetch_historical_overlay_ranges` werd `detect_dynamic_price_peaks` per kalenderdag aangeroepen (lokale indices `0..23`). De `lockout_map` werd echter abusievelijk uitgelezen met de globale array-index (`it["idx"]` = 16..39 voor dag 2). Hierdoor werd de avondspits van dag 2 (19:00–21:00) verschoven naar midden in de nacht (03:00–05:00) en verdween het werkelijke avondblok.
+- **Enumerate Local Index Mapping**: Gecorrigeerd naar `for local_idx, it in enumerate(day_items): entry = lockout_map.get(local_idx)`. Piekblokken in zowel 24u als 48u vallen nu op exact dezelfde avond- en ochtenduren.
+- **Regressietest Toegevoegd**: `test_historical_ranges_24h_vs_48h_multi_day_alignment` bewaakt dat meerdagse bereiken (48h) nooit spitsblokken verschuiven naar nachtelijke uren.
+
+---
+
 ## [0.104.3] — 2026-09-25 (Universele Resolutie-Pariteit & Architectuur Invariant #8)
 
 ### Visual Contracts & Invarianten
