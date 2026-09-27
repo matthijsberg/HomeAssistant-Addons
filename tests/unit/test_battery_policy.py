@@ -410,3 +410,47 @@ def test_early_negative_price_does_not_zero_lambda():
     assert end_soc_neg > spec.min_soc_pct + 10.0
 
 
+def test_discharge_uses_nominal_for_mild_and_max_for_extreme_opportunity():
+    """Discharge blijft op nominal_discharge_kw bij lichte pieken, maar schaalt naar max_discharge_kw bij > 30ct delta."""
+    spec = BatterySpec(
+        capacity_kwh=15.0,
+        nominal_discharge_kw=2.5,
+        max_discharge_kw=5.0,
+        boost_opportunity_spread_eur=0.30,
+        degradation_cost_eur_kwh=0.078
+    )
+
+    # 1. Extreme piek (€0.50 vs €0.11 base, delta = €0.39 > €0.30):
+    # Huis vraagt 4.0 kW -> batterij ontlaadt de volle 4.0 kW
+    prices_extreme = [0.11] * 12 + [0.50] * 4 + [0.11] * 8
+    res_extreme = BatteryPolicy.optimize(
+        residual_demand_kw=[0.0] * 12 + [4.0] * 4 + [0.0] * 8,
+        import_prices=prices_extreme,
+        export_prices=[0.02] * 24,
+        spec=spec,
+        initial_soc_pct=80.0
+    )
+    dis_extreme = [abs(res_extreme.slots[i].power_kw) for i in range(12, 16)]
+    assert all(p == 4.0 for p in dis_extreme), f"Expected 4.0 kW discharge, got {dis_extreme}"
+
+
+def test_battery_spec_from_config():
+    cfg = {
+        "battery": {
+            "nominal_charge_kw": 2.2,
+            "max_charge_kw": 4.8,
+            "nominal_discharge_kw": 2.0,
+            "max_discharge_kw": 4.5,
+            "boost_opportunity_spread_eur": 0.35
+        }
+    }
+    spec = BatterySpec.from_config(cfg)
+    assert spec.nominal_charge_kw == 2.2
+    assert spec.max_charge_kw == 4.8
+    assert spec.nominal_discharge_kw == 2.0
+    assert spec.max_discharge_kw == 4.5
+    assert spec.boost_opportunity_spread_eur == 0.35
+    assert spec.charge_knee_kw == 2.2
+
+
+

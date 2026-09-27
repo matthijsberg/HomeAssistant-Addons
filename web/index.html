@@ -1715,6 +1715,44 @@
                             </button>
                         </div>
                     </div>
+
+                    <!-- Battery Power & Optimization Settings -->
+                    <div class="bg-[#0B0F17] p-4 rounded-xl border border-slate-800 space-y-3 mt-4">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <h4 class="text-xs font-semibold text-slate-200">Thuisbatterij Vermogenslimieten & Dynamische Boost (Deye 15 kWh LFP)</h4>
+                                <p class="text-[11px] text-slate-400">Beheer geadviseerde vermogens voor minimale celopwarming/slijtage en maximale limieten voor diepe prijsdalen (> 30 cent delta).</p>
+                            </div>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">BATTERY POLICY</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-5 gap-3 pt-1">
+                            <div>
+                                <label for="tab-battery-nom-ch" class="text-[10px] text-slate-400 block mb-1">Geadviseerd Laden (kW)</label>
+                                <input type="number" step="0.1" min="0.5" max="10" id="tab-battery-nom-ch" value="2.5" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-cyan-500 focus:outline-none" title="Standaard laadvermogen voor rustige zonne- en netlading">
+                            </div>
+                            <div>
+                                <label for="tab-battery-max-ch" class="text-[10px] text-slate-400 block mb-1">Maximaal Laden (kW)</label>
+                                <input type="number" step="0.1" min="0.5" max="15" id="tab-battery-max-ch" value="5.0" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-cyan-500 focus:outline-none" title="Plafond omvormer voor korte dalen of diep negatieve tarieven">
+                            </div>
+                            <div>
+                                <label for="tab-battery-nom-dis" class="text-[10px] text-slate-400 block mb-1">Geadviseerd Ontladen (kW)</label>
+                                <input type="number" step="0.1" min="0.5" max="10" id="tab-battery-nom-dis" value="2.5" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-cyan-500 focus:outline-none" title="Standaard ontlading voor baselast en gemiddeld verbruik">
+                            </div>
+                            <div>
+                                <label for="tab-battery-max-dis" class="text-[10px] text-slate-400 block mb-1">Maximaal Ontladen (kW)</label>
+                                <input type="number" step="0.1" min="0.5" max="15" id="tab-battery-max-dis" value="5.0" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-cyan-500 focus:outline-none" title="Plafond omvormer voor koken, warmtepomp en extreme prijspieken">
+                            </div>
+                            <div>
+                                <label for="tab-battery-boost-spread" class="text-[10px] text-slate-400 block mb-1">Boost Drempel (€/kWh)</label>
+                                <input type="number" step="0.05" min="0.05" max="1.0" id="tab-battery-boost-spread" value="0.30" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-cyan-500 focus:outline-none" title="Prijsdelta drempel (> €0.30) waarbij de optimizer opschaalt naar maximaal vermogen">
+                            </div>
+                        </div>
+                        <div class="flex justify-end pt-2">
+                            <button id="btn-save-battery-settings" onclick="saveBatterySettingsFromTab()" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-lg shadow transition flex items-center gap-1.5">
+                                <span>Opslaan Batterij-instellingen</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="flex justify-between items-center pt-2">

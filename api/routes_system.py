@@ -37,6 +37,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         cfg = load_json(CONFIG_FILE)
         opt_cfg = cfg.get("dhw_optimizer", {})
         cm_cfg = opt_cfg.get("comfort_margin", {})
+        bat_cfg = cfg.get("battery", {})
         handler._send_json({
             "status": "success",
             "baseload_watts": cfg.get("baseload_watts", 300),
@@ -49,6 +50,13 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     "min_margin_c": float(cm_cfg.get("min_margin_c", 0.5)),
                     "fixed_margin_c": float(cm_cfg.get("fixed_margin_c", 2.0))
                 }
+            },
+            "battery": {
+                "nominal_charge_kw": float(bat_cfg.get("nominal_charge_kw", 2.5)),
+                "max_charge_kw": float(bat_cfg.get("max_charge_kw", 5.0)),
+                "nominal_discharge_kw": float(bat_cfg.get("nominal_discharge_kw", 2.5)),
+                "max_discharge_kw": float(bat_cfg.get("max_discharge_kw", 5.0)),
+                "boost_opportunity_spread_eur": float(bat_cfg.get("boost_opportunity_spread_eur", 0.30))
             }
         })
         return True
@@ -559,10 +567,40 @@ def handle_post(handler, path: str, body: dict) -> bool:
                             raise ValueError("fixed_margin_c must be between 0.0 and 10.0")
                         cur_cm["fixed_margin_c"] = round(fix_m, 2)
 
+            if "battery" in body and isinstance(body["battery"], dict):
+                b_in = body["battery"]
+                cur_b = cfg.setdefault("battery", {})
+                if "nominal_charge_kw" in b_in:
+                    v = float(b_in["nominal_charge_kw"])
+                    if not (0.5 <= v <= 10.0):
+                        raise ValueError("nominal_charge_kw must be between 0.5 and 10.0")
+                    cur_b["nominal_charge_kw"] = round(v, 2)
+                if "max_charge_kw" in b_in:
+                    v = float(b_in["max_charge_kw"])
+                    if not (0.5 <= v <= 15.0):
+                        raise ValueError("max_charge_kw must be between 0.5 and 15.0")
+                    cur_b["max_charge_kw"] = round(v, 2)
+                if "nominal_discharge_kw" in b_in:
+                    v = float(b_in["nominal_discharge_kw"])
+                    if not (0.5 <= v <= 10.0):
+                        raise ValueError("nominal_discharge_kw must be between 0.5 and 10.0")
+                    cur_b["nominal_discharge_kw"] = round(v, 2)
+                if "max_discharge_kw" in b_in:
+                    v = float(b_in["max_discharge_kw"])
+                    if not (0.5 <= v <= 15.0):
+                        raise ValueError("max_discharge_kw must be between 0.5 and 15.0")
+                    cur_b["max_discharge_kw"] = round(v, 2)
+                if "boost_opportunity_spread_eur" in b_in:
+                    v = float(b_in["boost_opportunity_spread_eur"])
+                    if not (0.05 <= v <= 1.0):
+                        raise ValueError("boost_opportunity_spread_eur must be between 0.05 and 1.0")
+                    cur_b["boost_opportunity_spread_eur"] = round(v, 3)
+
             save_json(CONFIG_FILE, cfg)
 
             opt_cfg = cfg.get("dhw_optimizer", {})
             cm_cfg = opt_cfg.get("comfort_margin", {})
+            bat_cfg = cfg.get("battery", {})
             handler._send_json({
                 "status": "success",
                 "baseload_watts": cfg.get("baseload_watts", 300),
@@ -575,6 +613,13 @@ def handle_post(handler, path: str, body: dict) -> bool:
                         "min_margin_c": float(cm_cfg.get("min_margin_c", 0.5)),
                         "fixed_margin_c": float(cm_cfg.get("fixed_margin_c", 2.0))
                     }
+                },
+                "battery": {
+                    "nominal_charge_kw": float(bat_cfg.get("nominal_charge_kw", 2.5)),
+                    "max_charge_kw": float(bat_cfg.get("max_charge_kw", 5.0)),
+                    "nominal_discharge_kw": float(bat_cfg.get("nominal_discharge_kw", 2.5)),
+                    "max_discharge_kw": float(bat_cfg.get("max_discharge_kw", 5.0)),
+                    "boost_opportunity_spread_eur": float(bat_cfg.get("boost_opportunity_spread_eur", 0.30))
                 }
             })
 

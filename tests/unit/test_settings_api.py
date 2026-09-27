@@ -88,6 +88,48 @@ def test_post_settings_updates_and_validates():
     assert bad_f_handler.sent_status == 400
 
 
+def test_battery_settings_get_and_post():
+    # 1. Update battery nominal and max powers
+    body = {
+        "battery": {
+            "nominal_charge_kw": 2.0,
+            "max_charge_kw": 4.5,
+            "nominal_discharge_kw": 2.2,
+            "max_discharge_kw": 4.8,
+            "boost_opportunity_spread_eur": 0.25
+        }
+    }
+    handler = MockHandler(body=body, path="/api/settings")
+    res = routes_system.handle_post(handler, "/api/settings", body)
+    assert res is True
+    assert handler.sent_status == 200
+    assert handler.sent_json is not None
+    bat = handler.sent_json["battery"]
+    assert bat["nominal_charge_kw"] == 2.0
+    assert bat["max_charge_kw"] == 4.5
+    assert bat["nominal_discharge_kw"] == 2.2
+    assert bat["max_discharge_kw"] == 4.8
+    assert bat["boost_opportunity_spread_eur"] == 0.25
+
+    # 2. Get settings returns battery config
+    get_handler = MockHandler(path="/api/settings")
+    routes_system.handle_get(get_handler, "/api/settings", {})
+    assert get_handler.sent_status == 200
+    assert get_handler.sent_json is not None
+    assert get_handler.sent_json["battery"]["nominal_charge_kw"] == 2.0
+    assert get_handler.sent_json["battery"]["max_charge_kw"] == 4.5
+
+    # 3. Invalid out-of-range bounds rejected
+    bad_body = {
+        "battery": {
+            "max_charge_kw": 50.0
+        }
+    }
+    bad_handler = MockHandler(body=bad_body, path="/api/settings")
+    routes_system.handle_post(bad_handler, "/api/settings", bad_body)
+    assert bad_handler.sent_status == 400
+
+
 from tests.unit.test_central_planner_explanations import create_sample_telemetry_frame
 
 

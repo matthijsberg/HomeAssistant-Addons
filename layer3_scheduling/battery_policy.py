@@ -17,15 +17,18 @@ import numpy as np
 from scipy.optimize import linprog
 
 
-@dataclass(frozen=True)
+@dataclass
 class BatterySpec:
     """Physical and economic specifications of the battery system."""
     capacity_kwh: float = 15.0
     usable_capacity_kwh: float = 13.5          # 10% to 100% (or 10% to 95%) DoD
     min_soc_pct: float = 10.0                   # Hard low-voltage protection limit
     max_soc_pct: float = 95.0                   # High-voltage cycle life preservation limit
-    max_charge_kw: float = 5.0                  # Inverter continuous AC charge limit
-    max_discharge_kw: float = 5.0               # Inverter continuous AC discharge limit
+    nominal_charge_kw: float = 2.5              # Geadviseerd nominaal laadvermogen (normale werking)
+    max_charge_kw: float = 5.0                  # Maximaal omvormer laadvermogen (korte dalen / grote spread)
+    nominal_discharge_kw: float = 2.5           # Geadviseerd nominaal ontlaadvermogen
+    max_discharge_kw: float = 5.0               # Maximaal omvormer ontlaadvermogen
+    boost_opportunity_spread_eur: float = 0.30  # Prijsdelta drempel (> €0.30) voor opschalen naar max vermogen
     roundtrip_efficiency: float = 0.87          # AC-DC-AC roundtrip efficiency
     degradation_cost_eur_kwh: float = 0.078     # LCOC based on €6000 / 76500 kWh throughput
     min_cycle_margin_eur_kwh: float = 0.085     # In-device adjustable profit margin slider
@@ -36,9 +39,41 @@ class BatterySpec:
     reserve_price_delta_eur_kwh: float = 0.12   # Minimaal prijsverschil voor netlaad-reservering
     grid_charge_soc_ceiling_pct: float = 85.0   # Netladen stopt hier; de rest is voor zon
     max_grid_import_kw: float = 17.25           # Main grid connection fuse limit (3x25A = ~17.25 kW)
-    charge_knee_kw: float = 2.5                 # Nominal piecewise linear knee for charging
-    charge_tier2_penalty_eur_kwh: float = 0.005 # Penalty per kWh above charge_knee_kw to encourage smoothing
+    charge_knee_kw: float = 2.5                 # Nominal piecewise linear knee for charging (synced to nominal_charge_kw)
+    charge_tier2_penalty_eur_kwh: float = 0.005 # Penalty per kWh above knee to encourage smoothing
     charge_ramp_penalty_eur_kw: float = 0.001   # Penalty per kW step change to prevent zigzagging
+    discharge_tier2_penalty_eur_kwh: float = 0.003 # Penalty per kWh above nominal_discharge_kw
+
+    @classmethod
+    def from_config(cls, cfg: Optional[Dict[str, Any]] = None, **overrides) -> "BatterySpec":
+        if not cfg:
+            return cls(**overrides)
+        b_cfg = cfg.get("battery", {})
+        nom_ch = float(b_cfg.get("nominal_charge_kw", 2.5))
+        max_ch = float(b_cfg.get("max_charge_kw", 5.0))
+        nom_dis = float(b_cfg.get("nominal_discharge_kw", 2.5))
+        max_dis = float(b_cfg.get("max_discharge_kw", 5.0))
+        boost_spread = float(b_cfg.get("boost_opportunity_spread_eur", 0.30))
+        cap = float(b_cfg.get("capacity_kwh", 15.0))
+
+        kwargs = {
+            "capacity_kwh": cap,
+            "usable_capacity_kwh": float(b_cfg.get("usable_capacity_kwh", cap * 0.9)),
+            "min_soc_pct": float(b_cfg.get("min_soc_pct", 10.0)),
+            "max_soc_pct": float(b_cfg.get("max_soc_pct", 95.0)),
+            "nominal_charge_kw": nom_ch,
+            "max_charge_kw": max_ch,
+            "nominal_discharge_kw": nom_dis,
+            "max_discharge_kw": max_dis,
+            "boost_opportunity_spread_eur": boost_spread,
+            "charge_knee_kw": nom_ch,
+        }
+        for k, v in overrides.items():
+            if k in ("reserve_lookahead_slots", "valley_lookahead_slots"):
+                kwargs[k] = int(v)
+            else:
+                kwargs[k] = v
+        return cls(**kwargs)
 
 
 @dataclass
@@ -199,15 +234,16 @@ class BatteryPolicy:
         lambda_term = (max(0.0, min_tail_reload) / eta_ch) * 0.98
 
         N = n_slots
-        # Decision variables (7 blocks of size N):
+        # Decision variables (8 blocks of size N):
         # 0*N: P_ch_solar (kW)
         # 1*N: P_ch_grid (kW)
         # 2*N: P_dis (kW)
         # 3*N: P_imp (kW)
         # 4*N: P_exp (kW)
-        # 5*N: P_ch_high (kW above knee_kw)
+        # 5*N: P_ch_high (kW above nominal_charge_kw)
         # 6*N: r (kW ramp step change)
-        n_vars = 7 * N
+        # 7*N: P_dis_high (kW above nominal_discharge_kw)
+        n_vars = 8 * N
         c = np.zeros(n_vars)
         for t in range(N):
             p_in = import_prices[t]
@@ -219,6 +255,7 @@ class BatteryPolicy:
             c[4*N + t] = -p_ex * dt
             c[5*N + t] = spec.charge_tier2_penalty_eur_kwh * dt
             c[6*N + t] = spec.charge_ramp_penalty_eur_kw
+            c[7*N + t] = spec.discharge_tier2_penalty_eur_kwh * dt
 
         A_eq = np.zeros((N, n_vars))
         b_eq = np.zeros(N)
@@ -233,10 +270,11 @@ class BatteryPolicy:
         # Inequality constraints:
         # 1. SoC upper bound (N)
         # 2. SoC lower bound (N)
-        # 3. Tier-2 knee: P_ch_solar(t) + P_ch_grid(t) - P_ch_high(t) <= charge_knee_kw (N)
-        # 4. Ramping up: P_ch(t+1) - P_ch(t) - r(t) <= 0 (N-1)
-        # 5. Ramping down: P_ch(t) - P_ch(t+1) - r(t) <= 0 (N-1)
-        n_ub = 3 * N + 2 * (N - 1)
+        # 3. Tier-2 charge knee: P_ch_solar(t) + P_ch_grid(t) - P_ch_high(t) <= nominal_charge_kw (N)
+        # 4. Tier-2 discharge knee: P_dis(t) - P_dis_high(t) <= nominal_discharge_kw (N)
+        # 5. Ramping up: P_ch(t+1) - P_ch(t) - r(t) <= 0 (N-1)
+        # 6. Ramping down: P_ch(t) - P_ch(t+1) - r(t) <= 0 (N-1)
+        n_ub = 4 * N + 2 * (N - 1)
         A_ub = np.zeros((n_ub, n_vars))
         b_ub = np.zeros(n_ub)
 
@@ -261,7 +299,13 @@ class BatteryPolicy:
             A_ub[row, 0*N + t] = 1.0
             A_ub[row, 1*N + t] = 1.0
             A_ub[row, 5*N + t] = -1.0
-            b_ub[row] = spec.charge_knee_kw
+            b_ub[row] = spec.nominal_charge_kw
+            row += 1
+
+        for t in range(N):
+            A_ub[row, 2*N + t] = 1.0
+            A_ub[row, 7*N + t] = -1.0
+            b_ub[row] = spec.nominal_discharge_kw
             row += 1
 
         for t in range(N - 1):
@@ -298,6 +342,8 @@ class BatteryPolicy:
             # Physical grid connection fuse limit from spec (default 17.25 kW for 3x25A)
             limit = max(spec.max_grid_import_kw, residual_demand_kw[t] + 1.0)
             bounds.append((0, limit))
+        for t in range(N):
+            bounds.append((0, None))
         for t in range(N):
             bounds.append((0, None))
         for t in range(N):

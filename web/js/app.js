@@ -4001,6 +4001,22 @@
                     if (document.getElementById('tab-dhw-margin-fixed') && cm.fixed_margin_c !== undefined) {
                         document.getElementById('tab-dhw-margin-fixed').value = cm.fixed_margin_c;
                     }
+                    const bat = data.battery || {};
+                    if (document.getElementById('tab-battery-nom-ch') && bat.nominal_charge_kw !== undefined) {
+                        document.getElementById('tab-battery-nom-ch').value = bat.nominal_charge_kw;
+                    }
+                    if (document.getElementById('tab-battery-max-ch') && bat.max_charge_kw !== undefined) {
+                        document.getElementById('tab-battery-max-ch').value = bat.max_charge_kw;
+                    }
+                    if (document.getElementById('tab-battery-nom-dis') && bat.nominal_discharge_kw !== undefined) {
+                        document.getElementById('tab-battery-nom-dis').value = bat.nominal_discharge_kw;
+                    }
+                    if (document.getElementById('tab-battery-max-dis') && bat.max_discharge_kw !== undefined) {
+                        document.getElementById('tab-battery-max-dis').value = bat.max_discharge_kw;
+                    }
+                    if (document.getElementById('tab-battery-boost-spread') && bat.boost_opportunity_spread_eur !== undefined) {
+                        document.getElementById('tab-battery-boost-spread').value = bat.boost_opportunity_spread_eur;
+                    }
                     onDhwMarginModeChange();
                 }
             } catch (err) {
@@ -4049,6 +4065,59 @@
                 alert('Netwerkfout bij opslaan: ' + err.message);
             }
         }
+
+        async function saveBatterySettingsFromTab() {
+            const nomCh = parseFloat(document.getElementById('tab-battery-nom-ch')?.value || 2.5);
+            const maxCh = parseFloat(document.getElementById('tab-battery-max-ch')?.value || 5.0);
+            const nomDis = parseFloat(document.getElementById('tab-battery-nom-dis')?.value || 2.5);
+            const maxDis = parseFloat(document.getElementById('tab-battery-max-dis')?.value || 5.0);
+            const spread = parseFloat(document.getElementById('tab-battery-boost-spread')?.value || 0.30);
+
+            const btn = document.getElementById('btn-save-battery-settings');
+            if (btn) {
+                btn.disabled = true;
+                btn.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+
+            const payload = {
+                battery: {
+                    nominal_charge_kw: nomCh,
+                    max_charge_kw: maxCh,
+                    nominal_discharge_kw: nomDis,
+                    max_discharge_kw: maxDis,
+                    boost_opportunity_spread_eur: spread
+                }
+            };
+
+            try {
+                const res = await fetch('./api/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert(`Batterij-instellingen succesvol opgeslagen (Laden: ${nomCh}-${maxCh} kW, Ontladen: ${nomDis}-${maxDis} kW, Boost delta: €${spread.toFixed(2)}/kWh)`);
+                    await fetch('./api/schedule/recalculate', { method: 'POST' });
+                    if (typeof loadChartData === 'function') await loadChartData();
+                    if (typeof loadElectricityPricesChart === 'function') await loadElectricityPricesChart();
+                    if (typeof renderDhwTemperatureChart === 'function') await renderDhwTemperatureChart();
+                    if (typeof renderHeatingForecastChart === 'function') await renderHeatingForecastChart();
+                    if (typeof renderBatteryTrajectoryChart === 'function') await renderBatteryTrajectoryChart();
+                } else {
+                    alert('Fout bij opslaan: ' + (data.message || 'Onbekende fout'));
+                }
+            } catch (err) {
+                console.error('Error saving battery settings:', err);
+                alert('Netwerkfout bij opslaan: ' + err.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+            }
+        }
+        window.saveBatterySettingsFromTab = saveBatterySettingsFromTab;
 
         async function refreshPredictionView() {
             const btn = document.getElementById('btn-refresh-prediction');

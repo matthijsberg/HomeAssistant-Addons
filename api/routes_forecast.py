@@ -534,11 +534,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         except Exception:
             live_soc = 50.0
 
-        spec = BatterySpec(
-            capacity_kwh=15.0,
-            usable_capacity_kwh=13.5,
-            max_charge_kw=5.0,
-            max_discharge_kw=5.0,
+        cfg = load_json(CONFIG_FILE) if CONFIG_FILE.exists() else {}
+        spec = BatterySpec.from_config(
+            cfg,
             reserve_lookahead_slots=max_canonical_slots,
             valley_lookahead_slots=max_canonical_slots
         )

@@ -10,6 +10,17 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.29] — 2026-09-27 (Configureerbare Batterij Vermogenslimieten & Dynamische Boost)
+
+### Nieuwe Functionaliteit & Systeeminstellingen
+- **Configureerbare Batterijlimieten in GUI & API**: Instellingenpaneel verrijkt met instelbare velden voor `Geadviseerd Laden (kW)` (default 2,5 kW), `Maximaal Laden (kW)` (default 5,0 kW), `Geadviseerd Ontladen (kW)` (default 2,5 kW), `Maximaal Ontladen (kW)` (default 5,0 kW) en `Boost Drempel (€/kWh)` (default €0,30/kWh).
+- **Two-Tier Piecewise Linear Accu-optimalisatie**:
+  - *Standaard gedrag*: De LP plant laden en ontladen primair binnen het geadviseerde nominale vermogen (2,5 kW) ter bescherming van de accucellen tegen overbelasting, opwarming en onnodige degradatie.
+  - *Dynamische Boost*: Bij een substantieel prijsverschil (> €0,30 delta) of een kort diep prijsdal overstemt het economisch gewin de lichte tier-2 straf en schaalt de optimizer automatisch op naar het maximale omvormervermogen (tot 5,0 kW) om alle dure netimport te elimineren of maximaal goedkoop in te slaan.
+- **API & Dynamic Re-planning**: `GET /api/settings` en `POST /api/settings` ondersteunen nu `battery` parameters met validatiebounds en triggeren direct een herberekening van de 24–48h dispatch.
+
+---
+
 ## [0.104.28] — 2026-09-26 (Dataset ID Doorgifte & Tooltip Pariteit)
 
 ### Frontend Verbeteringen

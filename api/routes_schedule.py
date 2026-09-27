@@ -467,11 +467,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         else:
             # Full physical & economic optimization via BatteryPolicy
             residual_kw = [round(u + b + h - s, 3) for u, b, h, s in zip(unallocated, boiler, heating, solar)]
-            spec = BatterySpec(
-                capacity_kwh=15.0,
-                usable_capacity_kwh=13.5,
-                max_charge_kw=5.0,
-                max_discharge_kw=5.0,
+            spec = BatterySpec.from_config(
+                cfg,
                 reserve_lookahead_slots=total_slots,
                 valley_lookahead_slots=total_slots
             )
