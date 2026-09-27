@@ -213,9 +213,23 @@ def evaluate_and_apply_dhw_run_merger(
         if _LAST_LOGGED_DECISION.get("state") != "forced_50" or (now_ts - _LAST_LOGGED_DECISION.get("ts", 0)) >= 900.0:
             _LAST_LOGGED_DECISION["state"] = "forced_50"
             _LAST_LOGGED_DECISION["ts"] = now_ts
+
+            # SRE Observability: Differentiate autonomous Daikin hardware trigger vs smart dispatch
+            from api.secrets_store import CONFIG_FILE, load_json
+            cfg = load_json(CONFIG_FILE) if CONFIG_FILE.exists() else {}
+            dhw_params = {}
+            for d in cfg.get("devices", []):
+                if isinstance(d, dict) and d.get("id") == "dhw_tank":
+                    dhw_params = d.get("parameters", {})
+                    break
+            reheat_mode = dhw_params.get("reheat_mode", "daikin_system_setting")
+            is_auto = (reheat_mode == "daikin_system_setting")
+            trigger_origin = "daikin_hardware_hysteresis" if is_auto else "openhems_smart_dispatch"
+            trigger_desc = "Daikin Hardware Hysteresis (Autonoom)" if is_auto else "Open HEMS Drempelsturing"
+
             write_hems_annotation(
                 event_type="dhw_run",
-                title="🚿 DHW Basislading (50°C) Gestart",
+                title=f"🚿 DHW Basislading (50°C) Gestart [{trigger_desc}]",
                 description=merge_res.decision_explanation,
                 state_code="forced_on",
                 power_kw=run_pwr,
@@ -229,9 +243,12 @@ def evaluate_and_apply_dhw_run_merger(
                 inputs={
                     "tank_temp_c": t_live,
                     "wp_power_w": wp_power,
-                    "target_temp_c": 50.0
+                    "target_temp_c": 50.0,
+                    "trigger": trigger_origin,
+                    "trigger_provenance": trigger_desc,
+                    "reheat_mode": reheat_mode
                 },
-                reason="DHW Basislading (50°C) Gestart",
+                reason=f"DHW Basislading (50°C) Gestart [{trigger_desc}]",
                 explanation=merge_res.decision_explanation,
                 savings_estimate_eur=0.10
             )
