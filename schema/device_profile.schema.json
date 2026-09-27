@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "OpenHEMSDeviceProfile",
+  "description": "Standard schema for Open HEMS modular device profiles, capabilities and hardware interfaces.",
+  "type": "object",
+  "required": [
+    "profile_id",
+    "name",
+    "category",
+    "capabilities",
+    "physical_specs",
+    "control_interface"
+  ],
+  "properties": {
+    "profile_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "Unique identifier for this profile (e.g. daikin_altherma_3h_ht_18kw)"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable device model name"
+    },
+    "manufacturer": {
+      "type": "string",
+      "description": "Manufacturer / brand name (e.g. Daikin, Deye, SolarEdge)"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "heat_pump",
+        "thermal_storage",
+        "home_battery",
+        "solar_inverter",
+        "ev_charger",
+        "grid_meter"
+      ]
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "can_store",
+          "can_export",
+          "can_modulate",
+          "can_delay",
+          "has_deadline",
+          "is_thermal",
+          "can_curtail",
+          "has_modulation_floor",
+          "has_hydraulic_interlock",
+          "has_minimum_activation_power",
+          "autonomous_reheat"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "physical_specs": {
+      "type": "object",
+      "description": "Physical parameters, ratings, efficiency curves, and thermal capacities",
+      "properties": {
+        "nominal_power_w": { "type": "number", "minimum": 0 },
+        "max_power_w": { "type": "number", "minimum": 0 },
+        "modulation_floor_w": { "type": "number", "minimum": 0 },
+        "nominal_thermal_kw": { "type": "number", "minimum": 0 },
+        "volume_liters": { "type": "number", "minimum": 0 },
+        "capacity_kwh": { "type": "number", "minimum": 0 },
+        "usable_capacity_kwh": { "type": "number", "minimum": 0 },
+        "roundtrip_efficiency": { "type": "number", "minimum": 0.5, "maximum": 1.0 },
+        "lcos_degradation_eur_kwh": { "type": "number", "minimum": 0 },
+        "safe_soc_range_pct": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "standby_loss_w": { "type": "number", "minimum": 0 },
+        "min_runtime_minutes": { "type": "integer", "minimum": 0 },
+        "min_dwell_minutes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "subsystems": {
+      "type": "array",
+      "description": "Attached child subsystems (e.g. DHW cylinder attached to a heat pump outdoor unit)",
+      "items": {
+        "type": "object",
+        "required": ["id", "type"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "type": { "type": "string" },
+          "parameters": { "type": "object" }
+        }
+      }
+    },
+    "control_interface": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["homeassistant", "modbus_tcp", "mqtt", "dry_contact_relays", "rest_api"]
+        },
+        "supported_modes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "telemetry_mapping": { "type": "object" },
+        "command_mapping": { "type": "object" }
+      }
+    },
+    "quirks": {
+      "type": "object",
+      "description": "Manufacturer-specific hardware quirks, field settings, and protocol overrides"
+    }
+  }
+}

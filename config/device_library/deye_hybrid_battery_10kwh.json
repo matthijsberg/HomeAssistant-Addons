@@ -1,0 +1,44 @@
+{
+  "profile_id": "deye_hybrid_battery_10kwh",
+  "name": "Deye Hybride Thuisaccu (10 kW / 10 kWh)",
+  "manufacturer": "Deye",
+  "category": "home_battery",
+  "capabilities": [
+    "can_store",
+    "can_export",
+    "can_modulate"
+  ],
+  "physical_specs": {
+    "nominal_power_w": 5000,
+    "max_power_w": 10000,
+    "capacity_kwh": 10.24,
+    "usable_capacity_kwh": 9.21,
+    "roundtrip_efficiency": 0.88,
+    "lcos_degradation_eur_kwh": 0.0741,
+    "safe_soc_range_pct": [10.0, 95.0],
+    "standby_loss_w": 55.0
+  },
+  "control_interface": {
+    "type": "modbus_tcp",
+    "supported_modes": [
+      "auto",
+      "solar_priority",
+      "grid_charge",
+      "grid_discharge"
+    ],
+    "telemetry_mapping": {
+      "soc_pct": "sensor.battery_state_of_charge",
+      "charge_power_w": "sensor.battery_charge_power",
+      "discharge_power_w": "sensor.battery_discharge_power"
+    },
+    "command_mapping": {
+      "mode": "select.battery_mode",
+      "power_limit_pct": "number.battery_power_limit"
+    }
+  },
+  "quirks": {
+    "charge_tapering_threshold_soc": 90.0,
+    "max_charge_amps": 100.0,
+    "min_temperature_charge_c": 5.0
+  }
+}

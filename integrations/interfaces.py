@@ -26,6 +26,11 @@ class DeviceCapability(str, Enum):
     CAN_DELAY = "can_delay"            # Operation can be deferred / postponed
     HAS_DEADLINE = "has_deadline"      # Process must complete before a target time
     IS_THERMAL = "is_thermal"          # Involves thermodynamic heating / cooling capacity
+    CAN_CURTAIL = "can_curtail"        # Can throttle or shut off production during negative tariffs
+    HAS_MODULATION_FLOOR = "has_modulation_floor" # Non-zero minimum continuous operating power (e.g. 950W)
+    HAS_HYDRAULIC_INTERLOCK = "has_hydraulic_interlock" # Requires mutual exclusion across hydraulic paths (CV vs SWW)
+    HAS_MINIMUM_ACTIVATION_POWER = "has_minimum_activation_power" # Minimum threshold to engage (e.g. EV 6A / 1.4kW)
+    AUTONOMOUS_REHEAT = "autonomous_reheat" # Hardware thermostat autonomous reheat capability
 
 
 @dataclass(frozen=True)
