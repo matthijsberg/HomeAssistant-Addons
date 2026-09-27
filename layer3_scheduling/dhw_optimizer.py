@@ -664,7 +664,29 @@ def solve(
         planned_u.append(u_opt)
         t_star.append(round(current_t, 2))
 
-    # 10. Generate P05 (light) and P95 (heavy) uncertainty trajectories using exact same policy
+    # 10. Generate P05 (light) and P95 (heavy) uncertainty trajectories
+    # Thermostat Convergence Principle:
+    # Uncertainty widens before heating due to stochastic tapping, which determines the reheat trigger moment.
+    # At completion of a heating run (the peak point), the thermostat terminates at the target setpoint.
+    # Uncertainty collapses to 0.0 at the peak, and restarts spreading outward from that known temperature!
+    run_spans = []
+    in_r = False
+    r_start = 0
+    for idx_u, u_val in enumerate(planned_u):
+        if u_val == 1 and not in_r:
+            in_r = True
+            r_start = idx_u
+        elif u_val == 0 and in_r:
+            in_r = False
+            run_spans.append((r_start, idx_u - 1))
+    if in_r:
+        run_spans.append((r_start, len(planned_u) - 1))
+
+    slot_to_run = {}
+    for st, en in run_spans:
+        for idx_slot in range(st, en + 1):
+            slot_to_run[idx_slot] = (st, en)
+
     t_p05 = [round(float(t0_c), 2)]
     t_p95 = [round(float(t0_c), 2)]
     curr_05 = float(t0_c)
@@ -701,6 +723,18 @@ def solve(
             t_max_c=t_max,
             t_amb_c=p.t_amb_c
         )
+
+        if u_k == 1 and k in slot_to_run:
+            st, en = slot_to_run[k]
+            prog = (k - st + 1) / (en - st + 1)
+            target_k = t_star[k + 1]
+            curr_05 = (1.0 - prog) * curr_05 + prog * target_k
+            curr_95 = (1.0 - prog) * curr_95 + prog * target_k
+            if k == en:
+                # Peak reached: thermostat terminates cycle at setpoint; uncertainty resets to 0.0
+                curr_05 = target_k
+                curr_95 = target_k
+
         t_p05.append(round(curr_05, 2))
         t_p95.append(round(curr_95, 2))
 

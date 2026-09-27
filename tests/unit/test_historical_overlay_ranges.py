@@ -64,8 +64,7 @@ def test_power_producers_returns_both_ranges():
 
 def test_historical_ranges_15m_and_1h_alignment():
     """Verify that switching between 15m and 1h resolutions keeps peak overlays aligned on identical times."""
-    now = datetime.now(AMS_TZ)
-    base = now.replace(minute=0, second=0, microsecond=0)
+    base = datetime(2026, 9, 26, 12, 0, 0, tzinfo=AMS_TZ)
     
     # 15m: 97 slots
     slots_15m = [base - timedelta(minutes=15 * (96 - i)) for i in range(97)]
