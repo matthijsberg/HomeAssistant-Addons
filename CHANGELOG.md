@@ -10,6 +10,13 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.28] — 2026-09-26 (Dataset ID Doorgifte & Tooltip Pariteit)
+
+### Frontend Verbeteringen
+- **Doorgifte Dataset ID in `createBarDataset`**: `OpenHEMSChartEngine.createBarDataset` geeft nu netjes het optionele `id`-veld door, waardoor `customBatteryTooltipHandler` alle vermogensstaven (netladen, zonneladen, ontladen, tekort) direct en robuust herkent.
+
+---
+
 ## [0.104.27] — 2026-09-26 (Gestijlde Custom Glassmorphism Tooltip Batterij)
 
 ### Frontend Verbeteringen & UI Pariteit

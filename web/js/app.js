@@ -765,9 +765,11 @@
                 stack = 'default_bar_stack',
                 yAxisID = 'y1',
                 order = 2,
-                borderRadius = 2
+                borderRadius = 2,
+                id = null
             }) {
                 return {
+                    id: id,
                     label: label,
                     data: data,
                     type: 'bar',
