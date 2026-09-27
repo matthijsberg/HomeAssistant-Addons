@@ -10,6 +10,7 @@
     let heatingForecastChartInstance = null;
     let dhwHistoryChartInstance = null;
     let heatingHistoryChartInstance = null;
+    let batteryHistoryChartInstance = null;
 
     // =========================================================================
     // 1. REUSABLE THERMAL TRAJECTORY CHART FACTORY
@@ -1204,6 +1205,162 @@
         }
     }
 
+    async function loadBatteryHistoryChart() {
+        const canvas = document.getElementById('batteryHistoryChart');
+        if (!canvas) return;
+
+        try {
+            const rangeSelect = document.getElementById('pp-range-select');
+            const rangeVal = rangeSelect ? rangeSelect.value : '24h';
+            const resVal = window.OpenHEMSChartEngine ? window.OpenHEMSChartEngine.getResolution('history') : (window.powerProducersResolution || '1h');
+            const res = await fetch('./api/analytics/battery_history?range=' + encodeURIComponent(rangeVal) + '&resolution=' + encodeURIComponent(resVal));
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.status !== 'success') return;
+
+            const traj = data.trajectory || {};
+            const labels = data.labels || [];
+            const socPct = traj.soc_pct || [];
+
+            // Update Mini KPIs
+            const kpi = data.kpi_cards || {};
+            if (document.getElementById('bat-hist-kpi-autonomy') && kpi.autonomy_pct !== undefined) {
+                document.getElementById('bat-hist-kpi-autonomy').innerText = `${Number(kpi.autonomy_pct).toFixed(1)}%`;
+            }
+            if (document.getElementById('bat-hist-kpi-solar') && kpi.solar_charged_kwh !== undefined) {
+                document.getElementById('bat-hist-kpi-solar').innerText = `${Number(kpi.solar_charged_kwh).toFixed(1)} kWh`;
+            }
+            if (document.getElementById('bat-hist-kpi-discharge') && kpi.discharged_kwh !== undefined) {
+                document.getElementById('bat-hist-kpi-discharge').innerText = `${Number(kpi.discharged_kwh).toFixed(1)} kWh`;
+            }
+            if (document.getElementById('bat-hist-kpi-saving') && kpi.net_saving_eur !== undefined) {
+                document.getElementById('bat-hist-kpi-saving').innerText = `€${Number(kpi.net_saving_eur).toFixed(2)}`;
+            }
+
+            if (batteryHistoryChartInstance) {
+                batteryHistoryChartInstance.destroy();
+            }
+
+            const ctx = canvas.getContext('2d');
+            const T = {
+                socLine: '#06B6D4',
+                solarCharge: '#F59E0B',
+                gridCharge: '#8B5CF6',
+                discharge: '#10B981'
+            };
+
+            const datasets = [];
+
+            // 1. Tarieven (Y1)
+            if (traj.import_prices && traj.import_prices.length > 0) {
+                datasets.push({
+                    id: 'import_price',
+                    label: 'Inkooptarief (€/kWh)',
+                    data: traj.import_prices,
+                    type: 'line',
+                    borderColor: '#3B82F6',
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    yAxisID: 'y1',
+                    order: 0
+                });
+            }
+            if (traj.export_prices && traj.export_prices.length > 0) {
+                datasets.push({
+                    id: 'export_price',
+                    label: 'Teruglevertarief (€/kWh)',
+                    data: traj.export_prices,
+                    type: 'line',
+                    borderColor: '#06B6D4',
+                    borderDash: [4, 4],
+                    backgroundColor: 'transparent',
+                    borderWidth: 1.5,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    yAxisID: 'y1',
+                    order: 0
+                });
+            }
+
+            // 2. State of Charge (%) (Y0)
+            datasets.push({
+                id: 'battery_soc',
+                label: 'State of Charge (%)',
+                data: socPct,
+                type: 'line',
+                borderColor: T.socLine,
+                backgroundColor: 'rgba(6, 182, 212, 0.08)',
+                fill: true,
+                borderWidth: 2.2,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                tension: 0.25,
+                yAxisID: 'y',
+                order: 1
+            });
+
+            // 3. Staven (Vermogens)
+            const opt = window.OpenHEMSChartEngine;
+            const barW = { barPercentage: 0.9, categoryPercentage: 0.9 };
+
+            if (opt && opt.createBarDataset) {
+                datasets.push(opt.createBarDataset({
+                    id: 'battery_solar_charge',
+                    label: 'Zonneladen (+kW)',
+                    data: traj.solar_charge_kw || [],
+                    backgroundColor: T.solarCharge,
+                    stack: 'battery_power',
+                    yAxisID: 'y1',
+                    order: 3,
+                    ...barW
+                }));
+                datasets.push(opt.createBarDataset({
+                    id: 'battery_grid_charge',
+                    label: 'Netladen (+kW)',
+                    data: traj.grid_charge_kw || [],
+                    backgroundColor: T.gridCharge,
+                    stack: 'battery_power',
+                    yAxisID: 'y1',
+                    order: 3,
+                    ...barW
+                }));
+                datasets.push(opt.createBarDataset({
+                    id: 'battery_discharge',
+                    label: 'Ontladen (-kW)',
+                    data: (traj.discharge_kw || []).map(v => -Math.abs(v)),
+                    backgroundColor: T.discharge,
+                    stack: 'battery_power',
+                    yAxisID: 'y1',
+                    order: 4,
+                    ...barW
+                }));
+            }
+
+            // Options
+            const chartOpts = opt && opt.createDualAxisOptions ? opt.createDualAxisOptions({
+                mode: 'history',
+                yTitle: 'State of Charge (%)',
+                y1Title: 'Vermogen (kW) / Tarief (€)',
+                yMin: 0,
+                yMax: 100,
+                y1Min: -6,
+                y1Max: 6,
+                stepSize: 20,
+                tooltipHandler: customBatteryTooltipHandler
+            }) : {};
+
+            batteryHistoryChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: labels, datasets: datasets },
+                options: chartOpts
+            });
+        } catch (e) {
+            console.error('Failed to load battery history chart:', e);
+        }
+    }
+
     // Expose public API
     window.renderBatteryTrajectoryChart = renderBatteryTrajectoryChart;
     window.createThermalTrajectoryChart = createThermalTrajectoryChart;
@@ -1213,5 +1370,6 @@
     window.renderDhwTemperatureChart = renderDhwTemperatureChart;
     window.loadDhwHistoryChart = loadDhwHistoryChart;
     window.loadHeatingHistoryChart = loadHeatingHistoryChart;
+    window.loadBatteryHistoryChart = loadBatteryHistoryChart;
 
 })(window);

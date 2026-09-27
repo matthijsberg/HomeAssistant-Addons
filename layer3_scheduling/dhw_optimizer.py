@@ -60,7 +60,7 @@ from layer3_scheduling.dhw_financials import calculate_slot_financials
 class DhwOptimizerParams:
     """All parameters for the DHW dynamic programming solver (zero magic numbers)."""
     c_start: float = 0.05                 # Start cost (€) per compressor ignition
-    min_run_slots: int = 3                # L_min (3 slots = 45 min)
+    min_run_slots: int = 3                # L_min (3 slots = 45 min default for backward-compatible replays)
     min_dwell_slots: int = 4              # D_min (4 slots = 60 min rest after run)
     use_dynamic_margin: bool = True       # True for dynamic stress margin, False for fixed
     comfort_margin_mode: str = "p60"      # "p60" (economical minimal buffer) | "p95" | "p50" | "fixed"
@@ -90,9 +90,13 @@ class DhwOptimizerParams:
         fixed_m = float(cm.get("fixed_margin_c", 2.0))
         fixed_m = max(0.0, min(10.0, fixed_m))
         c_start_val = float(opt_cfg.get("c_start", 0.05))
+        l_min = int(opt_cfg.get("min_run_slots", 3))
+        d_min = int(opt_cfg.get("min_dwell_slots", 4))
 
         return cls(
             c_start=c_start_val,
+            min_run_slots=l_min,
+            min_dwell_slots=d_min,
             comfort_margin_mode=mode,
             use_dynamic_margin=(mode in ("p60", "p95")),
             tap_stress_factor=factor,

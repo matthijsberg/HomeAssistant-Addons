@@ -4001,6 +4001,9 @@
                     if (document.getElementById('tab-dhw-margin-fixed') && cm.fixed_margin_c !== undefined) {
                         document.getElementById('tab-dhw-margin-fixed').value = cm.fixed_margin_c;
                     }
+                    if (document.getElementById('tab-dhw-min-run') && data.dhw_optimizer && data.dhw_optimizer.min_run_slots !== undefined) {
+                        document.getElementById('tab-dhw-min-run').value = data.dhw_optimizer.min_run_slots;
+                    }
                     const bat = data.battery || {};
                     if (document.getElementById('tab-battery-nom-ch') && bat.nominal_charge_kw !== undefined) {
                         document.getElementById('tab-battery-nom-ch').value = bat.nominal_charge_kw;
@@ -4026,13 +4029,15 @@
 
         async function saveDhwMarginFromTab() {
             const mode = document.getElementById('tab-dhw-margin-mode')?.value || 'p95';
-            const minM = parseFloat(document.getElementById('tab-dhw-margin-min')?.value || 0.5);
-            const factor = parseFloat(document.getElementById('tab-dhw-margin-factor')?.value || 1.5);
+            const minRun = parseInt(document.getElementById('tab-dhw-min-run')?.value || 2, 10);
+            const minM = parseFloat(document.getElementById('tab-dhw-margin-min')?.value || 0.2);
+            const factor = parseFloat(document.getElementById('tab-dhw-margin-factor')?.value || 1.15);
             const horizon = parseFloat(document.getElementById('tab-dhw-margin-horizon')?.value || 8.0);
             const fixedM = parseFloat(document.getElementById('tab-dhw-margin-fixed')?.value || 2.0);
 
             const payload = {
                 dhw_optimizer: {
+                    min_run_slots: minRun,
                     comfort_margin: {
                         mode: mode,
                         min_margin_c: minM,

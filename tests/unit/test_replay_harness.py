@@ -62,7 +62,9 @@ def _load_and_plan_fixture(fixture_filename: str):
         step_mins=15
     )
 
-    plan = CentralPlanner.plan(frame, current_dhw_temp=data["dhw_tank_temp_c"])
+    from layer3_scheduling.dhw_optimizer import DhwOptimizerParams
+    golden_dhw_params = DhwOptimizerParams(min_run_slots=3, comfort_margin_mode="p50", min_comfort_margin_c=0.5)
+    plan = CentralPlanner.plan(frame, current_dhw_temp=data["dhw_tank_temp_c"], dhw_optimizer_params=golden_dhw_params)
     return data, frame, plan
 
 

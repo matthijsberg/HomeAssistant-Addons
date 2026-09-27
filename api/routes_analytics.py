@@ -1588,6 +1588,174 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             handler._send_json({"status": "error", "message": f"Fout bij plan vs actual: {str(e)}"}, status=500)
             return True
 
+    # =========================================================================
+    # API: HISTORICAL BATTERY TRAJECTORY, POWERS & TARIFFS
+    # =========================================================================
+    if path.startswith("/api/analytics/battery_history"):
+        try:
+            parsed_url = urllib.parse.urlparse(handler.path)
+            qp = urllib.parse.parse_qs(parsed_url.query)
+            tf = qp.get("range", ["24h"])[0]
+            user_res = qp.get("resolution", ["1h"])[0]
+
+            bucket_sz = "1h" if user_res == "1h" else "15m"
+            interval_h = 1.0 if bucket_sz == "1h" else 0.25
+            is_15m = (interval_h <= 0.25)
+            step_mins = int(interval_h * 60)
+
+            t_start, t_end = resolve_analytics_time_range(tf)
+            t_start_iso = t_start.strftime("%Y-%m-%dT%H:%M:00Z")
+            t_end_iso = t_end.strftime("%Y-%m-%dT%H:%M:00Z")
+
+            sec = load_secrets()
+            pwd = sec.get("influxdb", {}).get("openhems_db", "") or sec.get("influx_password", "")
+
+            # Query historical power flows
+            q = f"""
+            SELECT mean("power_w") as afname FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'IMPORT' AND time >= '{t_start_iso}' AND time <= '{t_end_iso}' GROUP BY time({bucket_sz}) fill(0);
+            SELECT mean("power_w") as terug FROM "energy_telemetry" WHERE "device_id" = 'main_grid_meter' AND "flow" = 'EXPORT' AND time >= '{t_start_iso}' AND time <= '{t_end_iso}' GROUP BY time({bucket_sz}) fill(0);
+            SELECT mean("power_w") as solar FROM "energy_telemetry" WHERE "device_id" = 'rooftop_solar' AND "flow" = 'GENERATION' AND time >= '{t_start_iso}' AND time <= '{t_end_iso}' GROUP BY time({bucket_sz}) fill(0);
+            SELECT mean("power_w") as hp FROM "energy_telemetry" WHERE "device_id" = 'daikin_heat_pump' AND time >= '{t_start_iso}' AND time <= '{t_end_iso}' GROUP BY time({bucket_sz}) fill(0);
+            """
+            influx_url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
+            with urllib.request.urlopen(influx_url, timeout=5) as r:
+                res = json.loads(r.read().decode())
+
+            afname_pts = res.get("results", [{}])[0].get("series", [{}])[0].get("values", []) if len(res.get("results", [])) > 0 else []
+            terug_pts = res.get("results", [{}])[1].get("series", [{}])[0].get("values", []) if len(res.get("results", [])) > 1 else []
+            solar_pts = res.get("results", [{}])[2].get("series", [{}])[0].get("values", []) if len(res.get("results", [])) > 2 else []
+            hp_pts = res.get("results", [{}])[3].get("series", [{}])[0].get("values", []) if len(res.get("results", [])) > 3 else []
+
+            ts_map = {}
+            for pt in afname_pts:
+                if pt[1] is not None:
+                    ts_map.setdefault(pt[0], {})["afname"] = float(pt[1])
+            for pt in terug_pts:
+                if pt[1] is not None:
+                    ts_map.setdefault(pt[0], {})["terug"] = float(pt[1])
+            for pt in solar_pts:
+                if pt[1] is not None:
+                    ts_map.setdefault(pt[0], {})["solar"] = abs(float(pt[1]))
+            for pt in hp_pts:
+                if pt[1] is not None:
+                    ts_map.setdefault(pt[0], {})["hp"] = float(pt[1])
+
+            sorted_ts = sorted(ts_map.keys())
+            if not sorted_ts:
+                cur = t_start
+                while cur < t_end:
+                    sorted_ts.append(cur.strftime("%Y-%m-%dT%H:%M:00Z"))
+                    cur += timedelta(minutes=step_mins)
+
+            slot_dts = [datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(AMS_TZ) for ts_str in sorted_ts]
+            labels = format_chart_timeline_labels(slot_dts, is_15m=is_15m, is_historical=True)
+
+            # Tariffs
+            from api.energy_feed import get_epex_tariffs_cached
+            from layer3_scheduling.tariff_provider import TariffProvider
+            _, prices_map, _ = get_epex_tariffs_cached(is_15m=True)
+
+            import_prices = []
+            export_prices = []
+            for dt_s in slot_dts:
+                k_15m = dt_s.strftime("%Y-%m-%d %H:%M")
+                p_in = prices_map.get(k_15m)
+                if p_in is None:
+                    k_1h = dt_s.strftime("%Y-%m-%d %H:00")
+                    p_in = prices_map.get(k_1h, 0.28)
+                p_ex = TariffProvider.calculate_export_value_from_import(p_in)
+                import_prices.append(round(p_in, 4))
+                export_prices.append(round(p_ex, 4))
+
+            # Residual demand in kW
+            cfg = load_json(CONFIG_FILE) if CONFIG_FILE.exists() else {}
+            spec = BatterySpec.from_config(cfg)
+            baseload_w = float(cfg.get("baseload_watts", 300))
+
+            residual_kw = []
+            for ts_str in sorted_ts:
+                row = ts_map.get(ts_str, {})
+                afn = row.get("afname", 0.0)
+                ter = row.get("terug", 0.0)
+                sol = row.get("solar", 0.0)
+                hp = row.get("hp", 0.0)
+                unalloc = max(0.0, afn + sol - ter - hp)
+                if unalloc < 50.0:
+                    unalloc = baseload_w
+                res_w = unalloc + hp - sol
+                residual_kw.append(round(res_w / 1000.0, 3))
+
+            # Initial SOC from HA sensor if available
+            init_soc = 50.0
+            base_url, token = get_ha_client_config()
+            if base_url and token:
+                try:
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    ha_url = f"{base_url}/api/history/period/{t_start.strftime('%Y-%m-%dT%H:00:00Z')}?filter_entity_id=sensor.cyberspace_battery_test_virtual_test_matthijs_state_of_charge,sensor.battery_state_of_charge"
+                    req = urllib.request.Request(ha_url, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+                    with urllib.request.urlopen(req, context=ctx, timeout=3) as r_ha:
+                        ha_data = json.loads(r_ha.read().decode())
+                        for ent in ha_data:
+                            if ent and ent[0].get("state") not in (None, "unknown", "unavailable"):
+                                try:
+                                    init_soc = float(ent[0].get("state"))
+                                    break
+                                except (ValueError, TypeError):
+                                    pass
+                except Exception:
+                    pass
+
+            from layer3_scheduling.battery_policy import BatteryPolicy
+            summary = BatteryPolicy.optimize(
+                residual_demand_kw=residual_kw,
+                import_prices=import_prices,
+                export_prices=export_prices,
+                spec=spec,
+                initial_soc_pct=init_soc,
+                step_hours=interval_h
+            )
+
+            soc_pct_list = [round(s.soc_pct, 1) for s in summary.slots]
+            soc_kwh_list = [round(s.soc_kwh, 2) for s in summary.slots]
+            power_kw_list = [round(s.power_kw, 2) for s in summary.slots]
+            discharge_kw_list = [round(max(0.0, -s.power_kw), 2) for s in summary.slots]
+            solar_charge_disp = [round(s.ch_solar_kw, 2) for s in summary.slots]
+            grid_charge_disp = [round(s.ch_grid_kw, 2) for s in summary.slots]
+            deficit_disp = [round(s.deficit_kw, 2) for s in summary.slots]
+
+            handler._send_json({
+                "status": "success",
+                "range": tf,
+                "resolution": bucket_sz,
+                "interval_h": interval_h,
+                "labels": labels,
+                "trajectory": {
+                    "soc_pct": soc_pct_list,
+                    "soc_kwh": soc_kwh_list,
+                    "power_kw": power_kw_list,
+                    "discharge_kw": discharge_kw_list,
+                    "solar_charge_kw": solar_charge_disp,
+                    "grid_charge_kw": grid_charge_disp,
+                    "deficit_kw": deficit_disp,
+                    "import_prices": import_prices,
+                    "export_prices": export_prices
+                },
+                "kpi_cards": {
+                    "autonomy_pct": summary.autonomy_pct,
+                    "solar_charged_kwh": summary.total_charged_solar_kwh,
+                    "grid_charged_kwh": summary.total_charged_grid_kwh,
+                    "discharged_kwh": summary.total_discharged_kwh,
+                    "net_saving_eur": summary.net_financial_saving_eur,
+                    "deficit_kwh": summary.total_deficit_kwh
+                }
+            })
+            return True
+        except Exception as e:
+            handler._send_json({"status": "error", "message": f"Fout bij batterij historie: {str(e)}"}, status=500)
+            return True
+
     if path.startswith("/api/analytics/decisions"):
         qp = urllib.parse.parse_qs(urllib.parse.urlparse(handler.path).query)
         limit = int(qp.get("limit", [50])[0])

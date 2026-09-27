@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.30] — 2026-09-27 (DHW P95 Doellanding op 40°C & Batterij Historie Grafiek)
+
+### Optimalisatie & Algoritme Verbeteringen
+- **DHW P95 Doellanding op 40,0°C bij Volgende Run**: Nachtelijke comfortlading dimensioneert de lift zó dat onder zware ochtendvraag (P95 "veel" verbruik + standby-verlies) het boilervat bij aanvang van de volgende geplande laadcyclus (bijv. 12:30/12:45 middagzon/dal) exact landt op de comfortgrens van 40,0°C.
+- **Configureerbare Minimale Runlengte ($L_{\text{min}} = 2$ slots / 30m)**: Warmtepomp kan na 30 minuten stoppen op ~47,4–49,0°C in plaats van verplicht door te stoken naar 51,7°C (45 min), wat direct ~€0,17–€0,20 nachtstroom bespaart, de COP verhoogt, stilstandsverliezen verlaagt en maximale opnamecapaciteit biedt voor goedkope middagstroom.
+- **Thuisbatterij Historie Grafiek Pariteit**: Dedicated `batteryHistoryChart` en `/api/analytics/battery_history` endpoint toegevoegd aan de Historie-pagina met mini-KPI's (Autonomie %, Zonnegeladen kWh, Ontladen kWh, Besparing €) en interactieve custom tooltip.
+
+---
+
 ## [0.104.29] — 2026-09-27 (Configureerbare Batterij Vermogenslimieten & Dynamische Boost)
 
 ### Nieuwe Functionaliteit & Systeeminstellingen

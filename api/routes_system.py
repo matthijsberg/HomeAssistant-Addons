@@ -43,6 +43,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "baseload_watts": cfg.get("baseload_watts", 300),
             "solar_cost_eur_kwh": cfg.get("solar_cost_eur_kwh", 0.06),
             "dhw_optimizer": {
+                "min_run_slots": int(opt_cfg.get("min_run_slots", 2)),
                 "comfort_margin": {
                     "mode": cm_cfg.get("mode", "p95"),
                     "tap_stress_factor": float(cm_cfg.get("tap_stress_factor", 1.5)),
@@ -538,6 +539,11 @@ def handle_post(handler, path: str, body: dict) -> bool:
             if "dhw_optimizer" in body and isinstance(body["dhw_optimizer"], dict):
                 opt_in = body["dhw_optimizer"]
                 cur_opt = cfg.setdefault("dhw_optimizer", {})
+                if "min_run_slots" in opt_in:
+                    m_slots = int(opt_in["min_run_slots"])
+                    if not (1 <= m_slots <= 6):
+                        raise ValueError("min_run_slots must be between 1 and 6")
+                    cur_opt["min_run_slots"] = m_slots
                 if "comfort_margin" in opt_in and isinstance(opt_in["comfort_margin"], dict):
                     cm_in = opt_in["comfort_margin"]
                     cur_cm = cur_opt.setdefault("comfort_margin", {})
