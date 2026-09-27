@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.27] — 2026-09-26 (Gestijlde Custom Glassmorphism Tooltip Batterij)
+
+### Frontend Verbeteringen & UI Pariteit
+- **Gestijlde Custom Batterij Tooltip (`customBatteryTooltipHandler`)**: De standaard vierkante Chart.js popup met lelijke referentielijnen (`Min SoC`, `Max SoC`, `Marge`) is vervangen door de uniforme Open HEMS Glassmorphism styling (`renderCustomTooltip`).
+- **Rijke Header Status Badge**: Toont direct de actieve toestand van dat kwartier: e.g. `[Zon + Netladen]`, `[Netladen (Dal)]`, `[Zon-absorptie]`, `[Ontladen]` of de SoC-status.
+- **Duidelijke Metriekrijen**: Zuivere weergave van State of Charge (`%` en `kWh`), bandbreedte (P05–P95), zonne- en netlaadvermogen, ontlaadvermogen, ongedekt tekort en dynamische inkoop- en teruglevertarieven.
+
+---
+
 ## [0.104.26] — 2026-09-26 (Correctie Deficit Boekhouding Batterij)
 
 ### Bugfixes & Optimalisatie

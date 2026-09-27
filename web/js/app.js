@@ -680,7 +680,8 @@
                 rightColor = '#94A3B8',
                 stacked = true,
                 batteryOverlayRanges = null,
-                tooltipCallbacks = null
+                tooltipCallbacks = null,
+                tooltipHandler = null
             } = {}) {
                 return {
                     responsive: true,
@@ -689,7 +690,10 @@
                     interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { display: false },
-                        tooltip: {
+                        tooltip: tooltipHandler ? {
+                            enabled: false,
+                            external: tooltipHandler
+                        } : {
                             enabled: true,
                             backgroundColor: 'rgba(15, 23, 42, 0.95)',
                             titleColor: '#F8FAFC',
@@ -3251,6 +3255,142 @@
                 }
 
                 grp.list.forEach(dev => {
+                    // Skip child devices: they are rendered inside their parent composite card!
+                    if (dev.parent_device_id) {
+                        return;
+                    }
+
+                    // Check if this device is the Daikin Heat Pump or a system with subsystems
+                    if (dev.id === 'daikin_heat_pump' || (dev.subsystems && dev.subsystems.length > 0)) {
+                        const childId = (dev.subsystems && dev.subsystems[0]) || 'dhw_tank';
+                        const childDev = devices.find(d => d.id === childId) || null;
+                        if (childDev) {
+                            window.__cachedDevicesMap = window.__cachedDevicesMap || {};
+                            window.__cachedDevicesMap[childDev.id] = childDev;
+                        }
+
+                        const pVal = dev.ha_power_entity ? (haStateMap[dev.ha_power_entity] || '--') : '--';
+                        const dhwTVal = (childDev && childDev.sensors && childDev.sensors[0] && childDev.sensors[0].entity_id) 
+                            ? (haStateMap[childDev.sensors[0].entity_id] || haStateMap['sensor.hc_dhw_temperature_r5t_dhw_tank'] || '49.9')
+                            : (haStateMap['sensor.hc_dhw_temperature_r5t_dhw_tank'] || '49.9');
+                        const cvClimateVal = haStateMap['climate.woonkamer_climate_daikin'] || '20.5';
+
+                        const dhwParams = (childDev && childDev.parameters) || {};
+                        const isDaikinReheat = (dhwParams.reheat_mode !== 'openhems_threshold');
+
+                        const isInstalled = dev.installed !== false;
+                        const isEnabled = dev.enabled !== false;
+                        const statusPill = (!isInstalled)
+                            ? '<span class="px-2 py-0.5 rounded text-[9px] font-mono font-semibold bg-slate-800 text-slate-400 border border-slate-700">NIET GEÏNSTALLEERD</span>'
+                            : (isEnabled 
+                                ? '<span class="px-2 py-0.5 rounded text-[9px] font-mono font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-800 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> ACTIEF</span>'
+                                : '<span class="px-2 py-0.5 rounded text-[9px] font-mono font-semibold bg-amber-950/80 text-amber-400 border border-amber-800">UITGESCHAKELD</span>');
+
+                        const compositeCard = document.createElement('div');
+                        compositeCard.className = 'col-span-1 md:col-span-2 lg:col-span-2 bg-[#0e1422] border-2 border-indigo-900/60 hover:border-indigo-700/80 rounded-2xl p-4 sm:p-5 shadow-2xl transition space-y-4';
+                        compositeCard.innerHTML = `
+                            <!-- Hoofdkaart Header -->
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                                <div>
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="text-xl">♨️</span>
+                                        <h4 class="font-bold text-white text-sm sm:text-base">${dev.name}</h4>
+                                        <span class="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-indigo-950 text-indigo-300 border border-indigo-800">HOOFDSYSTEEM</span>
+                                        ${statusPill}
+                                    </div>
+                                    <p class="text-[11px] text-slate-400 mt-1">
+                                        Gedeelde warmtebron (Compressor) · Inepro 102 MQTT (<span class="font-mono text-cyan-300 font-bold">${pVal}</span>) · SG-Ready Bus (SG1..SG4)
+                                    </p>
+                                </div>
+                                <div class="flex items-center gap-2 flex-shrink-0">
+                                    <span class="px-2.5 py-1 rounded-lg text-[10px] font-mono font-semibold bg-amber-950/40 text-amber-300 border border-amber-800/60 flex items-center gap-1.5">
+                                        <span>🔒</span> Hydraulische Interlock: ACTIEF
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- De 2 Subkaarten Grid -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                                <!-- SUBKAART 1: RUIMTEVERWARMING (CV VLOERVERWARMING) -->
+                                <div class="bg-[#0B0F17] border border-slate-800/90 rounded-xl p-3.5 flex flex-col justify-between space-y-3">
+                                    <div>
+                                        <div class="flex items-center justify-between border-b border-slate-800/80 pb-2 mb-2.5">
+                                            <div class="flex items-center gap-1.5">
+                                                <span class="text-sm">🏠</span>
+                                                <h5 class="font-bold text-white text-xs">Subkaart 1: Ruimteverwarming (CV)</h5>
+                                            </div>
+                                            <span class="px-1.5 py-0.5 rounded text-[9px] font-mono bg-blue-950 text-blue-300 border border-blue-800">Vloerverwarming</span>
+                                        </div>
+                                        <div class="space-y-1.5 text-[11px] text-slate-300">
+                                            <div class="flex justify-between py-1 px-2 rounded bg-[#0e1422] border border-slate-800/60 font-mono">
+                                                <span class="text-slate-400">Doeltemperatuur:</span>
+                                                <span class="text-white font-bold">${cvClimateVal} °C</span>
+                                            </div>
+                                            <div class="flex justify-between py-1 px-2 rounded bg-[#0e1422] border border-slate-800/60 font-mono">
+                                                <span class="text-slate-400">Stooklijn (LWT):</span>
+                                                <span class="text-cyan-300 font-bold">33 °C - 35 °C</span>
+                                            </div>
+                                            <div class="flex justify-between py-1 px-2 rounded bg-[#0e1422] border border-slate-800/60 font-mono">
+                                                <span class="text-slate-400">Modulatiebodem:</span>
+                                                <span class="text-slate-300">~950 W elektrisch</span>
+                                            </div>
+                                            <div class="flex justify-between py-1 px-2 rounded bg-[#0e1422] border border-slate-800/60 font-mono">
+                                                <span class="text-slate-400">Vloertraagheidsmodel:</span>
+                                                <span class="text-amber-300">3 - 4 uur responsvertraging</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="flex justify-end pt-2 border-t border-slate-800/80">
+                                        <button onclick="openDeviceModal('${dev.id}')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg border border-slate-700 transition">Bewerken CV</button>
+                                    </div>
+                                </div>
+
+                                <!-- SUBKAART 2: WARM TAPWATERVAT (350L SWW) -->
+                                <div class="bg-[#0B0F17] border border-slate-800/90 rounded-xl p-3.5 flex flex-col justify-between space-y-3">
+                                    <div>
+                                        <div class="flex items-center justify-between border-b border-slate-800/80 pb-2 mb-2.5">
+                                            <div class="flex items-center gap-1.5">
+                                                <span class="text-sm">🚰</span>
+                                                <h5 class="font-bold text-white text-xs">Subkaart 2: Warm Tapwatervat (SWW)</h5>
+                                            </div>
+                                            <span class="px-1.5 py-0.5 rounded text-[9px] font-mono bg-pink-950 text-pink-300 border border-pink-800">350L Buffer</span>
+                                        </div>
+                                        <div class="space-y-1.5 text-[11px] text-slate-300">
+                                            <div class="flex justify-between py-1 px-2 rounded bg-[#0e1422] border border-slate-800/60 font-mono">
+                                                <span class="text-slate-400">Vattemperatuur (R5T):</span>
+                                                <span class="text-pink-400 font-bold">${dhwTVal} °C</span>
+                                            </div>
+                                            <div class="flex justify-between py-1 px-2 rounded bg-[#0e1422] border border-slate-800/60 font-mono">
+                                                <span class="text-slate-400">Doeltemp & Boost:</span>
+                                                <span class="text-white font-bold">${dhwParams.target_temp_c || 50} °C · Boost: ${dhwParams.boost_temp_c || 60} °C</span>
+                                            </div>
+                                            <div class="p-2 rounded bg-[#0e1422] border border-slate-800/60 space-y-1">
+                                                <div class="flex items-center justify-between">
+                                                    <span class="text-slate-400">Reheat Modus:</span>
+                                                    ${isDaikinReheat
+                                                        ? '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">⚙️ Daikin Systeeminstelling</span>'
+                                                        : '<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-950 text-blue-300 border border-blue-800">⚡ Open HEMS Drempel</span>'
+                                                    }
+                                                </div>
+                                                <div class="text-[10px] text-slate-400">
+                                                    ${isDaikinReheat
+                                                        ? 'Warmtepomp bepaalt zelfstandig (hardware veldsetting [6-00]/[6-0C])'
+                                                        : `Ondergrens: <strong>< ${dhwParams.deadband_reheat_c || 40} °C</strong> (10 °C delta)`
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="flex justify-end pt-2 border-t border-slate-800/80">
+                                        <button onclick="openDeviceModal('${childDev ? childDev.id : 'dhw_tank'}')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg border border-slate-700 transition">Bewerken Tapwatervat</button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        grid.appendChild(compositeCard);
+                        return;
+                    }
+
                     const boundPolicies = policies.filter(p => (p.target_devices || []).includes(dev.id));
                     const policyBadge = boundPolicies.length > 0
                         ? boundPolicies.map(p => `<span class="px-1.5 py-0.5 rounded text-[10px] bg-purple-900/40 text-purple-300 border border-purple-800 font-medium">${p.name}</span>`).join(' ')
@@ -3398,6 +3538,51 @@
             }
         }
 
+        function toggleDeviceParameterBoxes(forcedType = null) {
+            const devType = forcedType || document.getElementById('modal-dev-type').value;
+            const dhwBox = document.getElementById('dev-params-dhw');
+            const solBox = document.getElementById('dev-params-solar');
+            const batBox = document.getElementById('dev-params-battery');
+            const hpBox = document.getElementById('dev-params-heatpump');
+            const badge = document.getElementById('dev-param-type-badge');
+
+            if (dhwBox) dhwBox.classList.add('hidden');
+            if (solBox) solBox.classList.add('hidden');
+            if (batBox) batBox.classList.add('hidden');
+            if (hpBox) hpBox.classList.add('hidden');
+
+            if (devType === 'thermal_storage' || devType === 'dhw_boiler') {
+                if (dhwBox) dhwBox.classList.remove('hidden');
+                if (badge) badge.innerText = 'Tapwatervat (350L SWW)';
+            } else if (devType === 'solar_inverter' || devType === 'solar_pv') {
+                if (solBox) solBox.classList.remove('hidden');
+                if (badge) badge.innerText = 'Zonnepanelen & Omvormer';
+            } else if (devType === 'home_battery') {
+                if (batBox) batBox.classList.remove('hidden');
+                if (badge) badge.innerText = 'Thuisbatterij';
+            } else if (devType === 'heat_pump') {
+                if (hpBox) hpBox.classList.remove('hidden');
+                if (badge) badge.innerText = 'Warmtepomp (Compressor)';
+            } else {
+                if (badge) badge.innerText = 'Generiek apparaat';
+            }
+        }
+
+        function toggleDhwReheatFields() {
+            const elMode = document.getElementById('modal-dev-dhw-reheat-mode');
+            if (!elMode) return;
+            const mode = elMode.value;
+            const dbInput = document.getElementById('modal-dev-dhw-deadband');
+            const hint = document.getElementById('dhw-reheat-hint');
+            if (mode === 'daikin_system_setting') {
+                if (hint) hint.innerText = 'Warmtepomp bepaalt zelfstandig (Daikin hardware veldsetting [6-00]/[6-0C])';
+                if (dbInput) dbInput.classList.add('opacity-50');
+            } else {
+                if (hint) hint.innerText = 'Open HEMS blokkeert heropwarming zolang vat ≥ drempel (bv. 40 °C)';
+                if (dbInput) dbInput.classList.remove('opacity-50');
+            }
+        }
+
         function openDeviceModal(devOrId = null) {
             populateHaDropdowns();
             
@@ -3419,6 +3604,9 @@
                     bSelect.appendChild(opt);
                 });
             }
+
+            const devParams = (dev && dev.parameters) ? dev.parameters : {};
+            const devType = dev ? dev.type : document.getElementById('modal-dev-type').value;
 
             if (dev) {
                 document.getElementById('modal-dev-title').innerText = 'Apparaat Bewerken';
@@ -3456,12 +3644,46 @@
                 document.getElementById('modal-dev-mqtt-json-key').value = '';
                 document.getElementById('modal-dev-mqtt-control-topic').value = '';
             }
-            const elMin = document.getElementById('modal-dev-min-runtime');
-            if (elMin) elMin.value = (dev && dev.parameters) ? (dev.parameters.min_runtime_minutes || '') : '';
-            const elMax = document.getElementById('modal-dev-max-power');
-            if (elMax) elMax.value = (dev && dev.parameters) ? (dev.parameters.max_power_w || '') : '';
-            const elEm = document.getElementById('modal-dev-emergency-threshold');
-            if (elEm) elEm.value = (dev && dev.parameters) ? (dev.parameters.emergency_threshold || '') : '';
+
+            // Populate contextual parameters
+            const elReheat = document.getElementById('modal-dev-dhw-reheat-mode');
+            if (elReheat) elReheat.value = devParams.reheat_mode || 'daikin_system_setting';
+            const elDb = document.getElementById('modal-dev-dhw-deadband');
+            if (elDb) elDb.value = (devParams.deadband_reheat_c !== undefined) ? devParams.deadband_reheat_c : 40.0;
+            const elVol = document.getElementById('modal-dev-dhw-volume');
+            if (elVol) elVol.value = devParams.volume_liters || 350;
+            const elTgt = document.getElementById('modal-dev-dhw-target');
+            if (elTgt) elTgt.value = devParams.target_temp_c || 50.0;
+            const elBst = document.getElementById('modal-dev-dhw-boost');
+            if (elBst) elBst.value = devParams.boost_temp_c || 60.0;
+            const elParent = document.getElementById('modal-dev-parent-id');
+            if (elParent) elParent.value = (dev && dev.parent_device_id) ? dev.parent_device_id : (devType === 'dhw_boiler' ? 'daikin_heat_pump' : '');
+
+            const elWp = document.getElementById('modal-dev-solar-wp');
+            if (elWp) elWp.value = devParams.wp_installed || 5760;
+            const elInv = document.getElementById('modal-dev-solar-inv');
+            if (elInv) elInv.value = devParams.inverter_max_w || 5500;
+            const elAz = document.getElementById('modal-dev-solar-azimuth');
+            if (elAz) elAz.value = devParams.azimuth || 225;
+            const elTilt = document.getElementById('modal-dev-solar-tilt');
+            if (elTilt) elTilt.value = devParams.tilt || 34;
+
+            const elBatCap = document.getElementById('modal-dev-battery-cap');
+            if (elBatCap) elBatCap.value = devParams.capacity_kwh || 10.0;
+            const elBatPwr = document.getElementById('modal-dev-battery-power');
+            if (elBatPwr) elBatPwr.value = devParams.max_charge_power_w || 5000;
+            const elMinSoc = document.getElementById('modal-dev-battery-min-soc');
+            if (elMinSoc) elMinSoc.value = devParams.min_soc_pct || 10;
+            const elMaxSoc = document.getElementById('modal-dev-battery-max-soc');
+            if (elMaxSoc) elMaxSoc.value = devParams.max_soc_pct || 95;
+
+            const elHpFloor = document.getElementById('modal-dev-hp-floor');
+            if (elHpFloor) elHpFloor.value = devParams.min_floor_power_w || 950;
+            const elHpNom = document.getElementById('modal-dev-hp-nominal');
+            if (elHpNom) elHpNom.value = devParams.nominal_thermal_kw || 18.0;
+
+            toggleDeviceParameterBoxes(devType);
+            toggleDhwReheatFields();
             toggleDeviceSourceFields();
             document.getElementById('device-modal').classList.remove('hidden');
         }
@@ -3470,9 +3692,11 @@
             e.preventDefault();
             const id = document.getElementById('modal-dev-id').value;
             const st = document.getElementById('modal-dev-source-type').value;
+            const dt = document.getElementById('modal-dev-type').value;
+
             const payload = {
                 name: document.getElementById('modal-dev-name').value,
-                type: document.getElementById('modal-dev-type').value,
+                type: dt,
                 source_type: st,
                 ha_power_entity: document.getElementById('modal-dev-ha-power').value,
                 ha_temp_entity: document.getElementById('modal-dev-ha-temp') ? document.getElementById('modal-dev-ha-temp').value : '',
@@ -3487,13 +3711,52 @@
                 parameters: (() => {
                     const dev = (window.__cachedDevicesMap && window.__cachedDevicesMap[id]) || {};
                     const p = (dev && dev.parameters) ? Object.assign({}, dev.parameters) : {};
-                    const elMin = document.getElementById('modal-dev-min-runtime');
-                    if (elMin && elMin.value) p.min_runtime_minutes = parseInt(elMin.value) || 0;
-                    const elMax = document.getElementById('modal-dev-max-power');
-                    if (elMax && elMax.value) p.max_power_w = parseFloat(elMax.value) || 0;
-                    const elEm = document.getElementById('modal-dev-emergency-threshold');
-                    if (elEm && elEm.value) p.emergency_threshold = parseFloat(elEm.value) || 0;
+                    if (dt === 'thermal_storage' || dt === 'dhw_boiler') {
+                        const elReheat = document.getElementById('modal-dev-dhw-reheat-mode');
+                        if (elReheat) p.reheat_mode = elReheat.value;
+                        const elDb = document.getElementById('modal-dev-dhw-deadband');
+                        if (elDb) p.deadband_reheat_c = parseFloat(elDb.value) || 40.0;
+                        const elVol = document.getElementById('modal-dev-dhw-volume');
+                        if (elVol) p.volume_liters = parseInt(elVol.value) || 350;
+                        const elTgt = document.getElementById('modal-dev-dhw-target');
+                        if (elTgt) p.target_temp_c = parseFloat(elTgt.value) || 50.0;
+                        const elBst = document.getElementById('modal-dev-dhw-boost');
+                        if (elBst) p.boost_temp_c = parseFloat(elBst.value) || 60.0;
+                        p.emergency_reheat_c = 38.0;
+                    } else if (dt === 'solar_inverter' || dt === 'solar_pv') {
+                        const elWp = document.getElementById('modal-dev-solar-wp');
+                        if (elWp) p.wp_installed = parseFloat(elWp.value) || 5760;
+                        const elInv = document.getElementById('modal-dev-solar-inv');
+                        if (elInv) p.inverter_max_w = parseFloat(elInv.value) || 5500;
+                        const elAz = document.getElementById('modal-dev-solar-azimuth');
+                        if (elAz) p.azimuth = parseFloat(elAz.value) || 225;
+                        const elTilt = document.getElementById('modal-dev-solar-tilt');
+                        if (elTilt) p.tilt = parseFloat(elTilt.value) || 34;
+                    } else if (dt === 'home_battery') {
+                        const elCap = document.getElementById('modal-dev-battery-cap');
+                        if (elCap) p.capacity_kwh = parseFloat(elCap.value) || 10.0;
+                        const elPwr = document.getElementById('modal-dev-battery-power');
+                        if (elPwr) {
+                            p.max_charge_power_w = parseFloat(elPwr.value) || 5000;
+                            p.max_discharge_power_w = parseFloat(elPwr.value) || 5000;
+                        }
+                        const elMin = document.getElementById('modal-dev-battery-min-soc');
+                        if (elMin) p.min_soc_pct = parseFloat(elMin.value) || 10.0;
+                        const elMax = document.getElementById('modal-dev-battery-max-soc');
+                        if (elMax) p.max_soc_pct = parseFloat(elMax.value) || 95.0;
+                    } else if (dt === 'heat_pump') {
+                        const elFloor = document.getElementById('modal-dev-hp-floor');
+                        if (elFloor) p.min_floor_power_w = parseFloat(elFloor.value) || 950;
+                        const elNom = document.getElementById('modal-dev-hp-nominal');
+                        if (elNom) p.nominal_thermal_kw = parseFloat(elNom.value) || 18.0;
+                    }
                     return p;
+                })(),
+                parent_device_id: (() => {
+                    const elParent = document.getElementById('modal-dev-parent-id');
+                    if (elParent && elParent.value) return elParent.value;
+                    const dev = (window.__cachedDevicesMap && window.__cachedDevicesMap[id]) || {};
+                    return dev.parent_device_id || null;
                 })()
             };
             // Automatically construct/update canonical sensors and actuators based on entered entities

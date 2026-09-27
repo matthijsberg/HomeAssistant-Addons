@@ -110,3 +110,32 @@ def test_no_dhw_cop_call_without_params_in_optimizer():
                     violations.append(f"Line {node.lineno}: call to {func_name}() is missing 'params' keyword argument")
 
     assert not violations, "Unparameterized physics calls in dhw_optimizer.py:\n" + "\n".join(violations)
+
+
+def test_dhw_spec_from_devices_config_and_reheat_mode():
+    """Verify that DhwTankSpec.from_config() reads directly from cfg['devices'] parameters."""
+    cfg = {
+        "devices": [
+            {
+                "id": "dhw_tank",
+                "type": "dhw_boiler",
+                "parent_device_id": "daikin_heat_pump",
+                "parameters": {
+                    "volume_liters": 350.0,
+                    "target_temp_c": 50.0,
+                    "boost_temp_c": 60.0,
+                    "comfort_min_temp_c": 40.0,
+                    "auto_start_delta_c": 10.0,
+                    "reheat_mode": "daikin_system_setting"
+                }
+            }
+        ]
+    }
+    spec = DhwTankSpec.from_config(cfg)
+    assert spec.volume_liters == 350.0
+    assert spec.target_setpoint_c == 50.0
+    assert spec.boost_setpoint_c == 60.0
+    assert spec.comfort_min_temp_c == 40.0
+    assert spec.auto_start_delta_c == 10.0
+    assert spec.reheat_mode == "daikin_system_setting"
+

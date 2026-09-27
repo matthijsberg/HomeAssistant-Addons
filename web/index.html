@@ -3135,11 +3135,12 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                 </div>
                 <div>
                     <label class="block mb-1 text-slate-400">Type Resource</label>
-                    <select id="modal-dev-type" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
+                    <select id="modal-dev-type" onchange="toggleDeviceParameterBoxes()" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white">
                         <option value="grid_meter">Netmeter (P1 DSMR)</option>
                         <option value="solar_inverter">Zonnepanelen (Omvormer)</option>
                         <option value="heat_pump">Warmtepomp (CV)</option>
-                        <option value="thermal_storage">Warm Tapwatervat (SWW)</option>
+                        <option value="dhw_boiler">Warm Tapwatervat (SWW Boiler)</option>
+                        <option value="thermal_storage">Thermische Buffer (SWW)</option>
                         <option value="home_battery">Thuisbatterij</option>
                         <option value="ev_charger">EV Laadpaal</option>
                         <option value="baseload">Basislast / Sluipverbruik</option>
@@ -3221,6 +3222,116 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
                         <input type="text" id="modal-dev-mqtt-control-topic" placeholder="bijv. P1P2/C/9/Heating_Cooling_Auto_Off" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
                     </div>
                 </div>
+
+                <!-- Contextual Parameters (Fysisch & Operationeel) -->
+                <div id="dev-parameters-section" class="border-t border-slate-800/80 pt-3 space-y-3">
+                    <div class="text-[11px] font-mono font-bold text-slate-300 flex items-center justify-between">
+                        <span>⚙️ Apparaat Parameters & Specificaties</span>
+                        <span id="dev-param-type-badge" class="text-[9px] text-slate-500 font-normal"></span>
+                    </div>
+
+                    <!-- SWW Tapwatervat (thermal_storage / dhw_boiler) Parameters -->
+                    <div id="dev-params-dhw" class="space-y-2.5 hidden">
+                        <div>
+                            <label class="block mb-1 text-slate-400">Reheat Modus (Heropwarming Tapwater)</label>
+                            <select id="modal-dev-dhw-reheat-mode" onchange="toggleDhwReheatFields()" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white text-xs">
+                                <option value="daikin_system_setting">Daikin Systeeminstelling (Warmtepomp bepaalt zelf via hardware/veldsetting)</option>
+                                <option value="openhems_threshold">Open HEMS Drempelsturing (Softwarematige ondergrens)</option>
+                            </select>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block mb-1 text-slate-400">Reheat Drempel (°C)</label>
+                                <input type="number" step="0.5" id="modal-dev-dhw-deadband" placeholder="40.0" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                                <span id="dhw-reheat-hint" class="text-[9px] text-slate-500 block mt-0.5">10 °C onder het 50 °C setpoint</span>
+                            </div>
+                            <div>
+                                <label class="block mb-1 text-slate-400">Watervolume (Liter)</label>
+                                <input type="number" step="1" id="modal-dev-dhw-volume" placeholder="350" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block mb-1 text-slate-400">Doeltemperatuur (°C)</label>
+                                <input type="number" step="0.5" id="modal-dev-dhw-target" placeholder="50.0" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block mb-1 text-slate-400">Zonne-Boost Temperatuur (°C)</label>
+                                <input type="number" step="0.5" id="modal-dev-dhw-boost" placeholder="60.0" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block mb-1 text-slate-400">Gekoppelde Hoofdunit (Parent Heat Pump)</label>
+                            <select id="modal-dev-parent-id" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono text-xs">
+                                <option value="">-- Geen (Zelfstandig apparaat) --</option>
+                                <option value="daikin_heat_pump">Daikin Altherma 3 H HT (daikin_heat_pump)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Zonnepanelen (solar_inverter / solar_pv) Parameters -->
+                    <div id="dev-params-solar" class="space-y-2.5 hidden">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block mb-1 text-slate-400">Geïnstalleerd Piekvermogen (Wp)</label>
+                                <input type="number" step="10" id="modal-dev-solar-wp" placeholder="5760" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block mb-1 text-slate-400">Max Omvormervermogen (W)</label>
+                                <input type="number" step="100" id="modal-dev-solar-inv" placeholder="5500" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block mb-1 text-slate-400">Oriëntatie / Azimuth (°)</label>
+                                <input type="number" step="1" id="modal-dev-solar-azimuth" placeholder="225" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block mb-1 text-slate-400">Dakhelling (°)</label>
+                                <input type="number" step="1" id="modal-dev-solar-tilt" placeholder="34" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Thuisbatterij (home_battery) Parameters -->
+                    <div id="dev-params-battery" class="space-y-2.5 hidden">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block mb-1 text-slate-400">Batterij Capaciteit (kWh)</label>
+                                <input type="number" step="0.5" id="modal-dev-battery-cap" placeholder="10.0" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block mb-1 text-slate-400">Max Laad/Ontlaad (W)</label>
+                                <input type="number" step="100" id="modal-dev-battery-power" placeholder="5000" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block mb-1 text-slate-400">Min SoC Reserve (%)</label>
+                                <input type="number" step="1" id="modal-dev-battery-min-soc" placeholder="10" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block mb-1 text-slate-400">Max SoC Plafond (%)</label>
+                                <input type="number" step="1" id="modal-dev-battery-max-soc" placeholder="95" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Warmtepomp (heat_pump) Parameters -->
+                    <div id="dev-params-heatpump" class="space-y-2.5 hidden">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block mb-1 text-slate-400">Modulatiebodem (W)</label>
+                                <input type="number" step="50" id="modal-dev-hp-floor" placeholder="950" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                            <div>
+                                <label class="block mb-1 text-slate-400">Nominaal Thermisch (kW)</label>
+                                <input type="number" step="0.5" id="modal-dev-hp-nominal" placeholder="18.0" class="w-full bg-[#0B0F17] border border-slate-800 rounded-lg p-2 text-white font-mono">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="flex justify-end gap-2 pt-3 border-t border-slate-800">
                     <button type="button" onclick="closeModal('device-modal')" class="px-3 py-1.5 bg-slate-800 text-slate-400 rounded-lg">Annuleren</button>
                     <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white font-semibold rounded-lg">Opslaan</button>

@@ -787,10 +787,16 @@ def handle_post(handler, path: str, body: dict) -> bool:
             "storage_unit": "W",
             "installed": body.get("installed", True),
             "enabled": body.get("enabled", True),
+            "parent_device_id": body.get("parent_device_id", None),
+            "subsystems": body.get("subsystems", []),
             "parameters": body.get("parameters", {})
         }
         cfg["devices"].append(new_dev)
         save_json(CONFIG_FILE, cfg)
+        try:
+            ensure_active_canonical_plan(force_refresh=True)
+        except Exception as e:
+            print(f"Auto-replan notice on device create: {e}")
         handler._send_json({"status": "created", "device": new_dev}, 201)
         return True
 
@@ -857,10 +863,14 @@ def handle_put(handler, path: str, body: dict) -> bool:
         ensure_framework_defaults(cfg)
         for d in cfg["devices"]:
             if d["id"] == dev_id:
-                for k in ["name", "type", "source_type", "adapter", "capabilities", "ha_power_entity", "ha_energy_entity", "ha_temp_entity", "ha_control_entity", "mqtt_broker_id", "mqtt_power_topic", "mqtt_power_json_key", "mqtt_control_topic", "native_unit", "storage_unit", "installed", "enabled", "parameters"]:
+                for k in ["name", "type", "source_type", "adapter", "capabilities", "ha_power_entity", "ha_energy_entity", "ha_temp_entity", "ha_control_entity", "mqtt_broker_id", "mqtt_power_topic", "mqtt_power_json_key", "mqtt_control_topic", "native_unit", "storage_unit", "installed", "enabled", "parent_device_id", "subsystems", "parameters"]:
                     if k in body:
                         d[k] = body[k]
                 save_json(CONFIG_FILE, cfg)
+                try:
+                    ensure_active_canonical_plan(force_refresh=True)
+                except Exception as e:
+                    print(f"Auto-replan notice on device update: {e}")
                 handler._send_json({"status": "updated", "device": d})
                 return True
         handler._send_json({"error": "Device not found"}, 404)
@@ -949,6 +959,10 @@ def handle_delete(handler, path: str) -> bool:
         cfg["devices"] = [d for d in cfg["devices"] if d["id"] != dev_id]
         if len(cfg["devices"]) < orig_len:
             save_json(CONFIG_FILE, cfg)
+            try:
+                ensure_active_canonical_plan(force_refresh=True)
+            except Exception as e:
+                print(f"Auto-replan notice on device delete: {e}")
             handler._send_json({"status": "deleted", "id": dev_id})
         else:
             handler._send_json({"error": "Device not found"}, 404)

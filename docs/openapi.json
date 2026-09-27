@@ -603,6 +603,17 @@
                         "type": "boolean"
                       }
                     }
+                  },
+                  "parent_device_id": {
+                    "type": "string",
+                    "description": "Optional parent heat source or system controller ID (e.g. daikin_heat_pump)"
+                  },
+                  "subsystems": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "List of attached child subsystem device IDs (e.g. ['dhw_tank'])"
                   }
                 }
               }

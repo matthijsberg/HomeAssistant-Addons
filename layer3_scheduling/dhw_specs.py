@@ -30,6 +30,7 @@ class DhwTankSpec:
     target_setpoint_c: float = 50.0            # Nominal comfort target setpoint
     boost_setpoint_c: float = 60.0             # Solar/economic buffer setpoint
     auto_start_delta_c: float = 10.0           # Autonomous restart hysteresis below setpoint (setpoint - delta)
+    reheat_mode: str = "daikin_system_setting" # "daikin_system_setting" (autonomous) or "openhems_threshold"
 
     @property
     def thermal_capacity_kwh_per_k(self) -> float:
@@ -65,22 +66,30 @@ class DhwTankSpec:
     def from_config(cls, cfg: Optional[Dict[str, Any]] = None, live_setpoint_c: Optional[float] = None) -> "DhwTankSpec":
         """
         Builds a DhwTankSpec directly from the loaded system configuration dictionary.
+        Priority: cfg['devices'] parameters -> legacy cfg['dhw_boiler'] -> defaults.
         """
         if not cfg:
             return cls()
 
+        dev_params = {}
+        for d in cfg.get("devices", []):
+            if isinstance(d, dict) and (d.get("id") == "dhw_tank" or d.get("type") in ["dhw_boiler", "thermal_storage"]):
+                dev_params = d.get("parameters", {})
+                break
+
         b_cfg = cfg.get("dhw_boiler", {})
-        vol = float(b_cfg.get("tank_volume_liters", 350.0))
-        sh = float(b_cfg.get("specific_heat_water", 4.184))
-        s50 = float(b_cfg.get("standby_loss_50_kw", 0.0589))
-        s60 = float(b_cfg.get("standby_loss_60_kw", 0.0850))
-        p_nom = float(b_cfg.get("compressor_power_kw", 3.0))
-        p_boost = float(b_cfg.get("solar_boost_power_kw", 3.0))
-        th_cap = float(b_cfg.get("thermal_output_kw", 6.0))
-        t_comf = float(b_cfg.get("min_comfort_temp_c", 40.0))
-        t_set = float(live_setpoint_c) if (live_setpoint_c is not None and 35.0 <= float(live_setpoint_c) <= 65.0) else float(b_cfg.get("fallback_setpoint_temp", 50.0))
-        t_boost = float(b_cfg.get("boost_setpoint_temp", 60.0))
-        auto_delta = float(b_cfg.get("auto_start_delta_c", 10.0))
+        vol = float(dev_params.get("volume_liters") or b_cfg.get("tank_volume_liters", 350.0))
+        sh = float(dev_params.get("specific_heat_water") or b_cfg.get("specific_heat_water", 4.184))
+        s50 = float(dev_params.get("standby_loss_50_kw") or b_cfg.get("standby_loss_50_kw", 0.0589))
+        s60 = float(dev_params.get("standby_loss_60_kw") or b_cfg.get("standby_loss_60_kw", 0.0850))
+        p_nom = float(dev_params.get("compressor_power_kw") or b_cfg.get("compressor_power_kw", 3.0))
+        p_boost = float(dev_params.get("solar_boost_power_kw") or b_cfg.get("solar_boost_power_kw", 3.0))
+        th_cap = float(dev_params.get("thermal_output_kw") or b_cfg.get("thermal_output_kw", 6.0))
+        t_comf = float(dev_params.get("comfort_min_temp_c") or b_cfg.get("min_comfort_temp_c", 40.0))
+        t_set = float(live_setpoint_c) if (live_setpoint_c is not None and 35.0 <= float(live_setpoint_c) <= 65.0) else float(dev_params.get("target_temp_c") or b_cfg.get("fallback_setpoint_temp", 50.0))
+        t_boost = float(dev_params.get("boost_temp_c") or b_cfg.get("boost_setpoint_temp", 60.0))
+        auto_delta = float(dev_params.get("auto_start_delta_c") or b_cfg.get("auto_start_delta_c", 10.0))
+        reheat_m = str(dev_params.get("reheat_mode") or b_cfg.get("reheat_mode", "daikin_system_setting"))
 
         return cls(
             volume_liters=vol,
@@ -93,5 +102,6 @@ class DhwTankSpec:
             comfort_min_temp_c=t_comf,
             target_setpoint_c=t_set,
             boost_setpoint_c=t_boost,
-            auto_start_delta_c=auto_delta
+            auto_start_delta_c=auto_delta,
+            reheat_mode=reheat_m
         )

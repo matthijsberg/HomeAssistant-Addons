@@ -98,7 +98,8 @@ class ThermalBufferPolicy:
     target_device_id: str
     storage_volume_liters: int = 350
     emergency_threshold_c: float = 38.0       # Hard safety guardrail (overrules all prices)
-    deadband_reheat_c: float = 46.0           # Do not reheat if above this without solar
+    deadband_reheat_c: float = 40.0           # Do not reheat if above this without solar (10°C below 50°C setpoint)
+    reheat_mode: str = "daikin_system_setting" # "daikin_system_setting" (Daikin autonomous) or "openhems_threshold"
     target_temperature_c: float = 50.0        # Standard economic setpoint
     solar_boost_temperature_c: float = 60.0   # Maximum thermal battery boost
     min_run_time_minutes: int = 20            # Protect compressor against cycling

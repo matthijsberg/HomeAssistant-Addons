@@ -406,6 +406,68 @@
     }
 
     // =========================================================================
+    // 3b. BATTERY DISPATCH TOOLTIP HANDLER
+    // =========================================================================
+    function customBatteryTooltipHandler(context) {
+        const { chart, tooltip } = context;
+        if (typeof window.createOrGetTooltipEl !== 'function' || typeof window.renderCustomTooltip !== 'function') return;
+        const tooltipEl = window.createOrGetTooltipEl(chart);
+        if (tooltip.opacity === 0 || !tooltip.body || !tooltip.dataPoints || tooltip.dataPoints.length === 0) {
+            tooltipEl.style.opacity = '0';
+            tooltipEl.style.pointerEvents = 'none';
+            return;
+        }
+        const dataIndex = tooltip.dataPoints[0].dataIndex;
+
+        let soc = 0.0, p05 = 0.0, p95 = 0.0, solarCh = 0.0, gridCh = 0.0, disKw = 0.0, deficitKw = 0.0, pImp = 0.0, pExp = 0.0;
+        chart.data.datasets.forEach(ds => {
+            const v = Number(ds.data[dataIndex]) || 0.0;
+            if (ds.id === 'battery_soc' || (ds.label && ds.label.includes('State of Charge'))) soc = v;
+            else if (ds.id === 'battery_p05' || (ds.label && ds.label.includes('Ondergrens P05'))) p05 = v;
+            else if (ds.id === 'battery_p95' || (ds.label && (ds.label.includes('Bovengrens P95') || ds.label.includes('P05–P95')))) p95 = v;
+            else if (ds.id === 'battery_solar_ch' || (ds.label && ds.label.includes('Zonneladen'))) solarCh = v;
+            else if (ds.id === 'battery_grid_ch' || (ds.label && ds.label.includes('Netladen'))) gridCh = v;
+            else if (ds.id === 'battery_dis' || (ds.label && ds.label.includes('Ontladen'))) disKw = Math.abs(v);
+            else if (ds.id === 'battery_deficit' || (ds.label && ds.label.includes('Tekort'))) deficitKw = Math.abs(v);
+            else if (ds.id === 'battery_imp_price' || (ds.label && ds.label.includes('Inkoop'))) pImp = v;
+            else if (ds.id === 'battery_exp_price' || (ds.label && ds.label.includes('Teruglevering'))) pExp = v;
+        });
+
+        const socKwhVal = ((soc / 100.0) * 15.0).toFixed(2);
+        const socBadgeColor = soc >= 80 ? 'text-emerald-400 bg-emerald-950/80 border-emerald-800' : (soc >= 25 ? 'text-cyan-400 bg-cyan-950/80 border-cyan-800' : 'text-amber-400 bg-amber-950/80 border-amber-800');
+
+        let modeBadge = '';
+        if (gridCh > 0.05 && solarCh > 0.05) {
+            modeBadge = '<span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border text-purple-300 bg-purple-950/80 border-purple-800">Zon + Netladen</span>';
+        } else if (gridCh > 0.05) {
+            modeBadge = '<span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border text-purple-300 bg-purple-950/80 border-purple-800">Netladen (Dal)</span>';
+        } else if (solarCh > 0.05) {
+            modeBadge = '<span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border text-amber-300 bg-amber-950/80 border-amber-800">Zon-absorptie</span>';
+        } else if (disKw > 0.05) {
+            modeBadge = '<span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border text-emerald-300 bg-emerald-950/80 border-emerald-800">Ontladen</span>';
+        } else {
+            modeBadge = `<span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${socBadgeColor}">SoC: ${soc.toFixed(1)}%</span>`;
+        }
+
+        const rows = [
+            { type: 'line', color: '#06B6D4', label: 'Lading (SoC)', val: `${soc.toFixed(1)}% (${socKwhVal} kWh)`, valClass: 'font-bold text-cyan-300 font-mono' },
+            (p95 > 0 && Math.abs(p95 - p05) > 0.5) ? { type: 'band', bgColor: 'rgba(6, 182, 212, 0.25)', borderColor: 'rgba(6, 182, 212, 0.5)', label: 'Bandbreedte (P05–P95)', labelClass: 'text-cyan-200/80', val: `${p05.toFixed(0)}% – ${p95.toFixed(0)}%`, valClass: 'font-mono text-cyan-200/90', textClass: 'text-[11px]' } : null,
+            solarCh > 0.02 ? { type: 'bar', color: '#F59E0B', label: 'Zonneladen', labelClass: 'text-amber-300', val: `+${solarCh.toFixed(2)} kW`, valClass: 'font-bold text-amber-400 font-mono' } : null,
+            gridCh > 0.02 ? { type: 'bar', color: '#A855F7', label: 'Netladen', labelClass: 'text-purple-300', val: `+${gridCh.toFixed(2)} kW`, valClass: 'font-bold text-purple-400 font-mono' } : null,
+            disKw > 0.02 ? { type: 'bar', color: '#10B981', label: 'Ontladen aan Huis', labelClass: 'text-emerald-300', val: `-${disKw.toFixed(2)} kW`, valClass: 'font-bold text-emerald-400 font-mono' } : null,
+            deficitKw > 0.02 ? { type: 'bar', color: '#EF4444', label: 'Netafname (Ongedekt)', labelClass: 'text-red-300', val: `${deficitKw.toFixed(2)} kW`, valClass: 'font-bold text-red-400 font-mono' } : null,
+            pImp > 0 ? { type: 'line', color: '#3B82F6', label: 'Inkoop', labelClass: 'text-slate-400', val: `€${pImp.toFixed(4)} / kWh`, valClass: 'font-mono text-blue-300', borderTop: true } : null,
+            pExp !== 0 ? { type: 'dashed-line', color: '#06B6D4', label: 'Teruglevering', labelClass: 'text-slate-400', val: `€${pExp.toFixed(4)} / kWh`, valClass: 'font-mono text-cyan-300' } : null,
+        ];
+
+        window.renderCustomTooltip(context, {
+            dotColor: 'bg-cyan-400',
+            headerBadge: modeBadge,
+            rows: rows
+        });
+    }
+
+    // =========================================================================
     // 4. CV SPACE HEATING FORECAST RENDERER
     // =========================================================================
     async function renderHeatingForecastChart() {
@@ -851,6 +913,7 @@
             const datasets = [
                 // 1. Marge Ondergrens P05 (%)
                 {
+                    id: 'battery_p05',
                     label: 'Marge Ondergrens P05 (%)',
                     data: socP05,
                     type: 'line',
@@ -865,6 +928,7 @@
                 },
                 // 2. Marge Bovengrens P95 (%) met schaduwband
                 {
+                    id: 'battery_p95',
                     label: 'Marge (P05–P95)',
                     data: socP95,
                     type: 'line',
@@ -879,6 +943,7 @@
                 },
                 // 3. Primary Line: State of Charge P50 (%)
                 {
+                    id: 'battery_soc',
                     label: 'State of Charge (%)',
                     data: socPct,
                     type: 'line',
@@ -894,6 +959,7 @@
                 },
                 // 4. Bar: Zonneladen (+kW in oranje)
                 (window.OpenHEMSChartEngine?.createBarDataset ? window.OpenHEMSChartEngine.createBarDataset({
+                    id: 'battery_solar_ch',
                     label: 'Zonneladen (kW)',
                     data: solarChargeKw,
                     color: T.solarChargeBg,
@@ -902,6 +968,7 @@
                     yAxisID: 'y1',
                     order: 2
                 }) : {
+                    id: 'battery_solar_ch',
                     label: 'Zonneladen (kW)',
                     data: solarChargeKw,
                     type: 'bar',
@@ -917,6 +984,7 @@
                 }),
                 // 5. Bar: Netladen (+kW in paars)
                 (window.OpenHEMSChartEngine?.createBarDataset ? window.OpenHEMSChartEngine.createBarDataset({
+                    id: 'battery_grid_ch',
                     label: 'Netladen (kW)',
                     data: gridChargeKw,
                     color: T.gridChargeBg,
@@ -925,6 +993,7 @@
                     yAxisID: 'y1',
                     order: 2
                 }) : {
+                    id: 'battery_grid_ch',
                     label: 'Netladen (kW)',
                     data: gridChargeKw,
                     type: 'bar',
@@ -940,6 +1009,7 @@
                 }),
                 // 6. Bar: Ontladen (-kW in groen)
                 (window.OpenHEMSChartEngine?.createBarDataset ? window.OpenHEMSChartEngine.createBarDataset({
+                    id: 'battery_dis',
                     label: 'Ontladen (kW)',
                     data: dischargeKwNeg,
                     color: T.dischargeBg,
@@ -948,6 +1018,7 @@
                     yAxisID: 'y1',
                     order: 2
                 }) : {
+                    id: 'battery_dis',
                     label: 'Ontladen (kW)',
                     data: dischargeKwNeg,
                     type: 'bar',
@@ -963,6 +1034,7 @@
                 }),
                 // 7. Bar: Ongedekt Tekort (-kW in rood)
                 (window.OpenHEMSChartEngine?.createBarDataset ? window.OpenHEMSChartEngine.createBarDataset({
+                    id: 'battery_deficit',
                     label: 'Ongedekt Tekort (-kW)',
                     data: deficitKwNeg,
                     color: 'rgba(239, 68, 68, 0.85)',
@@ -971,6 +1043,7 @@
                     yAxisID: 'y1',
                     order: 2
                 }) : {
+                    id: 'battery_deficit',
                     label: 'Ongedekt Tekort (-kW)',
                     data: deficitKwNeg,
                     type: 'bar',
@@ -986,6 +1059,7 @@
                 }),
                 // 8. Line: EPEX Inkoop (€/kWh)
                 {
+                    id: 'battery_imp_price',
                     label: 'Inkoop (€/kWh)',
                     data: importPrices,
                     type: 'line',
@@ -1000,6 +1074,7 @@
                 },
                 // 9. Line: EPEX Teruglevering (€/kWh)
                 {
+                    id: 'battery_exp_price',
                     label: 'Teruglevering (€/kWh)',
                     data: exportPrices,
                     type: 'line',
@@ -1015,6 +1090,7 @@
                 },
                 // 10. Min SoC Reference (10%)
                 {
+                    id: 'battery_min_soc',
                     label: 'Min SoC (10%)',
                     data: Array(labels.length).fill(10),
                     type: 'line',
@@ -1028,6 +1104,7 @@
                 },
                 // 11. Max SoC Reference (95%)
                 {
+                    id: 'battery_max_soc',
                     label: 'Max SoC (95%)',
                     data: Array(labels.length).fill(95),
                     type: 'line',
@@ -1060,48 +1137,19 @@
                 rightColor: '#94A3B8',
                 stacked: true,
                 batteryOverlayRanges: allBatteryRanges,
-                tooltipCallbacks: {
-                    label: function(c) {
-                        const val = c.raw;
-                        if (c.dataset.label.includes('State of Charge')) {
-                            const idx = c.dataIndex;
-                            const kwh = socKwh[idx] !== undefined ? ` (${socKwh[idx]} kWh)` : '';
-                            return `🔋 Lading: ${val}%${kwh}`;
-                        }
-                        if (c.dataset.label.includes('Zonneladen')) {
-                            if (Math.abs(val) < 0.01) return null;
-                            return `☀️ Zonneladen: +${Math.abs(val).toFixed(2)} kW`;
-                        }
-                        if (c.dataset.label.includes('Netladen')) {
-                            if (Math.abs(val) < 0.01) return null;
-                            return `🔌 Netladen: +${Math.abs(val).toFixed(2)} kW`;
-                        }
-                        if (c.dataset.label.includes('Ontladen')) {
-                            if (Math.abs(val) < 0.01) return null;
-                            return `⚡ Ontladen: -${Math.abs(val).toFixed(2)} kW`;
-                        }
-                        if (c.dataset.label.includes('Ongedekt Tekort')) {
-                            if (Math.abs(val) < 0.01) return null;
-                            return `⚠️ Netafname (Tekort): -${Math.abs(val).toFixed(2)} kW`;
-                        }
-                        if (c.dataset.label.includes('Marge')) {
-                            return `${c.dataset.label}: ${val}%`;
-                        }
-                        if (c.dataset.label.includes('Inkoop')) {
-                            return `💶 Inkoop: €${Number(val).toFixed(4)} / kWh`;
-                        }
-                        if (c.dataset.label.includes('Teruglevering')) {
-                            return `💶 Teruglevering: €${Number(val).toFixed(4)} / kWh`;
-                        }
-                        return `${c.dataset.label}: ${val}`;
-                    }
-                }
+                tooltipHandler: customBatteryTooltipHandler
             }) : {
                 responsive: true,
                 maintainAspectRatio: false,
                 batteryOverlayRanges: allBatteryRanges,
                 interaction: { mode: 'index', intersect: false },
-                plugins: { legend: { display: false } }
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        enabled: false,
+                        external: customBatteryTooltipHandler
+                    }
+                }
             };
 
             // Configure yPrice axis
