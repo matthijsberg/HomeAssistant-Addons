@@ -1,0 +1,55 @@
+rules:
+  - id: ha-unsafe-subprocess-shell
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.Popen(..., shell=True, ...)
+          - pattern: subprocess.run(..., shell=True, ...)
+          - pattern: subprocess.check_output(..., shell=True, ...)
+          - pattern: subprocess.check_call(..., shell=True, ...)
+    message: "Potential command injection: subprocess called with shell=True"
+    metadata:
+      cwe: "CWE-78"
+    severity: ERROR
+    languages: [python]
+
+  - id: ha-unsafe-sql-interpolation
+    patterns:
+      - pattern-either:
+          - pattern: $DB.execute(f"...", ...)
+          - pattern: $DB.execute("..." % (...), ...)
+          - pattern: $DB.execute("...".format(...), ...)
+    message: "Potential SQL injection: SQL query constructed via string interpolation or formatting"
+    metadata:
+      cwe: "CWE-89"
+    severity: ERROR
+    languages: [python]
+
+  - id: ha-unrestricted-eval-exec
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: exec(...)
+    message: "Use of dangerous eval() or exec() construct allows arbitrary code execution"
+    metadata:
+      cwe: "CWE-95"
+    severity: ERROR
+    languages: [python]
+
+  - id: ha-hardcoded-token-leak
+    patterns:
+      - pattern-regex: '(?i)(bearer\s+[A-Za-z0-9_\-\.]{30,}|eyJhbGciOi[A-Za-z0-9_\-\.]+)'
+    message: "Hardcoded bearer token or JWT found in source code"
+    metadata:
+      cwe: "CWE-798"
+    severity: ERROR
+    languages: [python, yaml, json, javascript]
+
+  - id: ha-unsafe-path-traversal-join
+    patterns:
+      - pattern: os.path.join($BASE, $INPUT)
+      - pattern-not: os.path.join($BASE, os.path.basename($INPUT))
+    message: "Path join with unvalidated input may allow directory traversal (CWE-22)"
+    metadata:
+      cwe: "CWE-22"
+    severity: WARNING
+    languages: [python]
