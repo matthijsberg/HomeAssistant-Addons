@@ -61,6 +61,7 @@ def test_mcp_high_level_tools_coverage():
         "/api/model/parameter-history": "openhems_get_parameter_history",
         "/api/analytics/power_producers": "openhems_get_analytics_power",
         "/api/analytics/dhw_history": "openhems_get_analytics_dhw",
+        "/api/analytics/battery_history": "openhems_get_analytics_battery",
         "/api/analytics/plan_vs_actual": "openhems_get_plan_vs_actual",
         "/api/analytics/decisions": "openhems_get_decisions",
         "/api/devices": "openhems_get_devices",

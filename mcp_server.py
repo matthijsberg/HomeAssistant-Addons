@@ -177,6 +177,20 @@ def openhems_get_analytics_dhw(range: str = "24h", resolution: str = "15m") -> s
 
 
 @mcp.tool()
+def openhems_get_analytics_battery(range: str = "24h", resolution: str = "1h") -> str:
+    """Get historical battery State of Charge (%), charging/discharging powers (kW), and dynamic tariffs.
+
+    Args:
+        range: Historical timeframe: '24h', '48h', or '7d'.
+        resolution: Bucket size: '15m' or '1h'.
+    Returns:
+        Historical battery trajectory, power flows, and financial impacts.
+    """
+    res = _api_request("/api/analytics/battery_history", params={"range": range, "resolution": resolution})
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
 def openhems_get_plan_vs_actual(range: str = "24h", resolution: str = "15m") -> str:
     """Get aligned plan vs actual time-series comparing realized telemetry to planned dispatch schedules and forecasts.
 

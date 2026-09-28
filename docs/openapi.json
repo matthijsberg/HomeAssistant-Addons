@@ -458,6 +458,51 @@
         }
       }
     },
+    "/api/analytics/battery_history": {
+      "get": {
+        "tags": [
+          "Analytics & History"
+        ],
+        "summary": "Get historical battery trajectory, power flows, and tariffs",
+        "description": "Returns historical battery State of Charge (%), charging/discharging powers (kW), dynamic EPEX tariffs, and net cost impacts.",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "description": "Lookback timeframe",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "24h",
+                "48h",
+                "7d"
+              ],
+              "default": "24h"
+            }
+          },
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Bucket resolution",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h"
+              ],
+              "default": "1h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Battery historical trajectory and power time-series"
+          }
+        }
+      }
+    },
     "/api/analytics/plan_vs_actual": {
       "get": {
         "tags": [
