@@ -10,7 +10,7 @@ Layer 3 Scheduling & Arbitration:
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from models.canonical import StandardizedState
 from layer3_scheduling.plan_store import PlanStore
@@ -105,7 +105,7 @@ def evaluate_and_apply_dhw_run_merger(
         store = PlanStore.get_instance()
         store.register_in_flight_run(target_temp_c=60.0, mode="max_on")
         store.publish_plan(plan)
-        
+
         now_ts = time.time()
         if _LAST_LOGGED_DECISION.get("state") != "max_on" or (now_ts - _LAST_LOGGED_DECISION.get("ts", 0)) >= 900.0:
             _LAST_LOGGED_DECISION["state"] = "max_on"
@@ -383,7 +383,7 @@ def evaluate_and_log_planner_decisions(plan: Any, frame: Any):
                 desc = f"Verwarming laadt {sh.preheat_kwh_th:.1f} kWh thermische buffer in de dekvloer tijdens goedkope nachturen (02:00–06:00). Voorkomt piekafname overdag."
                 mode = "advised_on"
             else:
-                title = f"♨️ CV Vloerverwarming: Stooklijn Modulatie"
+                title = "♨️ CV Vloerverwarming: Stooklijn Modulatie"
                 desc = f"Verwarming volgt reguliere stooklijn (gemiddeld {sh.mean_outdoor_temp_c:.1f}°C buiten)."
                 mode = "normal"
 

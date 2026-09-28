@@ -15,7 +15,6 @@ Applies data exclusion windows (e.g. Modbus outage) to prevent distorted trainin
 Stores cleanly into 'openhems' InfluxDB measurement 'energy_telemetry' using Line Protocol.
 """
 
-import sys
 import os
 import argparse
 import json
@@ -25,7 +24,7 @@ from datetime import datetime, timezone, timedelta
 import urllib.request
 import urllib.parse
 import urllib.error
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 
 SOURCE_INFLUX_URL = "http://a0d7b954-influxdb:8086"
 SOURCE_DB = "hassio"
@@ -84,7 +83,7 @@ def write_influx_lines(url: str, db: str, user: str, pwd: str, lines: List[str])
         "db": db,
         "precision": "s"
     })
-    
+
     # Try sending compressed if large
     if len(payload) > 50000:
         req = urllib.request.Request(
@@ -95,7 +94,7 @@ def write_influx_lines(url: str, db: str, user: str, pwd: str, lines: List[str])
         )
     else:
         req = urllib.request.Request(write_url, data=payload, method="POST")
-        
+
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.status in [200, 204]
@@ -204,7 +203,7 @@ SELECT last(value) FROM "°C" WHERE entity_id = 'hc_dhw_temperature_r5t_dhw_tank
         # Totals and balance
         p_tot = max(0.0, (p_imp - p_exp) + p_sol)
         p_dir_sol = max(0.0, min(p_sol, p_tot))
-        
+
         if not in_excl:
             p_unalloc = max(0.0, p_tot - p_wp_calc)
             tot_unalloc_kwh += (p_unalloc / 60.0) / 1000.0
@@ -275,7 +274,7 @@ def main():
 
     exclusion_windows = config.get("data_exclusion_windows", [])
 
-    print(f"=== Open HEMS Historical Telemetry Importer ===")
+    print("=== Open HEMS Historical Telemetry Importer ===")
     print(f"Period: {start_dt.isoformat()} -> {end_dt.isoformat()} ({(end_dt - start_dt).days} days)")
     print(f"Source DB: {SOURCE_DB} on {SOURCE_INFLUX_URL} (User: {SOURCE_USER})")
     print(f"Target DB: {TARGET_DB} on {TARGET_INFLUX_URL} (User: {TARGET_USER})")
@@ -331,7 +330,7 @@ def main():
     print(f"Import completed in {total_dur:.1f}s")
     print(f"Total 1-minute samples: {total_ts:,}")
     print(f"Total Line Protocol points: {total_lines:,}")
-    print(f"Totals across period:")
+    print("Totals across period:")
     print(f"  • Zonnestroom (Solar):       {grand_solar_kwh:,.1f} kWh")
     print(f"  • WP Ruimteverwarming (CV):   {grand_wp_cv_kwh:,.1f} kWh")
     print(f"  • WP Warm Tapwater (SWW):     {grand_wp_dhw_kwh:,.1f} kWh")

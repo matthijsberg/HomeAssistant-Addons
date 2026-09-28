@@ -128,7 +128,7 @@ class ForecastSolarProvider:
         slots = []
         for i in range(horizon_slots):
             slot_dt = aligned_start + timedelta(minutes=i * step_mins)
-            
+
             # Find nearest or linear interpolation between points
             w_val = 0.0
             if parsed_points:

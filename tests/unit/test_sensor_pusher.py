@@ -19,7 +19,7 @@ def test_sensor_pusher_initialization():
 def test_sensor_pusher_payload_generation():
     """Verify that push_plan_sensors builds correct entity states and calls push_state."""
     pusher = HomeAssistantSensorPusher("https://172.30.32.1:8123", "fake_token")
-    
+
     # Mock push_state so we inspect calls without real network traffic
     pusher.push_state = MagicMock(return_value=True)
 

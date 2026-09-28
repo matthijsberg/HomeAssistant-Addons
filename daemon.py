@@ -11,17 +11,15 @@ Generic Energy Management Platform:
 
 import argparse
 import json
-import os
 import socket
-import ssl
 import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -35,30 +33,23 @@ from models.canonical import normalize_power_reading
 from site_adapters.daikin_p1p2 import DaikinP1P2StateClassifier
 from layer3_scheduling.decision_audit import DecisionAuditLogger
 from api.context import (
-    GLOBAL_COLLECTOR, GLOBAL_DHW_MODEL, GLOBAL_MODEL,
-    ensure_active_canonical_plan, INDEX_HTML_PATH, WEB_DIR, get_web_dir
+    ensure_active_canonical_plan, get_web_dir
 )
 from api.secrets_store import (
-    CONFIG_FILE, PARAMS_FILE, SECRETS_FILE,
-    load_json, save_json, load_secrets, save_secret, get_secret, ensure_framework_defaults
+    CONFIG_FILE, load_json, load_secrets, ensure_framework_defaults
 )
 from integrations.homeassistant.client import (
-    get_ha_client_config, get_ha_states_map, fetch_ha_entities,
-    call_ha_service, call_ha_service_detailed, make_daikin_ha_actuator
+    get_ha_client_config, get_ha_states_map, call_ha_service, make_daikin_ha_actuator
 )
 from api.infra_diagnostics import (
-    write_hems_annotation, log_technical_error,
-    test_influxdb_connection, test_mqtt_connection
+    write_hems_annotation, log_technical_error
 )
 from api.energy_feed import (
-    AMS_TZ, DUTCH_DAYS_SHORT, format_slot_label,
-    calculate_poa_solar_kw, get_anchored_weather_forecast,
-    fetch_recent_telemetry_history, get_epex_tariffs_cached
+    AMS_TZ
 )
 from layer3_scheduling.plan_decision_evaluator import (
     evaluate_and_apply_dhw_run_merger,
-    evaluate_and_log_night_boiler_decision,
-    evaluate_and_log_planner_decisions
+    evaluate_and_log_night_boiler_decision
 )
 from layer3_scheduling.plan_store import PlanStore
 from layer4_control.room_thermostat_buffer import RoomThermostatBufferController
@@ -790,7 +781,7 @@ class HemsBackgroundCollector(threading.Thread):
             # Update Live Pipeline Power Balance (10s snapshot) with direct MQTT priority
             p1_imp = get_val_w("sensor.power_consumption") or 0.0
             p1_exp = get_val_w("sensor.power_production") or 0.0
-            
+
             # Read Solar (Direct MQTT Inepro 103 -> HA Fallback)
             if "mbmd/inepro1-103/Power" in self.mqtt_sub.cache:
                 sol = abs(float(self.mqtt_sub.cache["mbmd/inepro1-103/Power"]))

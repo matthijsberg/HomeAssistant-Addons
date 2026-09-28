@@ -1,13 +1,11 @@
 # Open HEMS: Analytics & Energy Telemetry Router
 import urllib
 import json
-import math
 import ssl
 import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -15,7 +13,7 @@ from api.context import (
     ensure_active_canonical_plan, GLOBAL_DHW_MODEL
 )
 from api.secrets_store import (
-    CONFIG_FILE, PARAMS_FILE, SECRETS_FILE, load_json, save_json, load_secrets
+    CONFIG_FILE, load_json, load_secrets
 )
 from integrations.homeassistant.client import (
     get_ha_client_config, get_ha_states_map
@@ -25,13 +23,13 @@ from api.energy_feed import (
     calculate_poa_solar_kw, fetch_recent_telemetry_history,
     get_epex_tariffs_cached, get_tariff_sources_map
 )
-from layer3_scheduling.decision_audit import DecisionAuditLogger
 from layer3_scheduling.peak_detection import (
     detect_dynamic_price_peaks,
     extract_plan_spitsblok_ranges,
     extract_plan_soft_advice_ranges
 )
 from models.canonical import DispatchPlanSlot, StandardizedState
+from layer3_scheduling.battery_policy import BatterySpec
 
 _weather_history_cache: Dict[str, Any] = {'ts': 0, 'rad': {}, 'temp': {}}
 
@@ -1039,7 +1037,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             # 1. Query InfluxDB for actuals
             q_telemetry = f"""
             SELECT mean("solar_w") as solar, mean("total_house_w") as house, mean("unallocated_w") as unalloc, mean("heatpump_w") as hp, mean("temperature_c") as tank_temp
-            FROM "energy_telemetry" 
+            FROM "energy_telemetry"
             WHERE time >= '{t_start}' AND time <= '{t_end}'
             GROUP BY time({bucket_sz}) fill(linear);
             SELECT mean("power_w") as dhw_w FROM "energy_telemetry" WHERE "device_id" = 'daikin_heat_pump' AND "mode" = 'dhw' AND time >= '{t_start}' AND time <= '{t_end}' GROUP BY time({bucket_sz}) fill(0);
@@ -1167,7 +1165,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     # Baseline fallback: standard night charging window (01:30–02:30) if no specific decision window logged
                     if p_dhw_kw == 0.0 and "01:30" <= t_cur < "02:30":
                         p_dhw_kw = 3.0
-                    
+
                     p_cv_kw = 0.0
 
                 pred_dhw.append(p_dhw_kw)
@@ -1489,7 +1487,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
 
             q_telemetry = f"""
             SELECT mean("solar_w") as solar, mean("heatpump_w") as hp, mean("temperature_c") as tank_temp
-            FROM "energy_telemetry" 
+            FROM "energy_telemetry"
             WHERE time >= '{t_start}' AND time <= '{t_end}'
             GROUP BY time({bucket_sz}) fill(linear);
             SELECT mean("solar_kw") FROM "weather_solar_forecast" WHERE time >= '{t_start}' AND time <= '{t_end}' GROUP BY time({bucket_sz}) fill(linear);
@@ -1651,7 +1649,6 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             labels = format_chart_timeline_labels(slot_dts, is_15m=is_15m, is_historical=True)
 
             # Tariffs
-            from api.energy_feed import get_epex_tariffs_cached
             from layer3_scheduling.tariff_provider import TariffProvider
             _, prices_map, _ = get_epex_tariffs_cached(is_15m=True)
 

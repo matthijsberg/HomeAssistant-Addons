@@ -7,8 +7,6 @@ compensation according to Dutch dynamic energy contract rules (e.g. Powerpeers).
 
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
-from pathlib import Path
-import json
 
 
 @dataclass

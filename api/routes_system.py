@@ -8,13 +8,10 @@ import ssl
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
-from pathlib import Path
-from typing import Dict, Any, List, Optional
+from datetime import datetime
 
 from api.context import (
-    ensure_active_canonical_plan, GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
+    ensure_active_canonical_plan, GLOBAL_COLLECTOR
 )
 from api.secrets_store import (
     CONFIG_FILE, PARAMS_FILE, SECRETS_FILE,
@@ -25,9 +22,6 @@ from integrations.homeassistant.client import (
 )
 from api.infra_diagnostics import (
     test_influxdb_connection, test_mqtt_connection
-)
-from api.energy_feed import (
-    AMS_TZ, format_slot_label, calculate_poa_solar_kw, fetch_recent_telemetry_history
 )
 from models.canonical import StandardizedState, get_state_metadata
 from layer3_scheduling.plan_store import get_plan_store

@@ -6,9 +6,7 @@ Bridges DhwOptimizerResult into the authoritative DHWPlanSummary and DispatchPla
 guaranteeing full conformance to Open HEMS 6-state taxonomy, entity isolation, and dumb views.
 """
 
-from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime, timezone
-import math
+from typing import Dict, List, Any, Optional
 
 from models.canonical import (
     DHWPlanSummary,
@@ -20,7 +18,6 @@ from layer3_scheduling.dhw_specs import DhwTankSpec
 from layer3_scheduling.dhw_optimizer import (
     DhwOptimizerResult,
     DhwOptimizerParams,
-    DhwRun,
 )
 from layer3_scheduling.dhw_optimizer_explain import explain_dhw_optimization
 

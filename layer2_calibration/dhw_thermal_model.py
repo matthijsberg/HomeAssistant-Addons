@@ -23,14 +23,11 @@ Features:
 import os
 import json
 import math
-import statistics
-import urllib.request
-import urllib.parse
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
-from models.physics import calculate_dhw_cop, dhw_step
+from models.physics import dhw_step
 
 AMS_TZ = ZoneInfo("Europe/Amsterdam")
 

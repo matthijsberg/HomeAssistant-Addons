@@ -11,9 +11,9 @@ Principles:
 """
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 
 class Vector(str, Enum):
@@ -271,7 +271,7 @@ def normalize_power_reading(
     """
     Deterministically normalizes any raw power reading from hardware, MQTT, or Home Assistant
     to canonical Watts (W).
-    
+
     Borging Rules:
       1. Returns None for None, 'unavailable', 'unknown', or unparseable inputs.
       2. Device Contract (Priority 1): If device_cfg['native_unit'] == 'kW', strictly multiplies by 1000.0.

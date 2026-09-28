@@ -7,7 +7,7 @@ adapters, capability-based device resolution, and canonical device typing.
 INVARIANT: No dynamic directory scanning, no magic imports, zero entity names.
 """
 
-from typing import Dict, Any, List, Optional, FrozenSet, Iterable
+from typing import Dict, Any, List, Optional, Iterable
 from integrations.interfaces import AdapterSpec, DeviceBinding, DeviceCapability
 from models.canonical import DeviceType
 

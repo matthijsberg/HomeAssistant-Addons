@@ -8,7 +8,7 @@ Implements layer4_control.interfaces.IActuatorController contract.
 
 import time
 from dataclasses import dataclass
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Any, Callable
 from layer4_control.interfaces import IActuatorController
 from models.canonical import DeviceCommand
 from integrations.daikin_altherma.interlocks import DaikinInterlock, DaikinHardwareCommand

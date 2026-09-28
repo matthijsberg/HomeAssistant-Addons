@@ -6,7 +6,7 @@ enabling transparent auditing in InfluxDB, Grafana, and the Open HEMS UI.
 """
 
 from typing import Dict, Any, Optional
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from datetime import datetime
 import json
 
@@ -27,23 +27,23 @@ class DecisionRecord:
     def to_influx_line(self, measurement: str = "hems_decisions") -> str:
         """Serializes decision record to InfluxDB Line Protocol."""
         now_ns = int(datetime.fromisoformat(self.timestamp_iso).timestamp() * 1e9)
-        
+
         # Tags (low cardinality for fast Grafana filtering)
         tags = f"domain={self.domain},decision_type={self.decision_type},chosen_mode={self.chosen_mode},category={self.category}"
-        
+
         # Fields
         safe_reason = self.reason.replace('"', '\\"').replace('\n', ' ')
         safe_expl = self.explanation.replace('"', '\\"').replace('\n', ' ')
-        
+
         fields = [
             f'reason="{safe_reason}"',
             f'explanation="{safe_expl}"',
             f'savings_eur={float(self.savings_estimate_eur):.2f}'
         ]
-        
+
         if self.target_temp_c is not None:
             fields.append(f'target_temp_c={float(self.target_temp_c):.1f}')
-            
+
         # Extract numerical inputs as dedicated fields for Grafana aggregation
         for k, v in self.inputs.items():
             if isinstance(v, (int, float)) and not isinstance(v, bool):

@@ -5,8 +5,8 @@ Implements physical command dispatch via volatile RAM Smart Grid relays
 (S10S/S11S), hydraulic exclusivity, and Priority 1 Emergency Comfort guards.
 """
 
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from datetime import datetime
+from typing import Dict, List, Optional
 from models.canonical import DeviceCommand
 from layer4_control.interfaces import ISafetyGuard, IActuatorController
 

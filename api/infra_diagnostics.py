@@ -11,7 +11,7 @@ import socket
 import urllib.request
 import urllib.parse
 import urllib.error
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from api.secrets_store import CONFIG_FILE, load_json, load_secrets
 from layer3_scheduling.decision_audit import DecisionAuditLogger

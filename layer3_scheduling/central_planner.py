@@ -13,9 +13,8 @@ Strictly preserves all operational and physical directives:
 """
 
 import math
-import time
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional, Tuple
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
 from models.canonical import (
     StandardizedState,
     get_state_metadata,
@@ -24,7 +23,6 @@ from models.canonical import (
     CanonicalDispatchPlan,
 )
 from layer3_scheduling.peak_detection import (
-    calc_percentile,
     detect_dynamic_price_peaks
 )
 from layer1_data_collection.sanitizer import CleanTelemetryFrame
@@ -34,7 +32,6 @@ from layer3_scheduling.dhw_specs import DhwTankSpec
 from layer3_scheduling.dhw_shadow_logger import get_dhw_planner_mode, run_dhw_shadow_comparison
 from layer3_scheduling.dhw_optimizer import solve, DhwOptimizerParams
 from layer3_scheduling.dhw_plan_adapter import adapt_optimizer_to_dhw_summary
-from models.physics import calculate_dhw_cop
 
 
 class CentralPlanner:

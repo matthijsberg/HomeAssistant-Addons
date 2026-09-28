@@ -17,7 +17,6 @@ Solves:
 """
 
 import os
-import sys
 import json
 import math
 from datetime import datetime

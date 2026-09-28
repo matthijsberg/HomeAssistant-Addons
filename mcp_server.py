@@ -9,12 +9,11 @@ Maintains strict lockstep parity with the Open HEMS OpenAPI 3.1.0 REST API.
 """
 
 import os
-import sys
 import json
 import urllib.request
 import urllib.error
 import urllib.parse
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from mcp.server.mcpserver import MCPServer
 
 # Configuration

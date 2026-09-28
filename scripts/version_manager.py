@@ -14,9 +14,7 @@ Usage:
   python3 version_manager.py release-notes [version]
 """
 
-import sys
 import re
-import os
 import argparse
 from pathlib import Path
 

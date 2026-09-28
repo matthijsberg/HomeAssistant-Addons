@@ -6,7 +6,7 @@ Extracts UI formatting, currency localization, consumer breakdowns,
 and arbitrage calculations out of raw HTTP API handlers into testable pure functions.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from models.api_dto import KpiCardItem, KpiBreakdownItem
 
 

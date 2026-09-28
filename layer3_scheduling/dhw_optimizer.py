@@ -42,14 +42,14 @@ Algorithm:
   If (T_0, r_0) is infeasible, gracefully degrades to emergency recovery outside lockouts.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timezone, timedelta
 import math
 import time
 import numpy as np
 
-from models.physics import dhw_cop, dhw_heat_delivered_kwh, dhw_step
+from models.physics import dhw_cop, dhw_step
 from layer2_calibration.dhw_thermal_model import DhwThermalModel
 from layer3_scheduling.dhw_specs import DhwTankSpec
 from layer3_scheduling.tariff_provider import TariffProvider
@@ -642,7 +642,7 @@ def solve(
             is_fallback = True
             if validation_issue is None:
                 validation_issue = f"Initial state T0={t0_c:.1f}°C below comfort boundary or infeasible; degraded to emergency recovery."
-            
+
             if not is_locked_k and current_t < t_max:
                 u_opt = 1
                 current_t = t_next_cand_1

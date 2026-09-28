@@ -6,7 +6,7 @@ and time-series persistence.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from models.canonical import Measurement, DeviceState
 
 

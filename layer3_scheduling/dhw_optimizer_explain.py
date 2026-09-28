@@ -11,9 +11,8 @@ Three Canonical Counterfactuals:
 3. J_delay: Exact solve with u == 0 forced until the end of the first planned run.
 """
 
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone, timedelta
-import math
 
 from models.physics import dhw_step
 from layer3_scheduling.dhw_specs import DhwTankSpec
@@ -22,7 +21,6 @@ from layer3_scheduling.dhw_optimizer import (
     solve,
     DhwOptimizerParams,
     DhwOptimizerResult,
-    DhwRun,
 )
 
 

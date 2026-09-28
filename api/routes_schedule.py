@@ -1,35 +1,28 @@
 # Open HEMS: 24h Dispatch Schedule & Optimization Router
 import urllib
 import json
-import math
-import os
 import re
 import ssl
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from pathlib import Path
-from typing import Dict, Any, List, Optional
 
 from api.context import (
     ensure_active_canonical_plan, GLOBAL_CENTRAL_CACHE,
-    GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
+    GLOBAL_MODEL
 )
 from api.secrets_store import (
-    CONFIG_FILE, PARAMS_FILE, SECRETS_FILE,
-    load_json, save_json, load_secrets, ensure_framework_defaults
+    CONFIG_FILE, load_json, save_json, ensure_framework_defaults
 )
 from integrations.homeassistant.client import (
     get_ha_client_config, get_ha_states_map
 )
 from api.energy_feed import (
-    AMS_TZ, DUTCH_DAYS_SHORT, format_slot_label,
-    calculate_poa_solar_kw, fetch_recent_telemetry_history,
+    AMS_TZ, DUTCH_DAYS_SHORT, calculate_poa_solar_kw, fetch_recent_telemetry_history,
     get_epex_tariffs_cached, get_tariff_sources_map
 )
 from layer3_scheduling.plan_decision_evaluator import evaluate_and_apply_dhw_run_merger
-from models.canonical import StandardizedState
 from layer3_scheduling.peak_detection import detect_dynamic_price_peaks
 from layer3_scheduling.battery_policy import BatteryPolicy, BatterySpec
 

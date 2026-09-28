@@ -11,7 +11,7 @@ This baseline represents the true counterfactual: "What happens if Open HEMS doe
 The optimizer must beat this baseline on objective J to justify intervention.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 

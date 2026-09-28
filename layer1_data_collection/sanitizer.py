@@ -9,7 +9,7 @@ Strictly enforces: No mock data in production, clear quality flags.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from models.canonical import Quality
 

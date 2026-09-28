@@ -431,7 +431,7 @@ class EnergyDataCollector:
                 temp_map[hour_key] = round(float(temp), 1)
                 hum_map[hour_key] = round(float(hum), 1)
                 wind_map[hour_key] = round(float(wind), 1)
-                
+
                 # Apply empirical tilt & shading factor for this hour
                 tilt_factor = float(tilt_profile.get(str(dt.hour), tilt_profile.get(dt.hour, 1.0)))
                 solar_kw_map[hour_key] = round((rad / 1000.0) * kwp * eff * tilt_factor, 3) if rad else 0.0

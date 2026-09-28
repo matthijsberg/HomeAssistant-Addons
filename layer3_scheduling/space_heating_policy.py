@@ -20,8 +20,7 @@ Key Capabilities:
 6. Hydraulic DHW Interlock: Space heating is strictly 0 kW during active DHW runs.
 """
 
-from typing import List, Dict, Any, Tuple, Optional
-import math
+from typing import List, Dict, Any, Optional
 import json
 from pathlib import Path
 
@@ -149,7 +148,7 @@ class SpaceHeatingPolicy:
             effective_price = min(price_eur, 0.075)
         elif solar_kw >= 0.5:
             effective_price = min(price_eur, 0.12)
-        
+
         return round(effective_price / max(1.0, cop), 4)
 
     @classmethod

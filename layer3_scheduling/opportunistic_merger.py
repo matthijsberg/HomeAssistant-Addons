@@ -6,9 +6,9 @@ Detects when the heat pump starts heating domestic hot water autonomously
 60°C thermal storage / solar boost run into the active run or stop at 50°C.
 """
 
-from typing import Optional, List, Dict, Any
-from dataclasses import dataclass, field
-from models.canonical import CanonicalDispatchPlan, DispatchPlanSlot
+from typing import Optional, List
+from dataclasses import dataclass
+from models.canonical import CanonicalDispatchPlan
 
 
 @dataclass

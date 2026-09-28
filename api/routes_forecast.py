@@ -1,32 +1,27 @@
 # Open HEMS: Operational Forecast Router (DHW & Space Heating)
 import urllib
 import json
-import math
 import ssl
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from pathlib import Path
-from typing import Dict, Any, List, Optional
 
 from api.i18n import localize_dhw_decision
 from api.context import (
-    ensure_active_canonical_plan, GLOBAL_CENTRAL_CACHE,
-    GLOBAL_MODEL, GLOBAL_DHW_MODEL, GLOBAL_COLLECTOR
+    ensure_active_canonical_plan, GLOBAL_DHW_MODEL
 )
 from api.secrets_store import (
-    CONFIG_FILE, PARAMS_FILE, load_json, save_json, load_secrets
+    CONFIG_FILE, PARAMS_FILE, load_json
 )
 from layer3_scheduling.dhw_specs import DhwTankSpec
 from integrations.homeassistant.client import (
-    get_ha_client_config, get_ha_states_map
+    get_ha_client_config
 )
 from api.energy_feed import (
-    AMS_TZ, format_slot_label, format_chart_timeline_labels, calculate_poa_solar_kw, fetch_recent_telemetry_history
+    AMS_TZ, format_chart_timeline_labels, fetch_recent_telemetry_history
 )
 from layer3_scheduling.plan_decision_evaluator import evaluate_and_apply_dhw_run_merger
-from layer3_scheduling.space_heating_policy import SpaceHeatingPolicy
 from layer3_scheduling.tariff_provider import TariffProvider
 from layer3_scheduling.battery_policy import (
     BatteryPolicy, BatterySpec, extract_battery_overlay_ranges, BatterySlotResult
@@ -168,9 +163,9 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         comfort_reasons = []
         if has_evening_run:
             comfort_reasons.append("Avondherstel: na de avondspits koelt de woning af door wegvallende zon en dalende buitentemperatuur. Zodra de binnentemperatuur naar 19,6 °C daalt, start een rustige stookcyclus (min. 2u runtijd) om de woonkamer stabiel op 20,0 °C te houden.")
-        
+
         comfort_reasons.append("Geen middagstook: om 14:00–16:00 is de buitentemperatuur hoog (~19 °C) en het warmteverlies minimaal. Vloerverwarming heeft een minimale runtijd van 2 uur (~9 kWh thermisch); stoken op een zonnige middag zou leiden tot oververhitting (>21,5 °C), waarbij die buffer over de 5 tussenliggende uren grotendeels weglekt.")
-        
+
         if has_night_run:
             comfort_reasons.append("Nachtvallei Pre-heat: benutting van het laagste nachttarief om de betondekvloer (13,2 kWh/K) thermisch voor te laden, zodat de woning de dure ochtendpiek passief overbrugt.")
 

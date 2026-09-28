@@ -4,21 +4,18 @@ Open HEMS - Domestic Hot Water (DHW / SWW) Empirical COP Calibrator
 Fits canonical DHW parameters: COP_50, k_T, k_out via OLS over historical runs.
 """
 
-import os
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import json
-import math
 import urllib.request
 import urllib.parse
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, Any
 import numpy as np
 
 from api.secrets_store import load_secrets
-from models.physics import dhw_step, get_dhw_cop_params
 from layer2_calibration.dhw_thermal_model import DhwThermalModel
 
 

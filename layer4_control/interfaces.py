@@ -7,7 +7,7 @@ and comfort safety floors.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
+from typing import List, Optional
 from models.canonical import DeviceCommand
 
 

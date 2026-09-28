@@ -29,7 +29,7 @@ def test_electricity_prices_tooltip_extraction():
     // Load customPricesTooltipHandler from app.js
     const fs = require('fs');
     const code = fs.readFileSync('{APP_JS_PATH}', 'utf8');
-    
+
     // Extract renderCustomTooltip and customPricesTooltipHandler functions
     eval(code.match(/function renderCustomTooltip\\(context, config\\) \\{{[\\s\\S]*?\\n        \\}}/)[0]);
     eval(code.match(/function customPricesTooltipHandler\\(context\\) \\{{[\\s\\S]*?\\n        \\}}/)[0]);
@@ -68,7 +68,7 @@ def test_electricity_prices_tooltip_extraction():
 
     res = subprocess.run(["node", "-e", js_runner], capture_output=True, text=True)
     assert res.returncode == 0, f"Node test failed: {res.stderr}"
-    
+
     out = json.loads(res.stdout.strip())
     assert out["hasSolar"], f"Tooltip failed to extract 1.25 kW solar production: {out['html']}"
     assert out["hasImport"], f"Tooltip failed to extract 0.1574 import price: {out['html']}"

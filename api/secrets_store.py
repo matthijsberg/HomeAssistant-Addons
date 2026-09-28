@@ -7,7 +7,7 @@ Handles secure, isolated credentials management and JSON configuration files.
 import os
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 
 CONFIG_FILE = Path("/config/heatpump_config.json")

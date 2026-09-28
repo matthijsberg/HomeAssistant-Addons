@@ -17,7 +17,7 @@ Entities:
 import json
 import ssl
 import urllib.request
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from models.canonical import CanonicalDispatchPlan
 from layer3_scheduling.tariff_provider import TariffProvider

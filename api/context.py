@@ -1,30 +1,18 @@
 import sys
-import os
-import re
 from pathlib import Path
-import argparse
 import json
 import urllib.parse
 import urllib.request
 import urllib.error
-import ssl
-import socket
-import base64
-import time
 import threading
-import math
-from typing import Optional, Dict, Any, List, Tuple
 
 ROOT_DIR = str(Path(__file__).resolve().parent.parent)
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from layer1_data_collection.sanitizer import TelemetrySanitizer, CleanTelemetryFrame
+from layer1_data_collection.sanitizer import TelemetrySanitizer
 from layer3_scheduling.central_planner import CentralPlanner
-from layer3_scheduling.plan_store import get_plan_store, PlanStore
-from layer3_scheduling.tariff_provider import TariffProvider
-from models.mode_catalog import get_mode_meta, load_mode_catalog
-from models.canonical import StandardizedState, get_state_metadata, CanonicalDispatchPlan
+from layer3_scheduling.plan_store import get_plan_store
 
 from layer2_calibration.learned_forecaster import HybridForecastingModel
 from layer2_calibration.dhw_thermal_model import DhwThermalModel
@@ -34,8 +22,7 @@ GLOBAL_DHW_MODEL = DhwThermalModel()
 
 GLOBAL_COLLECTOR = None
 
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
@@ -43,26 +30,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, "/addons/open-hems")
 sys.path.insert(0, "/opt/open-hems")
-from site_adapters.daikin_p1p2 import DaikinP1P2StateClassifier, HeatPumpDisaggregation
-from models.canonical import normalize_power_reading, StandardizedState, get_state_metadata
-from layer3_scheduling.peak_detection import detect_dynamic_price_peaks, calc_percentile
 
 from api.secrets_store import (
-    CONFIG_FILE, PARAMS_FILE, SECRETS_FILE, HA_API_CONFIG,
-    load_json, save_json, load_secrets, save_secret, get_secret, ensure_framework_defaults
+    CONFIG_FILE, PARAMS_FILE, load_json, load_secrets
 )
 from integrations.homeassistant.client import (
-    get_ha_client_config, fetch_ha_entities, get_ha_states_map,
-    call_ha_service, call_ha_service_detailed, make_daikin_ha_actuator
-)
-from api.infra_diagnostics import (
-    write_hems_annotation, log_technical_error,
-    test_influxdb_connection, test_mqtt_connection
+    get_ha_states_map
 )
 from api.energy_feed import (
-    AMS_TZ, DUTCH_DAYS_SHORT, format_slot_label,
-    calculate_poa_solar_kw, get_anchored_weather_forecast,
-    fetch_recent_telemetry_history, get_epex_tariffs_cached
+    calculate_poa_solar_kw, get_epex_tariffs_cached
 )
 from layer3_scheduling.plan_decision_evaluator import evaluate_and_log_planner_decisions
 
@@ -204,7 +180,7 @@ def ensure_active_canonical_plan(force_refresh=False, horizon_hours=48.0):
                         live_dhw_setpoint = v_sp
                 except (ValueError, TypeError):
                     pass
-        
+
         # Read live room temperature and target setpoint from Daikin climate entity
         daikin_cl = states_map.get("climate.woonkamer_climate_daikin", {})
         if daikin_cl:
@@ -281,7 +257,6 @@ def ensure_active_canonical_plan(force_refresh=False, horizon_hours=48.0):
     live_solar_kw = None
     live_wind_ms = None
     try:
-        from layer1_data_collection.nowcasting import ObservationNowcaster
 
         # Live Outdoor Temp from Wittboy
         for ent in ["sensor.wittboy_gw2000a_weather_station_gw2000a_outdoor_temperature", "sensor.temperatuur_buiten"]:
@@ -376,7 +351,7 @@ def ensure_active_canonical_plan(force_refresh=False, horizon_hours=48.0):
             wp_pwr = 0.0
         dhw_demand_st = (states_map.get("binary_sensor.hc_dhw_dhw_demand", {}).get("state") == "on")
         dhw_valve_st = (states_map.get("binary_sensor.hc_dhw_valve_dhw_tank", {}).get("state") == "on")
-        
+
         store = get_plan_store()
         if (s10_on and s11_on) or (wp_pwr > 600.0 and (dhw_demand_st or dhw_valve_st)) or (wp_pwr > 1200.0 and cur_dhw < 58.0):
             if not store.get_in_flight_run():

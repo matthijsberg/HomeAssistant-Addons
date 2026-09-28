@@ -10,7 +10,7 @@ INVARIANTS:
 3. Strictly Priority 3: operates strictly on residual load after Baseload, DHW, and Space Heating.
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import List, Dict, Any, Optional, Set
 import math
 import numpy as np

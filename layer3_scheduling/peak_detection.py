@@ -9,7 +9,7 @@ Layer 3 Business & Scheduling Logic:
 
 import math
 from datetime import timedelta
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple
 
 
 def calc_percentile(data: List[float], p: float) -> float:

@@ -6,10 +6,9 @@ the 24-hour / 96-quarter multi-vector economic dispatch schedule.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 from models.canonical import (
     ScheduleSlot,
-    PolicyType,
     ShiftableConsumerPolicy,
     ThermalBufferPolicy,
     BatteryArbitragePolicy,

@@ -28,7 +28,7 @@ def test_zero_fragile_label_matching_in_frontend():
 def test_key_datasets_have_semantic_ids():
     """Verifies that critical datasets define immutable `id` attributes."""
     code = APP_JS_PATH.read_text(encoding="utf-8")
-    
+
     required_ids = [
         "solar_forecast",
         "epex_import",

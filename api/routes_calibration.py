@@ -1,21 +1,18 @@
 # Open HEMS: Self-Learning Calibration & Model Governance Router
 import urllib
-import json
-import ssl
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
+AMS_TZ = ZoneInfo("Europe/Amsterdam")
 from pathlib import Path
-from typing import Dict, Any, List, Optional
 
 from api.context import (
-    ensure_active_canonical_plan, GLOBAL_MODEL, GLOBAL_DHW_MODEL
+    ensure_active_canonical_plan, GLOBAL_MODEL
 )
 from api.secrets_store import (
-    CONFIG_FILE, PARAMS_FILE, load_json, save_json, load_secrets
+    PARAMS_FILE, load_json, save_json
 )
-from layer2_calibration.parameter_history import ParameterHistoryManager
 
 def handle_get(handler, path: str, qp: dict) -> bool:
     if path == "/api/model/recommendations":

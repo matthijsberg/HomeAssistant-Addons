@@ -15,14 +15,11 @@ Provides:
 """
 
 import os
-import sys
 import json
 import math
-import time
-from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, Any, Optional
 import urllib.request
 import urllib.parse
 import statistics
@@ -72,7 +69,7 @@ class HybridForecastingModel:
     def _ensure_defaults(self):
         if not isinstance(self.params, dict):
             self.params = {}
-        
+
         # Merge legacy parameters if present
         legacy_ua = float(self.params.get("ua_base", 7.02)) * 1000.0 / 24.0  # kWh/deg/day to W/K approx
         legacy_cop = float(self.params.get("heating_average_cop", 4.2))
@@ -602,7 +599,7 @@ if __name__ == "__main__":
     print("=== Open HEMS Hybrid Self-Learning Model ===")
     res = model.retrain_from_openhems(days_history=120)
     print("Retraining outcome:", json.dumps(res, indent=2))
-    
+
     # Test a sample 15m slot prediction
     now = datetime.now(AMSTERDAM_TZ)
     unalloc = model.predict_unallocated_w(now)

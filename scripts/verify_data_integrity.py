@@ -8,12 +8,11 @@ exec python3 "$0" "$@"
 """
 
 import sys
-import os
 import math
 import json
 import argparse
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -64,7 +63,7 @@ def check_sanitizer_matrix_shapes(errors: list):
     if len(set(u_vals_672)) <= 1:
         log_fail("TelemetrySanitizer failed to parse 1D 672 flat list!", errors)
     else:
-        log_pass(f"TelemetrySanitizer parsed 1D 672 flat list successfully")
+        log_pass("TelemetrySanitizer parsed 1D 672 flat list successfully")
 
 def check_canonical_plan_invariants(errors: list):
     """Verify CanonicalDispatchPlan adheres to all physical and architectural invariants."""
@@ -176,7 +175,7 @@ def check_live_api_contracts(base_url: str, errors: list):
     import urllib.error
 
     print(f"\n--- Checking Live API Endpoints at {base_url} ---")
-    
+
     # Check health/consistency endpoint
     try:
         url_health = f"{base_url}/api/health/consistency"

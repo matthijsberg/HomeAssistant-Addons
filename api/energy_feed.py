@@ -6,7 +6,6 @@ Wittboy weather assimilation, and recent telemetry retrieval.
 """
 
 import os
-import sys
 import time
 import math
 import json
@@ -265,15 +264,15 @@ def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
 
         q = f"""
         SELECT mean("solar_w")/1000.0 as solar, mean("total_house_w")/1000.0 as house, mean("unallocated_w")/1000.0 as unalloc, mean("heatpump_w")/1000.0 as hp
-        FROM "energy_telemetry" 
+        FROM "energy_telemetry"
         WHERE time >= '{start_utc}' AND time < '{end_utc}'
         GROUP BY time({bucket}) fill(linear);
         SELECT mean("temperature_c") as tank_temp
-        FROM "energy_telemetry" 
+        FROM "energy_telemetry"
         WHERE "device_id" = 'dhw_tank' AND time >= '{start_utc}' AND time < '{end_utc}'
         GROUP BY time({bucket}) fill(linear);
         SELECT mean("temperature_c") as outdoor_temp
-        FROM "energy_telemetry" 
+        FROM "energy_telemetry"
         WHERE "device_id" = 'outdoor_weather' AND time >= '{start_utc}' AND time < '{end_utc}'
         GROUP BY time({bucket}) fill(linear);
         """

@@ -6,8 +6,7 @@ Belongs to the Core Layer 0 contract layer (models/) — accessible by all layer
 without violating unidirectional architecture (Laag 1 -> 2 -> 3 -> 4/5).
 """
 
-import math
-from typing import Optional, Any, Dict, Tuple
+from typing import Optional, Any, Tuple
 
 
 def calculate_carnot_cop(
@@ -22,11 +21,11 @@ def calculate_carnot_cop(
 ) -> float:
     """
     Calculates temperature-dependent Carnot COP with empirical heat pump scaling.
-    
+
     Formula:
         COP_Carnot = T_flow_k / max(8.0, T_flow_k - T_source_k)
         COP_empirical = carnot_efficiency * COP_Carnot
-    
+
     Includes defrost cycle penalty near freezing (-2°C to +4°C).
     Bounds: [min_cop, max_cop] (default [2.2, 6.8]).
     """

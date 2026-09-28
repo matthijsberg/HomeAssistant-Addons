@@ -43,7 +43,7 @@ def test_core_entity_isolation():
             if re.search(pattern, text):
                 violations.append(f"{file_path.name} violates entity isolation: matched '{pattern}'")
 
-    assert not violations, f"Entity isolation violations found:\n" + "\n".join(violations)
+    assert not violations, "Entity isolation violations found:\n" + "\n".join(violations)
 
 
 def test_standardized_taxonomy_completeness():

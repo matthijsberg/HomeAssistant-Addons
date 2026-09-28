@@ -6,16 +6,8 @@ Layer 2 Physical Model Validation:
   - Computes Normalized MAE, Volumetric Energy Accuracy, and Unified Quality KPI scores
   - Enforces Single Source of Truth: uses CanonicalDispatchPlan for scheduled forward slots
 """
-import math
-import time
-import urllib.parse
-import urllib.request
-import json
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List
 
-from models.canonical import CanonicalDispatchPlan
 
 
 class ModelValidator:
