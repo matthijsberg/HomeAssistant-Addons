@@ -1776,7 +1776,7 @@
                             </div>
                             <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">BATTERY POLICY</span>
                         </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-5 gap-3 pt-1">
+                        <div class="grid grid-cols-1 sm:grid-cols-6 gap-3 pt-1">
                             <div>
                                 <label for="tab-battery-nom-ch" class="text-[10px] text-slate-400 block mb-1">Geadviseerd Laden (kW)</label>
                                 <input type="number" step="0.1" min="0.5" max="10" id="tab-battery-nom-ch" value="2.5" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-cyan-500 focus:outline-none" title="Standaard laadvermogen voor rustige zonne- en netlading">
@@ -1792,6 +1792,10 @@
                             <div>
                                 <label for="tab-battery-max-dis" class="text-[10px] text-slate-400 block mb-1">Maximaal Ontladen (kW)</label>
                                 <input type="number" step="0.1" min="0.5" max="15" id="tab-battery-max-dis" value="5.0" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-cyan-500 focus:outline-none" title="Plafond omvormer voor koken, warmtepomp en extreme prijspieken">
+                            </div>
+                            <div>
+                                <label for="tab-battery-min-dis-thresh" class="text-[10px] text-slate-400 block mb-1">Min. Ontlaad-drempel (W)</label>
+                                <input type="number" step="50" min="0" max="2000" id="tab-battery-min-dis-thresh" value="400" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:border-cyan-500 focus:outline-none" title="Onder dit vermogen ontlaadt de batterij niet om inefficiënte omvormerverliezen bij lage baselast te voorkomen">
                             </div>
                             <div>
                                 <label for="tab-battery-boost-spread" class="text-[10px] text-slate-400 block mb-1">Boost Drempel (€/kWh)</label>

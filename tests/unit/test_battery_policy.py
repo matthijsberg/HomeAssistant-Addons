@@ -453,4 +453,30 @@ def test_battery_spec_from_config():
     assert spec.charge_knee_kw == 2.2
 
 
+def test_battery_min_discharge_threshold_suppresses_baseload():
+    """Onder de minimale ontlaaddrempel (bijv. 400W) blijft de batterij op standby ter voorkoming van omvormerverliezen."""
+    spec = BatterySpec(
+        capacity_kwh=15.0,
+        min_discharge_threshold_w=400.0,
+        degradation_cost_eur_kwh=0.078
+    )
+    # 4 slots baseload (250W) bij lage prijs (€0.15) en 4 slots koken (1500W) bij hoge piek (€0.45)
+    prices = [0.15] * 4 + [0.45] * 4
+    residual = [0.25] * 4 + [1.5] * 4
+    res = BatteryPolicy.optimize(
+        residual_demand_kw=residual,
+        import_prices=prices,
+        export_prices=[0.02] * 8,
+        spec=spec,
+        initial_soc_pct=80.0
+    )
+    # Slots 0..3: baseload < 400W -> ontlading moet exact 0.0 kW zijn
+    for i in range(4):
+        assert abs(res.slots[i].power_kw) == 0.0, f"Slot {i} should be standby, got {res.slots[i].power_kw}"
+    # Slots 4..7: koken 1.5 kW > 400W -> ontlading dekt de volle 1.5 kW
+    for i in range(4, 8):
+        assert abs(res.slots[i].power_kw) == 1.5, f"Slot {i} should discharge 1.5 kW, got {res.slots[i].power_kw}"
+
+
+
 

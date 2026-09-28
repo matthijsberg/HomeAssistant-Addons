@@ -43,6 +43,7 @@ class BatterySpec:
     charge_tier2_penalty_eur_kwh: float = 0.005 # Penalty per kWh above knee to encourage smoothing
     charge_ramp_penalty_eur_kw: float = 0.001   # Penalty per kW step change to prevent zigzagging
     discharge_tier2_penalty_eur_kwh: float = 0.003 # Penalty per kWh above nominal_discharge_kw
+    min_discharge_threshold_w: float = 400.0    # Minimale ontlaaddrempel in Watt (geen ontlading bij pure baselast)
 
     @classmethod
     def from_config(cls, cfg: Optional[Dict[str, Any]] = None, **overrides) -> "BatterySpec":
@@ -54,6 +55,7 @@ class BatterySpec:
         nom_dis = float(b_cfg.get("nominal_discharge_kw", 2.5))
         max_dis = float(b_cfg.get("max_discharge_kw", 5.0))
         boost_spread = float(b_cfg.get("boost_opportunity_spread_eur", 0.30))
+        min_dis_w = float(b_cfg.get("min_discharge_threshold_w", 400.0))
         cap = float(b_cfg.get("capacity_kwh", 15.0))
 
         kwargs = {
@@ -67,6 +69,7 @@ class BatterySpec:
             "max_discharge_kw": max_dis,
             "boost_opportunity_spread_eur": boost_spread,
             "charge_knee_kw": nom_ch,
+            "min_discharge_threshold_w": min_dis_w,
         }
         for k, v in overrides.items():
             if k in ("reserve_lookahead_slots", "valley_lookahead_slots"):
@@ -249,7 +252,7 @@ class BatteryPolicy:
             p_in = import_prices[t]
             p_ex = export_prices[t]
             c[0*N + t] = -lambda_term * dt * eta_ch - 1e-5 * dt + (1e-7 * t * dt)
-            c[1*N + t] = -lambda_term * dt * eta_ch + (1e-7 * t * dt)
+            c[1*N + t] = -lambda_term * dt * eta_ch + (1e-7 * (N - t) * dt)
             c[2*N + t] = (c_deg * dt + lambda_term * (dt / eta_dis)) - 1e-6 * (N - t) * dt
             c[3*N + t] = p_in * dt
             c[4*N + t] = -p_ex * dt
@@ -335,9 +338,13 @@ class BatteryPolicy:
                 bounds.append((0, 0))
             else:
                 bounds.append((0, spec.max_charge_kw))
+        thresh_kw = max(0.0, float(getattr(spec, "min_discharge_threshold_w", 400.0) or 0.0) / 1000.0)
         for t in range(N):
             req = max(0.0, residual_demand_kw[t])
-            bounds.append((0, min(spec.max_discharge_kw, req)))
+            if req < thresh_kw:
+                bounds.append((0, 0))
+            else:
+                bounds.append((0, min(spec.max_discharge_kw, req)))
         for t in range(N):
             # Physical grid connection fuse limit from spec (default 17.25 kW for 3x25A)
             limit = max(spec.max_grid_import_kw, residual_demand_kw[t] + 1.0)

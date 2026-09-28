@@ -57,7 +57,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "max_charge_kw": float(bat_cfg.get("max_charge_kw", 5.0)),
                 "nominal_discharge_kw": float(bat_cfg.get("nominal_discharge_kw", 2.5)),
                 "max_discharge_kw": float(bat_cfg.get("max_discharge_kw", 5.0)),
-                "boost_opportunity_spread_eur": float(bat_cfg.get("boost_opportunity_spread_eur", 0.30))
+                "boost_opportunity_spread_eur": float(bat_cfg.get("boost_opportunity_spread_eur", 0.30)),
+                "min_discharge_threshold_w": float(bat_cfg.get("min_discharge_threshold_w", 400.0))
             }
         })
         return True
@@ -601,6 +602,11 @@ def handle_post(handler, path: str, body: dict) -> bool:
                     if not (0.05 <= v <= 1.0):
                         raise ValueError("boost_opportunity_spread_eur must be between 0.05 and 1.0")
                     cur_b["boost_opportunity_spread_eur"] = round(v, 3)
+                if "min_discharge_threshold_w" in b_in:
+                    v = float(b_in["min_discharge_threshold_w"])
+                    if not (0.0 <= v <= 2000.0):
+                        raise ValueError("min_discharge_threshold_w must be between 0 and 2000")
+                    cur_b["min_discharge_threshold_w"] = round(v, 1)
 
             save_json(CONFIG_FILE, cfg)
 

@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.34] — 2026-09-28 (Minimale Ontlaaddrempel & Just-In-Time Laadplanning)
+
+### Batterij-optimalisatie & Efficiëntiebescherming
+- **Instelbare Minimale Ontlaaddrempel (`min_discharge_threshold_w`)**: Onderdrukt batterij-ontlading bij lage baselast (default 400 W, instelbaar 0–2000 W via GUI en API) om inefficiënte omvormerconversie (25–30% idle-verlies onder 400 W) te voorkomen.
+- **Just-In-Time Laadsturing**: LP tie-breaker omgedraaid (`1e-7 * (N - t) * dt`) zodat de batterij binnen een vlak prijsdal bij voorkeur aan het staartje van het dal laadt (vlak voor de piek), wat de kalenderveroudering en rusttijd op hoge spanning (>90% SoC) minimaliseert.
+- **Vraagvolgende Ladingsbegrenzing**: De LP laadt uitsluitend de capaciteit die daadwerkelijk rendabel ontladen kan worden over de horizon (tegen pieken of terminale waarde), ter voorkoming van onnodig over-laden wanneer er geen latere pieken zijn.
+
+---
+
 ## [0.104.30] — 2026-09-27 (DHW P95 Doellanding op 40°C & Batterij Historie Grafiek)
 
 ### Optimalisatie & Algoritme Verbeteringen

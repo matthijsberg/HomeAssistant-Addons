@@ -4020,6 +4020,9 @@
                     if (document.getElementById('tab-battery-boost-spread') && bat.boost_opportunity_spread_eur !== undefined) {
                         document.getElementById('tab-battery-boost-spread').value = bat.boost_opportunity_spread_eur;
                     }
+                    if (document.getElementById('tab-battery-min-dis-thresh') && bat.min_discharge_threshold_w !== undefined) {
+                        document.getElementById('tab-battery-min-dis-thresh').value = bat.min_discharge_threshold_w;
+                    }
                     onDhwMarginModeChange();
                 }
             } catch (err) {
@@ -4077,6 +4080,7 @@
             const nomDis = parseFloat(document.getElementById('tab-battery-nom-dis')?.value || 2.5);
             const maxDis = parseFloat(document.getElementById('tab-battery-max-dis')?.value || 5.0);
             const spread = parseFloat(document.getElementById('tab-battery-boost-spread')?.value || 0.30);
+            const minDisThresh = parseFloat(document.getElementById('tab-battery-min-dis-thresh')?.value || 400);
 
             const btn = document.getElementById('btn-save-battery-settings');
             if (btn) {
@@ -4090,7 +4094,8 @@
                     max_charge_kw: maxCh,
                     nominal_discharge_kw: nomDis,
                     max_discharge_kw: maxDis,
-                    boost_opportunity_spread_eur: spread
+                    boost_opportunity_spread_eur: spread,
+                    min_discharge_threshold_w: minDisThresh
                 }
             };
 
