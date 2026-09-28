@@ -41,7 +41,7 @@ class EnergyDataCollector:
         self.config = self._load_config()
         self.ha_url, self.ha_token = self._load_ha_config()
         self.influx_cfg = self.config.get("influxdb", {})
-        self.ssl_ctx = ssl._create_unverified_context()
+        self.ssl_ctx = ssl.create_default_context()
 
     def _load_config(self) -> dict:
         if os.path.exists(self.config_path):

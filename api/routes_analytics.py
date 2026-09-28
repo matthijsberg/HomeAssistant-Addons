@@ -30,6 +30,7 @@ from layer3_scheduling.peak_detection import (
 )
 from models.canonical import DispatchPlanSlot, StandardizedState
 from layer3_scheduling.battery_policy import BatterySpec
+from api.http_client import safe_urlopen
 
 _weather_history_cache: Dict[str, Any] = {'ts': 0, 'rad': {}, 'temp': {}}
 
@@ -130,7 +131,7 @@ def fetch_historical_overlay_ranges(
                 f'ORDER BY time ASC'
             )
             url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q=" + urllib.parse.quote(q)
-            with urllib.request.urlopen(url, timeout=3) as r:
+            with safe_urlopen(url, timeout=3) as r:
                 res = json.loads(r.read().decode())
             series = res.get("results", [{}])[0].get("series", [])
             if series:
@@ -228,7 +229,7 @@ def fetch_actual_heating_ranges_from_db(
             f'ORDER BY time ASC'
         )
         url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
-        with urllib.request.urlopen(url, timeout=3) as r:
+        with safe_urlopen(url, timeout=3) as r:
             res = json.loads(r.read().decode())
         series = res.get("results", [{}])[0].get("series", [])
         if not series:
@@ -325,7 +326,7 @@ def get_today_history_kpis(cfg: dict, sec: dict) -> dict:
         url = "http://a0d7b954-influxdb:8086/query?" + urllib.parse.urlencode({
             "u": db_user, "p": pwd, "db": db_name, "q": q
         })
-        with urllib.request.urlopen(url, timeout=4) as r:
+        with safe_urlopen(url, timeout=4) as r:
             res = json.loads(r.read().decode())
             results = res.get("results", [])
             if len(results) > 0:
@@ -726,7 +727,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                 "q": q
             })
 
-            with urllib.request.urlopen(url, timeout=6) as r:
+            with safe_urlopen(url, timeout=6) as r:
                 data = json.loads(r.read().decode())
 
             # Safely extract series lists
@@ -778,7 +779,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     d_str = (now_ams - timedelta(days=days_back)).strftime("%d-%m-%Y")
                     url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval=INTERVAL_HOUR"
                     req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
-                    with urllib.request.urlopen(req_p, timeout=3) as r_p:
+                    with safe_urlopen(req_p, timeout=3) as r_p:
                         res_p = json.loads(r_p.read().decode())
                         # 1. All-in afnametarief (incl. energiebelasting, opslag en btw)
                         for it in res_p.get("all_in_with_vat", []):
@@ -1044,7 +1045,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             SELECT mean("power_w") as cv_w FROM "energy_telemetry" WHERE "device_id" = 'daikin_heat_pump' AND "mode" = 'heating' AND time >= '{t_start}' AND time <= '{t_end}' GROUP BY time({bucket_sz}) fill(0);
             """
             url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q_telemetry)}"
-            with urllib.request.urlopen(url, timeout=5) as r:
+            with safe_urlopen(url, timeout=5) as r:
                 influx_res = json.loads(r.read().decode())
 
             gen_pts = influx_res['results'][0].get('series', [{}])[0].get('values', [])
@@ -1062,7 +1063,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     from layer1_data_collection.geo_location import get_geo_coordinates
                     geo_lat, geo_lon = get_geo_coordinates(cfg)
                     om_url = f"https://api.open-meteo.com/v1/forecast?latitude={geo_lat}&longitude={geo_lon}&hourly=temperature_2m,shortwave_radiation_instant&past_days=7&timezone=Europe%2FAmsterdam"
-                    with urllib.request.urlopen(om_url, timeout=6) as r_om:
+                    with safe_urlopen(om_url, timeout=6) as r_om:
                         om_data = json.loads(r_om.read().decode())
                         h_data = om_data.get("hourly", {})
                         rad_m = {t: r for t, r in zip(h_data.get("time", []), h_data.get("shortwave_radiation_instant", []))}
@@ -1245,7 +1246,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             GROUP BY time({bucket_sz}) fill(0);
             """
             url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
-            with urllib.request.urlopen(url, timeout=5) as r:
+            with safe_urlopen(url, timeout=5) as r:
                 res = json.loads(r.read().decode())
 
             temp_series = res["results"][0].get("series", [{}])[0].get("values", []) if len(res.get("results", [])) > 0 else []
@@ -1335,7 +1336,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
             req = urllib.request.Request(ha_url, headers=headers)
             try:
-                with urllib.request.urlopen(req, context=ctx, timeout=5) as r:
+                with safe_urlopen(req, context=ctx, timeout=5) as r:
                     ha_data = json.loads(r.read().decode())
             except Exception:
                 ha_data = []
@@ -1387,7 +1388,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             cv_map = {}
             try:
                 influx_url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
-                with urllib.request.urlopen(influx_url, timeout=4) as r:
+                with safe_urlopen(influx_url, timeout=4) as r:
                     res = json.loads(r.read().decode())
                     for row in res.get("results", [{}])[0].get("series", [{}])[0].get("values", []):
                         cv_map[row[0]] = float(row[1] or 0.0)
@@ -1493,7 +1494,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             SELECT mean("solar_kw") FROM "weather_solar_forecast" WHERE time >= '{t_start}' AND time <= '{t_end}' GROUP BY time({bucket_sz}) fill(linear);
             """
             url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q_telemetry)}"
-            with urllib.request.urlopen(url, timeout=5) as r:
+            with safe_urlopen(url, timeout=5) as r:
                 influx_res = json.loads(r.read().decode())
 
             gen_pts = influx_res.get('results', [{}])[0].get('series', [{}])[0].get('values', []) if len(influx_res.get('results', [])) > 0 else []
@@ -1616,7 +1617,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             SELECT mean("power_w") as hp FROM "energy_telemetry" WHERE "device_id" = 'daikin_heat_pump' AND time >= '{t_start_iso}' AND time <= '{t_end_iso}' GROUP BY time({bucket_sz}) fill(0);
             """
             influx_url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
-            with urllib.request.urlopen(influx_url, timeout=5) as r:
+            with safe_urlopen(influx_url, timeout=5) as r:
                 res = json.loads(r.read().decode())
 
             afname_pts = res.get("results", [{}])[0].get("series", [{}])[0].get("values", []) if len(res.get("results", [])) > 0 else []
@@ -1692,7 +1693,7 @@ def handle_get(handler, path: str, qp: dict) -> bool:
                     ctx.verify_mode = ssl.CERT_NONE
                     ha_url = f"{base_url}/api/history/period/{t_start.strftime('%Y-%m-%dT%H:00:00Z')}?filter_entity_id=sensor.cyberspace_battery_test_virtual_test_matthijs_state_of_charge,sensor.battery_state_of_charge"
                     req = urllib.request.Request(ha_url, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
-                    with urllib.request.urlopen(req, context=ctx, timeout=3) as r_ha:
+                    with safe_urlopen(req, context=ctx, timeout=3) as r_ha:
                         ha_data = json.loads(r_ha.read().decode())
                         for ent in ha_data:
                             if ent and ent[0].get("state") not in (None, "unknown", "unavailable"):

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 
 from api.secrets_store import load_secrets
+from api.http_client import safe_urlopen
 from integrations.homeassistant.client import get_ha_client_config, get_ha_states_map
 from layer1_data_collection.geo_location import get_geo_coordinates
 
@@ -168,7 +169,7 @@ def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
             for ent, var in entities_to_query:
                 try:
                     req = urllib.request.Request(f"{ha_url}/api/states/{ent}", headers={"Authorization": f"Bearer {ha_tok}", "Content-Type": "application/json"})
-                    with urllib.request.urlopen(req, timeout=1.5, context=ctx_ssl) as r:
+                    with safe_urlopen(req, timeout=1.5, context=ctx_ssl) as r:
                         st = json.loads(r.read().decode())
                         val = float(st.get("state", 0.0))
                         if var == "temp" and wb_temp is None:
@@ -194,7 +195,7 @@ def get_anchored_weather_forecast(base_dt: datetime) -> tuple:
         else:
             w_url = "https://api.open-meteo.com/v1/forecast?latitude=51.9537&longitude=5.2320&hourly=temperature_2m,shortwave_radiation,wind_speed_10m,relative_humidity_2m&timezone=Europe%2FAmsterdam&forecast_days=3"
             req_m = urllib.request.Request(w_url, headers={"User-Agent": "OpenHEMS/1.0"})
-            with urllib.request.urlopen(req_m, timeout=4) as r_m:
+            with safe_urlopen(req_m, timeout=4) as r_m:
                 m_data = json.loads(r_m.read().decode())
                 _GLOBAL_WEATHER_FORECAST_CACHE = {"m_data": m_data, "ts": time.time()}
     except Exception as e:
@@ -277,7 +278,7 @@ def fetch_recent_telemetry_history(is_15m: bool, base_dt: datetime) -> list:
         GROUP BY time({bucket}) fill(linear);
         """
         url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pwd}&db=openhems&q={urllib.parse.quote(q)}"
-        with urllib.request.urlopen(url, timeout=4) as r:
+        with safe_urlopen(url, timeout=4) as r:
             res = json.loads(r.read().decode())
 
         res_list = res.get("results", [])
@@ -422,7 +423,7 @@ def fetch_stroomvoorspeller_tariffs_cached(force: bool = False) -> Dict[str, Any
         try:
             url = "https://stroomvoorspeller.nl/data/forecast.json"
             req = urllib.request.Request(url, headers={"User-Agent": "OpenHEMS/1.0"})
-            with urllib.request.urlopen(req, timeout=8) as r:
+            with safe_urlopen(req, timeout=8) as r:
                 data = json.loads(r.read().decode())
                 forecasts = data.get("forecasts", [])
                 if forecasts:
@@ -538,7 +539,7 @@ def get_epex_tariffs_cached(is_15m: bool = True, force: bool = False) -> Tuple[L
             try:
                 url_p = f"https://public.api.energyzero.nl/public/v1/prices?energyType=ENERGY_TYPE_ELECTRICITY&date={d_str}&interval={interval_str}"
                 req_p = urllib.request.Request(url_p, headers={"User-Agent": "OpenHEMS/1.0"})
-                with urllib.request.urlopen(req_p, timeout=6) as r_p:
+                with safe_urlopen(req_p, timeout=6) as r_p:
                     res_p = json.loads(r_p.read().decode())
                     all_in_items = res_p.get("all_in_with_vat", [])
                     base_items = res_p.get("base", [])

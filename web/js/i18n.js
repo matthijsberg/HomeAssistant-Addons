@@ -33,7 +33,11 @@ window.OpenHEMSi18n = (function() {
         const parts = key.split('.');
         let val = translations;
         for (const p of parts) {
-            if (val && typeof val === 'object' && p in val) {
+            // Guard against prototype pollution (CWE-915)
+            if (p === '__proto__' || p === 'constructor' || p === 'prototype') {
+                return defaultVal || key;
+            }
+            if (val && typeof val === 'object' && Object.prototype.hasOwnProperty.call(val, p)) {
                 val = val[p];
             } else {
                 return defaultVal || key;

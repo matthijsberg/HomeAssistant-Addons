@@ -10,6 +10,15 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.37] — 2026-09-28 (Mantis Security Audit Remediatie: Safe HTTP Client & Prototype Guard)
+
+### Beveiliging & Verharding
+- **Safe HTTP Client (`api/http_client.py`)**: CWE-939 & CWE-295 gemitigeerd. Enforceert URL scheme whitelisting (`http`/`https` only, harde afwijzing van `file://`, `ftp://`). Forceert strikte, geverifieerde TLS-certificaatvalidatie voor alle externe WAN endpoints (Open-Meteo, EnergyZero, Stroomvoorspeller). Lokale LAN endpoints (`172.30.x.x`, `localhost`) behouden veilige fallback voor HA self-signed certs.
+- **JavaScript Prototype Pollution Guard (`web/js/i18n.js`)**: CWE-915 gemitigeerd door `__proto__`, `constructor` en `prototype` uit te sluiten en veilige `Object.prototype.hasOwnProperty` property checks te gebruiken in de i18n lookup engine.
+- **Frontend Subresource Integrity (`web/index.html`)**: `crossorigin="anonymous"` toegevoegd aan externe CDN tags.
+- **Container Privilege Documentatie (`Dockerfile`)**: Architectuurnotitie toegevoegd waarom Open HEMS binnen de HAOS Docker-namespace als root draait vanwege permissies op `/data/options.json` (`0600`) en `/config/heatpump_config.json`.
+- **Security Unittests (`tests/unit/test_http_client_security.py`)**: 4 nieuwe regressietests toegevoegd ter verificatie van URL scheme en TLS enforcement (207/207 tests passing).
+
 ## [0.104.36] — 2026-09-28 (5-Traps Kwaliteitsframework: Bandit Security & JSON Schema Validatie)
 
 ### Beveiliging & Kwaliteitsborging

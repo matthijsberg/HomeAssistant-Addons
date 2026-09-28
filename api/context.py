@@ -34,6 +34,7 @@ sys.path.insert(0, "/opt/open-hems")
 from api.secrets_store import (
     CONFIG_FILE, PARAMS_FILE, load_json, load_secrets
 )
+from api.http_client import safe_urlopen
 from integrations.homeassistant.client import (
     get_ha_states_map
 )
@@ -127,7 +128,7 @@ def ensure_active_canonical_plan(force_refresh=False, horizon_hours=48.0):
     try:
         url_m = f"https://api.open-meteo.com/v1/forecast?latitude={geo_lat}&longitude={geo_lon}&hourly=temperature_2m,shortwave_radiation,wind_speed_10m&timezone=Europe%2FAmsterdam&forecast_days=3"
         req_m = urllib.request.Request(url_m, headers={"User-Agent": "OpenHEMS/1.0"})
-        with urllib.request.urlopen(req_m, timeout=5) as r_m:
+        with safe_urlopen(req_m, timeout=5) as r_m:
             m_data = json.loads(r_m.read().decode())
             m_times = m_data.get("hourly", {}).get("time", [])
             m_rads = m_data.get("hourly", {}).get("shortwave_radiation", [])
@@ -243,7 +244,7 @@ def ensure_active_canonical_plan(force_refresh=False, horizon_hours=48.0):
             if pw:
                 query = 'SELECT last("temperature") FROM "daikin_heat_pump" WHERE "mode" = \'dhw\' AND time > now() - 2h'
                 q_url = f"http://a0d7b954-influxdb:8086/query?u=openhems&p={pw}&db=openhems&q={urllib.parse.quote(query)}"
-                with urllib.request.urlopen(q_url, timeout=3) as r:
+                with safe_urlopen(q_url, timeout=3) as r:
                     res = json.loads(r.read().decode())
                     series = res.get("results", [{}])[0].get("series", [])
                     if series:
