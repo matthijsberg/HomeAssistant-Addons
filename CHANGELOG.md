@@ -10,6 +10,20 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.36] — 2026-09-28 (5-Traps Kwaliteitsframework: Bandit Security & JSON Schema Validatie)
+
+### Beveiliging & Kwaliteitsborging
+- **Bandit AST Security Scanner (`[2/5]` in pre-commit)**: Geïntegreerd in de pre-commit workflow. Scant de AST van `api/`, `layer3_scheduling/` en `models/` op injection-vectoren, onveilige URL/bestandsschema's en cryptografische zwakheden.
+- **JSON Schema Validatie (`jsonschema`)**: Formaliseert validatie van alle templates in `config/device_library/` tegen `schema/device_profile.schema.json` via automatische pytest-borging.
+- **Volledige 5-Traps Pre-Commit Pipeline**:
+  1. `[1/5]` Secret & Credential Scanner
+  2. `[2/5]` Bandit Security Scanner
+  3. `[3/5]` Ruff Linter & Scope Guard
+  4. `[4/5]` Mypy Static Type Checker
+  5. `[5/5]` Node.js Frontend JavaScript Syntax Guard
+
+---
+
 ## [0.104.35] — 2026-09-28 (Vierlaags Pre-Commit Framework: Mypy Types & Node.js Frontend Guard)
 
 ### Kwaliteitsborging & Tooling

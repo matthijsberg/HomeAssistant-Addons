@@ -30,10 +30,16 @@ def test_all_device_profiles_conform_to_capabilities_enum():
     profile_files = list(LIBRARY_DIR.glob("*.json"))
     assert len(profile_files) >= 4, f"Expected at least 4 profiles, found {len(profile_files)}"
 
+    import jsonschema
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+
     canonical_caps = {c.value for c in DeviceCapability}
 
     for p_file in profile_files:
         profile = json.loads(p_file.read_text(encoding="utf-8"))
+        # Formal JSON Schema validation
+        jsonschema.validate(instance=profile, schema=schema)
+
         assert "profile_id" in profile, f"{p_file.name} missing profile_id"
         assert "capabilities" in profile, f"{p_file.name} missing capabilities"
         assert isinstance(profile["capabilities"], list)
