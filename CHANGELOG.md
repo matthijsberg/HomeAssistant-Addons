@@ -10,6 +10,19 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.35] — 2026-09-28 (Vierlaags Pre-Commit Framework: Mypy Types & Node.js Frontend Guard)
+
+### Kwaliteitsborging & Tooling
+- **Mypy Static Type Checking (`mypy.ini`)**: Type-validatie ingericht voor wiskundige rekenkernen (`models/` en `layer3_scheduling/battery_policy.py`, `dhw_specs.py`, `tariff_provider.py`). Vangt type-mismatches, incompatibele solver bounds en `None`-dereferencing af vóór runtime.
+- **Node.js Frontend Syntax Guard**: Pre-commit check (`node --check`) valideert automatisch alle JavaScript bestanden (`web/js/*.js` en `web/js/modules/*.js`) binnen 80 ms om syntaxfouten en 'blank screens' in de browser gegarandeerd te voorkomen.
+- **4-Traps Pre-Commit Workflow**: Git hook voert nu sequentieel uit:
+  1. `[1/4]` Secret & Credential Scanner (detectie van API-sleutels/wachtwoorden)
+  2. `[2/4]` Ruff Linter (scope-integriteit, ongebruikte imports, syntaxfouten)
+  3. `[3/4]` Mypy Type Checker (statische typeconsistentie van modellen)
+  4. `[4/4]` Node.js Frontend Syntax Guard (parsen van client-side JavaScript)
+
+---
+
 ## [0.104.34] — 2026-09-28 (Minimale Ontlaaddrempel & Just-In-Time Laadplanning)
 
 ### Batterij-optimalisatie & Efficiëntiebescherming

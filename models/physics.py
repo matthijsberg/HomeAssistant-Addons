@@ -63,11 +63,11 @@ def get_dhw_cop_params(params: Optional[dict] = None) -> tuple:
             print("[WARN] get_dhw_cop_params: geen 'dhw_cop' blok in modelparameters; teruggevallen op standaarden (cop_50=2.0).")
             _LOGGED_COP_FALLBACK = True
 
-    cop_50 = float(cop_cfg.get("cop_50", cop_cfg.get("COP_50", 2.0)))
-    k_t = float(cop_cfg.get("k_t", cop_cfg.get("k_T", 0.07)))
-    k_out = float(cop_cfg.get("k_out", cop_cfg.get("k_OUT", 0.05)))
-    cop_min = float(cop_cfg.get("cop_min", cop_cfg.get("COP_min", 1.4)))
-    cop_max = float(cop_cfg.get("cop_max", cop_cfg.get("COP_max", 3.2)))
+    cop_50 = float(cop_cfg.get("cop_50") or cop_cfg.get("COP_50") or 2.0)
+    k_t = float(cop_cfg.get("k_t") or cop_cfg.get("k_T") or 0.07)
+    k_out = float(cop_cfg.get("k_out") or cop_cfg.get("k_OUT") or 0.05)
+    cop_min = float(cop_cfg.get("cop_min") or cop_cfg.get("COP_min") or 1.4)
+    cop_max = float(cop_cfg.get("cop_max") or cop_cfg.get("COP_max") or 3.2)
     return cop_50, k_t, k_out, cop_min, cop_max
 
 
@@ -269,7 +269,7 @@ def dhw_step(
             if t_tank_c > 52.0 and hasattr(spec, "solar_boost_electric_kw"):
                 p_el_kw = float(spec.solar_boost_electric_kw)
     elif isinstance(spec, dict):
-        p_el_kw = float(spec.get("heat_pump_power_kw", spec.get("heat_pump_electric_kw", p_el_kw)))
+        p_el_kw = float(spec.get("heat_pump_power_kw") or spec.get("heat_pump_electric_kw") or p_el_kw)
 
     # 5. Delivered heat q_geleverd
     # Above T_max no heat is added; heat addition cannot exceed T_max

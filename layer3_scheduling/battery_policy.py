@@ -11,7 +11,7 @@ INVARIANTS:
 """
 
 from dataclasses import dataclass, asdict
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 import math
 import numpy as np
 from scipy.optimize import linprog
@@ -58,7 +58,7 @@ class BatterySpec:
         min_dis_w = float(b_cfg.get("min_discharge_threshold_w", 400.0))
         cap = float(b_cfg.get("capacity_kwh", 15.0))
 
-        kwargs = {
+        kwargs: Dict[str, Any] = {
             "capacity_kwh": cap,
             "usable_capacity_kwh": float(b_cfg.get("usable_capacity_kwh", cap * 0.9)),
             "min_soc_pct": float(b_cfg.get("min_soc_pct", 10.0)),
@@ -329,7 +329,7 @@ class BatteryPolicy:
             b_ub[row] = 0.0
             row += 1
 
-        bounds = []
+        bounds: List[Tuple[float, Optional[float]]] = []
         for t in range(N):
             surplus = max(0.0, -residual_demand_kw[t])
             bounds.append((0, min(spec.max_charge_kw, surplus)))
