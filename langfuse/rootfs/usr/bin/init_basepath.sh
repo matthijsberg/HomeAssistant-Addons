@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
-# Source bashio if present (running in Home Assistant Add-on container)
-if [ -f "/usr/lib/bashio/bashio.sh" ]; then
-  # shellcheck source=/dev/null
-  source "/usr/lib/bashio/bashio.sh"
-  INGRESS_ENTRY="$(bashio::addon.ingress_entry)"
-else
-  # Fallback for standalone/local dev testing
-  INGRESS_ENTRY="${INGRESS_ENTRY:-/api/hassio_ingress/local-dev}"
-fi
+# Ingress base path is handled dynamically per-request in Nginx via $http_x_ingress_path.
+INGRESS_ENTRY="/api/hassio_ingress/local_langfuse"
 
 MARKER_FILE="/run/langfuse_basepath_token"
 LAST_TOKEN=""

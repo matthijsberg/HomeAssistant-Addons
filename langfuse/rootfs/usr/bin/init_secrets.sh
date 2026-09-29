@@ -42,6 +42,31 @@ else
   echo "[init-secrets] Existing secrets loaded from ${SECRETS_FILE}."
 fi
 
+# Always ensure ClickHouse user configuration matches current secret
+# shellcheck disable=SC1090
+source "${SECRETS_FILE}"
+mkdir -p /etc/clickhouse-server/users.d
+cat <<EOF > /etc/clickhouse-server/users.d/langfuse.xml
+<clickhouse>
+    <users>
+        <langfuse>
+            <password>${CLICKHOUSE_PASSWORD}</password>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+            <named_collection_control>1</named_collection_control>
+            <show_named_collections>1</show_named_collections>
+            <show_named_collections_secrets>1</show_named_collections_secrets>
+        </langfuse>
+    </users>
+</clickhouse>
+EOF
+chmod 644 /etc/clickhouse-server/users.d/langfuse.xml
+echo "[init-secrets] Configured ClickHouse user 'langfuse' in users.d/langfuse.xml."
+
 # Check if Hermes env export is requested via bashio (or option)
 if [ -f "/data/options.json" ]; then
   EXPORT_HERMES="$(grep -o '"export_hermes_env": *true' /data/options.json || true)"

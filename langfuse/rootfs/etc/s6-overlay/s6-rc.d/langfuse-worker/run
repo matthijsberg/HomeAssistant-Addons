@@ -4,6 +4,15 @@ set -a
 source /run/langfuse.env
 set +a
 
+# Worker HTTP metrics server runs on 3101 so Web owns 3100
+export PORT=3101
+
 cd /opt/langfuse-worker
-echo "[langfuse-worker] Starting Langfuse Async Worker..."
-exec node dist/index.js
+echo "[langfuse-worker] Starting Langfuse Async Worker on port 3101..."
+if [ -f "./worker/entrypoint.sh" ]; then
+  exec ./worker/entrypoint.sh node worker/dist/index.js
+elif [ -f "dist/index.js" ]; then
+  exec node dist/index.js
+else
+  exec node index.js
+fi

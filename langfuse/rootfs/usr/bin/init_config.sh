@@ -17,6 +17,7 @@ ADMIN_PASSWORD=""
 CLICKHOUSE_MEM_MB=4096
 NODE_MAX_OLD_SPACE_MB=2048
 TELEMETRY_ENABLED="false"
+EXTERNAL_URL="https://hass.b3rg.nl:8123"
 
 if [ -f "/data/options.json" ]; then
   # Simple robust JSON extraction
@@ -25,12 +26,14 @@ if [ -f "/data/options.json" ]; then
   OPT_CH_MEM=$(grep -o '"clickhouse_memory_limit_mb": *[0-9]*' /data/options.json | awk '{print $2}' || true)
   OPT_NODE_MEM=$(grep -o '"node_max_old_space_mb": *[0-9]*' /data/options.json | awk '{print $2}' || true)
   OPT_TELEM=$(grep -o '"telemetry_enabled": *true' /data/options.json || true)
+  OPT_EXT_URL=$(grep -o '"external_url": *"[^"]*"' /data/options.json | cut -d'"' -f4 || true)
 
   [ -n "${OPT_EMAIL}" ] && ADMIN_EMAIL="${OPT_EMAIL}"
   [ -n "${OPT_PASS}" ] && ADMIN_PASSWORD="${OPT_PASS}"
   [ -n "${OPT_CH_MEM}" ] && CLICKHOUSE_MEM_MB="${OPT_CH_MEM}"
   [ -n "${OPT_NODE_MEM}" ] && NODE_MAX_OLD_SPACE_MB="${OPT_NODE_MEM}"
   [ -n "${OPT_TELEM}" ] && TELEMETRY_ENABLED="true"
+  [ -n "${OPT_EXT_URL}" ] && EXTERNAL_URL="${OPT_EXT_URL}"
 fi
 
 # Write environment file for Langfuse Web and Worker processes
@@ -52,7 +55,7 @@ LANGFUSE_S3_EVENT_UPLOAD_PREFIX=events/
 NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
 SALT=${SALT}
 ENCRYPTION_KEY=${ENCRYPTION_KEY}
-NEXTAUTH_URL=http://langfuse.invalid${INGRESS_ENTRY}/api/auth
+NEXTAUTH_URL=${EXTERNAL_URL}${INGRESS_ENTRY}
 HOSTNAME=127.0.0.1
 PORT=3100
 TELEMETRY_ENABLED=${TELEMETRY_ENABLED}
@@ -71,3 +74,21 @@ EOF
 
 chmod 600 /run/langfuse.env
 echo "[init-config] Runtime environment rendered to /run/langfuse.env."
+
+# Configure port 3000 SSL automatically if certificates exist in /ssl
+if [ -f "/ssl/fullchain.pem" ] && [ -f "/ssl/privkey.pem" ]; then
+  echo "[init-config] Detected SSL certificates in /ssl. Enabling HTTPS for port 3000."
+  cat <<EOF > /run/nginx_port_3000.conf
+listen 3000 ssl;
+ssl_certificate /ssl/fullchain.pem;
+ssl_certificate_key /ssl/privkey.pem;
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_ciphers HIGH:!aNULL:!MD5;
+error_page 497 https://\$host:3000\$request_uri;
+EOF
+else
+  echo "[init-config] No SSL certificates in /ssl. Using plain HTTP for port 3000."
+  cat <<EOF > /run/nginx_port_3000.conf
+listen 3000;
+EOF
+fi

@@ -1,6 +1,6 @@
 name: "Langfuse"
 description: "Self-hosted LLM observability & prompt management (Langfuse v4)"
-version: "4.0.0-1"
+version: "4.0.0-2"
 slug: "langfuse"
 url: "https://github.com/matthijsberg/HomeAssistant-Addons/tree/main/langfuse"
 image: "ghcr.io/matthijsberg/{arch}-addon-langfuse"
@@ -19,6 +19,7 @@ panel_title: "Langfuse"
 panel_admin: true
 map:
   - "share:rw"
+  - "ssl:ro"
 
 ports:
   3000/tcp: null

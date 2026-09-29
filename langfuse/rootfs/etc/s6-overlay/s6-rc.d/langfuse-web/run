@@ -5,5 +5,11 @@ source /run/langfuse.env
 set +a
 
 cd /opt/langfuse-web
-echo "[langfuse-web] Starting Langfuse Web server..."
-exec node server.js
+echo "[langfuse-web] Running migrations and starting Langfuse Web server..."
+if [ -f "./web/entrypoint.sh" ]; then
+  exec ./web/entrypoint.sh node ./web/server.js
+elif [ -f "./entrypoint.sh" ]; then
+  exec ./entrypoint.sh node ./web/server.js
+else
+  exec node ./web/server.js
+fi

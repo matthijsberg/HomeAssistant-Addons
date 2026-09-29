@@ -7,8 +7,17 @@ source "${SECRETS_FILE}"
 
 PG_DATA="/data/postgres"
 
+if [ -f "${PG_DATA}/PG_VERSION" ]; then
+  CURRENT_PG_VER=$(cat "${PG_DATA}/PG_VERSION" 2>/dev/null || echo "")
+  if [ "${CURRENT_PG_VER}" != "16" ]; then
+    echo "[init-postgres] Incompatible PostgreSQL data directory version ${CURRENT_PG_VER} (expected 16). Re-initializing..."
+    rm -rf "${PG_DATA:?}"/*
+  fi
+fi
+
 if [ ! -f "${PG_DATA}/PG_VERSION" ]; then
   echo "[init-postgres] Initializing fresh PostgreSQL cluster in ${PG_DATA}..."
+  chown -R postgres:postgres "${PG_DATA}"
   su-exec postgres initdb -D "${PG_DATA}" --encoding=UTF8 --locale=C
   
   echo "listen_addresses = '127.0.0.1'" >> "${PG_DATA}/postgresql.conf"
@@ -40,9 +49,9 @@ END
 \$\$;
 "
 
-su-exec postgres psql -h 127.0.0.1 -p 5432 -c "
-SELECT 'CREATE DATABASE langfuse OWNER langfuse'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'langfuse')\gexec
-"
+if ! su-exec postgres psql -h 127.0.0.1 -p 5432 -tAc "SELECT 1 FROM pg_database WHERE datname = 'langfuse'" | grep -q 1; then
+  echo "[init-postgres] Creating database 'langfuse'..."
+  su-exec postgres createdb -h 127.0.0.1 -p 5432 -O langfuse langfuse
+fi
 
 echo "[init-postgres] PostgreSQL database and user 'langfuse' confirmed ready."

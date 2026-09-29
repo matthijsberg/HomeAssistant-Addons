@@ -16,7 +16,7 @@ done
 echo "[init-clickhouse] Configuring ClickHouse user 'langfuse' and grants..."
 
 # Use default admin user (or clickhouse client) via HTTP to configure langfuse user
-curl -sS "http://127.0.0.1:8123/" -d "
+curl -sS "http://127.0.0.1:8123/?multiquery=1" -d "
 CREATE USER IF NOT EXISTS langfuse IDENTIFIED WITH plaintext_password BY '${CLICKHOUSE_PASSWORD}';
 ALTER USER langfuse IDENTIFIED WITH plaintext_password BY '${CLICKHOUSE_PASSWORD}';
 GRANT ALL ON default.* TO langfuse;
