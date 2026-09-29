@@ -60,6 +60,33 @@ Every prompt, turn, tool invocation, token count, and cost will now stream direc
 
 ---
 
+## 🎙️ Tracing Home Assistant Assist (Voice & Chat)
+
+You can automatically route and trace all Home Assistant native voice and chat assistant requests directly in Langfuse using **Extended OpenAI Conversation** (HACS) or the native **OpenAI Conversation** integration.
+
+### Setup Instructions
+
+1. **Obtain API Keys:**
+   - In Langfuse (via the HA sidebar), open the **Hermes** project (or create a dedicated `Home Assistant` project).
+   - Go to **Settings ➔ API Keys** and copy the **Secret Key** (`sk-lf-...`) and **Public Key** (`pk-lf-...`).
+2. **Configure Integration in Home Assistant:**
+   - Go to **Settings ➔ Devices & Services ➔ Add Integration ➔ Extended OpenAI Conversation** (or *OpenAI Conversation*).
+   - Fill in the connection parameters:
+     - **API Key:** `sk-lf-...`
+     - **Base URL:** `http://local-langfuse:3000/api/public/openai/v1`  
+       *(Note: If you are connecting across your LAN or from external services, ensure port `3000/tcp` is exposed in the add-on configuration, and use `http://<home-assistant-ip>:3000/api/public/openai/v1`)*.
+     - **Model Name:** Enter your downstream model (e.g., `gpt-4o-mini`, `gemini-2.5-flash`, etc.).
+3. **Set as Default Assist Conversation Agent:**
+   - Navigate to **Settings ➔ Voice Assistants ➔ Assist**.
+   - Under **Conversation Agent**, select your configured Extended OpenAI agent.
+
+Every voice command from your dashboard, mobile app, or ESP32 voice satellite will now generate a complete trace in Langfuse, recording:
+- Input user prompt and system context
+- Exposed Home Assistant entity state and tools
+- Model token usage, response latency, and execution cost
+
+---
+
 ## 📋 Quality & Architecture Standards
 
 This add-on is governed by the **[Open Knowledge Format (OKF v0.2)](knowledge/index.md)** architectural bundle and automated quality checks:
