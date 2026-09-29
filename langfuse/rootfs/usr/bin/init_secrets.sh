@@ -67,6 +67,33 @@ EOF
 chmod 644 /etc/clickhouse-server/users.d/langfuse.xml
 echo "[init-secrets] Configured ClickHouse user 'langfuse' in users.d/langfuse.xml."
 
+# Configure SeaweedFS S3 credentials matching secrets.env
+mkdir -p /etc/seaweedfs
+cat <<EOF > /etc/seaweedfs/s3.json
+{
+  "identities": [
+    {
+      "name": "langfuse",
+      "credentials": [
+        {
+          "accessKey": "${S3_ACCESS_KEY_ID}",
+          "secretKey": "${S3_SECRET_ACCESS_KEY}"
+        }
+      ],
+      "actions": [
+        "Read",
+        "Write",
+        "List",
+        "Tagging",
+        "Admin"
+      ]
+    }
+  ]
+}
+EOF
+chmod 600 /etc/seaweedfs/s3.json
+echo "[init-secrets] Configured SeaweedFS S3 credentials in /etc/seaweedfs/s3.json."
+
 # Check if Hermes env export is requested via bashio (or option)
 if [ -f "/data/options.json" ]; then
   EXPORT_HERMES="$(grep -o '"export_hermes_env": *true' /data/options.json || true)"
