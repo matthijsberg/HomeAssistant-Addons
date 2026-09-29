@@ -1,5 +1,4 @@
-ARG BUILD_FROM=debian:bookworm-slim
-FROM ${BUILD_FROM}
+FROM debian:bookworm-slim
 
 ENV LANG=C.UTF-8
 ENV DEBIAN_FRONTEND=noninteractive
