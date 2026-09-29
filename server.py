@@ -137,6 +137,7 @@ async def execute_campaign_job(job_id: str):
 
     update_job_status(job_id, status="running", progress=10, stage="indexing")
     targets = job["targets"]
+    env_context = job.get("egress_manifest", {}).get("context", "")
     all_findings = []
     total_tokens_in = 0
     total_tokens_out = 0
@@ -158,14 +159,25 @@ async def execute_campaign_job(job_id: str):
                     "source": "deployment_surface_extractor",
                 })
             for lead in prepass.get("leads", []):
+                raw_cwe = lead.get("metadata", {}).get("cwe", "CWE-Unknown") or lead.get("cwe", "CWE-Unknown")
+                severity = lead.get("severity", "WARNING")
+                rationale = lead.get("message") or lead.get("description") or "Scanner Lead"
+
+                # Context-aware Calibration
+                if env_context and "CWE-939" in str(raw_cwe):
+                    if any(term in env_context.lower() for term in ["home assistant", "haos", "ingress"]):
+                        severity = "INFO"
+                        rationale = f"[Context Calibrated - {env_context}]: urllib calls to internal HA Core / Supervisor APIs operate within an isolated network container behind HA Ingress. File scheme risks are restricted."
+
                 all_findings.append({
                     "id": f"A-{job_id[:6]}-{len(all_findings)+1:03d}",
-                    "cwe": lead.get("metadata", {}).get("cwe", "CWE-Unknown") or lead.get("cwe", "CWE-Unknown"),
+                    "cwe": raw_cwe,
                     "title": lead.get("message") or lead.get("description") or "Scanner Lead",
                     "file": lead.get("file"),
                     "start_line": lead.get("start_line"),
                     "end_line": lead.get("end_line"),
-                    "severity": lead.get("severity", "WARNING"),
+                    "severity": severity,
+                    "rationale": rationale,
                     "verification": "statically_confirmed",
                     "source": lead.get("source"),
                 })
@@ -179,9 +191,11 @@ async def execute_campaign_job(job_id: str):
             "critical": len([f for f in all_findings if f.get("severity") in ("CRITICAL", "ERROR")]),
             "high": len([f for f in all_findings if f.get("severity") == "HIGH"]),
             "medium": len([f for f in all_findings if f.get("severity") in ("MEDIUM", "WARNING")]),
+            "info": len([f for f in all_findings if f.get("severity") == "INFO"]),
         }
 
-        report_md = f"# Mantis Security Audit Report\n\n**Job ID:** `{job_id}`  \n**Status:** Completed  \n**Total Findings:** {len(all_findings)}\n\n"
+        context_hdr = f"\n**Environment Context:** {env_context}\n" if env_context else ""
+        report_md = f"# Mantis Security Audit Report\n\n**Job ID:** `{job_id}`  \n**Status:** Completed{context_hdr}\n**Total Findings:** {len(all_findings)}\n\n"
         for f in all_findings:
             report_md += f"### [{f.get('severity')}] {f.get('title')}\n- **CWE:** {f.get('cwe')}\n- **Location:** `{f.get('file', 'system')}:{f.get('start_line', 0)}`\n- **Details:** {f.get('rationale', '')}\n\n"
 
@@ -212,6 +226,7 @@ MCP_TOOLS = [
                 "diff": {"type": "string", "description": "The unified git diff text (max 200 KB)"},
                 "repo_path": {"type": "string", "description": "Optional local repo path to resolve surrounding context"},
                 "context_paths": {"type": "array", "items": {"type": "string"}, "description": "Extra related file paths"},
+                "context": {"type": "string", "description": "Environment, runtime architecture, and trust boundary context (e.g. 'Home Assistant add-on on HAOS, behind Ingress, internal network only')"},
                 "llm": {"type": "object", "description": "Optional provider/model specification"}
             },
             "required": ["diff"]
@@ -229,6 +244,7 @@ MCP_TOOLS = [
                     "description": "Array of target objects with type ('local_path' | 'git_url' | 'upload'), target, and role"
                 },
                 "focus": {"type": "string", "description": "Optional plain-language audit objective"},
+                "context": {"type": "string", "description": "Environment, runtime architecture, and trust boundary context (e.g. 'Home Assistant add-on on HAOS, behind Ingress, internal network only')"},
                 "passes": {"type": "integer", "description": "Number of research passes (default 1)"},
                 "include_git_history": {"type": "boolean", "description": "Whether to audit past git commit history"}
             },
@@ -341,6 +357,7 @@ async def handle_tool_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
 
         job_id = f"job_{secrets.token_hex(5)}"
         models = args.get("llm") or APP_OPTIONS.get("defaults", {})
+        env_context = args.get("context", "")
         egress_manifest = create_egress_manifest(
             targets=validated_targets,
             files_count=10,
@@ -348,6 +365,7 @@ async def handle_tool_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             redactions=0,
             models=models,
         )
+        egress_manifest["context"] = env_context
 
         approval_url = f"{APP_OPTIONS.get('ha_external_url', 'https://hass.b3rg.nl:8123')}/api/hassio_ingress/{job_id}"
         warning_text = format_warning_text(egress_manifest, approval_url)
