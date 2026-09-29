@@ -1,0 +1,25 @@
+configuration:
+  admin_email:
+    name: "Admin Email"
+    description: "Administrator email for the initial Langfuse account created on first start."
+  admin_password:
+    name: "Admin Password"
+    description: "Administrator password for the initial Langfuse account (minimum 8 characters)."
+  retention_days:
+    name: "Data Retention (Days)"
+    description: "Number of days to keep analytical trace and event data in ClickHouse and SeaweedFS (0 = keep forever)."
+  clickhouse_memory_limit_mb:
+    name: "ClickHouse Memory Limit (MB)"
+    description: "Maximum RAM allocated to the ClickHouse OLAP analytics engine (default: 4096 MB)."
+  node_max_old_space_mb:
+    name: "Node.js Heap Size (MB)"
+    description: "Maximum memory allocation for Langfuse Web and Worker processes (default: 2048 MB)."
+  export_hermes_env:
+    name: "Export Hermes Environment File"
+    description: "Write project API keys to /share/langfuse/hermes.env for Hermes Agent."
+  telemetry_enabled:
+    name: "Langfuse Telemetry"
+    description: "Send anonymous product analytics to Langfuse core team."
+  log_level:
+    name: "Log Level"
+    description: "Logging verbosity level."
