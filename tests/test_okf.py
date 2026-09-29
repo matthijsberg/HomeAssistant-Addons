@@ -87,3 +87,14 @@ def test_okf_crud_and_bundle_exchange():
         assert guidance["okf_trust_tier"] == "HUMAN_REVIEWED"
         assert len(guidance["security_invariants"]) == 1
         assert "Mantis Security Advisor: Dockerfile" in guidance["guidance_markdown"]
+
+        # 6. Official OKF v0.2 Specification Validator Script Verification
+        import subprocess
+        val_script = Path("/config/.hermes/profiles/matthijs/skills/software-development/okf-open-knowledge-format/scripts/validate.sh")
+        if val_script.exists():
+            res = subprocess.run([str(val_script), str(export_dir)], capture_output=True, text=True)
+            print("OKF Validator output:\n", res.stdout)
+            assert res.returncode == 0
+            assert "Bundle is OKF v0.2 conformant" in res.stdout
+            assert "error(s)" not in res.stdout
+            assert "warning(s)" not in res.stdout

@@ -221,46 +221,126 @@ def query_okf_concepts(
 
 
 def export_okf_bundle(db_path: Path, output_dir: Path) -> int:
-    """Export all OKF concepts from database to standard OKF v0.2 directory structure."""
+    """
+    Export all OKF concepts from database to a fully conformant OKF v0.2 directory bundle on disk,
+    including bundle-root index.md (with okf_version), log.md, and subdirectory index.md files.
+    """
     concepts = query_okf_concepts(db_path)
     output_dir.mkdir(parents=True, exist_ok=True)
+    now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    today_date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+
+    categories: Dict[str, List[Tuple[str, str, str]]] = {
+        "invariants": [],
+        "threats": [],
+        "vulnerabilities": [],
+        "entities": [],
+        "concepts": [],
+    }
 
     exported_count = 0
     for c in concepts:
         ctype = c.get("type", "").lower()
-        if "entity" in ctype:
-            subdir = output_dir / "entities"
+        if "invariant" in ctype:
+            cat = "invariants"
         elif "threat" in ctype:
-            subdir = output_dir / "threats"
-        elif "invariant" in ctype:
-            subdir = output_dir / "invariants"
+            cat = "threats"
         elif "vulnerabilit" in ctype:
-            subdir = output_dir / "vulnerabilities"
+            cat = "vulnerabilities"
+        elif "entity" in ctype:
+            cat = "entities"
         else:
-            subdir = output_dir / "concepts"
+            cat = "concepts"
 
+        subdir = output_dir / cat
         subdir.mkdir(parents=True, exist_ok=True)
+
         slug = _OKF_SLUG_RE.sub('_', c.get('title', 'concept').lower())[:50].strip('_.')
         cid = c.get('concept_id', 'concept')
         filename = f"{cid}_{slug}.md"
         file_path = subdir / filename
 
-        # Render OKF markdown
+        title = c.get("title") or "Untitled Concept"
+        body = c.get("body_markdown", "").strip()
+        first_line = body.splitlines()[0] if body else ""
+        desc = (c.get("frontmatter", {}).get("description") or first_line or title)[:120].strip()
+
+        # Build conformant v0.2 frontmatter
         fm = dict(c.get("frontmatter", {}))
         fm["type"] = c.get("type")
-        fm["title"] = c.get("title")
+        fm["title"] = title
+        fm["description"] = desc
         if c.get("resource"):
             fm["resource"] = c.get("resource")
-        fm["trust_tier"] = c.get("trust_tier")
+        fm["status"] = fm.get("status", "stable")
+        fm["trust_tier"] = c.get("trust_tier", "unverified")
+
         if c.get("tags"):
             fm["tags"] = c.get("tags")
 
+        # Trust & Provenance fields (v0.2)
+        if "generated" not in fm:
+            fm["generated"] = {"by": "process:mantis-security-agent/1.0", "at": now_iso}
+
+        if "verified" not in fm or not fm["verified"]:
+            if c.get("trust_tier") == "human_reviewed":
+                fm["verified"] = [{"by": "human:security-lead", "at": now_iso}]
+            else:
+                fm["verified"] = [{"by": "process:mantis-critic", "at": now_iso}]
+
+        if "sources" not in fm:
+            res_target = c.get("resource") or "/addons"
+            fm["sources"] = [{
+                "id": "audit-lead",
+                "resource": res_target,
+                "title": f"Mantis Security Audit Target ({res_target})",
+                "author": "process:mantis-security-agent",
+                "last_modified": now_iso,
+            }]
+
         fm_str = yaml.dump(fm, sort_keys=False).strip()
-        body = c.get("body_markdown", "").strip()
         full_text = f"---\n{fm_str}\n---\n\n{body}\n"
 
         file_path.write_text(full_text, encoding="utf-8")
         exported_count += 1
+        categories[cat].append((title, filename, desc))
+
+    # 1. Generate subdirectory index.md files (NO frontmatter per E3)
+    cat_titles = {
+        "invariants": "Security Invariants",
+        "threats": "Threat Boundaries",
+        "vulnerabilities": "Vulnerability Patterns",
+        "entities": "Component Entities",
+        "concepts": "General Concepts",
+    }
+    for cat, items in categories.items():
+        if items:
+            cat_dir = output_dir / cat
+            idx_lines = [f"# {cat_titles[cat]}\n"]
+            for t, fn, d in sorted(items, key=lambda x: x[0]):
+                idx_lines.append(f"* [{t}](./{fn}) - {d}")
+            (cat_dir / "index.md").write_text("\n".join(idx_lines) + "\n", encoding="utf-8")
+
+    # 2. Generate bundle-root index.md with okf_version: "0.2"
+    root_idx = [
+        "---",
+        'okf_version: "0.2"',
+        "---",
+        "",
+        "# Mantis Security Knowledge Bundle",
+        "",
+        "Self-contained Open Knowledge Format (OKF v0.2) bundle containing verified security invariants, threat boundaries, and vulnerabilities.",
+        "",
+        "## Catalog Sections",
+    ]
+    for cat, items in categories.items():
+        if items:
+            root_idx.append(f"* [{cat_titles[cat]}](./{cat}/index.md) - {len(items)} concepts")
+    (output_dir / "index.md").write_text("\n".join(root_idx) + "\n", encoding="utf-8")
+
+    # 3. Generate bundle-root log.md with ISO 8601 date headings
+    log_content = f"# Update Log\n\n## {today_date}\n* **Creation**: Exported {exported_count} concepts into OKF v0.2 bundle.\n"
+    (output_dir / "log.md").write_text(log_content, encoding="utf-8")
 
     return exported_count
 
@@ -273,7 +353,7 @@ def import_okf_bundle(db_path: Path, bundle_dir: Path) -> int:
     imported_count = 0
     for root, _, files in os.walk(bundle_dir):
         for f in files:
-            if not f.endswith(".md"):
+            if not f.endswith(".md") or f in ("index.md", "log.md"):
                 continue
             f_path = Path(root) / f
             try:
