@@ -5103,6 +5103,7 @@
                         }
                         if (elCostsMain) {
                             elCostsMain.innerText = `${totHistNetCostEur >= 0 ? '€' : '-€'}${Math.abs(totHistNetCostEur).toFixed(2)}`;
+                            kc.costs.main = elCostsMain.innerText;
                         }
                         if (elCostsSub) elCostsSub.innerText = kc.costs.sub;
 
@@ -5130,6 +5131,83 @@
                             elHpMain.innerHTML = `${kc.heatpump.main} <span class="text-xs text-slate-400 font-normal">${kc.heatpump.main_extra || ''}</span>`;
                         }
                         if (elHpSub) elHpSub.innerText = kc.heatpump.sub;
+
+                        // Ensure rich breakdowns exist for the KPI Detail Modal
+                        const rangeLbl = kc.range_label || 'Historie';
+                        if (!kc.costs.breakdown) {
+                            const subParts = (kc.costs.sub || '').split('·');
+                            const afnameVal = parseFloat(subParts[0]) || 0;
+                            const retourVal = parseFloat(subParts[1]) || 0;
+                            const avgPrice = afnameVal > 0 ? Math.max(0.10, Math.abs(totHistNetCostEur) / afnameVal) : 0.28;
+                            const hpEur = parseFloat((kc.heatpump?.main_extra || '').replace(/[^\d.]/g, '')) || 0;
+                            const hpKwh = parseFloat(kc.heatpump?.main) || 0;
+                            const solBenutEur = parseFloat((kc.solar?.sub || '').match(/€([\d.]+)\s*benut/)?.[1]) || 0;
+                            const solBenutKwh = parseFloat((kc.solar?.sub || '').match(/benut\s*\(([\d.]+)\s*kWh\)/)?.[1]) || 0;
+                            const solRetourEur = parseFloat((kc.solar?.sub || '').match(/€([\d.]+)\s*retour/)?.[1]) || 0;
+
+                            kc.costs.title = `Kosten ${rangeLbl} (Historie)`;
+                            kc.costs.headline = `Werkelijke energiekosten (${rangeLbl}): ${kc.costs.main}`;
+                            kc.costs.explanation = `Gerealiseerde kosten op basis van InfluxDB energiemetingen en dynamische uurprijzen over ${rangeLbl}.`;
+                            kc.costs.breakdown = [
+                                { label: 'Netafname (Totaal)', icon: 'blue', kwh: afnameVal, eur: Number((afnameVal * avgPrice).toFixed(2)), desc: `Gemeten stroomafname via de hoofdmeter (€${avgPrice.toFixed(2)}/kWh gem.)` },
+                                { label: 'Warmtepomp Verbruik', icon: 'cyan', kwh: hpKwh, eur: hpEur, desc: `Inepro kWh-meter warmtepomp (${(hpKwh * 3.65).toFixed(1)} kWh thermisch)` },
+                                { label: 'Zon Direct Benut (Aftrek)', icon: 'amber', kwh: -solBenutKwh, eur: -solBenutEur, desc: 'Zonnestroom direct in huis verbruikt (vermeden afname)' },
+                                { label: 'Teruglevering aan het Net', icon: 'emerald', kwh: -retourVal, eur: -solRetourEur, desc: 'Netto export naar het net' }
+                            ];
+                            kc.costs.footer = `Netto netafname: ${(afnameVal - retourVal).toFixed(1)} kWh · Teruglevering: ${retourVal.toFixed(1)} kWh`;
+                        }
+
+                        if (!kc.solar.breakdown) {
+                            const totSolKwh = parseFloat((kc.solar?.main_extra || '').replace(/[^\d.]/g, '')) || 0;
+                            const totSolEur = parseFloat((kc.solar?.main || '').replace(/[^\d.]/g, '')) || 0;
+                            const solBenutEur = parseFloat((kc.solar?.sub || '').match(/€([\d.]+)\s*benut/)?.[1]) || 0;
+                            const solBenutKwh = parseFloat((kc.solar?.sub || '').match(/benut\s*\(([\d.]+)\s*kWh\)/)?.[1]) || 0;
+                            const solRetourEur = parseFloat((kc.solar?.sub || '').match(/€([\d.]+)\s*retour/)?.[1]) || 0;
+                            const solRetourKwh = parseFloat((kc.solar?.sub || '').match(/retour\s*\(([\d.]+)\s*kWh\)/)?.[1]) || 0;
+                            const selfconsPct = totSolKwh > 0 ? Math.round((solBenutKwh / totSolKwh) * 100) : 0;
+                            const exportPct = totSolKwh > 0 ? Math.round((solRetourKwh / totSolKwh) * 100) : 0;
+
+                            kc.solar.title = `Zonnepanelen ${rangeLbl}`;
+                            kc.solar.headline = `Zonnepanelen (${rangeLbl}): ${kc.solar.main} ${kc.solar.main_extra || ''}`;
+                            kc.solar.explanation = `Werkelijk opgewekte zonnestroom gemeten door Inepro 103 zonne-omvormer over ${rangeLbl}.`;
+                            kc.solar.breakdown = [
+                                { label: 'Direct Eigen Verbruik', icon: 'amber', kwh: solBenutKwh, eur: solBenutEur, desc: `${selfconsPct}% direct lokaal in huis/boiler benut` },
+                                { label: 'Teruglevering aan het Net', icon: 'blue', kwh: solRetourKwh, eur: solRetourEur, desc: `${exportPct}% geëxporteerd overschot` },
+                                { label: 'Totale Opwekking', icon: 'emerald', kwh: totSolKwh, eur: totSolEur, desc: `Totale zonne-energie over ${rangeLbl}` }
+                            ];
+                            kc.solar.footer = `Zelfconsumptie: ${selfconsPct}% · Bespaard op netafname: €${solBenutEur.toFixed(2)}`;
+                        }
+
+                        if (!kc.savings.breakdown) {
+                            const savEur = parseFloat((kc.savings?.main || '').replace(/[^\d.]/g, '')) || 0;
+                            const savKwh = parseFloat(kc.savings?.sub) || 0;
+                            kc.savings.title = `Besparing ${rangeLbl}`;
+                            kc.savings.headline = `Gerealiseerde Besparing (${rangeLbl}): ${kc.savings.main}`;
+                            kc.savings.explanation = `Kostenbesparing gerealiseerd door HEMS sturing ten opzichte van ongecontroleerd stoken in piekuren over ${rangeLbl}.`;
+                            kc.savings.breakdown = [
+                                { label: 'Spitsblokkades Vermeden', icon: 'emerald', kwh: savKwh, eur: savEur, desc: 'Warmtepomp vergrendeld tijdens dure spitsuren via betondekvloer buffer' }
+                            ];
+                            kc.savings.footer = `Totaal ${savKwh.toFixed(1)} kWh dure netstroom vermeden over ${rangeLbl}`;
+                        }
+
+                        if (!kc.heatpump.breakdown) {
+                            const hpKwh = parseFloat(kc.heatpump?.main) || 0;
+                            const hpEur = parseFloat((kc.heatpump?.main_extra || '').replace(/[^\d.]/g, '')) || 0;
+                            const hpTh = parseFloat(kc.heatpump?.sub) || Number((hpKwh * 3.65).toFixed(1));
+                            kc.heatpump.title = `Warmtepomp ${rangeLbl}`;
+                            kc.heatpump.headline = `Warmtepomp (${rangeLbl}): ${kc.heatpump.main} el (~€${hpEur.toFixed(2)})`;
+                            kc.heatpump.explanation = `Werkelijk gemeten stroomverbruik en berekende thermische opbrengst van de Daikin Altherma warmtepomp over ${rangeLbl}.`;
+                            kc.heatpump.breakdown = [
+                                { label: 'Elektrische Netafname', icon: 'cyan', kwh: hpKwh, eur: hpEur, desc: `Totaal stroomverbruik warmtepomp over ${rangeLbl}` },
+                                { label: 'Thermische Opbrengst', icon: 'pink', kwh: hpTh, eur: null, desc: 'Geleverde warmte aan CV en sanitair warm water (SCOP 3.65)' }
+                            ];
+                            kc.heatpump.footer = `Seizoens-COP 3.65 · ${hpTh.toFixed(1)} kWh thermische warmte geproduceerd over ${rangeLbl}`;
+                        }
+
+                        // Synchronize current history KPIs for modal detail popup
+                        if (window.updateCurrentHistoryKpis) {
+                            window.updateCurrentHistoryKpis(kc);
+                        }
                     }
 
                     // Symmetrical bounds

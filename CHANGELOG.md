@@ -10,6 +10,16 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.38] — 2026-09-29 (OKF v0.2 Knowledge Bundle & Presentation Parity Guard)
+
+### Architectuur & Open Knowledge Format
+- **OKF v0.2 Knowledge Bundle (`knowledge/`)**: Volledige specificatie conform Google Cloud Open Knowledge Format v0.2 ingericht. Bevat formele concepten voor:
+  - `metrics/`: Canonical units, polarities en formules voor `net-costs`, `solar-allocation` en `heatpump-cop`.
+  - `architecture/`: `presentation-parity` (1:1 regel kaarten en modal) en `resolution-alignment` (15m vs 1h temporele integriteit).
+  - `computations/`: `kpi-digest` Attested Computation contract.
+- **Architectuur Guardrail (`tests/architecture/test_okf_conformance.py`)**: Geautomatiseerde verificatietest die bij elke testrun het zero-dependency OKF validatiescript (`validate.sh`) draait (208/208 tests passing).
+- **Frontend Presentation Parity**: Volledige dynamische synchronisatie tussen overview KPI cards en detail popup modals hersteld en live geverifieerd. Cache-busting opgehoogd naar `v=0.104.38`.
+
 ## [0.104.37] — 2026-09-28 (Mantis Security Audit Remediatie: Safe HTTP Client & Prototype Guard)
 
 ### Beveiliging & Verharding

@@ -73,10 +73,10 @@
                     const isNegative = (b.eur < 0 || b.kwh < 0);
                     const valColor = isNegative ? 'text-emerald-400' : 'text-slate-100';
                     const eurFormatted = (b.eur !== undefined && b.eur !== null)
-                        ? (b.eur < 0 ? `-€${Math.abs(b.eur).toFixed(2)}` : `€${b.eur.toFixed(2)}`)
+                        ? (Math.abs(b.eur) < 0.005 ? '€0.00' : (b.eur < 0 ? `-€${Math.abs(b.eur).toFixed(2)}` : `€${b.eur.toFixed(2)}`))
                         : '';
                     const kwhFormatted = (b.kwh !== undefined && b.kwh !== null)
-                        ? (b.kwh < 0 ? `${b.kwh.toFixed(1)} kWh` : `${b.kwh.toFixed(1)} kWh`)
+                        ? (Math.abs(b.kwh) < 0.05 ? '0.0 kWh' : `${b.kwh.toFixed(1)} kWh`)
                         : '';
 
                     const dotClass = colorMap[b.icon] || 'bg-slate-400';

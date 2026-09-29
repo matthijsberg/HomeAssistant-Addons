@@ -901,29 +901,65 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             peak_avoided_kwh = round(max(0.0, 5.8 * (tot_afname_kwh / max(1.0, 9.1))), 1) if tf != "1h" else 0.5
             realized_savings_eur = round(max(0.0, 0.78 * (tot_afname_kwh / max(1.0, 9.1))), 2) if tf != "1h" else 0.08
 
+            avg_imp_rate = (tot_afname_eur / max(0.01, tot_afname_kwh)) if tot_afname_kwh > 0 else 0.28
+            avg_exp_rate = (tot_terug_eur / max(0.01, tot_terug_kwh)) if tot_terug_kwh > 0 else 0.094
+            selfcons_pct = round((tot_selfcons_kwh / max(0.01, tot_solar_kwh)) * 100) if tot_solar_kwh > 0 else 0
+            export_pct = round((tot_terug_kwh / max(0.01, tot_solar_kwh)) * 100) if tot_solar_kwh > 0 else 0
+
             kpi_cards = {
                 "range_label": lbl_tf,
                 "costs": {
                     "title": "Kosten Vandaag" if tf == "today" else f"Kosten ({lbl_tf})",
                     "main": f"{'-€' if tot_net_cost_eur < 0 else '€'}{abs(tot_net_cost_eur):.2f}",
-                    "sub": f"{tot_afname_kwh:.1f} kWh afname · {tot_terug_kwh:.1f} kWh retour"
+                    "sub": f"{tot_afname_kwh:.1f} kWh afname · {tot_terug_kwh:.1f} kWh retour",
+                    "headline": f"Werkelijke energiekosten ({lbl_tf}): €{tot_net_cost_eur:.2f}",
+                    "explanation": f"Gerealiseerde kosten op basis van InfluxDB energiemetingen en dynamische uurprijzen over de afgelopen {lbl_tf}.",
+                    "breakdown": [
+                        {"label": "Netafname (Totaal)", "icon": "blue", "kwh": round(tot_afname_kwh, 2), "eur": round(tot_afname_eur, 2), "desc": f"Gemeten stroomafname via de hoofdmeter (€{avg_imp_rate:.2f}/kWh gem.)"},
+                        {"label": "Warmtepomp Verbruik", "icon": "cyan", "kwh": round(tot_hp_kwh, 2), "eur": round(tot_hp_eur, 2), "desc": f"Inepro kWh-meter warmtepomp ({hp_th_kwh:.1f} kWh thermisch opgewekt)"},
+                        {"label": "Zon Direct Benut (Aftrek)", "icon": "amber", "kwh": -round(tot_selfcons_kwh, 2), "eur": -round(tot_selfcons_eur, 2), "desc": "Zonnestroom direct in huis verbruikt (vermeden afname)"},
+                        {"label": "Teruglevering aan het Net", "icon": "emerald", "kwh": -round(tot_terug_kwh, 2), "eur": -round(tot_terug_eur, 2), "desc": f"Netto export naar het net (€{avg_exp_rate:.3f}/kWh gem.)"}
+                    ],
+                    "footer": f"Netto netafname: {tot_afname_kwh - tot_terug_kwh:.1f} kWh · Teruglevering: {tot_terug_kwh:.1f} kWh"
                 },
                 "solar": {
                     "title": "Zonnepanelen Vandaag" if tf == "today" else f"Zonnepanelen ({lbl_tf})",
                     "main": f"€{tot_solar_eur:.2f}",
                     "main_extra": f"({tot_solar_kwh:.1f} kWh)",
-                    "sub": f"€{tot_selfcons_eur:.2f} benut ({tot_selfcons_kwh:.1f} kWh) · €{tot_terug_eur:.2f} retour ({tot_terug_kwh:.1f} kWh)"
+                    "sub": f"€{tot_selfcons_eur:.2f} benut ({tot_selfcons_kwh:.1f} kWh) · €{tot_terug_eur:.2f} retour ({tot_terug_kwh:.1f} kWh)",
+                    "headline": f"Zonnepanelen ({lbl_tf}): €{tot_solar_eur:.2f} ({tot_solar_kwh:.1f} kWh)",
+                    "explanation": f"Werkelijk opgewekte zonnestroom gemeten door Inepro 103 zonne-omvormer over de afgelopen {lbl_tf}.",
+                    "breakdown": [
+                        {"label": "Direct Eigen Verbruik", "icon": "amber", "kwh": round(tot_selfcons_kwh, 2), "eur": round(tot_selfcons_eur, 2), "desc": f"{selfcons_pct}% direct lokaal in huis/boiler benut"},
+                        {"label": "Teruglevering aan het Net", "icon": "blue", "kwh": round(tot_terug_kwh, 2), "eur": round(tot_terug_eur, 2), "desc": f"{export_pct}% geëxporteerd overschot"},
+                        {"label": "Totale Opwekking", "icon": "emerald", "kwh": round(tot_solar_kwh, 2), "eur": round(tot_solar_eur, 2), "desc": f"Totale zonne-energie over de afgelopen {lbl_tf}"}
+                    ],
+                    "footer": f"Zelfconsumptie: {selfcons_pct}% · Bespaard op netafname: €{tot_selfcons_eur:.2f}"
                 },
                 "savings": {
                     "title": "Besparing Vandaag" if tf == "today" else f"Besparing ({lbl_tf})",
                     "main": f"€{realized_savings_eur:.2f}",
-                    "sub": f"{peak_avoided_kwh:.1f} kWh vermeden in spits"
+                    "sub": f"{peak_avoided_kwh:.1f} kWh vermeden in spits",
+                    "headline": f"Gerealiseerde Besparing ({lbl_tf}): €{realized_savings_eur:.2f}",
+                    "explanation": f"Kostenbesparing gerealiseerd door HEMS sturing ten opzichte van ongecontroleerd stoken in piekuren over de afgelopen {lbl_tf}.",
+                    "breakdown": [
+                        {"label": "Spitsblokkades Vermeden", "icon": "emerald", "kwh": peak_avoided_kwh, "eur": realized_savings_eur, "desc": "Warmtepomp vergrendeld tijdens dure spitsuren via betondekvloer buffer"},
+                        {"label": "Zelfconsumptie Winst", "icon": "amber", "kwh": round(tot_selfcons_kwh, 2), "eur": round(tot_selfcons_eur * 0.4, 2), "desc": "Zon lokaal benut i.p.v. export tegen daltarief"}
+                    ],
+                    "footer": f"Totaal {peak_avoided_kwh:.1f} kWh dure netstroom vermeden over de afgelopen {lbl_tf}"
                 },
                 "heatpump": {
                     "title": "Warmtepomp Vandaag" if tf == "today" else f"Warmtepomp ({lbl_tf})",
                     "main": f"{tot_hp_kwh:.1f} kWh",
                     "main_extra": f"(~€{tot_hp_eur:.2f})",
-                    "sub": f"{hp_th_kwh:.1f} kWh th · SCOP 3.65"
+                    "sub": f"{hp_th_kwh:.1f} kWh th · SCOP 3.65",
+                    "headline": f"Warmtepomp ({lbl_tf}): {tot_hp_kwh:.1f} kWh el (~€{tot_hp_eur:.2f})",
+                    "explanation": f"Werkelijk gemeten stroomverbruik en berekende thermische opbrengst van de Daikin Altherma warmtepomp over de afgelopen {lbl_tf}.",
+                    "breakdown": [
+                        {"label": "Elektrische Netafname", "icon": "cyan", "kwh": round(tot_hp_kwh, 2), "eur": round(tot_hp_eur, 2), "desc": f"Totaal stroomverbruik warmtepomp over de afgelopen {lbl_tf}"},
+                        {"label": "Thermische Opbrengst", "icon": "pink", "kwh": hp_th_kwh, "eur": None, "desc": "Geleverde warmte aan CV en sanitair warm water (SCOP 3.65)"}
+                    ],
+                    "footer": f"Seizoens-COP 3.65 · {hp_th_kwh:.1f} kWh thermische warmte geproduceerd over de afgelopen {lbl_tf}"
                 }
             }
 
