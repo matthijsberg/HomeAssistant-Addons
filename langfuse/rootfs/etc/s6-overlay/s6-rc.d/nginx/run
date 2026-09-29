@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "[nginx] Starting dual reverse proxy listeners (:8099 and :3000)..."
+exec nginx -c /etc/nginx/nginx.conf

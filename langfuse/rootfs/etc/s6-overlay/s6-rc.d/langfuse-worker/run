@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -a
+# shellcheck disable=SC1091
+source /run/langfuse.env
+set +a
+
+cd /opt/langfuse-worker
+echo "[langfuse-worker] Starting Langfuse Async Worker..."
+exec node dist/index.js

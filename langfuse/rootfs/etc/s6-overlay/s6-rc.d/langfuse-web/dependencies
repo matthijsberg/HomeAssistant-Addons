@@ -1,0 +1,5 @@
+init-postgres-db
+init-clickhouse-user
+init-s3-bucket
+init-basepath
+redis

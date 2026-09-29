@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -a
+# shellcheck disable=SC1091
+source /run/langfuse.env
+set +a
+
+cd /opt/langfuse-web
+echo "[langfuse-web] Starting Langfuse Web server..."
+exec node server.js

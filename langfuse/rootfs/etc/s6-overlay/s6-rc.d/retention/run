@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+echo "[retention] Retention scheduler active."
+while true; do
+  sleep 86400
+  /usr/bin/retention_job.sh || true
+done

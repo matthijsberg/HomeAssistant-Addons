@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec clickhouse-server --config-file=/etc/clickhouse-server/config.xml
