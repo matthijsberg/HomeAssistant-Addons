@@ -59,7 +59,7 @@ jobs:
         with:
           args: |
             --target langfuse \
-            --image "ghcr.io/${{ github.repository_owner }}/{arch}-addon-langfuse" \
+            --image "{arch}-addon-langfuse" \
             --docker-hub "ghcr.io/${{ github.repository_owner }}" \
             --amd64 \
             --aarch64
