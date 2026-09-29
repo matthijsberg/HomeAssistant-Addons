@@ -1,6 +1,6 @@
 name: "Langfuse"
 description: "Self-hosted LLM observability & prompt management (Langfuse v4)"
-version: "4.0.0-4"
+version: "4.0.0-7"
 slug: "langfuse"
 url: "https://github.com/matthijsberg/HomeAssistant-Addons/tree/main/langfuse"
 init: false
@@ -13,6 +13,7 @@ timeout: 120
 backup: cold
 ingress: true
 ingress_port: 8099
+homeassistant_api: true
 panel_icon: "mdi:chart-timeline-variant"
 panel_title: "Langfuse"
 panel_admin: true

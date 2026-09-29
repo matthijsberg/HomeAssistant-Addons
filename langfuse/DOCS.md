@@ -80,6 +80,19 @@ In the Add-on **Configuration** tab:
 
 ---
 
+## 📊 Home Assistant KPI Sensors
+
+The add-on continuously monitors analytical metrics in ClickHouse and automatically publishes key performance indicators as native Home Assistant sensors:
+
+- **`sensor.langfuse_tokens_today`**: Total tokens consumed today (attributes: `input_tokens`, `output_tokens`, `reasoning_tokens`).
+- **`sensor.langfuse_cost_today`**: Total estimated cost today in USD ($).
+- **`sensor.langfuse_llm_calls_today`**: Total LLM calls / generations today.
+- **`sensor.langfuse_avg_latency`**: Average generation latency in seconds.
+
+These sensors update every 15–30 seconds and can be directly used in Lovelace dashboards, automation thresholds, or alerts.
+
+---
+
 ## 🔒 Storage, Backups & Maintenance
 
 - **Persistent Data:** All databases are stored safely under `/data`:

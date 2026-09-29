@@ -4,6 +4,12 @@ set -a
 source /run/langfuse.env
 set +a
 
+# Start HA KPI sensor reporter in background
+if [ -f "/usr/bin/ha_sensor_reporter.js" ]; then
+  echo "[langfuse-worker] Starting Home Assistant KPI sensor reporter..."
+  node /usr/bin/ha_sensor_reporter.js &
+fi
+
 # Worker HTTP metrics server runs on 3101 so Web owns 3100
 export PORT=3101
 

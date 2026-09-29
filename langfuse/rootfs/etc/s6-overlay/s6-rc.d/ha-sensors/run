@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec node /usr/bin/ha_sensor_reporter.js
