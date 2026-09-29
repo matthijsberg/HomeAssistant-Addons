@@ -18,6 +18,14 @@ from harness.jobs import init_db, create_job, get_job, update_job_status, list_j
 from harness.egress import redact_secrets, create_egress_manifest, format_warning_text
 from harness.stages import run_deterministic_prepass, call_llm, synthesize_patch_check
 from harness.uploads import unpack_upload
+from harness.okf import (
+    record_okf_concept,
+    query_okf_concepts,
+    export_okf_bundle,
+    import_okf_bundle,
+    query_security_guidance,
+    init_okf_table,
+)
 
 # Base paths
 ROOT_DIR = Path(__file__).parent.resolve()
@@ -25,12 +33,14 @@ DATA_DIR = Path(os.environ.get("MANTIS_DATA_DIR", "/data"))
 OPTIONS_FILE = DATA_DIR / "options.json"
 CACHE_DIR = DATA_DIR / "cache"
 WORKSPACES_DIR = DATA_DIR / "workspaces"
+KNOWLEDGE_DB = CACHE_DIR / "knowledge.db"
 
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 WORKSPACES_DIR.mkdir(parents=True, exist_ok=True)
 
-# Initialize SQLite database
+# Initialize SQLite databases
 init_db(DATA_DIR / "jobs.db")
+init_okf_table(KNOWLEDGE_DB)
 
 # Load configuration options
 def load_options() -> Dict[str, Any]:
@@ -199,6 +209,25 @@ async def execute_campaign_job(job_id: str):
         for f in all_findings:
             report_md += f"### [{f.get('severity')}] {f.get('title')}\n- **CWE:** {f.get('cwe')}\n- **Location:** `{f.get('file', 'system')}:{f.get('start_line', 0)}`\n- **Details:** {f.get('rationale', '')}\n\n"
 
+        # Index findings into Open Knowledge Format (OKF v0.2)
+        for idx, f in enumerate(all_findings):
+            cwe_tag = f.get("cwe")
+            if isinstance(cwe_tag, list):
+                cwe_tag = cwe_tag[0]
+            record_okf_concept(
+                KNOWLEDGE_DB,
+                {
+                    "concept_id": f"finding_{job_id}_{idx+1:03d}",
+                    "type": "Vulnerability Pattern",
+                    "title": f.get("title", "Finding"),
+                    "resource": f.get("file", ""),
+                    "trust_tier": "machine_confirmed",
+                    "tags": [str(cwe_tag)],
+                    "frontmatter": {"cwe": cwe_tag, "severity": f.get("severity")},
+                    "body_markdown": f.get("rationale") or f.get("title", ""),
+                },
+            )
+
         update_job_status(
             job_id,
             status="completed",
@@ -282,6 +311,39 @@ MCP_TOOLS = [
                 "status": {"type": "string", "description": "Filter by job status"},
                 "limit": {"type": "integer", "description": "Max jobs to return (default 20)"}
             }
+        }
+    },
+    {
+        "name": "mantis_advise",
+        "description": "Query Open Knowledge Format (OKF v0.2) security guidance, trust boundaries, and invariants for a target file before writing or refactoring code.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target_file": {"type": "string", "description": "Target file or component path (e.g. 'Dockerfile' or 'api/context.py')"},
+                "full": {"type": "boolean", "description": "Whether to emit unabridged OKF markdown bodies (default false)"}
+            },
+            "required": ["target_file"]
+        }
+    },
+    {
+        "name": "mantis_export_okf",
+        "description": "Export all recorded security concepts to an Open Knowledge Format (OKF v0.2) directory bundle on disk.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "output_dir": {"type": "string", "description": "Destination directory path for OKF bundle"}
+            }
+        }
+    },
+    {
+        "name": "mantis_import_okf",
+        "description": "Import an Open Knowledge Format (OKF v0.2) directory bundle from disk into the security knowledge database.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bundle_dir": {"type": "string", "description": "Source directory path containing the OKF bundle"}
+            },
+            "required": ["bundle_dir"]
         }
     }
 ]
@@ -420,6 +482,22 @@ async def handle_tool_call(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         limit = args.get("limit", 20)
         jobs = list_jobs(status=status_filter, limit=limit)
         return {"jobs": jobs}
+
+    elif name == "mantis_advise":
+        target_file = args.get("target_file", "")
+        full = args.get("full", False)
+        guidance = query_security_guidance(KNOWLEDGE_DB, target_file=target_file, full=full)
+        return guidance
+
+    elif name == "mantis_export_okf":
+        out_dir = Path(args.get("output_dir", "/data/okf_bundle")).resolve()
+        count = export_okf_bundle(KNOWLEDGE_DB, out_dir)
+        return {"status": "exported", "output_dir": str(out_dir), "concepts_count": count}
+
+    elif name == "mantis_import_okf":
+        b_dir = Path(args.get("bundle_dir", "")).resolve()
+        count = import_okf_bundle(KNOWLEDGE_DB, b_dir)
+        return {"status": "imported", "bundle_dir": str(b_dir), "concepts_count": count}
 
     else:
         raise ValueError(f"Unknown MCP tool: {name}")
