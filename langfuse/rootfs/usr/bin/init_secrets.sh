@@ -67,6 +67,19 @@ EOF
 chmod 644 /etc/clickhouse-server/users.d/langfuse.xml
 echo "[init-secrets] Configured ClickHouse user 'langfuse' in users.d/langfuse.xml."
 
+# Ensure ClickHouse persistent data path in /data/clickhouse
+mkdir -p /etc/clickhouse-server/config.d
+cat <<EOF > /etc/clickhouse-server/config.d/storage.xml
+<clickhouse>
+    <path>/data/clickhouse/</path>
+    <tmp_path>/data/clickhouse/tmp/</tmp_path>
+    <user_files_path>/data/clickhouse/user_files/</user_files_path>
+    <format_schema_path>/data/clickhouse/format_schemas/</format_schema_path>
+</clickhouse>
+EOF
+chmod 644 /etc/clickhouse-server/config.d/storage.xml
+echo "[init-secrets] Configured ClickHouse persistent data path in /data/clickhouse."
+
 # Configure SeaweedFS S3 credentials matching secrets.env
 mkdir -p /etc/seaweedfs
 cat <<EOF > /etc/seaweedfs/s3.json
