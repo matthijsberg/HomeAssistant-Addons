@@ -247,9 +247,17 @@
                 </div>
 
                 <!-- ========================================================================= -->
-                <!-- CATEGORIE 1: VOORSPELLING (FORECAST)                                      -->
+                <!-- SECTIE 1: FINANCIËN & MARKTTARIEVEN (FINANCE)                             -->
                 <!-- ========================================================================= -->
                 <div class="space-y-4 pt-2">
+                    <div class="flex items-center gap-2.5 border-b border-slate-800/80 pb-2.5">
+                        <div class="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 text-base">💶</div>
+                        <div>
+                            <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">Financiën &amp; Markttarieven</h3>
+                            <p class="text-[11px] text-slate-400">Verwachte netto energiekosten, dynamische EPEX inkoop- en terugleveringstarieven en prijsvolatiliteit.</p>
+                        </div>
+                    </div>
+
                     <!-- Chart 1.0: Kosten Forecast (Cost & EPEX Forecast) -->
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
@@ -273,6 +281,67 @@
 
                         <!-- Reusable Legend Chips Container -->
                         <div id="cost-forecast-legend"></div>
+                    </div>
+
+                    <!-- Chart 1.2: Prijzen & Zonnevoorspelling (EPEX Rates & Solar Forecast) -->
+                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
+                        <div class="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-3 flex-wrap">
+                            <h3 class="text-sm font-bold text-white tracking-wide">Prijzen &amp; Zonnevoorspelling (Forecast.Solar)</h3>
+                            <div class="flex items-center gap-3 text-[10px] font-mono">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="w-3.5 h-1 bg-[#3B82F6] rounded"></span>
+                                    <span class="text-blue-400 font-medium">EPEX Vastgesteld</span>
+                                </div>
+                                <div class="flex items-center gap-1.5">
+                                    <span class="w-3.5 h-0 border-t-2 border-dashed border-[#818CF8]"></span>
+                                    <span class="text-indigo-300 font-medium">Stroomvoorspeller Prognose</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Canvas -->
+                        <div class="relative w-full h-60 sm:h-64">
+                            <canvas id="electricityPricesChart"></canvas>
+                        </div>
+
+                        <!-- Price & Solar Stats Cards -->
+                        <div class="pt-2 border-t border-slate-800/80">
+                            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-mono">
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                    <div class="text-[10px] text-slate-500 uppercase">Laagste Tarief</div>
+                                    <div class="text-sm font-bold text-emerald-400 mt-0.5" id="stat-epex-min">--</div>
+                                    <div class="text-[10px] text-slate-400" id="stat-epex-min-time">om --:--</div>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                    <div class="text-[10px] text-slate-500 uppercase">Hoogste Tarief</div>
+                                    <div class="text-sm font-bold text-red-400 mt-0.5" id="stat-epex-max">--</div>
+                                    <div class="text-[10px] text-slate-400" id="stat-epex-max-time">om --:--</div>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                    <div class="text-[10px] text-slate-500 uppercase">Piek Zonverwachting</div>
+                                    <div class="text-sm font-bold text-amber-400 mt-0.5" id="stat-epex-solar-peak">--</div>
+                                    <div class="text-[10px] text-slate-400">Forecast.Solar</div>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
+                                    <div class="text-[10px] text-slate-500 uppercase" id="stat-epex-export-title">Hoogste Terugleverprijs</div>
+                                    <div class="text-sm font-bold text-cyan-400 mt-0.5" id="stat-epex-solar-margin">--</div>
+                                    <div class="text-[10px] text-slate-400" id="stat-epex-export-time">om --:--</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========================================================================= -->
+                <!-- SECTIE 2: ENERGIE & VERMOGENSBALANS (ENERGY)                              -->
+                <!-- ========================================================================= -->
+                <div class="space-y-4 pt-4">
+                    <div class="flex items-center gap-2.5 border-b border-slate-800/80 pb-2.5">
+                        <div class="p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-base">⚡</div>
+                        <div>
+                            <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">Energie &amp; Vermogensbalans</h3>
+                            <p class="text-[11px] text-slate-400">Integrale vermogens-waterval: baselast, zonne-opwek, tapwater, cv-verwarming en batterijstromen.</p>
+                        </div>
                     </div>
 
                     <!-- Chart 1.1: Verbruiksvoorspelling (Stacked 24h Prediction) -->
@@ -428,56 +497,93 @@
                             <div class="flex items-center gap-1.5"><span class="w-3.5 h-1 bg-cyan-400 rounded border-dashed"></span> <span class="text-cyan-400 font-medium">EPEX Teruglevering (€/kWh)</span></div>
                         </div>
                     </div>
+                </div>
 
-                    <!-- Chart 1.2: Prijzen & Zonnevoorspelling (EPEX Rates & Solar Forecast) -->
-                    <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
-                        <div class="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-3 flex-wrap">
-                            <h3 class="text-sm font-bold text-white tracking-wide">Prijzen & Zonnevoorspelling (Forecast.Solar)</h3>
-                            <div class="flex items-center gap-3 text-[10px] font-mono">
-                                <div class="flex items-center gap-1.5">
-                                    <span class="w-3.5 h-1 bg-[#3B82F6] rounded"></span>
-                                    <span class="text-blue-400 font-medium">EPEX Vastgesteld</span>
+                <!-- ========================================================================= -->
+                <!-- SECTIE 3: ENERGIE-OPSLAG & THERMISCHE BUFFERS (STORAGE)                   -->
+                <!-- ========================================================================= -->
+                <div class="space-y-4 pt-4">
+                    <div class="flex items-center gap-2.5 border-b border-slate-800/80 pb-2.5">
+                        <div class="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-base">🔋</div>
+                        <div>
+                            <h3 class="text-sm sm:text-base font-bold text-white tracking-wide">Energie-opslag &amp; Thermische Buffers</h3>
+                            <p class="text-[11px] text-slate-400">Inkoopwaarde, actuele marktwaarde en arbitragevoordeel van opgeslagen energie in boiler en thuisbatterij.</p>
+                        </div>
+                    </div>
+
+                    <!-- STORAGE VALUATION TOP BOXES: DHW & BATTERY -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                        <!-- Box 1: Boilervat Opslagwaarde -->
+                        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl relative overflow-hidden flex flex-col justify-between space-y-3">
+                            <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="text-xl">♨️</span>
+                                    <div>
+                                        <h4 class="text-xs sm:text-sm font-bold text-white tracking-wide">Boilervat Opslagwaarde (350L SWW)</h4>
+                                        <span class="text-[10px] text-slate-400">Bruikbare warmte boven comfortgrens (setpoint - 10°C)</span>
+                                    </div>
                                 </div>
-                                <div class="flex items-center gap-1.5">
-                                    <span class="w-3.5 h-0 border-t-2 border-dashed border-[#818CF8]"></span>
-                                    <span class="text-indigo-300 font-medium">Stroomvoorspeller Prognose</span>
+                                <span class="text-[10px] font-mono px-2 py-0.5 rounded-md bg-amber-950/60 text-amber-300 border border-amber-500/40 font-bold" id="storage-dhw-temp-pill">-- °C (min 40°C)</span>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2 py-2 border-b border-slate-800/60 font-mono text-center">
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/70">
+                                    <div class="text-[9px] uppercase tracking-wider text-slate-500 font-sans">Inkoopwaarde</div>
+                                    <div class="text-xs sm:text-sm font-bold text-slate-300 mt-0.5" id="storage-dhw-buy-eur">€--</div>
+                                    <div class="text-[9px] text-slate-500" id="storage-dhw-buy-rate">@ €--/kWh</div>
                                 </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/70">
+                                    <div class="text-[9px] uppercase tracking-wider text-cyan-400 font-sans">Actuele Waarde</div>
+                                    <div class="text-xs sm:text-sm font-bold text-cyan-300 mt-0.5" id="storage-dhw-actual-eur">€--</div>
+                                    <div class="text-[9px] text-cyan-500/80" id="storage-dhw-actual-rate">EPEX Nu €--</div>
+                                </div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/70">
+                                    <div class="text-[9px] uppercase tracking-wider text-emerald-400 font-sans">Arbitrage Voordeel</div>
+                                    <div class="text-xs sm:text-sm font-bold text-emerald-400 mt-0.5" id="storage-dhw-delta-eur">+€--</div>
+                                    <div class="text-[9px] text-emerald-500/80" id="storage-dhw-kwh-th">-- kWh th</div>
+                                </div>
+                            </div>
+                            <div class="text-[10px] text-slate-400 flex items-center justify-between font-mono pt-1">
+                                <span id="storage-dhw-usable-kwh">Bruikbaar: -- kWh th (~-- kWh el)</span>
+                                <span class="text-slate-500" id="storage-dhw-cop-note">COP 3.1</span>
                             </div>
                         </div>
 
-                        <!-- Canvas -->
-                        <div class="relative w-full h-60 sm:h-64">
-                            <canvas id="electricityPricesChart"></canvas>
-                        </div>
-
-                        <!-- Price & Solar Stats Cards -->
-                        <div class="pt-2 border-t border-slate-800/80">
-                            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-mono">
-                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
-                                    <div class="text-[10px] text-slate-500 uppercase">Laagste Tarief</div>
-                                    <div class="text-sm font-bold text-emerald-400 mt-0.5" id="stat-epex-min">--</div>
-                                    <div class="text-[10px] text-slate-400" id="stat-epex-min-time">om --:--</div>
+                        <!-- Box 2: Thuisbatterij Opslagwaarde -->
+                        <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl relative overflow-hidden flex flex-col justify-between space-y-3">
+                            <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                                <div class="flex items-center gap-2.5">
+                                    <span class="text-xl">🔋</span>
+                                    <div>
+                                        <h4 class="text-xs sm:text-sm font-bold text-white tracking-wide">Thuisaccu Opslagwaarde (15 kWh)</h4>
+                                        <span class="text-[10px] text-slate-400">Bruikbare stroom boven minimale ontlaadbodem (10% SoC)</span>
+                                    </div>
                                 </div>
-                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
-                                    <div class="text-[10px] text-slate-500 uppercase">Hoogste Tarief</div>
-                                    <div class="text-sm font-bold text-red-400 mt-0.5" id="stat-epex-max">--</div>
-                                    <div class="text-[10px] text-slate-400" id="stat-epex-max-time">om --:--</div>
+                                <span class="text-[10px] font-mono px-2 py-0.5 rounded-md bg-teal-950/60 text-teal-300 border border-teal-500/40 font-bold" id="storage-bat-soc-pill">SoC: --% (min 10%)</span>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2 py-2 border-b border-slate-800/60 font-mono text-center">
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/70">
+                                    <div class="text-[9px] uppercase tracking-wider text-slate-500 font-sans">Inkoopwaarde</div>
+                                    <div class="text-xs sm:text-sm font-bold text-slate-300 mt-0.5" id="storage-bat-buy-eur">€--</div>
+                                    <div class="text-[9px] text-slate-500" id="storage-bat-buy-rate">@ €--/kWh</div>
                                 </div>
-                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
-                                    <div class="text-[10px] text-slate-500 uppercase">Piek Zonverwachting</div>
-                                    <div class="text-sm font-bold text-amber-400 mt-0.5" id="stat-epex-solar-peak">--</div>
-                                    <div class="text-[10px] text-slate-400">Forecast.Solar</div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/70">
+                                    <div class="text-[9px] uppercase tracking-wider text-teal-400 font-sans">Actuele Waarde</div>
+                                    <div class="text-xs sm:text-sm font-bold text-teal-300 mt-0.5" id="storage-bat-actual-eur">€--</div>
+                                    <div class="text-[9px] text-teal-500/80" id="storage-bat-actual-rate">EPEX Nu €--</div>
                                 </div>
-                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/90">
-                                    <div class="text-[10px] text-slate-500 uppercase" id="stat-epex-export-title">Hoogste Terugleverprijs</div>
-                                    <div class="text-sm font-bold text-cyan-400 mt-0.5" id="stat-epex-solar-margin">--</div>
-                                    <div class="text-[10px] text-slate-400" id="stat-epex-export-time">om --:--</div>
+                                <div class="bg-[#0B0F17] p-2.5 rounded-xl border border-slate-800/70">
+                                    <div class="text-[9px] uppercase tracking-wider text-emerald-400 font-sans">Arbitrage Voordeel</div>
+                                    <div class="text-xs sm:text-sm font-bold text-emerald-400 mt-0.5" id="storage-bat-delta-eur">+€--</div>
+                                    <div class="text-[9px] text-emerald-500/80" id="storage-bat-usable-kwh">-- kWh el</div>
                                 </div>
+                            </div>
+                            <div class="text-[10px] text-slate-400 flex items-center justify-between font-mono pt-1">
+                                <span id="storage-bat-capacity-note">Beschikbaar: -- / 15.0 kWh</span>
+                                <span class="text-slate-500" id="storage-bat-eff-note">Rendement 90%</span>
                             </div>
                         </div>
                     </div>
 
-                    
                     <!-- Card 1.25: Warmtepomp & Boiler 24-Uurs Modusplanning (Horizontale Tijdlijn) -->
                     <div class="bg-[#0e1422] border border-[#1E293B] rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4" id="dhw-mode-timeline-container">
                         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
@@ -3725,11 +3831,11 @@ def predict_space_heating_w(dt: datetime, t_outdoor_c: float) -> dict:
 
 
         <!-- MODULAR DOMAIN MODULES & CONTROLLERS -->
-    <script src="./js/i18n.js?v=0.104.38"></script>
-    <script src="./js/modules/modal_decision.js?v=0.104.38"></script>
-    <script src="./js/modules/modal_kpi_detail.js?v=0.104.38"></script>
-    <script src="./js/modules/modal_param_history.js?v=0.104.38"></script>
-    <script src="./js/modules/charts_thermal.js?v=0.104.38"></script>
-    <script src="./js/app.js?v=0.104.38"></script>
+    <script src="./js/i18n.js?v=0.104.39"></script>
+    <script src="./js/modules/modal_decision.js?v=0.104.39"></script>
+    <script src="./js/modules/modal_kpi_detail.js?v=0.104.39"></script>
+    <script src="./js/modules/modal_param_history.js?v=0.104.39"></script>
+    <script src="./js/modules/charts_thermal.js?v=0.104.39"></script>
+    <script src="./js/app.js?v=0.104.39"></script>
 </body>
 </html>

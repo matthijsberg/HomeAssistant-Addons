@@ -10,6 +10,21 @@ and this project adheres to our **4-Tier Semantic Versioning Specification**:
 
 ---
 
+## [0.104.39] — 2026-09-29 (Opslagwaarde Opgeslagen Energie & Drie-Segmenten Voorspelling)
+
+### Nieuwe Functionaliteit & Architectuur
+- **Opslagwaarde Rekenkern (`layer3_scheduling/storage_valuation.py`)**: Real-time berekening van de inkoopwaarde en actuele vervangingswaarde (t.o.v. live EPEX tarief) voor:
+  - **Boilervat (350L SWW)**: Bruikbare warmte ($kWh_{\text{th}}$ en $kWh_{\text{el}}$) berekend vanaf de comfortgrens `setpoint - 10°C` (40 °C min).
+  - **Thuisbatterij (15 kWh LFP)**: Bruikbare stroom ($kWh$) berekend boven de minimale ontlaadbodem (`min_soc_pct`, 10% SoC) met 90% ontlaadrendement.
+  - **Arbitragevoordeel**: Live financieel voordeel (+€X.XX) van opgeslagen energie versus directe netinkoop.
+- **Drie-Segmenten Indeling Voorspelling-Pagina (`web/index.html`)**:
+  - **Sectie 1 (Financiën & Markttarieven)**: Kostenprognose (24h/48h) en EPEX dynamische tarieven & zonne-export direct bij elkaar gegroepeerd.
+  - **Sectie 2 (Energie & Vermogensbalans)**: Integrale vermogenswaterval (baselast, PV, SWW, CV, batterij, netto netlijn) en 6-box energieoverzicht.
+  - **Sectie 3 (Energie-opslag & Thermische Buffers)**: Nieuwe **Opslagwaarde Samenvattingskaarten** bovenaan voor boiler en thuisaccu, gevolgd door operating envelope tijdlijnen en temperatuur-/SoC-trajecten.
+- **OKF v0.2 Uitbreiding**: Kennisconcepten `knowledge/metrics/storage-valuation.md` en `knowledge/architecture/forecast-segmentation.md` toegevoegd (100% OKF conform).
+- **REST & MCP Lockstep**: Endpoint `GET /api/model/storage-valuation` en MCP tool `openhems_get_storage_valuation` geïmplementeerd en gedocumenteerd in `docs/openapi.json`.
+- **Unittests**: 4 nieuwe tests in `test_storage_valuation.py` (212/212 tests passing).
+
 ## [0.104.38] — 2026-09-29 (OKF v0.2 Knowledge Bundle & Presentation Parity Guard)
 
 ### Architectuur & Open Knowledge Format

@@ -754,5 +754,37 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         })
         return True
 
+    if path == "/api/model/storage-valuation":
+        cfg = load_json(CONFIG_FILE) if CONFIG_FILE.exists() else {}
+        dhw_cfg = cfg.get("dhw", {})
+        bat_cfg = cfg.get("battery", {})
+
+        from integrations.homeassistant.client import get_ha_states_map
+        from layer3_scheduling.storage_valuation import calculate_storage_valuation
+        from api.energy_feed import get_epex_tariffs_cached
+
+        ha_states = get_ha_states_map()
+        live_tank_temp = float(ha_states.get("sensor.hc_dhw_temperature_r5t_dhw_tank", {}).get("state", 49.2)) if ha_states else 49.2
+        live_battery_soc = float(ha_states.get("sensor.battery_state_of_charge", {}).get("state", 50.0)) if ha_states else 50.0
+
+        now_ams = datetime.now(ZoneInfo("Europe/Amsterdam"))
+        _, prices_map, _ = get_epex_tariffs_cached(is_15m=True)
+        cur_price = prices_map.get(now_ams.strftime("%d-%m-%Y %H:%M"), 0.28)
+
+        val = calculate_storage_valuation(
+            dhw_tank_temp_c=live_tank_temp,
+            dhw_setpoint_c=float(dhw_cfg.get("setpoint_c", 50.0)),
+            dhw_volume_l=float(dhw_cfg.get("volume_liters", 350.0)),
+            dhw_cop=float(dhw_cfg.get("cop", 3.1)),
+            dhw_charging_price_eur=float(dhw_cfg.get("historical_charge_price_eur", 0.18)),
+            battery_soc_pct=live_battery_soc,
+            battery_capacity_kwh=float(bat_cfg.get("capacity_kwh", 15.0)),
+            battery_min_soc_pct=float(bat_cfg.get("min_soc_pct", 10.0)),
+            battery_charging_price_eur=float(bat_cfg.get("historical_charge_price_eur", 0.16)),
+            battery_efficiency=float(bat_cfg.get("efficiency", 0.90)),
+            current_epex_price_eur=cur_price
+        )
+        handler._send_json(val)
+        return True
 
     return False

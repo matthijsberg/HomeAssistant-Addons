@@ -698,10 +698,34 @@ def handle_get(handler, path: str, qp: dict) -> bool:
         all_dhw_timeline = hist_dhw_timeline + dhw_mode_timeline
 
         from layer3_scheduling.peak_detection import extract_plan_spitsblok_ranges, extract_plan_soft_advice_ranges
+        from layer3_scheduling.storage_valuation import calculate_storage_valuation
+
         n_future = len(advices)
         display_slots = plan.slots[:(n_future if is_15m else n_future * 4)] if (plan and plan.slots) else []
         forced_off_ranges = extract_plan_spitsblok_ranges(display_slots, history_count=len(hist_pts), is_15m=is_15m)
         advised_off_ranges = extract_plan_soft_advice_ranges(display_slots, history_count=len(hist_pts), is_15m=is_15m)
+
+        # Calculate Storage Valuation for DHW & Battery
+        cur_price_now = prices[0] if prices else 0.28
+        ha_states = get_ha_states_map()
+        live_tank_temp = float(ha_states.get("sensor.hc_dhw_temperature_r5t_dhw_tank", {}).get("state", 49.2)) if ha_states else 49.2
+        live_battery_soc = float(ha_states.get("sensor.battery_state_of_charge", {}).get("state", 50.0)) if ha_states else 50.0
+        dhw_cfg = cfg.get("dhw", {})
+        bat_cfg = cfg.get("battery", {})
+
+        storage_val = calculate_storage_valuation(
+            dhw_tank_temp_c=live_tank_temp,
+            dhw_setpoint_c=float(dhw_cfg.get("setpoint_c", 50.0)),
+            dhw_volume_l=float(dhw_cfg.get("volume_liters", 350.0)),
+            dhw_cop=float(dhw_cfg.get("cop", 3.1)),
+            dhw_charging_price_eur=float(dhw_cfg.get("historical_charge_price_eur", 0.18)),
+            battery_soc_pct=live_battery_soc,
+            battery_capacity_kwh=float(bat_cfg.get("capacity_kwh", 15.0)),
+            battery_min_soc_pct=float(bat_cfg.get("min_soc_pct", 10.0)),
+            battery_charging_price_eur=float(bat_cfg.get("historical_charge_price_eur", 0.16)),
+            battery_efficiency=float(bat_cfg.get("efficiency", 0.90)),
+            current_epex_price_eur=cur_price_now
+        )
 
         handler._send_json({
             "hours": all_labels,
@@ -745,7 +769,8 @@ def handle_get(handler, path: str, qp: dict) -> bool:
             "total_net_cost_eur": net_cost_eur,
             "total_gross_cost_eur": gross_cost_eur,
             "solar_savings_eur": solar_savings_eur,
-            "forecast_kpis": forecast_kpis
+            "forecast_kpis": forecast_kpis,
+            "storage_valuation": storage_val
         })
         return True
 

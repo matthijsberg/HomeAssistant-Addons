@@ -2113,6 +2113,77 @@
         }
 
 
+        function updateStorageValuationUI(val) {
+            if (!val) return;
+
+            // 1. DHW Boilervat (usable above setpoint - 10°C, min 40°C)
+            if (val.dhw) {
+                const d = val.dhw;
+                const elTempPill = document.getElementById('storage-dhw-temp-pill');
+                if (elTempPill) elTempPill.innerText = `${d.current_temp_c}°C (min ${d.min_temp_c}°C)`;
+
+                const elBuyEur = document.getElementById('storage-dhw-buy-eur');
+                if (elBuyEur) elBuyEur.innerText = `€${d.buying_value_eur.toFixed(2)}`;
+
+                const elBuyRate = document.getElementById('storage-dhw-buy-rate');
+                if (elBuyRate) elBuyRate.innerText = `@ €${d.charging_price_eur.toFixed(3)}/kWh`;
+
+                const elActEur = document.getElementById('storage-dhw-actual-eur');
+                if (elActEur) elActEur.innerText = `€${d.actual_value_eur.toFixed(2)}`;
+
+                const elActRate = document.getElementById('storage-dhw-actual-rate');
+                if (elActRate) elActRate.innerText = `EPEX Nu €${d.current_price_eur.toFixed(3)}`;
+
+                const elDeltaEur = document.getElementById('storage-dhw-delta-eur');
+                if (elDeltaEur) {
+                    const prefix = d.delta_value_eur >= 0 ? '+€' : '-€';
+                    elDeltaEur.innerText = `${prefix}${Math.abs(d.delta_value_eur).toFixed(2)}`;
+                    elDeltaEur.className = `text-xs sm:text-sm font-bold mt-0.5 ${d.delta_value_eur >= 0 ? 'text-emerald-400' : 'text-amber-400'}`;
+                }
+
+                const elKwhTh = document.getElementById('storage-dhw-kwh-th');
+                if (elKwhTh) elKwhTh.innerText = `${d.stored_th_kwh.toFixed(1)} kWh th`;
+
+                const elUsable = document.getElementById('storage-dhw-usable-kwh');
+                if (elUsable) elUsable.innerText = `Bruikbaar: ${d.stored_th_kwh.toFixed(1)} kWh th (~${d.stored_el_kwh.toFixed(1)} kWh el)`;
+
+                const elCop = document.getElementById('storage-dhw-cop-note');
+                if (elCop) elCop.innerText = `COP ${d.cop.toFixed(1)}`;
+            }
+
+            // 2. Thuisbatterij (usable above minimum SoC, default 10%)
+            if (val.battery) {
+                const b = val.battery;
+                const elSocPill = document.getElementById('storage-bat-soc-pill');
+                if (elSocPill) elSocPill.innerText = `SoC: ${b.current_soc_pct}% (min ${b.min_soc_pct}%)`;
+
+                const elBuyEur = document.getElementById('storage-bat-buy-eur');
+                if (elBuyEur) elBuyEur.innerText = `€${b.buying_value_eur.toFixed(2)}`;
+
+                const elBuyRate = document.getElementById('storage-bat-buy-rate');
+                if (elBuyRate) elBuyRate.innerText = `@ €${b.charging_price_eur.toFixed(3)}/kWh`;
+
+                const elActEur = document.getElementById('storage-bat-actual-eur');
+                if (elActEur) elActEur.innerText = `€${b.actual_value_eur.toFixed(2)}`;
+
+                const elActRate = document.getElementById('storage-bat-actual-rate');
+                if (elActRate) elActRate.innerText = `EPEX Nu €${b.current_price_eur.toFixed(3)}`;
+
+                const elDeltaEur = document.getElementById('storage-bat-delta-eur');
+                if (elDeltaEur) {
+                    const prefix = b.delta_value_eur >= 0 ? '+€' : '-€';
+                    elDeltaEur.innerText = `${prefix}${Math.abs(b.delta_value_eur).toFixed(2)}`;
+                    elDeltaEur.className = `text-xs sm:text-sm font-bold mt-0.5 ${b.delta_value_eur >= 0 ? 'text-emerald-400' : 'text-amber-400'}`;
+                }
+
+                const elUsableKwh = document.getElementById('storage-bat-usable-kwh');
+                if (elUsableKwh) elUsableKwh.innerText = `${b.usable_kwh.toFixed(1)} kWh el`;
+
+                const elCapNote = document.getElementById('storage-bat-capacity-note');
+                if (elCapNote) elCapNote.innerText = `Beschikbaar: ${b.usable_kwh.toFixed(1)} / ${b.capacity_kwh.toFixed(1)} kWh`;
+            }
+        }
+
         async function loadChartData() {
             try {
                 const simParam = window.__simulateBattery ? '&simulate_battery=1' : '';
@@ -2187,6 +2258,11 @@
                     if (elHpTitle && fk.heatpump.title) elHpTitle.innerText = fk.heatpump.title;
                     if (elHpMain) elHpMain.innerText = fk.heatpump.main;
                     if (elHpSub) elHpSub.innerText = fk.heatpump.sub;
+                }
+
+                // Render Storage Energy Valuation (DHW & Thuisbatterij)
+                if (data.storage_valuation) {
+                    updateStorageValuationUI(data.storage_valuation);
                 }
 
                 // Populate Live Active DHW Banner (Visible only when heating)

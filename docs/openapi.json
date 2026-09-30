@@ -219,6 +219,27 @@
         }
       }
     },
+    "/api/model/storage-valuation": {
+      "get": {
+        "tags": [
+          "Models & Forecasts"
+        ],
+        "summary": "Get stored energy valuation for DHW and home battery",
+        "description": "Calculates the buying value and actual market value (vs current EPEX electricity price) for energy stored in DHW boilervat (usable above setpoint - 10°C) and home battery (usable above minimum SoC).",
+        "responses": {
+          "200": {
+            "description": "Storage valuation successfully calculated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/model/battery-status": {
       "get": {
         "tags": [

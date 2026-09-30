@@ -88,6 +88,21 @@ def openhems_recalculate_schedule() -> str:
 # =============================================================================
 
 @mcp.tool()
+def openhems_get_storage_valuation() -> str:
+    """Get buying vs actual market valuation of energy stored in DHW boilervat and home battery.
+
+    Compares stored energy (usable above setpoint - 10°C for DHW, and above min SoC for battery)
+    against the current live EPEX market price.
+
+    Returns:
+        JSON with DHW and battery stored energy (kWh), buying values, actual replacement values,
+        and net arbitrage margins.
+    """
+    res = _api_request("/api/model/storage-valuation")
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
 def openhems_get_dhw_status(resolution: str = "15m") -> str:
     """Get domestic hot water (DHW) 350L tank thermal trajectory and 24h arbitrage status.
 
