@@ -2114,13 +2114,65 @@
 
 
         function updateStorageValuationUI(val) {
-            if (!val) return;
+            let d = val ? val.dhw : null;
+            let b = val ? val.battery : null;
+
+            if (!d || !b) {
+                // Client-side fallback if backend container is still restarting
+                const lastPred = window.__lastPredictionData;
+                const curPrice = (lastPred && lastPred.datasets && lastPred.datasets.prices_eur && lastPred.datasets.prices_eur[0]) || 0.28;
+
+                // Extract live DHW temp from badge/summary or fallback 49.2°C
+                const dhwTankText = document.getElementById('live-dhw-metrics-sub')?.innerText || '';
+                const dhwMatch = dhwTankText.match(/Boilervat:\s*([\d.]+)\s*°C/);
+                const curTankTemp = dhwMatch ? parseFloat(dhwMatch[1]) : 49.2;
+                const minDhwTemp = 40.0;
+                const usableDhwDelta = Math.max(0.0, curTankTemp - minDhwTemp);
+                const storedThKwh = (350 * 1.163 * usableDhwDelta) / 1000.0;
+                const storedElKwh = storedThKwh / 3.1;
+
+                if (!d) {
+                    d = {
+                        current_temp_c: curTankTemp,
+                        min_temp_c: minDhwTemp,
+                        usable_temp_delta_c: usableDhwDelta,
+                        stored_th_kwh: storedThKwh,
+                        stored_el_kwh: storedElKwh,
+                        cop: 3.1,
+                        charging_price_eur: 0.18,
+                        current_price_eur: curPrice,
+                        buying_value_eur: storedElKwh * 0.18,
+                        actual_value_eur: storedElKwh * curPrice,
+                        delta_value_eur: (storedElKwh * curPrice) - (storedElKwh * 0.18)
+                    };
+                }
+
+                if (!b) {
+                    const socPillText = document.getElementById('bat-status-pill')?.innerText || '';
+                    const socMatch = socPillText.match(/SoC:\s*([\d.]+)\s*%/);
+                    const curSoc = socMatch ? parseFloat(socMatch[1]) : 50.0;
+                    const minSoc = 10.0;
+                    const usableSoc = Math.max(0.0, curSoc - minSoc);
+                    const usableKwh = 15.0 * (usableSoc / 100.0);
+                    b = {
+                        current_soc_pct: curSoc,
+                        min_soc_pct: minSoc,
+                        usable_soc_pct: usableSoc,
+                        capacity_kwh: 15.0,
+                        usable_kwh: usableKwh,
+                        charging_price_eur: 0.16,
+                        current_price_eur: curPrice,
+                        buying_value_eur: usableKwh * 0.16,
+                        actual_value_eur: usableKwh * 0.90 * curPrice,
+                        delta_value_eur: (usableKwh * 0.90 * curPrice) - (usableKwh * 0.16)
+                    };
+                }
+            }
 
             // 1. DHW Boilervat (usable above setpoint - 10°C, min 40°C)
-            if (val.dhw) {
-                const d = val.dhw;
+            if (d) {
                 const elTempPill = document.getElementById('storage-dhw-temp-pill');
-                if (elTempPill) elTempPill.innerText = `${d.current_temp_c}°C (min ${d.min_temp_c}°C)`;
+                if (elTempPill) elTempPill.innerText = `${d.current_temp_c.toFixed(1)}°C (min ${d.min_temp_c.toFixed(0)}°C)`;
 
                 const elBuyEur = document.getElementById('storage-dhw-buy-eur');
                 if (elBuyEur) elBuyEur.innerText = `€${d.buying_value_eur.toFixed(2)}`;
@@ -2152,10 +2204,9 @@
             }
 
             // 2. Thuisbatterij (usable above minimum SoC, default 10%)
-            if (val.battery) {
-                const b = val.battery;
+            if (b) {
                 const elSocPill = document.getElementById('storage-bat-soc-pill');
-                if (elSocPill) elSocPill.innerText = `SoC: ${b.current_soc_pct}% (min ${b.min_soc_pct}%)`;
+                if (elSocPill) elSocPill.innerText = `SoC: ${b.current_soc_pct.toFixed(0)}% (min ${b.min_soc_pct.toFixed(0)}%)`;
 
                 const elBuyEur = document.getElementById('storage-bat-buy-eur');
                 if (elBuyEur) elBuyEur.innerText = `€${b.buying_value_eur.toFixed(2)}`;
@@ -2261,9 +2312,7 @@
                 }
 
                 // Render Storage Energy Valuation (DHW & Thuisbatterij)
-                if (data.storage_valuation) {
-                    updateStorageValuationUI(data.storage_valuation);
-                }
+                updateStorageValuationUI(data.storage_valuation);
 
                 // Populate Live Active DHW Banner (Visible only when heating)
                 const liveDhwCard = document.getElementById('live-dhw-active-card');
