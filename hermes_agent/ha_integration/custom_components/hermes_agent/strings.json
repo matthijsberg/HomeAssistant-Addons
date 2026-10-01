@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hermes Agent",
+        "description": "Connect Assist to the Hermes Agent App. Each Home Assistant user is routed to their own Hermes profile; voice satellites and unknown users use the primary profile.",
+        "data": {
+          "url": "App URL",
+          "api_key": "API key (the App's access_password)",
+          "primary_profile": "Primary profile name"
+        },
+        "data_description": {
+          "url": "Internal address of the App, e.g. http://local-hermes-agent:8080",
+          "primary_profile": "The first profile in the App (served on the root URL)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the Hermes API",
+      "invalid_auth": "The API key was rejected"
+    },
+    "abort": {
+      "already_configured": "This Hermes App is already configured"
+    }
+  }
+}
