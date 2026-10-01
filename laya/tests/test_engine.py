@@ -35,6 +35,15 @@ def test_format_state_truncates_to_last_two():
     assert "Turn 4" in state["context"]
 
 
+def test_format_state_large_prompt_truncation():
+    large_text = "HEAD_CONTENT " + ("X" * 10000) + " TAIL_CONTENT"
+    state = LayaRouterEngine.format_state(large_text, [])
+    assert len(state["request"]) < 7000
+    assert "HEAD_CONTENT" in state["request"]
+    assert "TAIL_CONTENT" in state["request"]
+    assert "[truncated for routing]" in state["request"]
+
+
 def test_hermes_v1_wording_rules():
     qset = get_question_set("hermes-v1")
     questions = qset["questions"]

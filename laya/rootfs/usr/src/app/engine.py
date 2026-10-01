@@ -193,7 +193,12 @@ class LayaRouterEngine:
 
     @staticmethod
     def format_state(prompt: str, recent_turns: Optional[List[Any]] = None) -> Dict[str, Any]:
-        """Format request and context window (max 2 previous turns)."""
+        """Format request and context window (max 2 previous turns, truncated to fit ~1024 tokens)."""
+        clean_prompt = prompt.strip()
+        # Cap request prompt to fit within Laya's ~1024 token context window without tokenizer lag
+        if len(clean_prompt) > 6000:
+            clean_prompt = clean_prompt[:5000] + "\n...[truncated for routing]...\n" + clean_prompt[-1000:]
+
         turns = recent_turns or []
         # Strictly truncate to at most the previous 2 turns
         window = turns[-2:] if len(turns) > 2 else turns
@@ -201,18 +206,25 @@ class LayaRouterEngine:
         context_lines: List[str] = []
         for turn in window:
             if isinstance(turn, str):
-                context_lines.append(turn.strip())
+                t_str = turn.strip()
             elif isinstance(turn, dict):
                 role = turn.get("role", "turn")
                 content = turn.get("content", "")
-                context_lines.append(f"{role}: {content}".strip())
+                t_str = f"{role}: {content}".strip()
             elif hasattr(turn, "content"):
                 role = getattr(turn, "role", "turn") or "turn"
                 content = getattr(turn, "content", "")
-                context_lines.append(f"{role}: {content}".strip())
+                t_str = f"{role}: {content}".strip()
+            else:
+                t_str = str(turn).strip()
+
+            if len(t_str) > 1500:
+                t_str = t_str[:1500] + "..."
+            if t_str:
+                context_lines.append(t_str)
 
         context_str = "\n".join([line for line in context_lines if line])
-        state: Dict[str, Any] = {"request": prompt.strip()}
+        state: Dict[str, Any] = {"request": clean_prompt}
         if context_str:
             state["context"] = context_str
         return state
