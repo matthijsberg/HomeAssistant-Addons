@@ -1,5 +1,5 @@
 name: Hermes Agent
-version: "2.3.2"
+version: "2.4.0"
 slug: hermes_agent
 description: "The self-improving AI agent by Nous Research with multi-user HA auto-sync, smart profile routing, HA MCP tools, and status sensors. Built on top of the original App by Wolfram Ravenwolf."
 url: "https://github.com/matthijsvandenberg/Hermes"

@@ -1,4 +1,5 @@
 #!/bin/bash
+# hermes-addon-backup-wrapper (marker used by run.sh to detect this wrapper)
 # Installed in place of $VENV_DIR/bin/hermes (original renamed to hermes.real,
 # invoked here by its full path — substituted at container start).
 # Defaults a bare `hermes backup` (no explicit --output/-o) into HA's shared

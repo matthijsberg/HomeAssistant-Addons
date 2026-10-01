@@ -88,6 +88,10 @@ COPY ha_mcp_config.py /
 COPY ha_platform_config.py /
 COPY ha_sensor_reporter.py /
 COPY api-server.sh /usr/local/lib/hermes-api-server.sh
+COPY gateway-launcher.py /usr/local/lib/hermes-gateway-launcher.py
+COPY gateway-child.sh /usr/local/lib/hermes-gateway-child.sh
+COPY gateway-supervisor.py /usr/local/lib/hermes-gateway-supervisor.py
+COPY gateway-logger.py /usr/local/lib/hermes-gateway-logger.py
 COPY nginx-render.sh /usr/local/lib/hermes-nginx-render.sh
 COPY profile-init.sh /usr/local/lib/hermes-profile-init.sh
 COPY ha-user-sync.sh /usr/local/lib/hermes-ha-user-sync.sh
@@ -105,7 +109,7 @@ COPY dashboard-patches.py /usr/local/bin/hermes-dashboard-patches
 COPY ha_mcp_config.py /usr/local/bin/hermes-ha-mcp-config
 COPY ha_platform_config.py /usr/local/bin/hermes-ha-platform-config
 COPY ha_sensor_reporter.py /usr/local/bin/hermes-ha-sensor-reporter
-RUN chmod +x /run.sh /usr/local/bin/brew-wrapper /usr/local/bin/hermes-dashboard-patches /usr/local/bin/hermes-desktop-backend /usr/local/bin/hermes-ha-mcp-config /usr/local/bin/hermes-ha-platform-config /usr/local/bin/hermes-ha-sensor-reporter
+RUN chmod +x /run.sh /usr/local/bin/brew-wrapper /usr/local/bin/hermes-dashboard-patches /usr/local/bin/hermes-desktop-backend /usr/local/bin/hermes-ha-mcp-config /usr/local/bin/hermes-ha-platform-config /usr/local/bin/hermes-ha-sensor-reporter /usr/local/lib/hermes-gateway-child.sh
 
 # ── nginx dirs ───────────────────────────────────────────────────────
 RUN mkdir -p /var/www /var/log/nginx /run/nginx

@@ -16,7 +16,7 @@ LEVEL_MAP = {
 CURRENT_LOG_LEVEL_NUM = LEVEL_MAP.get(LOG_LEVEL, 2)
 
 
-def log_msg(msg: str, is_err: bool = False, level: str = "info", version: str = "2.3.2") -> None:
+def log_msg(msg: str, is_err: bool = False, level: str = "info", version: str = "2.4.0") -> None:
     msg_level_num = LEVEL_MAP.get(level.lower(), 2)
     if is_err:
         msg_level_num = max(msg_level_num, 5)

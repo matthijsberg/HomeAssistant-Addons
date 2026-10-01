@@ -62,7 +62,7 @@ _resolve_profile_dir() {
 }
 
 if ! declare -f log >/dev/null 2>&1; then
-  ADDON_VERSION="${ADDON_VERSION:-2.3.2}"
+  ADDON_VERSION="${ADDON_VERSION:-2.4.0}"
   log() {
     local now
     now="$(date +'%Y-%m-%d %H:%M:%S')"
@@ -154,6 +154,43 @@ resolve_profiles() {
     TTYD_HERMES_PORTS[i]=$((TTYD_HERMES_BASE_PORT + i))
     TTYD_TERMINAL_PORTS[i]=$((TTYD_TERMINAL_BASE_PORT + i))
     DASHBOARD_PORTS[i]=$((DASHBOARD_BASE_PORT + i))
+  done
+}
+
+# Hermes versions with standalone-profile support treat homes directly below a
+# `profiles` directory as named profiles. Keep older revisions untouched, and
+# use the supporting revision's config writer before any gateway starts.
+# Ported from upstream v1.3.3; also covers profiles created by sync_ha_users.
+configure_profile_topology() {
+  local hermes_python="$1"
+  local hermes_cli="$2"
+  local i home parent standalone status
+
+  if ! "$hermes_python" -c 'from hermes_cli.profiles import profile_is_standalone' \
+    >/dev/null 2>&1; then
+    return 0
+  fi
+
+  for i in "${!PROFILE_HOMES[@]}"; do
+    home="${PROFILE_HOMES[$i]%/}"
+    parent="${home%/*}"
+    [ "${parent##*/}" = "profiles" ] || continue
+
+    # Missing or not-yet-recognized keys make `config get` return nonzero.
+    # Suppress that probe-only diagnostic; the guarded writer below remains
+    # authoritative and fails startup on corrupt config or any write error.
+    if standalone="$(HERMES_HOME="$home" "$hermes_cli" config get gateway.standalone --json 2>/dev/null)" \
+      && [ "$standalone" = "true" ]; then
+      continue
+    fi
+
+    if HERMES_HOME="$home" "$hermes_cli" config set gateway.standalone true --force; then
+      log "[profile-init] Enabled standalone gateway compatibility for '$home'"
+    else
+      status=$?
+      log "[profile-init] FATAL: could not set gateway.standalone for '$home'" >&2
+      return "$status"
+    fi
   done
 }
 

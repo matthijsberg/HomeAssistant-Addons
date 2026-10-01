@@ -5,7 +5,7 @@
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-ADDON_VERSION="$(grep -m1 '^version:' "$(dirname "${BASH_SOURCE[0]}")/config.yaml" 2>/dev/null | cut -d'"' -f2 || echo "2.3.2")"
+ADDON_VERSION="$(grep -m1 '^version:' "$(dirname "${BASH_SOURCE[0]}")/config.yaml" 2>/dev/null | cut -d'"' -f2 || echo "2.4.0")"
 
 # ── Section 1: Read options ──────────────────────────────────────────
 OPTIONS_FILE="/data/options.json"
@@ -85,17 +85,40 @@ for _candidate in \
         break
     fi
 done
-if [ -n "$API_SERVER_LIB" ]; then
-    # shellcheck source=api-server.sh
-    source "$API_SERVER_LIB"
-    if ! api_server_read_json_string \
-        "$OPTIONS_FILE" access_password "" ACCESS_PASSWORD; then
-        echo "[run] FATAL: could not read access_password" >&2
-        exit 1
-    fi
-    api_server_validate_env_records "$OPTIONS_FILE" || exit 1
-    api_server_validate_options || exit 1
+if [ -z "$API_SERVER_LIB" ]; then
+    echo "[run] FATAL: api-server.sh not found" >&2
+    exit 1
 fi
+# shellcheck source=api-server.sh
+source "$API_SERVER_LIB"
+if ! api_server_read_json_string \
+    "$OPTIONS_FILE" access_password "" ACCESS_PASSWORD; then
+    echo "[run] FATAL: could not read access_password" >&2
+    exit 1
+fi
+api_server_validate_env_records "$OPTIONS_FILE" || exit 1
+api_server_validate_options || exit 1
+
+# Per-slot gateway supervision helpers (upstream v1.3.1/v1.3.2). The launcher
+# keeps add-on-owned API/profile settings authoritative, the supervisor owns
+# the gateway's whole process tree, and the logger tees output to both the
+# add-on log and the profile's gateway.log.
+find_addon_helper() {
+    local installed="$1" local_name="$2" require_exec="${3:-false}" candidate
+    for candidate in "$installed" "$(dirname "${BASH_SOURCE[0]}")/$local_name"; do
+        if [ "$require_exec" = "true" ] && [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"; return 0
+        elif [ "$require_exec" != "true" ] && [ -f "$candidate" ]; then
+            printf '%s\n' "$candidate"; return 0
+        fi
+    done
+    echo "[run] FATAL: $local_name not found${3:+ or not executable}" >&2
+    return 1
+}
+GATEWAY_LAUNCHER=$(find_addon_helper /usr/local/lib/hermes-gateway-launcher.py gateway-launcher.py) || exit 1
+GATEWAY_CHILD=$(find_addon_helper /usr/local/lib/hermes-gateway-child.sh gateway-child.sh true) || exit 1
+GATEWAY_SUPERVISOR=$(find_addon_helper /usr/local/lib/hermes-gateway-supervisor.py gateway-supervisor.py) || exit 1
+GATEWAY_LOGGER=$(find_addon_helper /usr/local/lib/hermes-gateway-logger.py gateway-logger.py) || exit 1
 
 USE_HA_SSL_CERT=$(opt_bool use_ha_ssl_cert)
 HA_SSL_CERTFILE=$(opt ha_ssl_certfile); HA_SSL_CERTFILE="${HA_SSL_CERTFILE:-fullchain.pem}"
@@ -358,6 +381,43 @@ install_needed() {
     return 1
 }
 
+# Honor the selected checkout's .python-version (upstream v1.3.4). Older
+# revisions without that file keep the historical Python 3.11 default.
+required_python_version() {
+    local version="3.11"
+    if [ -e "$SRC_DIR/.python-version" ] || [ -L "$SRC_DIR/.python-version" ]; then
+        version=$(cat "$SRC_DIR/.python-version") || return 1
+    fi
+    if [[ ! "$version" =~ ^3\.[0-9]+(\.[0-9]+)?$ ]]; then
+        log "[run] FATAL: .python-version must contain 3.MINOR or 3.MINOR.PATCH" >&2
+        return 1
+    fi
+    printf '%s\n' "$version"
+}
+
+hermes_runtime_works() {
+    [ -f "$VENV_DIR/bin/activate" ] && [ -x "$VENV_DIR/bin/hermes" ] && \
+        [ -x "$VENV_DIR/bin/python" ] || return 1
+    local probe_dir status=0
+    probe_dir=$(mktemp -d) || return 1
+    # Imports must exercise the installed CLI/config dependencies without writing
+    # bytecode or touching the user's profile, even before initial scaffolding.
+    (
+        cd "$SRC_DIR" || exit 1
+        HOME="$probe_dir" HERMES_HOME="$probe_dir" HERMES_PROFILE="" \
+            "$VENV_DIR/bin/python" -B -c '
+import sys
+expected = tuple(map(int, sys.argv[1].split(".")))
+if sys.version_info[:len(expected)] != expected:
+    sys.exit(1)
+import hermes_cli.main
+import hermes_cli.config
+' "$1"
+    ) || status=$?
+    rm -rf -- "$probe_dir"
+    return "$status"
+}
+
 install_hermes_core() {
     mkdir -p "$(dirname "$SRC_DIR")"
 
@@ -389,29 +449,55 @@ install_hermes_core() {
         )
     fi
 
-    # Editable install
-    if [ ! -f "$VENV_DIR/bin/activate" ]; then
-        log "[run] Creating venv..."
-        uv venv "$VENV_DIR" --python 3.11
+    # Resolve the selected checkout's pin after clone/update, never from the image.
+    local python_version backup_dir rebuild=false
+    python_version=$(required_python_version) || return 1
+    if ! hermes_runtime_works "$python_version"; then
+        rebuild=true
+        log "[run] venv missing, broken, or not on Python $python_version — rebuilding"
     fi
-    if install_needed; then
-        log "[run] Installing Hermes (editable)..."
-        (
-            cd "$SRC_DIR"
-            # shellcheck disable=SC1091
-            source "$VENV_DIR/bin/activate"
-            uv pip install -e ".[all,dev]" 2>&1 | tail -5
+    if install_needed || [ "$rebuild" = "true" ]; then
+        # Build at the final path so executable shebangs remain valid. Keep the
+        # old environment until a replacement passes installation and imports.
+        # Ordinary source updates retain a healthy venv and its extra packages.
+        backup_dir=$(mktemp -d "${VENV_DIR}.backup.XXXXXX") || return 1
+        if [ "$rebuild" = "true" ] && { [ -e "$VENV_DIR" ] || [ -L "$VENV_DIR" ]; }; then
+            mv -- "$VENV_DIR" "$backup_dir/venv" || return 1
+            log "[run] Previous venv saved at $backup_dir/venv until install succeeds"
+        fi
+        log "[run] Installing Hermes with Python $python_version (editable)..."
+        if (
+            if [ "$rebuild" = "true" ]; then
+                uv venv "$VENV_DIR" --python "$python_version" || exit 1
+            fi
+            cd "$SRC_DIR" || exit 1
+            uv pip install --python "$VENV_DIR/bin/python" -e ".[all,dev]" 2>&1 | tail -5 || exit 1
             if [ -f "$SRC_DIR/mini-swe-agent/pyproject.toml" ]; then
-                uv pip install -e "$SRC_DIR/mini-swe-agent" 2>&1 | tail -3
+                uv pip install --python "$VENV_DIR/bin/python" -e "$SRC_DIR/mini-swe-agent" 2>&1 | tail -3 || exit 1
             fi
             if [ -f "$SRC_DIR/tinker-atropos/pyproject.toml" ]; then
-                uv pip install -e "$SRC_DIR/tinker-atropos" 2>&1 | tail -3
+                uv pip install --python "$VENV_DIR/bin/python" -e "$SRC_DIR/tinker-atropos" 2>&1 | tail -3 || exit 1
             fi
-        )
-        compute_marker > "$MARKER_FILE"
-        log "[run] Install complete"
+            hermes_runtime_works "$python_version" || exit 1
+            compute_marker > "$backup_dir/marker" || exit 1
+            mv -- "$backup_dir/marker" "$MARKER_FILE" || exit 1
+        ); then
+            rm -rf -- "$backup_dir"
+            log "[run] Install complete"
+        else
+            log "[run] FATAL: Python $python_version install/import validation failed" >&2
+            if [ "$rebuild" = "true" ]; then
+                rm -rf -- "$VENV_DIR"
+                if [ -e "$backup_dir/venv" ] || [ -L "$backup_dir/venv" ]; then
+                    mv -- "$backup_dir/venv" "$VENV_DIR" || return 1
+                    log "[run] Previous venv restored" >&2
+                fi
+            fi
+            rm -rf -- "$backup_dir"
+            return 1
+        fi
     else
-        log "[run] Install up to date (marker match)"
+        log "[run] Install up to date (marker and Python runtime match)"
     fi
 
     # Link image-installed npm packages into project node_modules
@@ -473,14 +559,12 @@ export HERMES_VERSION
 log "[run] Hermes version: $HERMES_VERSION"
 desktop_backend_validate_runtime || exit 1
 
-# NOTE: this guard doesn't survive an auto_update-triggered venv reinstall
-# (uv pip install -e regenerates hermes without touching hermes.real, so
-# the wrapper silently reverts to unwrapped). Only affects the manual
-# `hermes backup` convenience default, not the core backups-on-/backup
-# feature (that's the profile-home symlink, unaffected). Tracked, not
-# fixed here — auto_update defaults off and config wiring is Task 5.
-if [ ! -f "$VENV_DIR/bin/hermes.real" ]; then
-    mv "$VENV_DIR/bin/hermes" "$VENV_DIR/bin/hermes.real"
+# Wrap `hermes` so a bare `hermes backup` lands in /backup. Any reinstall
+# (add-on install, venv rebuild, or Hermes' own `hermes update`) regenerates
+# bin/hermes, so detect the wrapper by its marker instead of trusting a
+# possibly stale hermes.real, and re-wrap whatever entry point is current.
+if ! grep -q 'hermes-addon-backup-wrapper' "$VENV_DIR/bin/hermes" 2>/dev/null; then
+    mv -f "$VENV_DIR/bin/hermes" "$VENV_DIR/bin/hermes.real"
     sed "s|HERMES_REAL_BIN_PLACEHOLDER|$VENV_DIR/bin/hermes.real|g; s|BACKUP_ROOT_PLACEHOLDER|$BACKUP_ROOT|g" \
         /usr/local/lib/hermes-wrapper.sh.tpl > "$VENV_DIR/bin/hermes"
     chmod +x "$VENV_DIR/bin/hermes"
@@ -634,7 +718,8 @@ export HOMEBREW_REPOSITORY="$BREW_DIR/Homebrew"
 export NPM_CONFIG_PREFIX="$NODE_DIR"
 export PATH="$VENV_DIR/bin:$BREW_DIR/sbin:$BREW_DIR/bin:$GO_DIR/bin:/usr/local/go/bin:$NODE_DIR/bin:\$PATH"
 ENVSH
-
+# Holds HASS_TOKEN / GITHUB_TOKEN in plain text.
+chmod 600 /config/.hermes_profile
 # ── Section 8: TLS certificates (shared) ─────────────────────────────
 HA_SSL_DIR="/ssl"
 TLS_CERTS_LIB=""
@@ -654,7 +739,18 @@ fi
 
 # ── Section 9: Render nginx config ───────────────────────────────────
 DASHBOARD_AVAILABLE="false"
-if "$VENV_DIR/bin/python" -c "from hermes_cli.web_server import start_server" 2>/dev/null; then
+# Self-managed Hermes checkouts (install-stamp updateMechanism "self") select
+# their dependency generation in hermes_bootstrap, which every Hermes entry
+# point imports first. Without it a relaunched dashboard runs on the managed
+# interpreter with no dependencies (ModuleNotFoundError: ruamel). Older
+# revisions have no hermes_bootstrap module and keep the plain import.
+DASHBOARD_BOOT='try:
+    import hermes_bootstrap
+except ModuleNotFoundError as exc:
+    if exc.name != "hermes_bootstrap":
+        raise
+from hermes_cli.web_server import start_server'
+if "$VENV_DIR/bin/python" -c "$DASHBOARD_BOOT" >/dev/null 2>&1; then
     DASHBOARD_AVAILABLE="true"
 fi
 
@@ -780,7 +876,12 @@ sed -i \
 log "[run] Nginx configured (ingress: $INGRESS_PORT, HTTP: $HTTP_PORT, HTTPS: $HTTPS_PORT)"
 
 # ── Section 10: Start services (per profile) ─────────────────────────
+RUN_SH_PID=$$
 GATEWAY_PIDS=()
+GATEWAY_LOGGER_PIDS=()
+GATEWAY_LOG_PIPES=()
+GATEWAY_READY_FILES=()
+DASHBOARD_RESTART_AFTER=()
 TTYD_HERMES_PIDS=()
 TTYD_TERMINAL_PIDS=()
 DASHBOARD_PIDS=()
@@ -814,14 +915,81 @@ start_gateway_for_profile() {
         pkill -9 -f "whatsapp-bridge/bridge.js" 2>/dev/null || true
     fi
     mkdir -p "$home/logs"
+    local log_pipe="/run/hermes-gateway-${i}.fifo"
+    local ready_file="/run/hermes-gateway-${i}.ready"
+    rm -f -- "$log_pipe" "$ready_file"
+    mkfifo -m 600 "$log_pipe"
+    /usr/bin/env -i PATH="/usr/bin:/bin" \
+        "$VENV_DIR/bin/python" "$GATEWAY_LOGGER" \
+        "$home/logs/gateway.log" "$log_pipe" "$RUN_SH_PID" &
+    local logger_pid=$!
+    GATEWAY_LOGGER_PIDS[$i]="$logger_pid"
+    GATEWAY_LOG_PIPES[$i]="$log_pipe"
+    GATEWAY_READY_FILES[$i]="$ready_file"
     (
         cd "$home"
         export HERMES_HOME="$home"
         export PATH="$VENV_DIR/bin:$BASE_PATH"
-        exec "${GATEWAY_PYTHON:-$VENV_DIR/bin/python3}" "$VENV_DIR/bin/hermes.real" gateway run --replace >> "$home/logs/gateway.log" 2>&1
+        export HERMES_S6_SUPERVISED_CHILD="1"
+        export HERMES_ADDON_PROFILE_HOME="$home"
+        export HERMES_ADDON_MULTIPLEX_PROFILES="false"
+        export HERMES_ADDON_GATEWAY_NO_SUPERVISE="1"
+        export HERMES_ADDON_SUPERVISED_CHILD="1"
+        export HERMES_ADDON_API_HOST="127.0.0.1"
+        export HERMES_ADDON_API_PORT="$port"
+        export HERMES_ADDON_API_ENABLED="$ENABLE_API"
+        if [ "$ENABLE_API" = "true" ]; then
+            export HERMES_ADDON_API_KEY="$ACCESS_PASSWORD"
+        else
+            export HERMES_ADDON_API_KEY=""
+        fi
+        exec "$GATEWAY_CHILD" \
+            "$VENV_DIR/bin/python" \
+            "$GATEWAY_SUPERVISOR" \
+            "$GATEWAY_LAUNCHER" \
+            "$ready_file" \
+            "$RUN_SH_PID" \
+            > "$log_pipe" 2>&1
     ) &
-    GATEWAY_PIDS[$i]=$!
-    log "[run] [$name] Gateway PID: ${GATEWAY_PIDS[$i]}"
+    local pid=$!
+    GATEWAY_PIDS[$i]="$pid"
+    local ready_pid=""
+    local ready=false
+    for _ in $(seq 1 100); do
+        if [ -f "$ready_file" ]; then
+            IFS= read -r ready_pid < "$ready_file" || true
+            if [ "$ready_pid" = "$pid" ]; then
+                ready=true
+                break
+            fi
+        fi
+        if ! kill -0 "$pid" 2>/dev/null; then
+            break
+        fi
+        sleep 0.05
+    done
+    if [ "$ready" != "true" ]; then
+        local startup_status
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null || true
+            local waited=0
+            while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 20 ]; do
+                sleep 0.1
+                waited=$((waited + 1))
+            done
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        fi
+        set +e
+        wait "$pid" 2>/dev/null
+        startup_status=$?
+        set -e
+        cleanup_gateway_logger "$i"
+        log "[run] [$name] FATAL: gateway supervisor failed before readiness (code: $startup_status)" >&2
+        return 70
+    fi
+    log "[run] [$name] Gateway PID: $pid (logger PID: $logger_pid)"
 }
 
 # Install the dedicated hermes startup wrapper (shared, sources .bashrc).
@@ -890,7 +1058,8 @@ start_dashboard_for_profile() {
     (
         cd "$home"
         export HERMES_HOME="$home"
-        exec "$VENV_DIR/bin/python" -c "from hermes_cli.web_server import start_server; start_server(host='127.0.0.1', port=${port}, open_browser=False)"
+        exec "$VENV_DIR/bin/python" -c "${DASHBOARD_BOOT}
+start_server(host='127.0.0.1', port=${port}, open_browser=False)"
     ) &
     DASHBOARD_PIDS[$i]=$!
     log "[run] [$name] Dashboard PID: ${DASHBOARD_PIDS[$i]}"
@@ -932,9 +1101,170 @@ reload_nginx() {
 }
 
 # ── Section 11: Signal handling ──────────────────────────────────────
+# Gateway slot lifecycle (upstream v1.3.1/v1.3.2): each slot supervisor is a
+# process-group leader that must prove its whole descendant tree is gone
+# before a replacement starts, so no gateway is ever duplicated.
+gateway_group_alive() {
+    local pid="$1"
+    kill -0 -- "-$pid" 2>/dev/null
+}
+
+signal_gateway_tree() {
+    local pid="$1"
+    local signal="$2"
+    if gateway_group_alive "$pid"; then
+        kill -s "$signal" -- "-$pid" 2>/dev/null || true
+    elif kill -0 "$pid" 2>/dev/null; then
+        kill -s "$signal" "$pid" 2>/dev/null || true
+    fi
+}
+
+stop_gateway_tree() {
+    local pid="$1"
+    local name="$2"
+    signal_gateway_tree "$pid" TERM
+    local waited=0
+    while { kill -0 "$pid" 2>/dev/null || gateway_group_alive "$pid"; } \
+        && [ "$waited" -lt 100 ]; do
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null || gateway_group_alive "$pid"; then
+        log "[run] [$name] FATAL: gateway slot supervisor did not prove containment before timeout" >&2
+        return 70
+    fi
+    local supervisor_status
+    set +e
+    wait "$pid" 2>/dev/null
+    supervisor_status=$?
+    set -e
+    if [ "$supervisor_status" -ne 0 ]; then
+        log "[run] [$name] FATAL: unsafe gateway supervisor exit: $supervisor_status" >&2
+        return "$supervisor_status"
+    fi
+    return 0
+}
+
+cleanup_gateway_logger() {
+    local i="$1"
+    local logger_pid="${GATEWAY_LOGGER_PIDS[$i]:-}"
+    local log_pipe="${GATEWAY_LOG_PIPES[$i]:-}"
+    local ready_file="${GATEWAY_READY_FILES[$i]:-}"
+    if [ -n "$logger_pid" ]; then
+        local waited=0
+        while kill -0 "$logger_pid" 2>/dev/null && [ "$waited" -lt 20 ]; do
+            sleep 0.1
+            waited=$((waited + 1))
+        done
+        if kill -0 "$logger_pid" 2>/dev/null; then
+            kill -TERM "$logger_pid" 2>/dev/null || true
+            waited=0
+            while kill -0 "$logger_pid" 2>/dev/null && [ "$waited" -lt 10 ]; do
+                sleep 0.1
+                waited=$((waited + 1))
+            done
+        fi
+        if kill -0 "$logger_pid" 2>/dev/null; then
+            kill -KILL "$logger_pid" 2>/dev/null || true
+        fi
+        wait "$logger_pid" 2>/dev/null || true
+    fi
+    if [ -n "$log_pipe" ]; then
+        rm -f -- "$log_pipe"
+    fi
+    if [ -n "$ready_file" ]; then
+        rm -f -- "$ready_file"
+    fi
+    unset 'GATEWAY_LOGGER_PIDS[i]' 'GATEWAY_LOG_PIPES[i]' 'GATEWAY_READY_FILES[i]'
+}
+
+SHUTDOWN_PENDING=false
+
+request_shutdown() {
+    SHUTDOWN_PENDING=true
+}
+
+start_gateway_signal_safe() {
+    # Bash runs traps between commands. Defer termination until the supervisor
+    # has published its post-reexec ready state or startup cleanup has finished.
+    local start_status
+    trap request_shutdown SIGTERM SIGINT
+    set +e
+    start_gateway_for_profile "$@"
+    start_status=$?
+    set -e
+    trap shutdown SIGTERM SIGINT
+    if [ "$SHUTDOWN_PENDING" = "true" ]; then
+        shutdown
+    fi
+    return "$start_status"
+}
+
+supervise_gateway_profile() {
+    local i="$1"
+    local pid="${GATEWAY_PIDS[$i]:-}"
+    local logger_pid="${GATEWAY_LOGGER_PIDS[$i]:-}"
+    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+        if [ -n "$pid" ]; then
+            set +e; wait "$pid" 2>/dev/null; EXIT_CODE=$?; set -e
+        else
+            EXIT_CODE=127
+        fi
+        cleanup_gateway_logger "$i"
+        if [ "$EXIT_CODE" -ne 0 ]; then
+            log "[run] [${PROFILE_NAMES[$i]}] FATAL: unsafe gateway supervisor exit: $EXIT_CODE" >&2
+            return "$EXIT_CODE"
+        fi
+        log "[run] [${PROFILE_NAMES[$i]}] Gateway slot exited with containment proven; restarting in 3s..."
+        log "[run] (Use the shutdown handler to stop the container.)"
+        sleep 3
+        start_gateway_signal_safe "$i"
+    elif [ -z "$logger_pid" ] || ! kill -0 "$logger_pid" 2>/dev/null; then
+        if [ -n "$logger_pid" ]; then
+            set +e; wait "$logger_pid" 2>/dev/null; LOGGER_EXIT_CODE=$?; set -e
+        else
+            LOGGER_EXIT_CODE=127
+        fi
+        log "[run] [${PROFILE_NAMES[$i]}] Gateway logger exited (code: $LOGGER_EXIT_CODE); restarting gateway tree in 3s..."
+        stop_gateway_tree "$pid" "${PROFILE_NAMES[$i]}"
+        cleanup_gateway_logger "$i"
+        sleep 3
+        start_gateway_signal_safe "$i"
+    fi
+}
+
+# Dashboards were previously started once and never restarted. Each restart
+# mints a new session token, so nginx must be re-rendered and reloaded too.
+# A crash-looping dashboard is retried at most once every 5 minutes.
+supervise_dashboards() {
+    [ "$DASHBOARD_AVAILABLE" = "true" ] || return 0
+    local i pid now restarted=false
+    now=$(date +%s)
+    for i in "${!PROFILE_DIRS[@]}"; do
+        pid="${DASHBOARD_PIDS[$i]:-}"
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            continue
+        fi
+        if [ "$now" -lt "${DASHBOARD_RESTART_AFTER[$i]:-0}" ]; then
+            continue
+        fi
+        [ -n "$pid" ] && { wait "$pid" 2>/dev/null || true; }
+        DASHBOARD_RESTART_AFTER[$i]=$((now + 300))
+        log "warning" "[run] [${PROFILE_NAMES[$i]}] Dashboard not running; restarting..."
+        start_dashboard_for_profile "$i"
+        inject_dashboard_token_for_profile "$i"
+        restarted=true
+    done
+    if [ "$restarted" = "true" ]; then
+        render_nginx_config
+        reload_nginx
+    fi
+}
+
 shutdown() {
     echo ""
     log "[run] Shutting down..."
+    local shutdown_status=0
     nginx -s quit 2>/dev/null || true
     log "[run] nginx stopped"
     desktop_backend_stop
@@ -946,8 +1276,6 @@ shutdown() {
         done
     done
     log "[run] ttyd + dashboards stopped"
-    pkill -9 -f "whatsapp-bridge/bridge.js" 2>/dev/null || true
-    kill_port 3000
     if [ -n "${REPORTER_PID:-}" ] && kill -0 "$REPORTER_PID" 2>/dev/null; then
         kill "$REPORTER_PID" 2>/dev/null || true
     fi
@@ -956,31 +1284,40 @@ shutdown() {
     fi
     for i in "${!PROFILE_DIRS[@]}"; do
         local pid="${GATEWAY_PIDS[$i]:-}"
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            kill -TERM "$pid" 2>/dev/null || true
-            local waited=0
-            while kill -0 "$pid" 2>/dev/null && [ $waited -lt 10 ]; do
-                sleep 1
-                waited=$((waited + 1))
-            done
-            if kill -0 "$pid" 2>/dev/null; then
-                log "[run] [${PROFILE_NAMES[$i]}] Gateway didn't stop gracefully, force killing..."
-                kill -9 "$pid" 2>/dev/null || true
+        if [ -n "$pid" ]; then
+            local gateway_status
+            set +e
+            stop_gateway_tree "$pid" "${PROFILE_NAMES[$i]}"
+            gateway_status=$?
+            set -e
+            if [ "$gateway_status" -ne 0 ]; then
+                shutdown_status="$gateway_status"
             fi
+        fi
+        cleanup_gateway_logger "$i"
+        if [ -n "$pid" ]; then
             log "[run] [${PROFILE_NAMES[$i]}] Gateway stopped"
         fi
     done
+    # Safety net: the bridge is a gateway descendant and normally already gone.
+    pkill -9 -f "whatsapp-bridge/bridge.js" 2>/dev/null || true
+    kill_port 3000
     log "[run] Shutdown complete"
-    exit 0
+    exit "$shutdown_status"
 }
 
 # Register signal handler BEFORE starting services
 trap shutdown SIGTERM SIGINT
 
+# Supporting Hermes revisions require named profiles to opt into the add-on's
+# existing one-gateway-per-profile topology. Complete every config write before
+# the first gateway so a partial topology can never be launched.
+configure_profile_topology "$VENV_DIR/bin/python" "$VENV_DIR/bin/hermes"
+
 install_start_hermes_wrapper
 
 for i in "${!PROFILE_DIRS[@]}"; do
-    start_gateway_for_profile "$i"
+    start_gateway_signal_safe "$i"
     start_ttyd_for_profile "$i"
     start_dashboard_for_profile "$i"
 done
@@ -1061,19 +1398,9 @@ echo "────────────────────────�
 while true; do
     desktop_backend_supervise
     for i in "${!PROFILE_DIRS[@]}"; do
-        pid="${GATEWAY_PIDS[$i]:-}"
-        if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
-            set +e; wait "$pid" 2>/dev/null; EXIT_CODE=$?; set -e
-            if [ "$EXIT_CODE" -eq 0 ]; then
-                log "[run] [${PROFILE_NAMES[$i]}] Gateway exited normally (code 0) — restarting in 3s..."
-                log "[run] (Use the shutdown handler to stop the container.)"
-            else
-                log "[run] [${PROFILE_NAMES[$i]}] Gateway exited unexpectedly (code: $EXIT_CODE), restarting in 3s..."
-            fi
-            sleep 3
-            start_gateway_for_profile "$i"
-        fi
+        supervise_gateway_profile "$i"
     done
+    supervise_dashboards
     sleep 5
 done
 
