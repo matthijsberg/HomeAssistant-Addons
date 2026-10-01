@@ -22,7 +22,7 @@ configuration:
     description: "Logging verbosity for Uvicorn and the Laya server process."
   provider:
     name: "Upstream Model Provider"
-    description: "Target LLM provider (gemini, litellm, openrouter, or custom). Note: multi-provider setups require a gateway (LiteLLM/OpenRouter) because Hermes Agent cannot switch provider credentials dynamically mid-session."
+    description: "Target LLM provider (gemini, litellm, openrouter, or custom). Note: multi-provider setups require a gateway (LiteLLM/OpenRouter) because LLM clients cannot switch provider credentials dynamically mid-session."
   model_quick:
     name: "Quick Tasks Model"
     description: "Model mapped to 'quick' family (e.g. gemini-2.5-flash-lite, google/gemini-2.5-flash-lite)."

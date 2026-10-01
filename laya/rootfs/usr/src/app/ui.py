@@ -82,7 +82,7 @@ def render_gui_html() -> str:
   <header>
     <div class="logo-area">
       <h1>⚡ Laya Router</h1>
-      <p>System 1 Sub-100ms Decision Engine for Hermes Agent</p>
+      <p>Local System 1 Sub-100ms LLM Decision & Routing Engine</p>
     </div>
     <div class="badge-bar">
       <div id="badge-device" class="badge xpu">Device: Loading...</div>

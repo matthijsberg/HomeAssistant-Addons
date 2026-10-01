@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Laya Router",
-    description="Local System 1 decision engine & Gemini router for Home Assistant and Hermes Agent",
+    description="Local sub-100ms System 1 decision engine and model/effort router for Home Assistant",
     version="0.4.0",
     lifespan=lifespan,
 )
@@ -137,9 +137,9 @@ def get_models_config() -> Dict[str, Any]:
         "models": config.get_models_map(),
         "supported_providers": ["gemini", "litellm", "openrouter", "custom"],
         "architecture_limitation_note": (
-            "Hermes Agent cannot switch provider credentials dynamically mid-session. "
+            "LLM client integrations cannot switch provider credentials dynamically mid-session. "
             "Routing across multiple upstream provider vendors (e.g. Anthropic, Google, OpenAI) "
-            "requires a unified gateway (LiteLLM or OpenRouter) configured as Hermes' single provider endpoint."
+            "requires a unified gateway (LiteLLM or OpenRouter) configured as the client's single provider endpoint."
         ),
     }
 

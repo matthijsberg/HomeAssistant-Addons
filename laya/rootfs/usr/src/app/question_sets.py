@@ -8,7 +8,7 @@ from typing import Any, Dict
 QUESTION_SETS: Dict[str, Dict[str, Any]] = {
     "hermes-v1": {
         "version": "1.0",
-        "description": "Hermes Agent v1 routing criteria for Gemini Flash Lite, Flash, and Pro",
+        "description": "Standard v1 routing criteria for Quick, General, Code, and Deep model tiers",
         "questions": {
             "task_family": {
                 "type": "choice",
