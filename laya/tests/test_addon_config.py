@@ -98,3 +98,12 @@ def test_dockerfile_exists():
     assert "whl/xpu" in content
     assert "laya[serve]" in content
     assert "EXPOSE 8000" in content
+
+
+def test_icon_and_logo_exist():
+    icon_path = ADDON_ROOT / "icon.png"
+    logo_path = ADDON_ROOT / "logo.png"
+    assert icon_path.exists(), "icon.png must exist for HA App Store"
+    assert logo_path.exists(), "logo.png must exist for HA App Store"
+    assert icon_path.stat().st_size > 1000
+    assert logo_path.stat().st_size > 1000
