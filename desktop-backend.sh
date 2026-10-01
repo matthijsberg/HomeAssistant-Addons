@@ -3,7 +3,7 @@
 # Optional Hermes Desktop remote-backend lifecycle helpers.
 
 if ! declare -f log >/dev/null 2>&1; then
-  ADDON_VERSION="${ADDON_VERSION:-2.4.0}"
+  ADDON_VERSION="${ADDON_VERSION:-unknown}"
   log() {
     local now
     now="$(date +'%Y-%m-%d %H:%M:%S')"

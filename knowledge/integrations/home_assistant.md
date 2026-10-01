@@ -33,16 +33,23 @@ sources:
 
 ## MCP tools
 On every start each profile's `config.yaml` gets `mcp_servers.homeassistant` running
-`npx -y @orellbuehler/homeassistant-mcp` with `HASS_URL`/`HASS_TOKEN`. The file is
-re-serialised with `yaml.safe_dump`, so **comments and formatting in profile
-`config.yaml` are lost on each start**.
+a **pinned** `npx -y @orellbuehler/homeassistant-mcp@<version>` with
+`HASS_URL`/`HASS_TOKEN`.
+- Only that block (and, for secondary profiles, `platforms.*.enabled`) is managed.
+- Files are round-tripped with `ruamel.yaml` (PyYAML fallback), so user comments and
+  formatting survive; nothing is written when the managed values already match.
+- Writes are atomic and leave the file `0600`. An unparseable `config.yaml` is never
+  overwritten.
 
 ## Status sensors
 `ha_sensor_reporter.py` posts `sensor.hermes_agent` (version, profiles) and
-`sensor.hermes_agent_<profile>` (online/offline from `GET /v1/health` on the
-profile's API port). With `enable_api: false` there is no API listener, so profile
-sensors always read `offline`. Sensors are state-only (no `unique_id`) and disappear
-after a Core restart until the next report.
+`sensor.hermes_agent_<profile>`.
+- `enable_api: true`: `online` ⇔ `GET /v1/health` on the profile's API port answers 200.
+- `enable_api: false`: `online` ⇔ a process running `gateway-launcher.py` has the
+  profile home as its working directory (`gateway_running` attribute).
+- Changed states are posted immediately (15 s poll); unchanged ones every 5 min, which
+  restores the REST-created entities after a Core restart. They have no `unique_id`
+  (a REST API limitation), so they cannot be edited in the UI.
 
 ## Skill
 A `skills/homeassistant/SKILL.md` template is created once per profile (never

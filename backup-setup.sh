@@ -17,7 +17,7 @@
 # ─────────────────────────────────────────────────────────────────────
 
 if ! declare -f log >/dev/null 2>&1; then
-  ADDON_VERSION="${ADDON_VERSION:-2.4.0}"
+  ADDON_VERSION="${ADDON_VERSION:-unknown}"
   log() {
     local now
     now="$(date +'%Y-%m-%d %H:%M:%S')"
@@ -70,6 +70,27 @@ prune_profile_backups() {
     fi
 }
 
+# Copy one SQLite database with the online backup API, which yields a
+# consistent snapshot even while Hermes writes to it in WAL mode.
+snapshot_sqlite_db() {
+    local src="$1" dst="$2" py_bin="python3"
+    [ -x /usr/bin/python3 ] && py_bin="/usr/bin/python3"
+    "$py_bin" -B - "$src" "$dst" <<'PY_EOF'
+import sqlite3
+import sys
+
+src = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True, timeout=30)
+try:
+    dst = sqlite3.connect(sys.argv[2])
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+finally:
+    src.close()
+PY_EOF
+}
+
 create_profile_backup() {
     local i="$1"
     local home="${PROFILE_HOMES[$i]:-}"
@@ -85,10 +106,33 @@ create_profile_backup() {
     local archive_name="hermes-backup-${name}-${stamp}.tar.gz"
     local archive_tmp="${target}/.${archive_name}.tmp"
     local archive_dest="${target}/${archive_name}"
+    local work
+    work="$(mktemp -d "${target}/.work.XXXXXX")" || return 1
+    local stage="$work/stage" db_excludes="$work/db-excludes" tar_tmp="$work/archive.tar"
+    mkdir -p "$stage"
+    : > "$db_excludes"
 
     log "[backup] Creating backup for profile '$name'..."
+
+    # Snapshot live databases; their raw files and WAL/SHM/journal companions
+    # are then excluded so the archive holds only the consistent copy.
+    local db rel snapshots=0
+    while IFS= read -r -d '' db; do
+        rel="${db#"$home"/}"
+        mkdir -p "$stage/$(dirname "$rel")"
+        if snapshot_sqlite_db "$db" "$stage/$rel" 2>/dev/null; then
+            printf './%s\n./%s-wal\n./%s-shm\n./%s-journal\n' "$rel" "$rel" "$rel" "$rel" >> "$db_excludes"
+            snapshots=$((snapshots + 1))
+        else
+            rm -f "$stage/$rel"
+            log "debug" "[backup] '$rel' is not a readable SQLite database; archiving raw file"
+        fi
+    done < <(find "$home" \( -path "$home/backups" -o -path "$home/logs" -o -name venv \
+                -o -name node_modules -o -name .cache -o -path "$home/lsp" \) -prune \
+                -o -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print0)
+
     local tar_rc=0
-    tar -czf "$archive_tmp" \
+    tar -cf "$tar_tmp" \
         --exclude="./backups" \
         --exclude="./logs" \
         --exclude="./venv" \
@@ -97,11 +141,21 @@ create_profile_backup() {
         --exclude="./lsp" \
         --exclude="*.sock" \
         --exclude="*.fifo" \
+        --anchored --no-wildcards -X "$db_excludes" \
         -C "$home" . 2>/dev/null || tar_rc=$?
+    # 1 = "file changed as we read it", expected for live non-database files.
+    if [ "$tar_rc" -le 1 ] && [ "$snapshots" -gt 0 ]; then
+        (cd "$stage" && find . -type f -print0) \
+            | tar -rf "$tar_tmp" -C "$stage" --null -T - 2>/dev/null || tar_rc=2
+    fi
+    if [ "$tar_rc" -le 1 ]; then
+        gzip -c "$tar_tmp" > "$archive_tmp" || tar_rc=2
+    fi
+    rm -rf -- "$work"
 
-    if { [ "$tar_rc" -eq 0 ] || [ "$tar_rc" -eq 1 ]; } && [ -s "$archive_tmp" ]; then
+    if [ "$tar_rc" -le 1 ] && [ -s "$archive_tmp" ]; then
         mv "$archive_tmp" "$archive_dest"
-        log "notice" "[backup] Backup created: $archive_dest"
+        log "notice" "[backup] Backup created: $archive_dest ($snapshots SQLite snapshot(s))"
         prune_profile_backups "$name"
         return 0
     else

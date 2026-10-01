@@ -62,7 +62,7 @@ _resolve_profile_dir() {
 }
 
 if ! declare -f log >/dev/null 2>&1; then
-  ADDON_VERSION="${ADDON_VERSION:-2.4.0}"
+  ADDON_VERSION="${ADDON_VERSION:-unknown}"
   log() {
     local now
     now="$(date +'%Y-%m-%d %H:%M:%S')"
@@ -145,16 +145,100 @@ resolve_profiles() {
     PROFILE_MARKER[i]="$HOME/.hermes_install_${name}"
   done
 
+  assign_port_slots || return 1
+
   API_PORTS=()
   TTYD_HERMES_PORTS=()
   TTYD_TERMINAL_PORTS=()
   DASHBOARD_PORTS=()
   for i in "${!PROFILE_DIRS[@]}"; do
-    API_PORTS[i]=$((API_BASE_PORT + i))
-    TTYD_HERMES_PORTS[i]=$((TTYD_HERMES_BASE_PORT + i))
-    TTYD_TERMINAL_PORTS[i]=$((TTYD_TERMINAL_BASE_PORT + i))
-    DASHBOARD_PORTS[i]=$((DASHBOARD_BASE_PORT + i))
+    API_PORTS[i]=$((API_BASE_PORT + PROFILE_PORT_SLOTS[i]))
+    TTYD_HERMES_PORTS[i]=$((TTYD_HERMES_BASE_PORT + PROFILE_PORT_SLOTS[i]))
+    TTYD_TERMINAL_PORTS[i]=$((TTYD_TERMINAL_BASE_PORT + PROFILE_PORT_SLOTS[i]))
+    DASHBOARD_PORTS[i]=$((DASHBOARD_BASE_PORT + PROFILE_PORT_SLOTS[i]))
   done
+}
+
+# Give each profile name a persistent port slot (0-99) so ports survive
+# reordering, removal, or HA users being added. Names that disappear keep
+# their slot until the pool runs out. A fresh install assigns slots in list
+# order, matching the historical index-based ports.
+PORT_SLOT_FILE="${PORT_SLOT_FILE:-$HOME/.hermes_port_slots}"
+PORT_SLOT_LIMIT=100
+assign_port_slots() {
+  PROFILE_PORT_SLOTS=()
+  local -a known_names=() known_slots=()
+  local name slot i j taken
+  if [ -f "$PORT_SLOT_FILE" ]; then
+    while read -r name slot; do
+      [[ "$name" =~ ^[[:alnum:]_]+$ && "$slot" =~ ^[0-9]+$ ]] || continue
+      [ "$slot" -lt "$PORT_SLOT_LIMIT" ] || continue
+      taken=false
+      for j in "${!known_names[@]}"; do
+        if [ "${known_names[$j]}" = "$name" ] || [ "${known_slots[$j]}" = "$slot" ]; then
+          taken=true; break
+        fi
+      done
+      [ "$taken" = "true" ] && continue
+      known_names+=("$name"); known_slots+=("$slot")
+    done < "$PORT_SLOT_FILE"
+  fi
+
+  for i in "${!PROFILE_NAMES[@]}"; do
+    for j in "${!known_names[@]}"; do
+      if [ "${known_names[$j]}" = "${PROFILE_NAMES[$i]}" ]; then
+        PROFILE_PORT_SLOTS[i]="${known_slots[$j]}"
+        break
+      fi
+    done
+  done
+
+  for i in "${!PROFILE_NAMES[@]}"; do
+    [ -n "${PROFILE_PORT_SLOTS[i]:-}" ] && continue
+    for ((slot = 0; slot < PORT_SLOT_LIMIT; slot++)); do
+      taken=false
+      for j in "${!PROFILE_PORT_SLOTS[@]}"; do
+        [ "${PROFILE_PORT_SLOTS[$j]}" = "$slot" ] && { taken=true; break; }
+      done
+      if [ "$taken" = "false" ]; then
+        for j in "${!known_slots[@]}"; do
+          # Reserved by a retired name: only reuse once the pool is otherwise full.
+          [ "${known_slots[$j]}" = "$slot" ] && { taken=reserved; break; }
+        done
+      fi
+      [ "$taken" = "false" ] && break
+    done
+    if [ "$slot" -ge "$PORT_SLOT_LIMIT" ]; then
+      for ((slot = 0; slot < PORT_SLOT_LIMIT; slot++)); do
+        taken=false
+        for j in "${!PROFILE_PORT_SLOTS[@]}"; do
+          [ "${PROFILE_PORT_SLOTS[$j]}" = "$slot" ] && { taken=true; break; }
+        done
+        [ "$taken" = "false" ] && break
+      done
+    fi
+    if [ "$slot" -ge "$PORT_SLOT_LIMIT" ]; then
+      log "[profile-init] FATAL: more than $PORT_SLOT_LIMIT profiles; no free port slot for '${PROFILE_NAMES[$i]}'" >&2
+      return 1
+    fi
+    PROFILE_PORT_SLOTS[i]="$slot"
+    # A reclaimed slot drops the retired name that held it.
+    for j in "${!known_slots[@]}"; do
+      if [ "${known_slots[$j]}" = "$slot" ]; then
+        unset 'known_names[j]' 'known_slots[j]'
+      fi
+    done
+    known_names+=("${PROFILE_NAMES[$i]}"); known_slots+=("$slot")
+  done
+
+  local tmp="${PORT_SLOT_FILE}.tmp"
+  if { for j in "${!known_names[@]}"; do
+         printf '%s %s\n' "${known_names[$j]}" "${known_slots[$j]}"
+       done; } > "$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$PORT_SLOT_FILE" 2>/dev/null || rm -f "$tmp"
+  else
+    log "[profile-init] WARNING: could not persist port slots to $PORT_SLOT_FILE" >&2
+  fi
 }
 
 # Hermes versions with standalone-profile support treat homes directly below a

@@ -6,7 +6,7 @@
 # ─────────────────────────────────────────────────────────────────────
 
 if ! declare -f log >/dev/null 2>&1; then
-  ADDON_VERSION="${ADDON_VERSION:-2.4.0}"
+  ADDON_VERSION="${ADDON_VERSION:-unknown}"
   log() {
     local now
     now="$(date +'%Y-%m-%d %H:%M:%S')"
@@ -39,14 +39,14 @@ sync_ha_users() {
   local states_json=""
   if [ -n "$token" ]; then
     # Query HA Core REST API /api/states
-    states_json="$(curl -s -k -f -m 5 \
+    states_json="$(curl -s -f -m 5 \
       -H "Authorization: Bearer ${token}" \
       -H "Content-Type: application/json" \
       "${hass_url}/api/states" 2>/dev/null || true)"
 
     # Fallback to Supervisor internal proxy if initial call produced nothing
     if [ -z "$states_json" ] && [ "$hass_url" != "http://supervisor/core" ]; then
-      states_json="$(curl -s -k -f -m 5 \
+      states_json="$(curl -s -f -m 5 \
         -H "Authorization: Bearer ${token}" \
         -H "Content-Type: application/json" \
         "http://supervisor/core/api/states" 2>/dev/null || true)"

@@ -49,6 +49,10 @@ assume upstream's `run.sh` layout. See [testing gap](#known-divergences).
 - The dashboard launch imports `hermes_bootstrap` first (see
   [python-runtime](python_runtime.md)).
 - Upstream helper `cleanup_gateway_descendants` is unused upstream and was not ported.
+- Ports come from persistent per-name slots, not the profile index (identical on a
+  fresh install, so upstream's port tests still pass).
+- `ADDON_VERSION` comes from Supervisor's `BUILD_VERSION`, falling back to the manifest
+  copied to `/usr/local/lib/hermes-addon-config.yaml`.
 
 ## Sync procedure
 1. Clone upstream and diff from the last recorded port commit:

@@ -160,11 +160,12 @@ The Model Context Protocol (MCP) server provides tool calling capabilities for t
       command: /usr/bin/npx
       args:
         - -y
-        - '@orellbuehler/homeassistant-mcp'
+        - '@orellbuehler/homeassistant-mcp@0.8.0'
       env:
         HASS_URL: http://supervisor/core
         HASS_TOKEN: <automatically provided>
   ```
+  The package version is pinned in the App (bumped deliberately per release), the file is set to `chmod 600` because it holds the token, and only this block is updated: your own comments and formatting in `config.yaml` are preserved, and the file is not rewritten when nothing changed.
 - **Controlling Exposed Devices:**
   You can manage which devices and entities the AI agent is allowed to see and control:
   1. Open Home Assistant and navigate to **Settings > Voice Assistants > Expose**.
@@ -223,7 +224,9 @@ The App publishes operational status to Home Assistant Core:
 | Entity ID | Description | Values |
 |---|---|---|
 | `sensor.hermes_agent` | Global App state | `online`, `offline` (includes version and active profile count) |
-| `sensor.hermes_agent_<profile>` | Per-profile state | `online`, `offline` (includes profile name and API listener port) |
+| `sensor.hermes_agent_<profile>` | Per-profile state | `online`, `offline` (includes profile name, API port, `gateway_running`, `api_healthy`) |
+
+With `enable_api` on, a profile is `online` when its `/v1/health` answers; with the API off, when its gateway process is running. States are re-sent every 5 minutes, so they reappear shortly after a Home Assistant restart.
 
 These sensors appear under **Developer Tools > States** and can be placed on Lovelace dashboards or used in automations to alert if an agent instance goes offline.
 
@@ -248,12 +251,16 @@ Persistent data is located in `/config` (mapped to `addon_configs/local_hermes_a
 │       │   ├── memories/            # SQLite long-term memory
 │       │   └── sessions/            # Chat history
 │       └── bob/
-└── .hermes_profile                  # Active environment variables
+├── .hermes_port_slots               # Stable port slot per profile name
+└── .hermes_profile                  # Active environment variables (chmod 600)
 ```
+
+Each profile name keeps its internal ports (`8642 + slot` for the API, and so on) even when profiles are reordered, removed, or added by HA user sync. Delete `.hermes_port_slots` to reassign slots in list order.
 
 ### Automated Periodic Backups
 - The App includes an automated backup scheduler configured via `enable_periodic_backups` (default `true`).
 - Every `periodic_backup_interval_hours` (default `24`), an archive of each profile's persistent state (excluding temporary logs, sockets, and caches) is written to Home Assistant's shared backup directory:
   `/backup/hermes/<profile>/hermes-backup-<profile>-<timestamp>.tar.gz`
+- SQLite databases (`state.db`, `kanban.db`, …) are captured with SQLite's online backup API, so an archive taken while agents are active still contains a consistent copy including recent WAL writes.
 - Backups older than `periodic_backup_keep_count` (default `7`) are pruned automatically.
 - These archives are stored on the shared `/backup` mount and can be synced off-site by Home Assistant backup integrations (such as Google Drive Backup).

@@ -117,4 +117,10 @@ RUN mkdir -p /var/www /var/log/nginx /run/nginx
 # Runtime HOME (build uses /root, runtime uses /config = addon persistent storage)
 ENV HOME=/config
 
+# Add-on version for logs and sensors. Supervisor passes BUILD_VERSION from
+# config.yaml; the copied manifest is the fallback for other builders.
+COPY config.yaml /usr/local/lib/hermes-addon-config.yaml
+ARG BUILD_VERSION
+ENV ADDON_VERSION=${BUILD_VERSION}
+
 CMD ["/run.sh"]

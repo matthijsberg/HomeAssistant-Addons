@@ -5,7 +5,15 @@
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-ADDON_VERSION="$(grep -m1 '^version:' "$(dirname "${BASH_SOURCE[0]}")/config.yaml" 2>/dev/null | cut -d'"' -f2 || echo "2.4.0")"
+# Single source of truth is config.yaml's version: injected as ADDON_VERSION
+# at build time, else read from the manifest copied into the image.
+if [ -z "${ADDON_VERSION:-}" ]; then
+    for _manifest in /usr/local/lib/hermes-addon-config.yaml "$(dirname "${BASH_SOURCE[0]}")/config.yaml"; do
+        ADDON_VERSION="$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "$_manifest" 2>/dev/null | head -n1 || true)"
+        [ -n "$ADDON_VERSION" ] && break
+    done
+fi
+ADDON_VERSION="${ADDON_VERSION:-unknown}"
 
 # ── Section 1: Read options ──────────────────────────────────────────
 OPTIONS_FILE="/data/options.json"
@@ -1351,7 +1359,8 @@ if [ -n "${HASS_TOKEN:-${SUPERVISOR_TOKEN:-}}" ]; then
     if [ -n "$reporter_tool" ]; then
         names_csv="$(IFS=,; echo "${PROFILE_NAMES[*]}")"
         ports_csv="$(IFS=,; echo "${API_PORTS[*]}")"
-        "$VENV_DIR/bin/python" "$reporter_tool" "$OPTIONS_FILE" "$ADDON_VERSION" "$names_csv" "$ports_csv" &
+        homes_csv="$(IFS=,; echo "${PROFILE_HOMES[*]}")"
+        "$VENV_DIR/bin/python" "$reporter_tool" "$OPTIONS_FILE" "$ADDON_VERSION" "$names_csv" "$ports_csv" "$homes_csv" &
         REPORTER_PID=$!
         log "[run] Home Assistant status sensor reporter started (PID: $REPORTER_PID)"
     fi

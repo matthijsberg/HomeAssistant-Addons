@@ -1,9 +1,68 @@
 #include <tunables/global>
 
-profile local_hermes_agent flags=(attach_disconnected,mediate_deleted) {
+# Based on Docker's docker-default profile, adapted for this add-on.
+#
+# Rollout: ships in `complain` mode, so allow-rule gaps are only logged
+# (apparmor="ALLOWED" in `ha host logs -t audit`) and never block the add-on.
+# Explicit `deny` rules below are enforced even in complain mode; they match
+# docker-default plus write protection for the add-on's own scripts.
+# After a clean observation period, remove `complain` from the flags.
+profile local_hermes_agent flags=(attach_disconnected,mediate_deleted,complain) {
   #include <abstractions/base>
 
-  file,
+  # Docker's default capability set; the add-on is not privileged.
+  capability chown,
+  capability dac_override,
+  capability fowner,
+  capability fsetid,
+  capability kill,
+  capability setgid,
+  capability setuid,
+  capability setpcap,
+  capability setfcap,
+  capability net_bind_service,
+  capability net_raw,
+  capability sys_chroot,
+  capability mknod,
+  capability audit_write,
+
   network,
-  capability,
+  file,
+  umount,
+
+  # Supervisor/Docker stop the container; processes signal each other
+  # (run.sh supervises gateway process groups, ttyd, dashboards).
+  signal (receive) peer=unconfined,
+  signal (receive) peer=runc,
+  signal (receive) peer=crun,
+  signal (receive) peer=dockerd-default,
+  signal (send,receive) peer=local_hermes_agent,
+
+  # ps, Hermes gateway discovery and the sensor reporter read /proc/<pid>.
+  ptrace (trace,read,tracedby,readby) peer=local_hermes_agent,
+
+  # ── docker-default denials ─────────────────────────────────────────
+  deny @{PROC}/* w,
+  deny @{PROC}/{[^1-9],[^1-9][^0-9],[^1-9s][^0-9y][^0-9s],[^1-9][^0-9][^0-9][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+  deny mount,
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  # ── add-on integrity ───────────────────────────────────────────────
+  # The agent has a root shell; keep it from rewriting its own supervisor,
+  # credential validation, or nginx templates until the next rebuild.
+  deny /run.sh wl,
+  deny /usr/local/lib/hermes-* wl,
+  deny /usr/local/bin/hermes-* wl,
+  deny /etc/nginx/*.tpl wl,
 }

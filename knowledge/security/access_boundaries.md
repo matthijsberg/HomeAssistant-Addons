@@ -43,10 +43,25 @@ shell-identifier names. Rejected values are never echoed.
 | `<profile>/.env` | 0600 | Provider keys, `API_SERVER_KEY` |
 | `/config/.hermes_profile` | 0600 (since 2.4.0) | `HASS_TOKEN`, `GITHUB_TOKEN` |
 | `/etc/nginx/.htpasswd` | 0644 | apr1 hash only; unprivileged nginx workers must read it (2.3.2 notes claimed 0600) |
-| `<profile>/config.yaml` | default | **Contains `HASS_TOKEN` in plain text** via the HA MCP server block |
+| `<profile>/config.yaml` | 0600 (since 2.5.0) | `HASS_TOKEN` in the HA MCP server block |
 | `$CERTS_DIR/*.key` | 0600 | Self-signed TLS keys |
 
-## Known gaps (tracked as recommendations)
-- `apparmor.txt` grants `file, network, capability` (no effective confinement).
-- The HA MCP block sets `NODE_TLS_REJECT_UNAUTHORIZED=0` for any `https://` HASS_URL.
-- `ha-user-sync.sh` calls the HA API with `curl -k`.
+## TLS verification
+No component disables certificate checks (removed in 2.5.0: `NODE_TLS_REJECT_UNAUTHORIZED=0`
+in the MCP block and `curl -k` in HA user sync). Use the default internal
+`http://supervisor/core`, or a custom `https://` URL with a valid certificate.
+
+## Supply chain
+The HA MCP server is pinned (`@orellbuehler/homeassistant-mcp@<version>` in
+`ha_mcp_config.py`); bump it deliberately after reviewing the release.
+
+## AppArmor confinement
+`apparmor.txt` mirrors Docker's `docker-default` (capability set, signal/ptrace peers,
+`/proc` and `/sys` write denials, no `mount`) and additionally denies writes to
+`/run.sh`, `/usr/local/{lib,bin}/hermes-*` and nginx templates.
+- **Rollout invariant:** the profile ships with `complain`. Allow-rule gaps are logged
+  as `apparmor="ALLOWED"` (`ha host logs -t audit`) and never block. `deny` rules are
+  enforced regardless of mode.
+- Switch to enforce (drop `complain`) only after an observation window with no
+  `ALLOWED` entries for `local_hermes_agent`, covering a restart, a `hermes update`,
+  dashboard use, a terminal session and a periodic backup.

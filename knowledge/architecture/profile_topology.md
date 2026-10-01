@@ -32,16 +32,22 @@ sources:
    inherits its memories, sessions, `state.db`, and `.env` (copy, never move).
 4. Names are sanitised; collisions are fatal.
 
-## Index-derived allocation (profile *i*, 0 = primary)
+## Allocation
+URL prefix is index-derived: `""` for the primary (i = 0), `/profile/<name>` otherwise.
+Ports derive from a **persistent slot per profile name** (since 2.5.0):
+
 | Resource | Value |
 |---|---|
-| URL prefix | `""` for i=0, `/profile/<name>` otherwise |
-| API port | 8642 + i |
-| ttyd Hermes / terminal | 49269 + i / 49369 + i |
-| Dashboard | 49469 + i |
+| API port | 8642 + slot |
+| ttyd Hermes / terminal | 49269 + slot / 49369 + slot |
+| Dashboard | 49469 + slot |
 
-Ports change if the profile **order** changes; HA sensors and external clients that
-cache ports must follow.
+- Slots live in `/config/.hermes_port_slots` (`<name> <slot>` lines), range 0–99.
+- Existing names keep their slot across reordering, removal and re-adding.
+- New names take the lowest slot not used or reserved by a retired name; retired
+  slots are reclaimed only when the pool is otherwise full. More than 100 concurrent
+  profiles is fatal.
+- A fresh install assigns slots in list order, i.e. the historical index ports.
 
 ## Gateway topology
 - Named profiles (homes directly under a `profiles/` dir) get

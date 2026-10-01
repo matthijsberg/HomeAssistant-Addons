@@ -4,6 +4,36 @@ All notable changes to the Hermes Agent Home Assistant add-on are documented her
 
 The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions match the add-on `version` in `config.yaml`.
 
+## [2.5.0] - 2026-10-01
+
+### Security
+
+- **Pinned MCP Server:** The Home Assistant MCP server is pinned to `@orellbuehler/homeassistant-mcp@0.8.0` instead of downloading whatever version is latest on every start.
+- **No TLS Bypasses:** Removed `NODE_TLS_REJECT_UNAUTHORIZED=0` from the MCP block and `curl -k` from HA user sync. Use the default internal Supervisor URL, or a custom `https://` URL with a valid certificate.
+- **Profile Config Permissions:** A profile's `config.yaml` holds the HA token for the MCP server, so it is now `chmod 600`.
+- **AppArmor Profile:** The old profile placed no real restrictions on the container. It is replaced by one based on Docker's `docker-default` (Docker capability set, signal/ptrace limited to this App, `/proc` and `/sys` write denials, no `mount`), which also blocks writes to the App's own scripts. It ships in **complain mode**, so anything not yet covered is logged rather than blocked; it switches to enforce mode once the audit log stays clean.
+
+### Fixed
+
+- **Config Comments Preserved:** Profile `config.yaml` updates now only touch the managed MCP and platform keys, keep your comments and formatting (via `ruamel.yaml`), write atomically, skip the write when nothing changed, and never overwrite a file that fails to parse.
+- **Stable Ports per Profile:** Ports are tied to the profile name (`/config/.hermes_port_slots`) instead of list position, so reordering, removing or HA-syncing users no longer shifts ports. Existing installs keep their current ports.
+- **Consistent Database Backups:** Periodic backups snapshot SQLite databases with the online backup API, so archives taken while agents are active hold a consistent copy including recent WAL writes. They no longer contain raw `-wal`/`-shm` files.
+- **Sensors Without API Server:** With `enable_api` off, profile sensors report whether the gateway process is running instead of always showing `offline`. States are re-sent every 5 minutes, so they come back after a Home Assistant restart.
+- **Single Version Source:** The App version now comes from the build (`BUILD_VERSION`, falling back to the manifest) instead of six hardcoded copies. A missing manifest no longer aborts startup.
+- **Repository Hygiene:** Added a `.gitignore` covering caches, local venvs, secrets, archives and editor files.
+
+### Recommended Action
+
+- Clear `hass_url` and `homeassistant_token` in the App configuration. The App then uses the internal Supervisor connection (`http://supervisor/core` with the automatically rotated `SUPERVISOR_TOKEN`), and no long-lived token is stored in profile files.
+
+### Verified
+
+- `create_profile_backup` against a live WAL-mode writer with GNU tar 1.35: all 1000 rows that existed only in the WAL were present, `integrity_check` ok, non-SQLite `.db` archived raw, work directory removed.
+- Port slots: fresh, reorder, remove, add, re-add and pool-exhaustion scenarios; a fresh install reproduces 8642/8643/8644.
+- Config helpers with ruamel.yaml and with PyYAML: comments kept (ruamel), byte-identical on re-run, mode `0600`, unparseable file untouched.
+- `apparmor.txt` compiles with AppArmor parser 4.1.7; gateway detection for sensors verified against a live process; upstream v1.3.4 suite unchanged (same 8 known fork-specific failures as 2.4.0).
+- Not yet verified on the live Home Assistant install.
+
 ## [2.4.0] - 2026-10-01
 
 Syncs upstream [hermes-ha-addon](https://github.com/WolframRavenwolf/hermes-ha-addon) v1.3.1–v1.3.4 into the fork (base was upstream v1.3.0). Architecture and change records live in the OKF bundle under `knowledge/`.

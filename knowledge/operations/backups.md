@@ -32,8 +32,13 @@ sources:
    Excludes `backups`, `logs`, `venv`, `node_modules`, `.cache`, `lsp`, sockets/FIFOs.
 4. **Manual**: `hermes backup` defaults `--output` to `/backup/hermes`.
 
+## Database consistency (since 2.5.0)
+Every `*.db`, `*.sqlite`, `*.sqlite3` in the profile is snapshotted with SQLite's
+online backup API (read-only source, 30 s busy timeout) and the snapshot replaces the
+live file in the archive; `-wal`, `-shm` and `-journal` companions are excluded.
+Files that are not SQLite are archived raw. Build steps: uncompressed tar → append
+snapshots → gzip, all inside a `.work.*` directory that is always removed.
+
 ## Caveats
-- Periodic archives copy SQLite files (`state.db`) while gateways run; an archive
-  can capture a mid-write state. Prefer layer 1/2 for restores of live databases.
 - Archives are written atomically (`.tmp` then `mv`), and pruning only touches
   `hermes-backup-<profile>-*.tar.gz`.
