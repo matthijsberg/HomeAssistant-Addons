@@ -47,7 +47,6 @@ options:
   git_ref: ""
   git_token: ""
   auto_update: false
-  hass_url: "http://homeassistant.local:8123"
   homeassistant_token: ""
   hermes_home: ".hermes"
   profiles: []

@@ -4,6 +4,37 @@ All notable changes to the Hermes Agent Home Assistant add-on are documented her
 
 The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions match the add-on `version` in `config.yaml`.
 
+## [2.4.0] - 2026-10-01
+
+Syncs upstream [hermes-ha-addon](https://github.com/WolframRavenwolf/hermes-ha-addon) v1.3.1–v1.3.4 into the fork (base was upstream v1.3.0). Architecture and change records live in the OKF bundle under `knowledge/`.
+
+### Added
+
+- **Per-Profile Gateway Supervision (upstream 1.3.1/1.3.2):** Each gateway runs under its own slot supervisor that owns the full process tree. Restarts happen only after every descendant has exited. Output goes to both the add-on log and `<profile>/logs/gateway.log`, and `hermes update` hands restarts back through `--external-supervisor` instead of stopping the gateways.
+- **Authoritative API Settings (upstream 1.3.1):** API host, port, enablement and key, plus profile pinning and multiplexing, are re-applied after every Hermes env/config load and enforced on the final `GatewayConfig`.
+- **Dashboard Supervision:** Crashed dashboards are restarted (at most once per 5 minutes), with a fresh session token and an nginx reload.
+- **OKF v0.2 Knowledge Bundle:** `knowledge/` documents upstream lineage, gateway supervision, Python runtime, profile topology, security boundaries, backups and the HA integration. Validate it with `scripts/validate_okf.sh` or `tests/test_okf.py`.
+
+### Fixed
+
+- **Python Version Pin (upstream 1.3.4):** The Hermes checkout's `.python-version` is now honoured; checkouts without one default to 3.11. Broken or incompatible venvs are rebuilt even when the install marker matches, and the previous venv is restored if the rebuild fails. Interpreter migrations drop manually added venv packages.
+- **Named-Profile Startup (upstream 1.3.3):** `gateway.standalone: true` is set on named profiles (including HA-synced users) before any gateway starts. This is feature-detected, so older Hermes revisions are unaffected.
+- **Dashboard Crash on Self-Managed Hermes:** Dashboards now import `hermes_bootstrap` first. Previously they failed with `ModuleNotFoundError: No module named 'ruamel'` once Hermes switched to its own dependency store.
+- **`hermes backup` Wrapper:** The wrapper is re-applied after any reinstall regenerates `bin/hermes`. Previously it was silently lost.
+- **Secret File Mode:** `/config/.hermes_profile` (contains `HASS_TOKEN`/`GITHUB_TOKEN`) is now `chmod 600`, as the 2.3.2 notes already claimed. `.htpasswd` intentionally stays world-readable because it only contains an apr1 hash that nginx workers must read; the 2.3.2 claim was incorrect.
+- **Zero-Config HA Access:** Without a `homeassistant_token`, the App now always talks to `http://supervisor/core`, because `SUPERVISOR_TOKEN` is rejected by Core's direct URL. The misleading `hass_url` default (`http://homeassistant.local:8123`) was removed for new installs. Installs with their own token are unaffected.
+- **Fail-Fast Credential Validation:** Startup aborts if `api-server.sh` is missing instead of silently skipping credential validation.
+
+### Changed
+
+- **Option Help Text:** `access_password`, `enable_api` and `env_vars` descriptions now state the credential rules enforced since 2.2.0 (upstream 1.3.1).
+
+### Verified
+
+- Upstream v1.3.4 regression suite run against this fork (Python 3.14.7, offline): all Python-runtime, gateway supervisor/launcher/logger, API-credential, backup-policy and multi-profile tests pass. The remaining failures are fork-specific metadata or test-harness artifacts, plus one environment-specific test that also fails on pure upstream in the same container. Details are in `knowledge/architecture/upstream_lineage.md`.
+- `bash -n` on all shell scripts, `py_compile` on all Python helpers, YAML parse of `config.yaml`, `build.yaml` and `translations/en.yaml`, and OKF validation (7 concepts, 0 errors) passed.
+- Not yet verified on a live Home Assistant install. The first start migrates the venv from Python 3.11 to the checkout's pinned 3.14, which needs network access and takes several minutes.
+
 ## [2.3.2] - 2026-09-07
 
 ### Security

@@ -59,7 +59,16 @@ HASS_URL="${HASS_URL:-http://supervisor/core}"
 [ -n "$HASS_URL" ] && export HASS_URL
 
 HASS_TOKEN=$(opt homeassistant_token)
-HASS_TOKEN="${HASS_TOKEN:-${SUPERVISOR_TOKEN:-}}"
+if [ -z "$HASS_TOKEN" ] && [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+    # SUPERVISOR_TOKEN is only accepted through the Supervisor proxy, never by
+    # Core directly, so a custom hass_url needs its own long-lived token.
+    HASS_TOKEN="$SUPERVISOR_TOKEN"
+    if [ "$HASS_URL" != "http://supervisor/core" ]; then
+        log "[run] No homeassistant_token set; using SUPERVISOR_TOKEN via http://supervisor/core instead of $HASS_URL"
+        HASS_URL="http://supervisor/core"
+        export HASS_URL
+    fi
+fi
 [ -n "$HASS_TOKEN" ] && export HASS_TOKEN
 # shellcheck disable=SC2034  # consumed by resolve_profiles in profile-init.sh
 HERMES_HOME_DIR=$(opt hermes_home)

@@ -39,7 +39,7 @@ Configuration options are managed under **Settings > Apps > Hermes Agent > Confi
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `auto_sync_ha_users` | `bool` | `true` | Automatically discover active Home Assistant users (`person.*` entities linked to accounts) and generate isolated profile folders. |
-| `hass_url` | `url` | `http://homeassistant.local:8123` | Home Assistant Core base URL. Defaults to the internal `http://supervisor/core` proxy when left empty. |
+| `hass_url` | `url` | *(empty)* | Home Assistant Core base URL. Defaults to the internal `http://supervisor/core` proxy when left empty. A custom URL is only used together with `homeassistant_token`; without a token the App always uses `SUPERVISOR_TOKEN` through `http://supervisor/core`. |
 | `homeassistant_token` | `password` | `""` | Optional long-lived access token. When left empty, the App automatically uses the internal `SUPERVISOR_TOKEN` provided by Home Assistant. |
 
 ### Backups & Maintenance

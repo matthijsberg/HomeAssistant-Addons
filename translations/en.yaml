@@ -18,7 +18,7 @@ configuration:
       Pull latest changes from git on every restart.
   hass_url:
     name: Home Assistant URL
-    description: Home Assistant base URL for API access.
+    description: Home Assistant base URL for API access. Leave empty to use the internal Supervisor proxy; a custom URL also needs a Home Assistant token.
   homeassistant_token:
     name: Home Assistant Token
     description: Long-lived access token for HA API integration (optional).
