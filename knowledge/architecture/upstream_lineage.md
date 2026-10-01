@@ -49,6 +49,8 @@ assume upstream's `run.sh` layout. See [testing gap](#known-divergences).
 - The dashboard launch imports `hermes_bootstrap` first (see
   [python-runtime](python_runtime.md)).
 - Upstream helper `cleanup_gateway_descendants` is unused upstream and was not ported.
+- `gateway-launcher.py` imports `hermes_bootstrap` before masking the Hermes root
+  (fixes lazy backends on self-managed Hermes); the venv probe disables lazy installs.
 - Ports come from persistent per-name slots, not the profile index (identical on a
   fresh install, so upstream's port tests still pass).
 - `ADDON_VERSION` comes from Supervisor's `BUILD_VERSION`, falling back to the manifest

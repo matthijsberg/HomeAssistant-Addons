@@ -421,7 +421,10 @@ hermes_runtime_works() {
     # bytecode or touching the user's profile, even before initial scaffolding.
     (
         cd "$SRC_DIR" || exit 1
+        # HERMES_DISABLE_LAZY_INSTALLS keeps self-managed Hermes from running a
+        # full source-update completion into the throwaway probe root.
         HOME="$probe_dir" HERMES_HOME="$probe_dir" HERMES_PROFILE="" \
+            HERMES_DISABLE_LAZY_INSTALLS=1 \
             "$VENV_DIR/bin/python" -B -c '
 import sys
 expected = tuple(map(int, sys.argv[1].split(".")))

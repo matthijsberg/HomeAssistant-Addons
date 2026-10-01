@@ -44,9 +44,15 @@ crashed with `ModuleNotFoundError: No module named 'ruamel'`.
 **Invariant:** any add-on code that imports Hermes modules directly must import
 `hermes_bootstrap` first (tolerating `ModuleNotFoundError` for older revisions).
 The dashboard launch and probe in `run.sh` (`DASHBOARD_BOOT`) follow this. The
-upstream gateway launcher imports `hermes_cli.env_loader` and then `hermes_cli.main`
-(which imports the bootstrap); it relies on the venv holding current dependencies,
-which the rebuild rules above guarantee at every start. Watch upstream for changes here.
+gateway launcher imports `hermes_bootstrap` **before** anything else (fork divergence,
+2.5.0). Upstream's launcher masks `get_default_hermes_root()` as `/dev/null` while
+importing `hermes_cli.main`; letting the bootstrap run inside that window resolved
+the package-manager store under `/dev/null` and dropped lazily provisioned backends
+(Telegram) on 2026-10-01.
+
+**Probe invariant:** the venv health probe runs with `HERMES_DISABLE_LAZY_INSTALLS=1`
+so it never performs a source-update completion into its throwaway root; a venv
+interpreter then falls back to its own packages, so the probe cannot loop rebuilds.
 
 ## `hermes` backup wrapper
 `venv/bin/hermes` is replaced by a bash wrapper (marker `hermes-addon-backup-wrapper`)

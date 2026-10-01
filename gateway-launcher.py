@@ -163,8 +163,26 @@ def _import_fixed_profile_main(import_module: Any = importlib.import_module) -> 
     return main_module.main
 
 
+def _import_bootstrap(import_module: Any = importlib.import_module) -> None:
+    """Let self-managed Hermes select its dependency generation first.
+
+    Fork divergence (add-on 2.5.0): hermes_bootstrap must run before
+    _import_fixed_profile_main masks get_default_hermes_root, or the package
+    manager resolves its store under /dev/null and the gateway runs without
+    lazily provisioned backends such as Telegram. The bootstrap may re-exec
+    this launcher on the managed interpreter, so it runs before the handoff
+    variables are consumed. Older revisions have no hermes_bootstrap module.
+    """
+    try:
+        import_module("hermes_bootstrap")
+    except ModuleNotFoundError as error:
+        if error.name != "hermes_bootstrap":
+            raise
+
+
 def main() -> None:
     """Start the regular Hermes CLI after installing the API env guard."""
+    _import_bootstrap()
     protected = _capture_protected_values()
 
     from hermes_cli import env_loader  # type: ignore[import-not-found]

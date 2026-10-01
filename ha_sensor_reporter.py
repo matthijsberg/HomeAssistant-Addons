@@ -66,7 +66,8 @@ def gateway_running(home: str) -> bool:
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as f:
                 cmdline = f.read().split(b"\0")
-            if not any(arg.endswith(b"gateway-launcher.py") for arg in cmdline):
+            # Substring match: a bootstrap re-exec runs the launcher via runpy.
+            if not any(b"gateway-launcher.py" in arg for arg in cmdline):
                 continue
             if os.path.realpath(os.readlink(f"/proc/{pid}/cwd")) == os.path.realpath(home):
                 return True

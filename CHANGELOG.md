@@ -15,6 +15,8 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 
 ### Fixed
 
+- **Telegram and Other Lazy Backends (2.4.0 regression):** The upstream gateway launcher masked Hermes' home as `/dev/null` while importing Hermes. On self-managed Hermes that made dependency selection fail (`source-update completion failed: … /dev/null/installs/…`), so gateways ran without lazily provisioned backends (`Platform 'telegram' … adapter creation failed`). The launcher now runs `hermes_bootstrap` with the real home first.
+- **Venv Probe Side Effects:** The startup health probe no longer runs a full Hermes source-update into a temporary directory on every venv (re)build (`HERMES_DISABLE_LAZY_INSTALLS=1`).
 - **Config Comments Preserved:** Profile `config.yaml` updates now only touch the managed MCP and platform keys, keep your comments and formatting (via `ruamel.yaml`), write atomically, skip the write when nothing changed, and never overwrite a file that fails to parse.
 - **Stable Ports per Profile:** Ports are tied to the profile name (`/config/.hermes_port_slots`) instead of list position, so reordering, removing or HA-syncing users no longer shifts ports. Existing installs keep their current ports.
 - **Consistent Database Backups:** Periodic backups snapshot SQLite databases with the online backup API, so archives taken while agents are active hold a consistent copy including recent WAL writes. They no longer contain raw `-wal`/`-shm` files.
