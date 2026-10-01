@@ -12,7 +12,8 @@
 
 ## Hermes Agent Plugin Configuration
 
-Add the following to Hermes Agent `config.yaml`:
+### Scenario A: Native Single Provider (Google Gemini) - Default
+Hermes Agent directly calls Google's API with a single `GEMINI_API_KEY`:
 
 ```yaml
 plugins:
@@ -34,4 +35,27 @@ plugins:
           deep:    {model: gemini-2.5-pro, effort: high}
         downgrade_within_session: false
         audit_enabled: true
+```
+
+### Scenario B: Multi-Provider Gateway (LiteLLM or OpenRouter)
+Because Hermes Agent **cannot dynamically change provider credentials mid-session**, routing across multi-vendor models (e.g. Anthropic Claude + Google Gemini + OpenAI) requires Hermes to be configured with a single unified gateway provider (`provider: openrouter` or `provider: custom` pointing to LiteLLM):
+
+```yaml
+# Under Hermes config.yaml
+model: google/gemini-flash-1.5
+
+plugins:
+  entries:
+    laya-router:
+      settings:
+        mode: observe
+        laya_url: http://local-laya:8000
+        api_key_env: LAYA_API_KEY
+        question_set: hermes-v1
+        default: {model: google/gemini-flash-1.5, effort: medium}
+        families:
+          quick:   {model: google/gemini-2.5-flash-lite, effort: low}
+          general: {model: google/gemini-flash-1.5, effort: medium}
+          code:    {model: anthropic/claude-3.5-sonnet, effort: high}
+          deep:    {model: anthropic/claude-3.7-sonnet, effort: high}
 ```

@@ -73,3 +73,19 @@ def test_engine_device_xpu_configuration():
     assert eng.ready is True
     res = eng.route(prompt="Test prompt", recent_turns=[])
     assert "family" in res
+
+
+def test_engine_provider_and_models_resolution():
+    cfg = AppConfig(
+        provider="openrouter",
+        model_quick="google/gemini-2.5-flash-lite",
+        model_code="anthropic/claude-3.5-sonnet",
+        mock_mode=True,
+        api_key="secret",
+    )
+    eng = LayaRouterEngine(cfg)
+    eng.initialize()
+    res = eng.route(prompt="Fix this syntax error in Python", recent_turns=[])
+    assert res["family"] == "code"
+    assert res["provider"] == "openrouter"
+    assert res["model"] == "anthropic/claude-3.5-sonnet"

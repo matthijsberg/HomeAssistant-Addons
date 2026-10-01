@@ -18,6 +18,33 @@ class AppConfig:
     log_level: str = "info"
     hf_home: str = "/data/hf"
     mock_mode: bool = False
+    provider: str = "gemini"
+    model_quick: str = "gemini-2.5-flash-lite"
+    model_general: str = "gemini-flash-latest"
+    model_code: str = "gemini-flash-latest"
+    model_deep: str = "gemini-2.5-pro"
+    gateway_url: Optional[str] = None
+
+    def get_model_for_family(self, family: str) -> str:
+        """Resolve model identifier for a given task family based on configuration."""
+        fam = family.lower().strip()
+        if fam == "quick":
+            return self.model_quick
+        elif fam == "code":
+            return self.model_code
+        elif fam == "deep":
+            return self.model_deep
+        else:
+            return self.model_general
+
+    def get_models_map(self) -> dict:
+        """Return full family-to-model mapping dictionary."""
+        return {
+            "quick": self.model_quick,
+            "general": self.model_general,
+            "code": self.model_code,
+            "deep": self.model_deep,
+        }
 
     @classmethod
     def load(cls, options_path: str = "/data/options.json") -> "AppConfig":
@@ -50,6 +77,15 @@ class AppConfig:
         hf_home = os.environ.get("HF_HOME", "/data/hf")
         mock_mode = os.environ.get("LAYA_MOCK_MODE", "").lower() in ("1", "true", "yes")
 
+        provider = data.get("provider") or os.environ.get("LAYA_PROVIDER", "gemini")
+        model_quick = data.get("model_quick") or os.environ.get("LAYA_MODEL_QUICK", "gemini-2.5-flash-lite")
+        model_general = data.get("model_general") or os.environ.get("LAYA_MODEL_GENERAL", "gemini-flash-latest")
+        model_code = data.get("model_code") or os.environ.get("LAYA_MODEL_CODE", "gemini-flash-latest")
+        model_deep = data.get("model_deep") or os.environ.get("LAYA_MODEL_DEEP", "gemini-2.5-pro")
+        gateway_url = data.get("gateway_url") or os.environ.get("LAYA_GATEWAY_URL")
+        if gateway_url == "":
+            gateway_url = None
+
         return cls(
             device=device,
             threads=threads,
@@ -60,4 +96,10 @@ class AppConfig:
             log_level=log_level,
             hf_home=hf_home,
             mock_mode=mock_mode,
+            provider=provider,
+            model_quick=model_quick,
+            model_general=model_general,
+            model_code=model_code,
+            model_deep=model_deep,
+            gateway_url=gateway_url,
         )

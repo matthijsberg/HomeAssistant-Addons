@@ -65,6 +65,23 @@ def test_route_endpoint_happy_path():
     assert "checkpoint" in data
     assert data["latency_ms"] >= 0.0
     assert data["question_set"] == "hermes-v1"
+    assert "provider" in data
+    assert "model" in data
+    assert isinstance(data["model"], str)
+
+
+def test_get_models_endpoint():
+    response = client.get("/v1/models", headers=AUTH_HEADER)
+    assert response.status_code == 200
+    data = response.json()
+    assert "provider" in data
+    assert "models" in data
+    assert "quick" in data["models"]
+    assert "general" in data["models"]
+    assert "code" in data["models"]
+    assert "deep" in data["models"]
+    assert "supported_providers" in data
+    assert "architecture_limitation_note" in data
 
 
 def test_route_context_truncation():

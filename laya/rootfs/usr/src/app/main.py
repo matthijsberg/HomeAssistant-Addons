@@ -90,6 +90,8 @@ class RouteResponse(BaseModel):
     checkpoint: str
     latency_ms: float
     question_set: str
+    provider: str = Field(description="Active upstream model provider")
+    model: str = Field(description="Target model identifier mapped to the resolved task family")
 
 
 @app.get("/health")
@@ -105,6 +107,23 @@ def health() -> Dict[str, Any]:
         "revisions": {
             "pinned": config.laya_revision,
         },
+        "provider": config.provider,
+    }
+
+
+@app.get("/v1/models", dependencies=[Depends(verify_api_key)])
+def get_models_config() -> Dict[str, Any]:
+    """Return active provider, model mappings, gateway configuration, and architecture notes."""
+    return {
+        "provider": config.provider,
+        "gateway_url": config.gateway_url,
+        "models": config.get_models_map(),
+        "supported_providers": ["gemini", "litellm", "openrouter", "custom"],
+        "architecture_limitation_note": (
+            "Hermes Agent cannot switch provider credentials dynamically mid-session. "
+            "Routing across multiple upstream provider vendors (e.g. Anthropic, Google, OpenAI) "
+            "requires a unified gateway (LiteLLM or OpenRouter) configured as Hermes' single provider endpoint."
+        ),
     }
 
 

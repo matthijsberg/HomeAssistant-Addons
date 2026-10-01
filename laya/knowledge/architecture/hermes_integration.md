@@ -67,6 +67,29 @@ If the Laya Add-on times out (threshold: 1.0s), returns an HTTP 5xx error, or fa
     },
     "checkpoint": "multilingual",
     "latency_ms": 42.5,
-    "question_set": "hermes-v1"
+    "question_set": "hermes-v1",
+    "provider": "gemini",
+    "model": "gemini-2.5-pro"
   }
   ```
+
+### 5. Multi-Provider Architecture & Single-Endpoint Limitation
+
+#### The Single-Endpoint Constraint
+Hermes Agent initializes provider adapters and authorization tokens at boot. The `llm_request` middleware hook allows rewriting the requested `model` and `effort` parameters, but **cannot dynamically switch provider credentials or API client adapters mid-session** (e.g., jumping from native `gemini` adapter to `anthropic` adapter on the fly).
+
+#### Operating Models:
+1. **Native Single-Provider Mode (Default - Gemini):**
+   - Directly connects to Google Gemini API (`generativelanguage.googleapis.com`).
+   - One API key (`GEMINI_API_KEY`).
+   - Routes between `gemini-2.5-flash-lite`, `gemini-flash-latest`, and `gemini-2.5-pro`.
+   - Zero gateway overhead; simplest and fastest path.
+
+2. **Unified Multi-Provider Gateway Mode (LiteLLM / OpenRouter):**
+   - Configures Hermes with `provider: openai` or `provider: openrouter` pointing to the unified gateway endpoint.
+   - The gateway manages credentials and routing to diverse backends:
+     - `quick`: `google/gemini-2.5-flash-lite`
+     - `general`: `google/gemini-flash-1.5`
+     - `code`: `anthropic/claude-3.5-sonnet`
+     - `deep`: `anthropic/claude-3.7-sonnet` or `openai/o3-mini`
+   - Laya Router returns the mapped model name for the selected gateway, allowing Hermes to stay on a single API endpoint while leveraging different underlying model vendors.

@@ -24,7 +24,8 @@ Laya Router categorizes incoming user turns in a single sub-50ms forward pass on
 | Endpoint | Method | Auth | Purpose |
 |---|---|---|---|
 | `/health` | `GET` | None | Container watchdog; reports readiness, device, loaded checkpoints, and pinned revision. |
-| `/v1/route` | `POST` | Bearer | Decision endpoint for one user turn. Returns `family`, `effort`, `confidence`, and `checkpoint`. |
+| `/v1/route` | `POST` | Bearer | Decision endpoint for one user turn. Returns `family`, `effort`, `confidence`, `checkpoint`, `provider`, and `model`. |
+| `/v1/models` | `GET` | Bearer | Returns active provider, model mappings, and gateway topology details. |
 | `/v1/systemone` | `POST` | Bearer | Raw Jev-compatible wire protocol passthrough for experiments and external tools. |
 | `/v1/question-sets` | `GET` | Bearer | Returns active criteria text and versioning details (e.g. `hermes-v1`). |
 
@@ -34,13 +35,28 @@ Laya Router categorizes incoming user turns in a single sub-50ms forward pass on
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `device` | string | `cpu` | Hardware compute device (`cpu`; `xpu` reserved for future Intel iGPU acceleration). |
+| `device` | select | `xpu` | Hardware compute device (`xpu` for Intel Arc iGPU acceleration; `cpu` for standard CPU). |
 | `threads` | int | `6` | PyTorch CPU intra-op threads. Cap to physical CPU cores. |
 | `checkpoints` | string | `english,multilingual` | Comma-separated checkpoints preloaded into memory at startup. |
-| `router_default` | string | `multilingual` | Fallback checkpoint for short prompts without clear language signal. |
+| `router_default` | select | `multilingual` | Fallback checkpoint for short prompts without clear language signal. |
 | `laya_revision` | string | `main` | Hugging Face weights revision for deterministic execution. |
 | `api_key` | password | *(required)* | Shared secret Bearer token used by the Hermes `laya-router` plugin. |
-| `log_level` | list | `info` | Logging verbosity (`debug`, `info`, `warn`, `error`). |
+| `log_level` | select | `info` | Logging verbosity (`debug`, `info`, `warn`, `error`). |
+| `provider` | select | `gemini` | Upstream model provider (`gemini`, `litellm`, `openrouter`, or `custom`). |
+| `model_quick` | string | `gemini-2.5-flash-lite` | Model identifier mapped to `quick` task family. |
+| `model_general` | string | `gemini-flash-latest` | Model identifier mapped to `general` task family. |
+| `model_code` | string | `gemini-flash-latest` | Model identifier mapped to `code` task family. |
+| `model_deep` | string | `gemini-2.5-pro` | Model identifier mapped to `deep` task family. |
+| `gateway_url` | string | `""` | Optional gateway base URL when using LiteLLM or OpenRouter. |
+
+---
+
+## Architectural Limitation: Single-Endpoint vs Multi-Provider Gateways
+
+Hermes Agent connects to upstream LLMs via a configured provider adapter. The `llm_request` middleware hook can rewrite model identifiers and reasoning effort on the fly, but **cannot switch provider authentication tokens or API adapters mid-session**:
+
+* **Native Single Provider (Gemini):** Routes seamlessly between Flash Lite, Flash, and Pro using a single Google API key and direct connection without extra gateway latency.
+* **Multi-Vendor Providers (e.g. Claude + Gemini + OpenAI):** Must use an OpenAI-compatible unified proxy such as **LiteLLM** or **OpenRouter** as the single configured provider in Hermes. The gateway receives the routed model name and multiplexes downstream.
 
 ---
 

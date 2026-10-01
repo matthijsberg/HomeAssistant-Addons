@@ -249,6 +249,8 @@ class LayaRouterEngine:
         routing_block = result.get("routing") or {}
         checkpoint = routing_block.get("model") or result.get("model") or self.config.router_default
 
+        resolved_model = self.config.get_model_for_family(str(family))
+
         return {
             "family": str(family),
             "effort": str(effort),
@@ -259,6 +261,8 @@ class LayaRouterEngine:
             "checkpoint": str(checkpoint),
             "latency_ms": round(latency_ms, 2),
             "question_set": question_set,
+            "provider": self.config.provider,
+            "model": resolved_model,
         }
 
     def systemone(self, body: Dict[str, Any]) -> Dict[str, Any]:

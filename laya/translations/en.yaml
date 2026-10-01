@@ -20,3 +20,21 @@ configuration:
   log_level:
     name: "Log Level"
     description: "Logging verbosity for Uvicorn and the Laya server process."
+  provider:
+    name: "Upstream Model Provider"
+    description: "Target LLM provider (gemini, litellm, openrouter, or custom). Note: multi-provider setups require a gateway (LiteLLM/OpenRouter) because Hermes Agent cannot switch provider credentials dynamically mid-session."
+  model_quick:
+    name: "Quick Tasks Model"
+    description: "Model mapped to 'quick' family (e.g. gemini-2.5-flash-lite, google/gemini-2.5-flash-lite)."
+  model_general:
+    name: "General Tasks Model"
+    description: "Model mapped to 'general' family (e.g. gemini-flash-latest, google/gemini-flash-1.5)."
+  model_code:
+    name: "Code Tasks Model"
+    description: "Model mapped to 'code' family (e.g. gemini-flash-latest, anthropic/claude-3.5-sonnet)."
+  model_deep:
+    name: "Deep Reasoning Model"
+    description: "Model mapped to 'deep' family (e.g. gemini-2.5-pro, anthropic/claude-3.7-sonnet)."
+  gateway_url:
+    name: "Gateway Base URL"
+    description: "Optional proxy/gateway base URL when using LiteLLM, OpenRouter, or a custom gateway."
