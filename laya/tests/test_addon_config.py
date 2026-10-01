@@ -18,10 +18,14 @@ def test_config_yaml_manifest():
 
     assert cfg["name"] == "Laya Router"
     assert cfg["slug"] == "laya"
-    assert cfg["version"] == "0.1.0"
+    assert cfg["version"] == "0.2.0"
     assert cfg["arch"] == ["amd64"]
     assert cfg["startup"] == "services"
     assert cfg["boot"] == "auto"
+
+    # Hardware devices check: /dev/dri passthrough for Intel iGPU
+    assert "devices" in cfg
+    assert "/dev/dri:/dev/dri" in cfg["devices"]
 
     # Ports check: null by default for optional LAN mapping
     assert "ports" in cfg
@@ -30,7 +34,7 @@ def test_config_yaml_manifest():
 
     # Required options
     opts = cfg.get("options", {})
-    assert opts.get("device") == "cpu"
+    assert opts.get("device") in ("cpu", "xpu")
     assert opts.get("threads") == 6
     assert "english" in opts.get("checkpoints", "")
     assert opts.get("router_default") == "multilingual"
@@ -53,7 +57,7 @@ def test_build_yaml_manifest():
         bld = yaml.safe_load(f)
 
     assert "build_from" in bld
-    assert bld["build_from"]["amd64"] == "python:3.12-slim"
+    assert bld["build_from"]["amd64"] in ("ubuntu:24.04", "python:3.12-slim")
     assert "args" in bld
     assert "LAYA_VERSION" in bld["args"]
 
@@ -76,7 +80,8 @@ def test_translations_coverage():
 def test_dockerfile_exists():
     assert DOCKERFILE_PATH.exists()
     content = DOCKERFILE_PATH.read_text(encoding="utf-8")
-    assert "python:3.12-slim" in content
-    assert "torch" in content
+    assert any(base in content for base in ("ubuntu:24.04", "python:3.12-slim"))
+    assert "libze1" in content
+    assert "whl/xpu" in content
     assert "laya[serve]" in content
     assert "EXPOSE 8000" in content

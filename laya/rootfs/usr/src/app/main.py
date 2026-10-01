@@ -1,5 +1,6 @@
 """FastAPI HTTP service for Laya Decision Router."""
 
+import asyncio
 import hmac
 import logging
 from contextlib import asynccontextmanager
@@ -24,12 +25,10 @@ engine = LayaRouterEngine(config)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan: initialize and preload models before serving traffic."""
+    """Application lifespan: initialize and preload models in background before serving traffic."""
     logger.info("Laya Router starting up...")
-    try:
-        engine.initialize()
-    except Exception as e:
-        logger.error("Initialization failure during startup: %s", e)
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, engine.initialize)
     yield
     logger.info("Laya Router shutting down...")
 
@@ -37,7 +36,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Laya Router",
     description="Local System 1 decision engine & Gemini router for Home Assistant and Hermes Agent",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 

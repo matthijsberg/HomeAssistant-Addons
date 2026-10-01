@@ -64,3 +64,12 @@ def test_mock_engine_route_execution():
     assert res["confidence"]["family"] > 0.5
     assert res["checkpoint"] in ("english", "multilingual")
     assert res["question_set"] == "hermes-v1"
+
+
+def test_engine_device_xpu_configuration():
+    cfg = AppConfig(device="xpu", mock_mode=True, api_key="secret")
+    eng = LayaRouterEngine(cfg)
+    eng.initialize()
+    assert eng.ready is True
+    res = eng.route(prompt="Test prompt", recent_turns=[])
+    assert "family" in res

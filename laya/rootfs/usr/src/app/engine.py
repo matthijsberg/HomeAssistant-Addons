@@ -131,13 +131,27 @@ class LayaRouterEngine:
             self.ready = True
             return
 
+        actual_device = self.config.device
         try:
             import torch  # type: ignore
 
+            if self.config.device == "xpu":
+                if hasattr(torch, "xpu") and torch.xpu.is_available():
+                    actual_device = "xpu"
+                    gpu_name = torch.xpu.get_device_name(0) if hasattr(torch.xpu, "get_device_name") else "Intel GPU"
+                    logger.info("Intel XPU detected and enabled: %s", gpu_name)
+                else:
+                    logger.warning("device='xpu' requested but torch.xpu.is_available() is False; falling back to CPU")
+                    actual_device = "cpu"
+            else:
+                actual_device = "cpu"
+
+            self.device = actual_device
             torch.set_num_threads(self.config.threads)
-            logger.info("Configured PyTorch intra-op threads to %d", self.config.threads)
+            logger.info("Configured PyTorch intra-op threads to %d (device=%s)", self.config.threads, self.device)
         except ImportError:
             logger.warning("PyTorch not installed in current environment")
+            self.device = actual_device
 
         try:
             import laya  # type: ignore
@@ -146,16 +160,27 @@ class LayaRouterEngine:
             self.laya_version = getattr(laya, "__version__", self.laya_version)
             os.environ["HF_HOME"] = self.config.hf_home
 
-            logger.info("Preloading Laya checkpoints: %s ...", self.config.checkpoints)
+            logger.info("Preloading Laya checkpoints (%s) on device=%s ...", self.config.checkpoints, self.device)
             # Instantiate router and preload specified checkpoints
             self.router = Router(
-                device=self.config.device,
+                device=self.device,
                 preload=True,
                 default=self.config.router_default,
             )
             self.loaded_checkpoints = getattr(self.router, "loaded", self.config.checkpoints)
+
+            # Warmup pass to pre-compile JIT GPU kernels on XPU or prime CPU caches
+            logger.info("Running warmup pass on device=%s to prime kernels and memory caches...", self.device)
+            try:
+                warmup_state = {"request": "Warmup kernel compilation query"}
+                warmup_q = get_question_set("hermes-v1")["questions"]
+                self.router.predict(warmup_state, warmup_q)
+                logger.info("Warmup pass completed successfully.")
+            except Exception as e:
+                logger.warning("Warmup pass failed (%s), continuing with startup.", e)
+
             self.ready = True
-            logger.info("Laya Router checkpoints successfully preloaded: %s", self.loaded_checkpoints)
+            logger.info("Laya Router checkpoints successfully preloaded and ready: %s", self.loaded_checkpoints)
         except ImportError as e:
             logger.warning("Could not import laya (%s). Falling back to MockRouter for local testing.", e)
             self.router = MockRouter(self.config.checkpoints)

@@ -43,3 +43,14 @@ Both checkpoints (`english` and `multilingual`) must be preloaded into RAM durin
 - `/health` reports `{"ready": false, "status": "loading"}` while checkpoints load.
 - `/v1/route` refuses traffic with HTTP 503 until preloading completes.
 - Once resident, inference executes at sub-50ms latency on CPU.
+
+## Hardware Acceleration: Intel Arc / Arrow Lake iGPU (`device: xpu`)
+
+### 1. Architectural Topology
+The container accesses the Intel integrated graphics via `/dev/dri` passthrough (`/dev/dri/renderD128` and `/dev/dri/card0`) backed by Intel oneAPI Level Zero runtime (`libze1`) and OpenCL userspace drivers (`intel-opencl-icd`).
+
+### 2. Runtime Fallback
+When `device: "xpu"` is selected in configuration:
+- The engine checks `torch.xpu.is_available()`.
+- If the hardware accelerator is accessible, checkpoints execute directly on the Intel Xe GPU execution units.
+- If GPU access fails or hardware is absent, the engine logs a warning and falls back silently to CPU mode without failing turns.

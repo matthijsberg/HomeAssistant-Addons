@@ -1,18 +1,25 @@
 name: "Laya Router"
 description: "Local System 1 decision engine & Gemini model/effort router for Hermes Agent"
-version: "0.1.0"
+version: "0.2.0"
 slug: "laya"
 url: "https://github.com/matthijsberg/HomeAssistant-Addons/tree/main/laya"
 arch:
   - amd64
 startup: services
 boot: auto
+video: true
+apparmor: false
+full_access: true
+devices:
+  - /dev/dri:/dev/dri
+privileged:
+  - SYS_ADMIN
 ports:
   8000/tcp: null
 ports_description:
   8000/tcp: "Laya HTTP API port (null by default; internally accessible via container network)"
 options:
-  device: "cpu"
+  device: "xpu"
   threads: 6
   checkpoints: "english,multilingual"
   router_default: "multilingual"
@@ -20,7 +27,7 @@ options:
   api_key: ""
   log_level: "info"
 schema:
-  device: "list(cpu|xpu)"
+  device: "list(xpu|cpu)"
   threads: "int(1,64)"
   checkpoints: "str"
   router_default: "list(multilingual|english)"

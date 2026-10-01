@@ -1,21 +1,36 @@
-FROM python:3.12-slim
+FROM ubuntu:24.04
 
-ENV LANG=C.UTF-8 \
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
     HF_HOME=/data/hf
 
-# Install minimal OS runtime packages
+# Install system dependencies and GPG
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    gnupg \
     jq \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install CPU-only PyTorch first (PRD requirement: CPU-only, avoid CUDA bloat)
-ARG TORCH_VERSION=2.5.1
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
-    torch==${TORCH_VERSION}
+# Add Intel official GPU repository for Ubuntu 24.04 (Noble) and install Intel compute drivers
+RUN curl -fsSL https://repositories.intel.com/gpu/intel-graphics.key | \
+    gpg --dearmor --output /usr/share/keyrings/intel-graphics.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu noble client unified" > /etc/apt/sources.list.d/intel-gpu.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    intel-opencl-icd \
+    libze-intel-gpu1 \
+    libze1 \
+    ocl-icd-libopencl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PyTorch with Intel XPU and CPU acceleration support
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/xpu \
+    torch torchvision
 
 # Install pinned laya[serve] and application dependencies
 ARG LAYA_VERSION=0.3.21

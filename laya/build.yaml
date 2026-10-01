@@ -1,5 +1,4 @@
 build_from:
-  amd64: "python:3.12-slim"
+  amd64: "ubuntu:24.04"
 args:
   LAYA_VERSION: "0.3.21"
-  TORCH_VERSION: "2.5.1"

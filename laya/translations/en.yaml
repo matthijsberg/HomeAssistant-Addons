@@ -1,7 +1,7 @@
 configuration:
   device:
     name: "Inference Device"
-    description: "Hardware compute device for Laya model execution (CPU by default; XPU reserved for future acceleration)."
+    description: "Hardware compute device for Laya model execution (select 'xpu' for Intel Arc / Arrow Lake iGPU hardware acceleration, or 'cpu' for CPU inference)."
   threads:
     name: "Torch Intra-op Threads"
     description: "Number of PyTorch CPU inference threads. Tune to physical cores (6 recommended) to leave headroom for other services."
