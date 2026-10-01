@@ -8,12 +8,8 @@ arch:
 startup: services
 boot: auto
 video: true
-apparmor: false
-full_access: true
 devices:
   - /dev/dri:/dev/dri
-privileged:
-  - SYS_ADMIN
 ports:
   8000/tcp: null
 ports_description:
