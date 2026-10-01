@@ -1363,7 +1363,8 @@ if [ -n "${HASS_TOKEN:-${SUPERVISOR_TOKEN:-}}" ]; then
         names_csv="$(IFS=,; echo "${PROFILE_NAMES[*]}")"
         ports_csv="$(IFS=,; echo "${API_PORTS[*]}")"
         homes_csv="$(IFS=,; echo "${PROFILE_HOMES[*]}")"
-        "$VENV_DIR/bin/python" "$reporter_tool" "$OPTIONS_FILE" "$ADDON_VERSION" "$names_csv" "$ports_csv" "$homes_csv" &
+        # System python: stdlib + python3-paho-mqtt only, independent of the Hermes venv.
+        /usr/bin/python3 "$reporter_tool" "$OPTIONS_FILE" "$ADDON_VERSION" "$names_csv" "$ports_csv" "$homes_csv" &
         REPORTER_PID=$!
         log "[run] Home Assistant status sensor reporter started (PID: $REPORTER_PID)"
     fi

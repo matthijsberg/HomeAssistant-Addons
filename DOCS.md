@@ -187,16 +187,19 @@ The Model Context Protocol (MCP) server provides tool calling capabilities for t
 
 ## Home Assistant Assist Voice Integration
 
-Hermes can be registered as an Assist conversation agent, allowing voice satellites (e.g. ESP32-S3 Box, Atom Echo, or Home Assistant mobile apps) to converse with the agent.
+The repository ships a small Home Assistant integration, **Hermes Agent** (`ha_integration/custom_components/hermes_agent`), that registers Hermes as an Assist conversation agent.
 
-1. **Prerequisite:** Set an `access_password` in the App's **Configuration** tab.
-2. In Home Assistant, go to **Settings > Devices & Services > Add Integration**.
-3. Search for **OpenAI Conversation** (or Extended OpenAI Conversation).
-4. Enter the connection settings:
-   - **Server URL:** `http://local-hermes-agent:8080/v1/`
-   - **API Key:** your configured `access_password`
-   - **Model:** your profile identifier (e.g. `alice` or `default`)
-5. Navigate to **Settings > Voice Assistants > Assist**, click your voice pipeline, and select the Hermes entry under **Conversation Agent**.
+- **Per-user routing:** each request goes to the Hermes profile of the Home Assistant user who made it (the user's `person.<name>` ⇒ profile `<name>`). Voice satellites and users without their own profile use the primary profile.
+- **Follow-up questions** continue the same Hermes session (`X-Hermes-Session-Id`).
+- Replies are kept short and markdown-free so they read well and sound natural through TTS.
+
+**Install**
+1. Copy `ha_integration/custom_components/hermes_agent` to `/config/custom_components/` of Home Assistant and restart Home Assistant.
+2. **Settings > Devices & Services > Add Integration > Hermes Agent**:
+   - **App URL:** `http://local-hermes-agent:8080` (internal; requires `enable_api` and the direct ports enabled in the App)
+   - **API key:** the App's `access_password`
+   - **Primary profile name:** the first profile in the App
+3. **Settings > Voice Assistants**: create or edit a pipeline and choose **Hermes Agent** as the conversation agent.
 
 ---
 
@@ -219,14 +222,16 @@ If you want a profile to inherit the permission scope of a specific Home Assista
 
 ## Operational Health Sensors
 
-The App publishes operational status to Home Assistant Core:
+With the Mosquitto broker App installed, the App announces its sensors through **MQTT discovery**: a **Hermes Agent** device plus one **Hermes <profile>** device per profile, with stable entities that survive Home Assistant restarts and turn *unavailable* when the App stops.
 
-| Entity ID | Description | Values |
-|---|---|---|
-| `sensor.hermes_agent` | Global App state | `online`, `offline` (includes version and active profile count) |
-| `sensor.hermes_agent_<profile>` | Per-profile state | `online`, `offline` (includes profile name, API port, `gateway_running`, `api_healthy`) |
+| Entity ID | Description |
+|---|---|
+| `binary_sensor.hermes_agent_<profile>` | Profile connectivity (on = online). With `enable_api` on: `/v1/health` answers; otherwise: the gateway process runs. Attributes include `gateway_running`, `api_healthy`, `api_port`. |
+| `binary_sensor.hermes_agent_<profile>_gateway` | Gateway process running (diagnostic) |
+| `binary_sensor.hermes_agent_<profile>_api` | API server healthy (diagnostic, only with `enable_api`) |
+| `sensor.hermes_agent_app_version` | App version (diagnostic) |
 
-With `enable_api` on, a profile is `online` when its `/v1/health` answers; with the API off, when its gateway process is running. States are re-sent every 5 minutes, so they reappear shortly after a Home Assistant restart.
+Without MQTT the App falls back to REST-posted `sensor.hermes_agent` / `sensor.hermes_agent_<profile>` states (`online`/`offline`), re-sent every 5 minutes.
 
 These sensors appear under **Developer Tools > States** and can be placed on Lovelace dashboards or used in automations to alert if an agent instance goes offline.
 

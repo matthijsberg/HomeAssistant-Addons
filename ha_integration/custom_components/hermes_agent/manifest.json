@@ -1,0 +1,12 @@
+{
+  "domain": "hermes_agent",
+  "name": "Hermes Agent",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["conversation"],
+  "documentation": "https://github.com/matthijsberg/HomeAssistant-Addons/tree/main/hermes_agent",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}

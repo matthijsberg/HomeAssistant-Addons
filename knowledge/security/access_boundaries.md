@@ -46,6 +46,13 @@ shell-identifier names. Rejected values are never echoed.
 | `<profile>/config.yaml` | 0600 (since 2.5.0) | `HASS_TOKEN` in the HA MCP server block |
 | `$CERTS_DIR/*.key` | 0600 | Self-signed TLS keys |
 
+## Messaging allowlists
+A profile whose `.env` has no `*_ALLOWED_USERS`/`*_ALLOWED_CHATS` value and no
+`*_ALLOW_ALL_USERS` gets `GATEWAY_ALLOWED_USERS=homeassistant` (since 2.6.0). Home
+Assistant events are always authorised by Hermes, so nothing changes today; a
+messaging platform enabled later stays closed until its own allowlist is set.
+User-set allowlists are never modified.
+
 ## TLS verification
 No component disables certificate checks (removed in 2.5.0: `NODE_TLS_REJECT_UNAUTHORIZED=0`
 in the MCP block and `curl -k` in HA user sync). Use the default internal

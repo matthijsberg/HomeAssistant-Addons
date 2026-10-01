@@ -1,5 +1,5 @@
 name: Hermes Agent
-version: "2.5.0"
+version: "2.6.0"
 slug: hermes_agent
 description: "The self-improving AI agent by Nous Research with multi-user HA auto-sync, smart profile routing, HA MCP tools, and status sensors. Built on top of the original App by Wolfram Ravenwolf."
 url: "https://github.com/matthijsberg/HomeAssistant-Addons/tree/main/hermes_agent"
@@ -13,6 +13,8 @@ boot: auto
 ingress: true
 ingress_port: 49169
 ingress_stream: true
+# Supervisor restarts the App when nginx (and with it run.sh) stops answering.
+watchdog: "http://[HOST]:[PORT:49169]/health"
 panel_icon: mdi:robot
 panel_title: Hermes Agent
 backup_exclude:
@@ -26,6 +28,9 @@ backup_exclude:
   - .cache
   - .npm
 hassio_api: true
+# MQTT discovery for the status sensors (credentials come from the Mosquitto App).
+services:
+  - mqtt:want
 homeassistant_api: true
 apparmor: true
 map:

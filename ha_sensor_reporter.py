@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Periodically reports Hermes Agent system and profile status to Home Assistant Core API."""
+"""Periodically reports Hermes Agent system and profile status to Home Assistant.
+
+Preferred transport is MQTT discovery (stable entities with unique_id, grouped
+under a "Hermes Agent" device, unavailable when the App stops). Without an MQTT
+broker the reporter falls back to posting states through the Core REST API.
+"""
 
 import json
 import os
@@ -96,17 +101,168 @@ def read_api_enabled(options_file: str) -> bool:
 # Home Assistant Core restarts, and this restores them within that interval.
 REFRESH_SECONDS = 300
 POLL_SECONDS = 15
+DISCOVERY_PREFIX = "homeassistant"
+BASE_TOPIC = "hermes_agent"
+LEGACY_REST_ENTITIES_PREFIX = "sensor.hermes_agent"
 
 
-def run_reporter_loop(options_file: str, profile_names: list, api_ports: list, version: str,
-                      profile_homes: list) -> None:
-    hass_url = os.environ.get("HASS_URL") or "http://supervisor/core"
-    token = os.environ.get("HASS_TOKEN") or os.environ.get("SUPERVISOR_TOKEN") or ""
+def profile_status(name: str, port: int, home: str, api_enabled: bool) -> dict:
+    running = gateway_running(home)
+    healthy = api_healthy(port) if api_enabled else None
+    # Without the API server, a live gateway slot is the best signal.
+    online = healthy if api_enabled else running
+    return {
+        "status": "online" if online else "offline",
+        "online": bool(online),
+        "gateway_running": running,
+        "api_enabled": api_enabled,
+        "api_healthy": healthy,
+        "api_port": port,
+    }
+
+
+def supervisor_mqtt_config() -> dict | None:
+    """Broker credentials published by the Mosquitto App (config.yaml: services: mqtt:want)."""
+    token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
-        log_msg("[ha-sensor-reporter] Warning: No Home Assistant token available; sensor reporting disabled.", is_err=True, version=version)
-        return
-    api_enabled = read_api_enabled(options_file)
-    log_msg("[ha-sensor-reporter] Starting Home Assistant status sensor reporter...", level="info", version=version)
+        return None
+    req = urllib.request.Request(
+        "http://supervisor/services/mqtt", headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.load(resp).get("data") or {}
+    except Exception:
+        return None
+    return data if data.get("host") else None
+
+
+def discovery_messages(profile_names: list, version: str, api_enabled: bool) -> list:
+    """(topic, payload) pairs announcing every entity to Home Assistant."""
+    availability = [{"topic": f"{BASE_TOPIC}/status"}]
+    app_device = {
+        "identifiers": ["hermes_agent_app"],
+        "name": "Hermes Agent",
+        "manufacturer": "Nous Research",
+        "model": "Home Assistant App",
+        "sw_version": version,
+    }
+    messages = [(
+        f"{DISCOVERY_PREFIX}/sensor/hermes_agent/version/config",
+        {
+            "name": "Version",
+            "unique_id": "hermes_agent_version",
+            "default_entity_id": "sensor.hermes_agent_app_version",
+            "state_topic": f"{BASE_TOPIC}/app",
+            "value_template": "{{ value_json.version }}",
+            "json_attributes_topic": f"{BASE_TOPIC}/app",
+            "entity_category": "diagnostic",
+            "icon": "mdi:robot",
+            "availability": availability,
+            "device": app_device,
+        },
+    )]
+    for name in profile_names:
+        device = {
+            "identifiers": [f"hermes_agent_profile_{name}"],
+            "name": f"Hermes {name}",
+            "manufacturer": "Nous Research",
+            "model": "Hermes profile",
+            "via_device": "hermes_agent_app",
+        }
+        state_topic = f"{BASE_TOPIC}/profile/{name}"
+        entities = [
+            ("binary_sensor", "status", {
+                "name": "Status",
+                "device_class": "connectivity",
+                "value_template": "{{ 'ON' if value_json.online else 'OFF' }}",
+                "json_attributes_topic": state_topic,
+            }),
+            ("binary_sensor", "gateway", {
+                "name": "Gateway",
+                "device_class": "running",
+                "entity_category": "diagnostic",
+                "value_template": "{{ 'ON' if value_json.gateway_running else 'OFF' }}",
+            }),
+        ]
+        if api_enabled:
+            entities.append(("binary_sensor", "api", {
+                "name": "API",
+                "device_class": "connectivity",
+                "entity_category": "diagnostic",
+                "value_template": "{{ 'ON' if value_json.api_healthy else 'OFF' }}",
+            }))
+        for component, key, config in entities:
+            config.update({
+                "unique_id": f"hermes_agent_{name}_{key}",
+                "default_entity_id": f"{component}.hermes_agent_{name}" + ("" if key == "status" else f"_{key}"),
+                "state_topic": state_topic,
+                "availability": availability,
+                "device": device,
+            })
+            messages.append((f"{DISCOVERY_PREFIX}/{component}/hermes_agent_{name}/{key}/config", config))
+    return messages
+
+
+def remove_legacy_rest_states(hass_url: str, token: str, profile_names: list, version: str) -> None:
+    """Drop the pre-MQTT REST entities so MQTT discovery can own the names."""
+    for entity_id in [LEGACY_REST_ENTITIES_PREFIX] + [f"{LEGACY_REST_ENTITIES_PREFIX}_{n}" for n in profile_names]:
+        req = urllib.request.Request(
+            f"{hass_url.rstrip('/')}/api/states/{entity_id}",
+            headers={"Authorization": f"Bearer {token}"}, method="DELETE")
+        try:
+            urllib.request.urlopen(req, timeout=5).close()
+            log_msg(f"[ha-sensor-reporter] Removed legacy REST entity {entity_id}", level="info", version=version)
+        except Exception:
+            pass  # 404: already gone
+
+
+def run_mqtt_loop(broker: dict, profile_names: list, api_ports: list, profile_homes: list,
+                  api_enabled: bool, version: str) -> None:
+    import paho.mqtt.client as mqtt  # system package python3-paho-mqtt
+
+    try:
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="hermes_agent_reporter")
+    except AttributeError:  # paho-mqtt 1.x (Debian bookworm)
+        client = mqtt.Client(client_id="hermes_agent_reporter")
+    if broker.get("username"):
+        client.username_pw_set(broker["username"], broker.get("password"))
+    if broker.get("ssl"):
+        client.tls_set()
+    # Broker marks every entity unavailable when the App (and this process) dies.
+    client.will_set(f"{BASE_TOPIC}/status", "offline", qos=1, retain=True)
+
+    def on_connect(client, _userdata, _flags, *args):
+        client.publish(f"{BASE_TOPIC}/status", "online", qos=1, retain=True)
+        for topic, payload in discovery_messages(profile_names, version, api_enabled):
+            client.publish(topic, json.dumps(payload), qos=1, retain=True)
+        last_payloads.clear()  # re-send states after every (re)connect
+
+    last_payloads: dict = {}
+    client.on_connect = on_connect
+    client.reconnect_delay_set(min_delay=2, max_delay=60)
+    client.connect_async(broker["host"], int(broker.get("port", 1883)), keepalive=60)
+    client.loop_start()
+    log_msg(f"[ha-sensor-reporter] Publishing via MQTT discovery ({broker['host']})", level="info", version=version)
+
+    while True:
+        try:
+            states = {f"{BASE_TOPIC}/app": {"version": version, "profile_count": len(profile_names),
+                                             "profiles": profile_names}}
+            for idx, (name, port) in enumerate(zip(profile_names, api_ports)):
+                home = profile_homes[idx] if idx < len(profile_homes) else ""
+                states[f"{BASE_TOPIC}/profile/{name}"] = profile_status(name, port, home, api_enabled)
+            for topic, payload in states.items():
+                body = json.dumps(payload, sort_keys=True)
+                if last_payloads.get(topic) != body and client.is_connected():
+                    client.publish(topic, body, qos=1, retain=True)
+                    last_payloads[topic] = body
+        except Exception as err:
+            log_msg(f"[ha-sensor-reporter] Loop exception: {err}", is_err=True, version=version)
+        time.sleep(POLL_SECONDS)
+
+
+def run_rest_loop(hass_url: str, token: str, profile_names: list, api_ports: list,
+                  profile_homes: list, api_enabled: bool, version: str) -> None:
     last_sent: dict = {}
 
     def report(entity_id: str, state: str, attributes: dict) -> None:
@@ -117,44 +273,48 @@ def run_reporter_loop(options_file: str, profile_names: list, api_ports: list, v
         if post_ha_state(hass_url, token, entity_id, state, attributes):
             last_sent[entity_id] = (key, time.monotonic())
 
+    log_msg("[ha-sensor-reporter] MQTT unavailable; publishing via the Core REST API", level="info", version=version)
     while True:
         try:
-            report(
-                "sensor.hermes_agent",
-                "online",
-                {
-                    "friendly_name": "Hermes Agent",
-                    "version": version,
-                    "profile_count": len(profile_names),
-                    "profiles": profile_names,
-                    "icon": "mdi:robot",
-                },
-            )
+            report("sensor.hermes_agent", "online", {
+                "friendly_name": "Hermes Agent", "version": version,
+                "profile_count": len(profile_names), "profiles": profile_names, "icon": "mdi:robot"})
             for idx, (name, port) in enumerate(zip(profile_names, api_ports)):
                 home = profile_homes[idx] if idx < len(profile_homes) else ""
-                running = gateway_running(home)
-                healthy = api_healthy(port) if api_enabled else None
-                # Without the API server, a live gateway slot is the best signal.
-                online = healthy if api_enabled else running
-                status = "online" if online else "offline"
-                report(
-                    f"sensor.hermes_agent_{name}",
-                    status,
-                    {
-                        "friendly_name": f"Hermes Agent ({name})",
-                        "profile_name": name,
-                        "api_port": port,
-                        "api_enabled": api_enabled,
-                        "api_healthy": healthy,
-                        "gateway_running": running,
-                        "status": status,
-                        "icon": "mdi:robot-happy" if status == "online" else "mdi:robot-off",
-                    },
-                )
+                st = profile_status(name, port, home, api_enabled)
+                report(f"sensor.hermes_agent_{name}", st["status"], {
+                    "friendly_name": f"Hermes Agent ({name})", "profile_name": name,
+                    "api_port": port, "api_enabled": api_enabled, "api_healthy": st["api_healthy"],
+                    "gateway_running": st["gateway_running"], "status": st["status"],
+                    "icon": "mdi:robot-happy" if st["online"] else "mdi:robot-off"})
         except Exception as err:
             log_msg(f"[ha-sensor-reporter] Loop exception: {err}", is_err=True, version=version)
-
         time.sleep(POLL_SECONDS)
+
+
+def run_reporter_loop(options_file: str, profile_names: list, api_ports: list, version: str,
+                      profile_homes: list) -> None:
+    hass_url = os.environ.get("HASS_URL") or "http://supervisor/core"
+    token = os.environ.get("HASS_TOKEN") or os.environ.get("SUPERVISOR_TOKEN") or ""
+    api_enabled = read_api_enabled(options_file)
+    log_msg("[ha-sensor-reporter] Starting Home Assistant status sensor reporter...", level="info", version=version)
+
+    broker = supervisor_mqtt_config()
+    if broker:
+        try:
+            import paho.mqtt.client  # noqa: F401
+        except ImportError:
+            broker = None
+            log_msg("[ha-sensor-reporter] paho-mqtt missing; using REST fallback", is_err=True, version=version)
+    if broker:
+        if token:
+            remove_legacy_rest_states(hass_url, token, profile_names, version)
+        run_mqtt_loop(broker, profile_names, api_ports, profile_homes, api_enabled, version)
+        return
+    if not token:
+        log_msg("[ha-sensor-reporter] Warning: No Home Assistant token available; sensor reporting disabled.", is_err=True, version=version)
+        return
+    run_rest_loop(hass_url, token, profile_names, api_ports, profile_homes, api_enabled, version)
 
 
 if __name__ == "__main__":

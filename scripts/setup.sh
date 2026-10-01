@@ -40,7 +40,7 @@ echo -e "\n4. [Syntax] bash -n and Python AST..."
 for sh_file in ./*.sh scripts/*.sh; do
   bash -n "$sh_file"
 done
-python3 -B -c "import ast, glob; [ast.parse(open(f).read(), f) for f in glob.glob('*.py') + glob.glob('tests/*.py')]"
+python3 -B -c "import ast, glob; [ast.parse(open(f).read(), f) for f in glob.glob('*.py') + glob.glob('tests/*.py') + glob.glob('ha_integration/custom_components/*/*.py')]"
 echo "✓ All scripts parse"
 
 echo -e "\n5. [Pytest Suite] ..."

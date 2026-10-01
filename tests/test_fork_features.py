@@ -175,3 +175,39 @@ def test_version_comes_from_env_then_manifest(tmp_path):
     (tmp_path / "config.yaml").unlink()
     missing = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True)
     assert missing.returncode == 0 and missing.stdout.strip() == "unknown"
+
+
+# ── MQTT discovery ──────────────────────────────────────────────────────
+def test_mqtt_discovery_entities_are_stable_and_grouped():
+    msgs = dict(ha_sensor_reporter.discovery_messages(["alice", "bob"], "1.2.3", api_enabled=True))
+    status = msgs["homeassistant/binary_sensor/hermes_agent_alice/status/config"]
+    assert status["unique_id"] == "hermes_agent_alice_status"
+    assert status["default_entity_id"] == "binary_sensor.hermes_agent_alice"
+    assert status["device_class"] == "connectivity"
+    assert status["availability"] == [{"topic": "hermes_agent/status"}]
+    assert status["device"]["via_device"] == "hermes_agent_app"
+    assert "homeassistant/binary_sensor/hermes_agent_bob/api/config" in msgs
+    version = msgs["homeassistant/sensor/hermes_agent/version/config"]
+    assert version["device"]["sw_version"] == "1.2.3"
+    without_api = dict(ha_sensor_reporter.discovery_messages(["alice"], "1.2.3", api_enabled=False))
+    assert not any(t.endswith("/api/config") for t in without_api)
+
+
+# ── messaging allowlist default ─────────────────────────────────────────
+def test_profiles_without_allowlist_are_closed_by_default(tmp_path):
+    (tmp_path / "p0").mkdir()
+    (tmp_path / "p1").mkdir()
+    (tmp_path / "p0" / ".env").write_text("TELEGRAM_ALLOWED_USERS=12345\n")
+    (tmp_path / "p1" / ".env").write_text("# TELEGRAM_ALLOWED_USERS=\n")
+    (tmp_path / "opts.json").write_text('{"env_vars":[],"profile_env_vars":[]}')
+    script = f"""
+        source {ADDON}/profile-init.sh
+        OPTIONS_FILE={tmp_path}/opts.json; ENABLE_API=false; ACCESS_PASSWORD=""
+        PROFILE_DIRS=(p0 p1); PROFILE_NAMES=(p0 p1); API_PORTS=(8642 8643)
+        PROFILE_HOMES=({tmp_path}/p0 {tmp_path}/p1)
+        for _ in 1 2; do apply_env_vars_for_profile 0; apply_env_vars_for_profile 1; done
+    """
+    result = _bash(script, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "GATEWAY_ALLOWED_USERS" not in (tmp_path / "p0" / ".env").read_text()
+    assert (tmp_path / "p1" / ".env").read_text().count("GATEWAY_ALLOWED_USERS=homeassistant") == 1

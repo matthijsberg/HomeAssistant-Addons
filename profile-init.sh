@@ -401,6 +401,16 @@ apply_env_vars_for_profile() {
     set_owned_env_var "$env_file" "API_SERVER_KEY" ""
   fi
 
+  # Closed by default: a profile without any messaging allowlist only accepts
+  # the Home Assistant platform (always trusted). Enabling Telegram/WhatsApp
+  # later then denies unknown senders until the user sets that platform's
+  # *_ALLOWED_USERS. User-set allowlists are never touched.
+  if ! grep -qE '^[[:space:]]*(export[[:space:]]+)?[A-Z_]*_ALLOWED_(USERS|CHATS)=[^[:space:]]' "$env_file" \
+    && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?[A-Z_]*ALLOW_ALL_USERS=' "$env_file"; then
+    upsert_env_var "$env_file" "GATEWAY_ALLOWED_USERS" "homeassistant"
+    log "[run] [$name] No messaging allowlist found; set GATEWAY_ALLOWED_USERS=homeassistant"
+  fi
+
   # Restrict .env file permissions so secrets are only readable by owner
   chmod 600 "$env_file" 2>/dev/null || true
 }

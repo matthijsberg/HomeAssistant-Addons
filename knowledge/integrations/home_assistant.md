@@ -42,14 +42,22 @@ a **pinned** `npx -y @orellbuehler/homeassistant-mcp@<version>` with
   overwritten.
 
 ## Status sensors
-`ha_sensor_reporter.py` posts `sensor.hermes_agent` (version, profiles) and
-`sensor.hermes_agent_<profile>`.
-- `enable_api: true`: `online` ⇔ `GET /v1/health` on the profile's API port answers 200.
-- `enable_api: false`: `online` ⇔ a process running `gateway-launcher.py` has the
-  profile home as its working directory (`gateway_running` attribute).
-- Changed states are posted immediately (15 s poll); unchanged ones every 5 min, which
-  restores the REST-created entities after a Core restart. They have no `unique_id`
-  (a REST API limitation), so they cannot be edited in the UI.
+Preferred transport: **MQTT discovery** (`services: mqtt:want`; credentials from
+`GET http://supervisor/services/mqtt`), published by `ha_sensor_reporter.py` running
+on the image's system Python with `python3-paho-mqtt` (independent of the Hermes venv).
+- Devices: `Hermes Agent` (app) and `Hermes <profile>` (`via_device`).
+- Entities: `binary_sensor.hermes_agent_<profile>` (connectivity), `…_gateway`
+  (running, diagnostic), `…_api` (only with `enable_api`), `sensor.hermes_agent_app_version`.
+- Availability topic `hermes_agent/status` with a retained `offline` last-will: every
+  entity turns unavailable when the App stops.
+- `online` = `/v1/health` answers (API enabled) or the gateway process runs (API off).
+- On MQTT start the legacy REST entities (`sensor.hermes_agent[_<profile>]`) are deleted.
+
+Fallback without a broker: REST-posted `sensor.hermes_agent[_<profile>]` states,
+re-posted every 5 minutes (they vanish on Core restart and have no `unique_id`).
+
+## Assist
+See [`assist-conversation`](assist_conversation.md).
 
 ## Skill
 A `skills/homeassistant/SKILL.md` template is created once per profile (never

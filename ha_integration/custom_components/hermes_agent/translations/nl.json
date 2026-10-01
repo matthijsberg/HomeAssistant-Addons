@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hermes Agent",
+        "description": "Koppel Assist aan de Hermes Agent App. Elke Home Assistant-gebruiker gaat naar zijn eigen Hermes-profiel; spraaksatellieten en onbekende gebruikers gebruiken het hoofdprofiel.",
+        "data": {
+          "url": "App-URL",
+          "api_key": "API-sleutel (het access_password van de App)",
+          "primary_profile": "Naam van het hoofdprofiel"
+        },
+        "data_description": {
+          "url": "Intern adres van de App, bijv. http://local-hermes-agent:8080",
+          "primary_profile": "Het eerste profiel in de App (bereikbaar op de hoofd-URL)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Kan de Hermes-API niet bereiken",
+      "invalid_auth": "De API-sleutel is geweigerd"
+    },
+    "abort": {
+      "already_configured": "Deze Hermes App is al geconfigureerd"
+    }
+  }
+}

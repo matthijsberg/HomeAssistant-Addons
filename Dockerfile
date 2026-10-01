@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         chromium \
         # SQLite with FTS5 (Memory)
         sqlite3 libsqlite3-dev \
+        # MQTT discovery for HA status sensors (system python, not the Hermes venv)
+        python3-paho-mqtt \
         # Homebrew deps
         file \
         # Python deps

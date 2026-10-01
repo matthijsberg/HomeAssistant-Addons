@@ -30,3 +30,4 @@ and promotes them to `human_reviewed`.
 
 ## 4. Integrations
 - [`home-assistant`](integrations/home_assistant.md) — Token/URL resolution, MCP tool injection, status sensors, bundled skill.
+- [`assist-conversation`](integrations/assist_conversation.md) — Hermes as Assist conversation agent: per-user profile routing and session continuity.

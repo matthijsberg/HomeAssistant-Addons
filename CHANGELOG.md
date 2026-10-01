@@ -4,6 +4,22 @@ All notable changes to the Hermes Agent Home Assistant add-on are documented her
 
 The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions match the add-on `version` in `config.yaml`.
 
+## [2.6.0] - 2026-10-01
+
+### Added
+
+- **Assist Conversation Agent:** New Home Assistant integration **Hermes Agent** (`ha_integration/custom_components/hermes_agent`) that makes Hermes selectable as the conversation agent of an Assist pipeline. Each request is routed to the profile of the Home Assistant user who made it; voice satellites use the primary profile. Follow-up questions continue the same Hermes session, and answers are kept short and speech-friendly.
+- **MQTT Discovery Sensors:** Status sensors are announced through MQTT discovery as a **Hermes Agent** device with one sub-device per profile. They have stable entities (`binary_sensor.hermes_agent_<profile>`, `…_gateway`, `…_api`, `sensor.hermes_agent_app_version`) that survive Home Assistant restarts and become unavailable when the App stops. Without MQTT the previous REST sensors are used.
+- **Supervisor Watchdog:** `watchdog` now points at the App's ingress `/health`, so Supervisor restarts the App if it stops responding (enable *Watchdog* on the App's Info page).
+
+### Security
+
+- **Closed-by-Default Messaging:** Profiles without any messaging allowlist get `GATEWAY_ALLOWED_USERS=homeassistant`. Home Assistant events keep working; a messaging platform enabled later rejects unknown senders until its own allowlist is set. Existing allowlists are never changed.
+
+### Fixed
+
+- **Documentation:** The Assist section described a "Server URL" field that the built-in OpenAI Conversation integration does not have. It now documents the bundled integration.
+
 ## [2.5.0] - 2026-10-01
 
 ### Security
