@@ -18,10 +18,16 @@ def test_config_yaml_manifest():
 
     assert cfg["name"] == "Laya Router"
     assert cfg["slug"] == "laya"
-    assert cfg["version"] == "0.3.0"
+    assert cfg["version"] == "0.4.0"
     assert cfg["arch"] == ["amd64"]
     assert cfg["startup"] == "services"
     assert cfg["boot"] == "auto"
+
+    # Ingress checks
+    assert cfg.get("ingress") is True
+    assert cfg.get("ingress_port") == 8000
+    assert cfg.get("ingress_panel") is True
+    assert "panel_icon" in cfg
 
     # Hardware devices check: /dev/dri passthrough for Intel iGPU
     assert "devices" in cfg

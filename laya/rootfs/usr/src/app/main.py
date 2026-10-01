@@ -9,9 +9,10 @@ from typing import Any, Dict, List, Optional, Union
 from config import AppConfig
 from engine import LayaRouterEngine
 from fastapi import Depends, FastAPI, Header, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from question_sets import list_question_sets
+from ui import render_gui_html
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,13 +37,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Laya Router",
     description="Local System 1 decision engine & Gemini router for Home Assistant and Hermes Agent",
-    version="0.2.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
 
-def verify_api_key(authorization: Optional[str] = Header(default=None)) -> None:
-    """Validate Bearer authentication against configured LAYA_API_KEY."""
+def verify_api_key(
+    authorization: Optional[str] = Header(default=None),
+    x_ingress_path: Optional[str] = Header(default=None),
+) -> None:
+    """Validate Bearer authentication against configured LAYA_API_KEY.
+
+    Requests passing through Home Assistant Ingress (carrying X-Ingress-Path)
+    are verified by the Home Assistant Core security perimeter.
+    """
+    if x_ingress_path:
+        return
+
     if not config.api_key:
         return
 
@@ -55,6 +66,12 @@ def verify_api_key(authorization: Optional[str] = Header(default=None)) -> None:
             detail="Invalid or missing bearer token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> HTMLResponse:
+    """Home Assistant Ingress WebUI playground."""
+    return HTMLResponse(content=render_gui_html())
 
 
 class TurnItem(BaseModel):

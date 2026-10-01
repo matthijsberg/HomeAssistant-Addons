@@ -28,6 +28,26 @@ def test_health_endpoint():
     assert "pinned" in data["revisions"]
 
 
+def test_ingress_gui_html():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers.get("content-type", "")
+    assert "Laya Router" in response.text
+    assert "Routing Playground" in response.text
+
+
+def test_ingress_auth_bypass():
+    # Requests with X-Ingress-Path header do not need Bearer Authorization
+    res = client.post(
+        "/v1/route",
+        json={"prompt": "test prompt without token"},
+        headers={"X-Ingress-Path": "/api/hassio_ingress/test-token"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "family" in data
+
+
 def test_auth_rejection():
     # Missing header
     res = client.post("/v1/route", json={"prompt": "test"})

@@ -1,12 +1,17 @@
 name: "Laya Router"
 description: "Local System 1 decision engine (~55-120ms Intel iGPU) routing Hermes Agent turns across Gemini, LiteLLM, and OpenRouter models"
-version: "0.3.0"
+version: "0.4.0"
 slug: "laya"
 url: "https://github.com/matthijsberg/HomeAssistant-Addons/tree/main/laya"
 arch:
   - amd64
 startup: services
 boot: auto
+ingress: true
+ingress_port: 8000
+ingress_panel: true
+panel_icon: "mdi:router-network"
+panel_title: "Laya Router"
 video: true
 devices:
   - /dev/dri:/dev/dri
