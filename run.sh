@@ -1376,6 +1376,13 @@ fi
 
 log "[run] All services started"
 BASE_URL="${HASS_URL:-http://localhost}"
+# The internal Supervisor proxy is no address a browser can use; show the URL
+# configured in Home Assistant (external first, then internal) instead.
+if [ "$BASE_URL" = "http://supervisor/core" ] && [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+    ha_urls=$(curl -s -m 3 -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" http://supervisor/core/api/config 2>/dev/null || true)
+    BASE_URL=$(printf '%s' "$ha_urls" | jq -r '.external_url // .internal_url // empty' 2>/dev/null || true)
+    BASE_URL="${BASE_URL:-http://homeassistant.local:8123}"
+fi
 BASE_SCHEME="${BASE_URL%%://*}"
 BASE_HOST="${BASE_URL#*://}"
 BASE_HOST="${BASE_HOST%%:*}"

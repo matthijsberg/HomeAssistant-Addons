@@ -211,3 +211,15 @@ def test_profiles_without_allowlist_are_closed_by_default(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "GATEWAY_ALLOWED_USERS" not in (tmp_path / "p0" / ".env").read_text()
     assert (tmp_path / "p1" / ".env").read_text().count("GATEWAY_ALLOWED_USERS=homeassistant") == 1
+
+
+def test_rest_fallback_hands_over_to_mqtt_when_broker_appears(monkeypatch):
+    monkeypatch.setattr(ha_sensor_reporter, "MQTT_RECHECK_SECONDS", 0)
+    monkeypatch.setattr(ha_sensor_reporter, "POLL_SECONDS", 0)
+    monkeypatch.setattr(ha_sensor_reporter, "post_ha_state", lambda *a, **k: True)
+    monkeypatch.setattr(ha_sensor_reporter, "gateway_running", lambda home: True)
+    broker = {"host": "core-mosquitto", "port": 1883}
+    monkeypatch.setattr(ha_sensor_reporter, "mqtt_ready", lambda: broker)
+    result = ha_sensor_reporter.run_rest_loop(
+        "http://supervisor/core", "token", ["alice"], [8642], ["/x"], False, "1.0")
+    assert result == broker

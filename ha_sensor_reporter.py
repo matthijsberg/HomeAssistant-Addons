@@ -261,9 +261,25 @@ def run_mqtt_loop(broker: dict, profile_names: list, api_ports: list, profile_ho
         time.sleep(POLL_SECONDS)
 
 
+MQTT_RECHECK_SECONDS = 300
+
+
+def mqtt_ready() -> dict | None:
+    broker = supervisor_mqtt_config()
+    if not broker:
+        return None
+    try:
+        import paho.mqtt.client  # noqa: F401
+    except ImportError:
+        return None
+    return broker
+
+
 def run_rest_loop(hass_url: str, token: str, profile_names: list, api_ports: list,
-                  profile_homes: list, api_enabled: bool, version: str) -> None:
+                  profile_homes: list, api_enabled: bool, version: str) -> dict:
+    """Post states via REST until MQTT becomes available; return its broker config."""
     last_sent: dict = {}
+    next_mqtt_check = time.monotonic() + MQTT_RECHECK_SECONDS
 
     def report(entity_id: str, state: str, attributes: dict) -> None:
         key = json.dumps([state, attributes], sort_keys=True)
@@ -289,6 +305,10 @@ def run_rest_loop(hass_url: str, token: str, profile_names: list, api_ports: lis
                     "icon": "mdi:robot-happy" if st["online"] else "mdi:robot-off"})
         except Exception as err:
             log_msg(f"[ha-sensor-reporter] Loop exception: {err}", is_err=True, version=version)
+        if time.monotonic() >= next_mqtt_check:
+            next_mqtt_check = time.monotonic() + MQTT_RECHECK_SECONDS
+            if broker := mqtt_ready():
+                return broker
         time.sleep(POLL_SECONDS)
 
 
@@ -299,22 +319,16 @@ def run_reporter_loop(options_file: str, profile_names: list, api_ports: list, v
     api_enabled = read_api_enabled(options_file)
     log_msg("[ha-sensor-reporter] Starting Home Assistant status sensor reporter...", level="info", version=version)
 
-    broker = supervisor_mqtt_config()
-    if broker:
-        try:
-            import paho.mqtt.client  # noqa: F401
-        except ImportError:
-            broker = None
-            log_msg("[ha-sensor-reporter] paho-mqtt missing; using REST fallback", is_err=True, version=version)
-    if broker:
-        if token:
-            remove_legacy_rest_states(hass_url, token, profile_names, version)
-        run_mqtt_loop(broker, profile_names, api_ports, profile_homes, api_enabled, version)
-        return
-    if not token:
-        log_msg("[ha-sensor-reporter] Warning: No Home Assistant token available; sensor reporting disabled.", is_err=True, version=version)
-        return
-    run_rest_loop(hass_url, token, profile_names, api_ports, profile_homes, api_enabled, version)
+    broker = mqtt_ready()
+    if not broker:
+        if not token:
+            log_msg("[ha-sensor-reporter] Warning: No Home Assistant token and no MQTT broker; sensor reporting disabled.", is_err=True, version=version)
+            return
+        # Falls through to MQTT as soon as the broker service appears.
+        broker = run_rest_loop(hass_url, token, profile_names, api_ports, profile_homes, api_enabled, version)
+    if token:
+        remove_legacy_rest_states(hass_url, token, profile_names, version)
+    run_mqtt_loop(broker, profile_names, api_ports, profile_homes, api_enabled, version)
 
 
 if __name__ == "__main__":

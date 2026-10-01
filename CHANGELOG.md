@@ -4,6 +4,13 @@ All notable changes to the Hermes Agent Home Assistant add-on are documented her
 
 The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions match the add-on `version` in `config.yaml`.
 
+## [2.6.1] - 2026-10-01
+
+### Fixed
+
+- **MQTT Sensors Start Late:** When the Mosquitto App has not (yet) registered its MQTT service with the Supervisor, the reporter used REST for the whole session. It now checks every 5 minutes and switches to MQTT discovery as soon as the broker is available, without restarting the App.
+- **Startup URLs:** With an empty `hass_url` (internal Supervisor connection) the startup summary showed `http://supervisor:8080`. It now shows the URL configured in Home Assistant.
+
 ## [2.6.0] - 2026-10-01
 
 ### Added
