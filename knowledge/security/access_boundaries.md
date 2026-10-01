@@ -62,6 +62,9 @@ The HA MCP server is pinned (`@orellbuehler/homeassistant-mcp@<version>` in
 - **Rollout invariant:** the profile ships with `complain`. Allow-rule gaps are logged
   as `apparmor="ALLOWED"` (`ha host logs -t audit`) and never block. `deny` rules are
   enforced regardless of mode.
+- Observation started 2026-10-01 20:11 UTC (see [`log.md`](../log.md)). The previous
+  allow-all profile still mediated ptrace and broke Chromium's crash handler; the
+  explicit same-profile `ptrace` rule fixes that.
 - Switch to enforce (drop `complain`) only after an observation window with no
   `ALLOWED` entries for `local_hermes_agent`, covering a restart, a `hermes update`,
   dashboard use, a terminal session and a periodic backup.

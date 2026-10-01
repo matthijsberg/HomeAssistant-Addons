@@ -33,8 +33,14 @@ The format follows the spirit of [Keep a Changelog](https://keepachangelog.com/e
 - `create_profile_backup` against a live WAL-mode writer with GNU tar 1.35: all 1000 rows that existed only in the WAL were present, `integrity_check` ok, non-SQLite `.db` archived raw, work directory removed.
 - Port slots: fresh, reorder, remove, add, re-add and pool-exhaustion scenarios; a fresh install reproduces 8642/8643/8644.
 - Config helpers with ruamel.yaml and with PyYAML: comments kept (ruamel), byte-identical on re-run, mode `0600`, unparseable file untouched.
-- `apparmor.txt` compiles with AppArmor parser 4.1.7; gateway detection for sensors verified against a live process; upstream v1.3.4 suite unchanged (same 8 known fork-specific failures as 2.4.0).
-- Not yet verified on the live Home Assistant install.
+- `apparmor.txt` compiles with AppArmor parser 4.1.7; gateway detection for sensors verified against a live process; upstream v1.3.4 suite unchanged (same 8 known fork-specific failures as 2.4.0); `scripts/setup.sh` quality gate passes (11 tests).
+- Live Home Assistant install (2026-10-01, three profiles, Hermes `6afef023`, Python 3.14.7):
+  - No dependency-selection error; Telegram connected (polling) and the WhatsApp bridge connected.
+  - `/v1/health`, `/dashboard/`, `/dashboard/api/status`, `/hermes/` and dashboard assets returned 200 for all three profiles over HTTPS.
+  - Unauthenticated `/hermes/` and `/v1/models` returned 401; Bearer `/v1/models` returned 200.
+  - All sensors are `online` with `gateway_running` and `api_healthy` true and version `2.5.0` (taken from the build).
+  - Profile `config.yaml` and `.hermes_profile` are `0600`; the MCP block is pinned, uses `http://supervisor/core` with the Supervisor token and has no TLS bypass; the port slots reproduce 8642/8643/8644.
+  - AppArmor: no events since the new profile loaded. The only earlier denial (2026-09-30, old profile) blocked Chromium's crash handler (`chrome_crashpad` ptrace), which the new profile allows.
 
 ## [2.4.0] - 2026-10-01
 
