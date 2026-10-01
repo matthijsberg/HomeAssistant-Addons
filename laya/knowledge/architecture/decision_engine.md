@@ -50,11 +50,19 @@ The engine extracts `answer_confidence` for each decision. If confidence falls b
 
 ### 5. Decoupled Provider & Model Resolution
 While Laya's internal forward pass operates exclusively on abstract task categories (`quick`, `general`, `code`, `deep`), the add-on maps these categories to concrete model identifiers according to the selected `provider`:
-- **Gemini (Native):** `quick` -> `gemini-2.5-flash-lite`, `general` -> `gemini-flash-latest`, `code` -> `gemini-flash-latest`, `deep` -> `gemini-2.5-pro`.
-- **OpenRouter:** `quick` -> `google/gemini-2.5-flash-lite`, `general` -> `google/gemini-flash-1.5`, `code` -> `anthropic/claude-3.5-sonnet`, `deep` -> `anthropic/claude-3.7-sonnet`.
+- **Gemini (Native):** `quick` -> `gemini-3.5-flash-lite`, `general` -> `gemini-flash-latest`, `code` -> `gemini-flash-latest`, `deep` -> `gemini-2.5-pro`.
+- **OpenRouter:** `quick` -> `google/gemini-3.5-flash-lite`, `general` -> `google/gemini-flash-1.5`, `code` -> `anthropic/claude-3.5-sonnet`, `deep` -> `anthropic/claude-3.7-sonnet`.
 - **LiteLLM / Custom:** Custom model tags routed through a local or remote OpenAI-compatible gateway.
 
-### 6. Hardware Inference Latency (Intel Arc iGPU vs CPU)
+### 6. Per-Family Execution Parameters & Omission Rules
+Each family profile in `families:` can define upstream model execution parameters:
+- `model`: Target LLM model identifier.
+- `effort`: Reasoning effort level (`low`, `medium`, `high`).
+- `max_tokens` (optional): Hard output context ceiling. Omitted/null uses provider default.
+- `temperature` (optional): Sampling temperature. Omitted/null uses provider default.
+- `thinking_budget` (optional): Discrete reasoning thinking tokens. Omitted/null (standard for `code` and `deep`) allows unconstrained thinking; set to `0` for `quick` to bypass thinking latency.
+
+### 7. Hardware Inference Latency (Intel Arc iGPU vs CPU)
 Empirical latency benchmarks measured on Intel Core Ultra 5 225H:
 - **Intel Arc iGPU (XPU):** 55–120 ms (averaging 120.2 ms across full suite, ~55 ms on deep reasoning tasks).
 - **CPU (6 intra-op threads):** 218–481 ms.

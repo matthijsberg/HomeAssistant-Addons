@@ -78,6 +78,17 @@ class MockRouter:
                     "choice": chosen,
                     "answer_confidence": conf,
                 }
+            elif q_id == "task_family" and isinstance(criteria, dict):
+                choice = next(iter(criteria.keys())) if criteria else "general"
+                prompt_lower = prompt_text.lower()
+                for key, _desc in criteria.items():
+                    if key in prompt_lower or (key == "code" and any(w in prompt_lower for w in ["python", "script", "code"])) or (key == "deep" and any(w in prompt_lower for w in ["hypotheek", "rente", "math", "dcf", "npv"])) or (key == "quick" and any(w in prompt_lower for w in ["lamp", "licht", "weer", "tijd"])):
+                        choice = key
+                        break
+                answers[q_id] = {
+                    "choice": choice,
+                    "answer_confidence": 0.88,
+                }
             elif q_type == "choice":
                 default_choice = next(iter(criteria.keys())) if isinstance(criteria, dict) and criteria else "unknown"
                 answers[q_id] = {
@@ -241,7 +252,14 @@ class LayaRouterEngine:
             raise RuntimeError("Laya Router is not ready: checkpoints are still loading.")
 
         q_spec = get_question_set(question_set)
-        questions = q_spec["questions"]
+        questions = dict(q_spec.get("questions", {}))
+
+        # Dynamically inject configured family criteria into the System 1 choice question
+        if "task_family" in questions and self.config.families:
+            tf_q = dict(questions["task_family"])
+            tf_q["criteria"] = self.config.get_criteria_map()
+            questions["task_family"] = tf_q
+
         state = self.format_state(prompt, recent_turns)
 
         t0 = time.perf_counter()
@@ -261,11 +279,15 @@ class LayaRouterEngine:
         routing_block = result.get("routing") or {}
         checkpoint = routing_block.get("model") or result.get("model") or self.config.router_default
 
-        resolved_model = self.config.get_model_for_family(str(family))
+        fam_str = str(family)
+        fam_cfg = self.config.get_family_config(fam_str)
+        resolved_model = fam_cfg.model
+        resolved_effort = fam_cfg.effort or ("low" if effort == "light" else "high" if effort == "deep" else "medium")
 
-        return {
-            "family": str(family),
+        payload: Dict[str, Any] = {
+            "family": fam_str,
             "effort": str(effort),
+            "reasoning_effort": resolved_effort,
             "confidence": {
                 "family": round(family_conf, 4),
                 "effort": round(effort_conf, 4),
@@ -276,6 +298,15 @@ class LayaRouterEngine:
             "provider": self.config.provider,
             "model": resolved_model,
         }
+
+        if fam_cfg.max_tokens is not None:
+            payload["max_tokens"] = fam_cfg.max_tokens
+        if fam_cfg.temperature is not None:
+            payload["temperature"] = fam_cfg.temperature
+        if fam_cfg.thinking_budget is not None:
+            payload["thinking_budget"] = fam_cfg.thinking_budget
+
+        return payload
 
     def systemone(self, body: Dict[str, Any]) -> Dict[str, Any]:
         """Raw passthrough on Jev-compatible /v1/systemone wire format."""

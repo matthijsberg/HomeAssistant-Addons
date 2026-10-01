@@ -18,7 +18,7 @@ def test_config_yaml_manifest():
 
     assert cfg["name"] == "Laya Router"
     assert cfg["slug"] == "laya"
-    assert cfg["version"] == "0.4.0"
+    assert cfg["version"] == "0.5.0"
     assert cfg["arch"] == ["amd64"]
     assert cfg["startup"] == "services"
     assert cfg["boot"] == "auto"
@@ -47,10 +47,10 @@ def test_config_yaml_manifest():
     assert "api_key" in opts
     assert opts.get("log_level") == "info"
     assert opts.get("provider") in ("gemini", "litellm", "openrouter", "custom")
-    assert "model_quick" in opts
-    assert "model_general" in opts
-    assert "model_code" in opts
-    assert "model_deep" in opts
+    assert "families" in opts
+    families_list = opts.get("families", [])
+    assert any(f.get("name") == "quick" and f.get("model") == "gemini-3.5-flash-lite" for f in families_list)
+    assert any(f.get("name") == "deep" and f.get("thinking_budget") is None for f in families_list)
 
     # Schema check
     schema = cfg.get("schema", {})
@@ -60,10 +60,7 @@ def test_config_yaml_manifest():
     assert "router_default" in schema
     assert "api_key" in schema
     assert "provider" in schema
-    assert "model_quick" in schema
-    assert "model_general" in schema
-    assert "model_code" in schema
-    assert "model_deep" in schema
+    assert "families" in schema
     assert "log_level" in schema
 
 

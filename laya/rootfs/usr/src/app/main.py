@@ -109,6 +109,9 @@ class RouteResponse(BaseModel):
     question_set: str
     provider: str = Field(description="Active upstream model provider")
     model: str = Field(description="Target model identifier mapped to the resolved task family")
+    max_tokens: Optional[int] = Field(default=None, description="Maximum output token budget for the model")
+    temperature: Optional[float] = Field(default=None, description="Sampling temperature override")
+    thinking_budget: Optional[int] = Field(default=None, description="Internal reasoning thinking token budget")
 
 
 @app.get("/health")
@@ -130,11 +133,12 @@ def health() -> Dict[str, Any]:
 
 @app.get("/v1/models", dependencies=[Depends(verify_api_key)])
 def get_models_config() -> Dict[str, Any]:
-    """Return active provider, model mappings, gateway configuration, and architecture notes."""
+    """Return active provider, model mappings, family profiles, and architecture notes."""
     return {
         "provider": config.provider,
         "gateway_url": config.gateway_url,
         "models": config.get_models_map(),
+        "families": {name: f.to_dict() for name, f in config.families.items()},
         "supported_providers": ["gemini", "litellm", "openrouter", "custom"],
         "architecture_limitation_note": (
             "LLM client integrations cannot switch provider credentials dynamically mid-session. "

@@ -38,3 +38,6 @@ configuration:
   gateway_url:
     name: "Gateway Base URL"
     description: "Optional proxy/gateway base URL when using LiteLLM, OpenRouter, or a custom gateway."
+  families:
+    name: "Task Families & Routing Profiles"
+    description: "Configured task families with semantic criteria for Laya System 1 routing, target models, effort levels, token caps, temperatures, and thinking budgets."

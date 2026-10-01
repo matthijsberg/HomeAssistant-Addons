@@ -3,6 +3,11 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+if [ -f "${REPO_ROOT}/.venv/bin/activate" ]; then
+  # shellcheck disable=SC1091
+  source "${REPO_ROOT}/.venv/bin/activate"
+fi
+
 echo "================================================================="
 echo "   SCAFFOLDING & QUALITY VERIFICATION: ha-addon-laya            "
 echo "================================================================="

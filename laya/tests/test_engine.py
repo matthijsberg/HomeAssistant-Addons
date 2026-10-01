@@ -98,3 +98,41 @@ def test_engine_provider_and_models_resolution():
     assert res["family"] == "code"
     assert res["provider"] == "openrouter"
     assert res["model"] == "anthropic/claude-3.5-sonnet"
+
+
+def test_engine_family_parameters_and_defaults():
+    cfg = AppConfig(mock_mode=True, api_key="secret")
+    eng = LayaRouterEngine(cfg)
+    eng.initialize()
+
+    # Quick prompt: lampen uit
+    quick_res = eng.route(prompt="Zet de lampen in de woonkamer uit", recent_turns=[])
+    assert quick_res["family"] == "quick"
+    assert quick_res["model"] == "gemini-3.5-flash-lite"
+    assert quick_res["effort"] in ("light", "normal", "deep")
+    assert quick_res["reasoning_effort"] == "low"
+    assert quick_res["max_tokens"] == 1024
+    assert quick_res["temperature"] == 0.2
+    assert quick_res["thinking_budget"] == 0
+
+    # Code prompt: python script
+    code_res = eng.route(prompt="Schrijf een Python script om data te filteren", recent_turns=[])
+    assert code_res["family"] == "code"
+    assert code_res["model"] == "gemini-flash-latest"
+    assert code_res["effort"] in ("light", "normal", "deep")
+    assert code_res["reasoning_effort"] == "high"
+    assert code_res["max_tokens"] == 8192
+    assert code_res["temperature"] == 0.1
+    # PRD & User requirement: no thinking budget for code
+    assert "thinking_budget" not in code_res
+
+    # Deep prompt: hypotheek berekenen
+    deep_res = eng.route(prompt="Bereken de annuïtaire hypotheek voor 450k", recent_turns=[])
+    assert deep_res["family"] == "deep"
+    assert deep_res["model"] == "gemini-2.5-pro"
+    assert deep_res["effort"] in ("light", "normal", "deep")
+    assert deep_res["reasoning_effort"] == "high"
+    assert deep_res["max_tokens"] == 8192
+    assert deep_res["temperature"] == 0.2
+    # PRD & User requirement: no thinking budget for deep
+    assert "thinking_budget" not in deep_res

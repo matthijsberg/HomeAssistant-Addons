@@ -1,6 +1,6 @@
 name: "Laya Router"
 description: "Local sub-100ms System 1 decision engine for Home Assistant, routing LLM prompts and reasoning effort across Gemini, LiteLLM, OpenRouter, and custom gateways"
-version: "0.4.0"
+version: "0.5.0"
 slug: "laya"
 url: "https://github.com/matthijsberg/HomeAssistant-Addons/tree/main/laya"
 arch:
@@ -28,11 +28,33 @@ options:
   api_key: ""
   log_level: "info"
   provider: "gemini"
-  model_quick: "gemini-2.5-flash-lite"
-  model_general: "gemini-flash-latest"
-  model_code: "gemini-flash-latest"
-  model_deep: "gemini-2.5-pro"
   gateway_url: ""
+  families:
+    - name: "quick"
+      criteria: "small talk, greetings, simple facts, unit conversions, one-step home control commands"
+      model: "gemini-3.5-flash-lite"
+      effort: "low"
+      max_tokens: 1024
+      temperature: 0.2
+      thinking_budget: 0
+    - name: "general"
+      criteria: "everyday writing, explaining, summarising, translating, ordinary questions that need a few tool calls"
+      model: "gemini-flash-latest"
+      effort: "medium"
+      max_tokens: 4096
+      temperature: 0.7
+    - name: "code"
+      criteria: "writing or debugging code or configuration files, multi-step tool or agent work"
+      model: "gemini-flash-latest"
+      effort: "high"
+      max_tokens: 8192
+      temperature: 0.1
+    - name: "deep"
+      criteria: "hard reasoning where a wrong answer is costly: maths, finance, planning, comparing complex options"
+      model: "gemini-2.5-pro"
+      effort: "high"
+      max_tokens: 8192
+      temperature: 0.2
 schema:
   device: "list(xpu|cpu)"
   threads: "int(1,64)"
@@ -42,8 +64,16 @@ schema:
   api_key: "password"
   log_level: "list(debug|info|warn|warning|error)"
   provider: "list(gemini|litellm|openrouter|custom)"
-  model_quick: "str"
-  model_general: "str"
-  model_code: "str"
-  model_deep: "str"
   gateway_url: "str?"
+  model_quick: "str?"
+  model_general: "str?"
+  model_code: "str?"
+  model_deep: "str?"
+  families:
+    - name: "str"
+      criteria: "str"
+      model: "str"
+      effort: "list(low|medium|high)?"
+      max_tokens: "int?"
+      temperature: "float?"
+      thinking_budget: "int?"

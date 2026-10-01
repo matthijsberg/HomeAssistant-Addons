@@ -140,6 +140,18 @@ def render_gui_html() -> str:
         <div class="result-label">Hardware Latency</div>
         <div id="res-latency" class="result-val" style="color: #34d399;">-</div>
       </div>
+      <div class="result-box">
+        <div class="result-label">Temperature</div>
+        <div id="res-temp" class="result-val" style="font-size: 15px; color: #93c5fd;">Default</div>
+      </div>
+      <div class="result-box">
+        <div class="result-label">Max Output Tokens</div>
+        <div id="res-tokens" class="result-val" style="font-size: 15px; color: #cbd5e1;">Default</div>
+      </div>
+      <div class="result-box">
+        <div class="result-label">Thinking Budget</div>
+        <div id="res-thinking" class="result-val" style="font-size: 15px; color: #fcd34d;">Unconstrained</div>
+      </div>
     </div>
 
     <div class="meter-row">
@@ -278,6 +290,11 @@ def render_gui_html() -> str:
 
     // Checkpoint
     document.getElementById('checkpoint-tag').textContent = 'Checkpoint: ' + data.checkpoint;
+
+    // Advanced parameters
+    document.getElementById('res-temp').textContent = data.temperature !== undefined ? data.temperature : 'Default';
+    document.getElementById('res-tokens').textContent = data.max_tokens ? data.max_tokens + ' tokens' : 'Default';
+    document.getElementById('res-thinking').textContent = data.thinking_budget !== undefined ? data.thinking_budget + ' tokens' : 'Unconstrained';
 
     // Confidences
     const famConf = Math.round((data.confidence.family || 0) * 100);

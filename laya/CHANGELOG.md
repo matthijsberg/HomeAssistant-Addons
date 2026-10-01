@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-01
+
+### Added
+- Fully configurable `families` section in Home Assistant add-on options (`config.yaml`).
+- Configurable semantic criteria, target models, effort levels, token ceilings (`max_tokens`), temperatures, and thinking budgets per task family.
+- Default configuration updated to `gemini-3.5-flash-lite` for the `quick` family with `thinking_budget: 0`.
+- Unconstrained thinking budget defaults (omitted) for `code` and `deep` families to support full reasoning capabilities.
+- Intelligent omission/defaulting for optional parameters (temperature, thinking budget, token caps).
+- Dynamic runtime category evaluation: user-added custom families in Home Assistant options are automatically evaluated by Laya in the single forward pass.
+- Ingress WebUI updated to display temperature, max tokens, and thinking budget parameters.
+
 ## [0.4.0] - 2026-10-01
 
 ### Added

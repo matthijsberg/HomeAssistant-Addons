@@ -2,19 +2,21 @@
 
 [![Quality Gate](https://img.shields.io/badge/scaffolding-verified-brightgreen.svg)]()
 [![OKF v0.2](https://img.shields.io/badge/OKF-v0.2-blue.svg)](knowledge/index.md)
-[![SemVer](https://img.shields.io/badge/semver-0.3.0-blue.svg)]()
+[![SemVer](https://img.shields.io/badge/semver-0.5.0-blue.svg)]()
 
 Local System 1 decision engine and multi-provider model & effort router for Home Assistant and Hermes Agent.
 
-Laya Router categorizes incoming user turns in a single forward pass on CPU or Intel Arc iGPU (down to ~55 ms), picking between calibrated model tiers (Gemini Flash Lite, Flash, Pro, or OpenRouter/LiteLLM models such as Claude 3.5/3.7 Sonnet) along with calibrated reasoning effort levels (`light`, `normal`, `deep`).
+Laya Router categorizes incoming user turns in a single forward pass on CPU or Intel Arc iGPU (down to ~55 ms), picking between calibrated model tiers (Gemini Flash Lite 3.5, Flash, Pro, or OpenRouter/LiteLLM models such as Claude 3.5/3.7 Sonnet) along with reasoning effort levels, token ceilings, temperatures, and thinking budgets.
 
 ---
 
 ## Features
 
 - **Intel Arc iGPU Acceleration (XPU):** Hardware-accelerated inference via `/dev/dri` on Intel Meteor Lake / Arrow Lake iGPUs (Core Ultra 5 225H), delivering **55–120 ms inference latency** (up to 5.4x faster than CPU).
-- **Multi-Provider & Model Tiering:** Configurable in Home Assistant settings for native **Google Gemini**, **LiteLLM**, **OpenRouter**, or custom OpenAI-compatible proxies.
-- **Fail-Open Resilience:** Zero broken turns. Timeouts, errors, or low-confidence decisions leave the Hermes request byte-identical.
+- **Home Assistant Ingress WebUI:** Interactive routing playground accessible from the HA sidebar, featuring live inference metrics, hardware badges, and confidence visualization.
+- **Configurable Task Families & Profiles:** Fully customizable `families` in Home Assistant options: customize semantic criteria, upstream model (`gemini-3.5-flash-lite`), effort, max tokens, temperature, and thinking budget per family.
+- **Multi-Provider & Model Tiering:** Configurable for native **Google Gemini**, **LiteLLM**, **OpenRouter**, or custom OpenAI-compatible proxies.
+- **Fail-Open Resilience:** Zero broken turns. Timeouts, errors, or low-confidence decisions leave the client request byte-identical.
 - **Language Aware:** Automatically routes between English and Multilingual checkpoints; short ambiguous Dutch follow-ups (e.g. *"ja, doe maar"*) are routed to the multilingual checkpoint using the preceding 2 turns of context.
 - **Startup GPU Warmup:** Asynchronous preloading and warmup pass pre-compiles Level-Zero SPIR-V JIT kernels at boot, ensuring the first live user request is served instantly without compilation delay.
 - **Open Knowledge Format (OKF v0.2):** Full architecture and operational specifications documented as agent-consumable knowledge concepts in `knowledge/`.
@@ -43,40 +45,55 @@ Empirical latency benchmark measured on the live add-on comparing CPU execution 
 
 | Endpoint | Method | Auth | Purpose |
 |---|---|---|---|
+| `/` | `GET` | Ingress / None | Interactive dark-mode Ingress WebUI playground. |
 | `/health` | `GET` | None | Container watchdog; reports readiness, device, loaded checkpoints, and pinned revision. |
-| `/v1/route` | `POST` | Bearer | Decision endpoint for one user turn. Returns `family`, `effort`, `confidence`, `checkpoint`, `provider`, and `model`. |
-| `/v1/models` | `GET` | Bearer | Returns active provider, model mappings, and gateway topology details. |
+| `/v1/route` | `POST` | Bearer / Ingress | Decision endpoint for one turn. Returns `family`, `effort`, `confidence`, `model`, `max_tokens`, `temperature`, `thinking_budget`. |
+| `/v1/models` | `GET` | Bearer | Returns active provider, model mappings, and full configured family profiles. |
 | `/v1/systemone` | `POST` | Bearer | Raw Jev-compatible wire protocol passthrough for experiments and external tools. |
 | `/v1/question-sets` | `GET` | Bearer | Returns active criteria text and versioning details (e.g. `hermes-v1`). |
 
 ---
 
-## Add-on Options
+## Task Family Configuration (`families`)
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `device` | select | `xpu` | Hardware compute device (`xpu` for Intel Arc iGPU acceleration; `cpu` for standard CPU). |
-| `threads` | int | `6` | PyTorch CPU intra-op threads. Cap to physical CPU cores. |
-| `checkpoints` | string | `english,multilingual` | Comma-separated checkpoints preloaded into memory at startup. |
-| `router_default` | select | `multilingual` | Fallback checkpoint for short prompts without clear language signal. |
-| `laya_revision` | string | `main` | Hugging Face weights revision for deterministic execution. |
-| `api_key` | password | *(required)* | Shared secret Bearer token used by the Hermes `laya-router` plugin. |
-| `log_level` | select | `info` | Logging verbosity (`debug`, `info`, `warn`, `error`). |
-| `provider` | select | `gemini` | Upstream model provider (`gemini`, `litellm`, `openrouter`, or `custom`). |
-| `model_quick` | string | `gemini-2.5-flash-lite` | Model identifier mapped to `quick` task family. |
-| `model_general` | string | `gemini-flash-latest` | Model identifier mapped to `general` task family. |
-| `model_code` | string | `gemini-flash-latest` | Model identifier mapped to `code` task family. |
-| `model_deep` | string | `gemini-2.5-pro` | Model identifier mapped to `deep` task family. |
-| `gateway_url` | string | `""` | Optional gateway base URL when using LiteLLM or OpenRouter. |
+Configurable via Home Assistant Add-on options:
 
----
+```yaml
+families:
+  - name: "quick"
+    criteria: "small talk, greetings, simple facts, unit conversions, one-step home control commands"
+    model: "gemini-3.5-flash-lite"
+    effort: "low"
+    max_tokens: 1024
+    temperature: 0.2
+    thinking_budget: 0
 
-## Architectural Limitation: Single-Endpoint vs Multi-Provider Gateways
+  - name: "general"
+    criteria: "everyday writing, explaining, summarising, translating, ordinary questions that need a few tool calls"
+    model: "gemini-flash-latest"
+    effort: "medium"
+    max_tokens: 4096
+    temperature: 0.7
 
-Hermes Agent connects to upstream LLMs via a configured provider adapter. The `llm_request` middleware hook can rewrite model identifiers and reasoning effort on the fly, but **cannot switch provider authentication tokens or API adapters mid-session**:
+  - name: "code"
+    criteria: "writing or debugging code or configuration files, multi-step tool or agent work"
+    model: "gemini-flash-latest"
+    effort: "high"
+    max_tokens: 8192
+    temperature: 0.1
 
-* **Native Single Provider (Gemini):** Routes seamlessly between Flash Lite, Flash, and Pro using a single Google API key and direct connection without extra gateway latency.
-* **Multi-Vendor Providers (e.g. Claude + Gemini + OpenAI):** Must use an OpenAI-compatible unified proxy such as **LiteLLM** or **OpenRouter** as the single configured provider in Hermes. The gateway receives the routed model name and multiplexes downstream.
+  - name: "deep"
+    criteria: "hard reasoning where a wrong answer is costly: maths, finance, planning, comparing complex options"
+    model: "gemini-2.5-pro"
+    effort: "high"
+    max_tokens: 8192
+    temperature: 0.2
+```
+
+### Parameter Defaults & Omission
+- **`temperature`:** When omitted, upstream model default temperature is used.
+- **`thinking_budget`:** When omitted (default for `code` and `deep`), model reasoning is unconstrained. Set to `0` for `quick` to strictly bypass thinking latency.
+- **`max_tokens`:** When omitted, upstream model context maximum applies.
 
 ---
 
