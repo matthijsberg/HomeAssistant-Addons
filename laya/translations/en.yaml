@@ -1,0 +1,22 @@
+configuration:
+  device:
+    name: "Inference Device"
+    description: "Hardware compute device for Laya model execution (CPU by default; XPU reserved for future acceleration)."
+  threads:
+    name: "Torch Intra-op Threads"
+    description: "Number of PyTorch CPU inference threads. Tune to physical cores (6 recommended) to leave headroom for other services."
+  checkpoints:
+    name: "Checkpoints to Preload"
+    description: "Comma-separated list of checkpoints to keep resident in memory (english,multilingual)."
+  router_default:
+    name: "Default Routing Fallback"
+    description: "Fallback checkpoint to route short, ambiguous prompts with no detected script."
+  laya_revision:
+    name: "Model Weights Revision"
+    description: "Pinned Git commit hash or branch for Hugging Face weights to ensure reproducible decisions."
+  api_key:
+    name: "API Bearer Token"
+    description: "Secret token required in Authorization header (Bearer <token>) for /v1/route and /v1/systemone."
+  log_level:
+    name: "Log Level"
+    description: "Logging verbosity for Uvicorn and the Laya server process."
