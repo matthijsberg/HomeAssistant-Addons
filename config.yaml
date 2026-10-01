@@ -1,0 +1,102 @@
+name: Hermes Agent
+version: "2.3.2"
+slug: hermes_agent
+description: "The self-improving AI agent by Nous Research with multi-user HA auto-sync, smart profile routing, HA MCP tools, and status sensors. Built on top of the original App by Wolfram Ravenwolf."
+url: "https://github.com/matthijsvandenberg/Hermes"
+# image: "ghcr.io/matthijsvandenberg/hermes_agent-{arch}"
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: application
+boot: auto
+ingress: true
+ingress_port: 49169
+ingress_stream: true
+panel_icon: mdi:robot
+panel_title: Hermes Agent
+backup_exclude:
+  - .hermes/hermes-agent/venv
+  - .hermes/hermes-agent/node_modules
+  - .hermes/hermes-agent/web/node_modules
+  - lsp/bin
+  - lsp/node_modules
+  - lsp/python-packages
+  - lsp/pses
+  - .cache
+  - .npm
+hassio_api: true
+homeassistant_api: true
+apparmor: true
+map:
+  - addon_config:rw
+  - media:rw
+  - share:rw
+  - ssl:ro
+  - backup:rw
+ports:
+  8080/tcp: null
+  8443/tcp: null
+  9119/tcp: null
+ports_description:
+  8080/tcp: "HTTP: /hermes/ (agent) · /dashboard/ (web UI) · /terminal/ (shell) · /v1/ (OpenAI API) · /api/ (Sessions/Runs API)"
+  8443/tcp: "HTTPS: /hermes/ (agent) · /dashboard/ (web UI) · /terminal/ (shell) · /v1/ (OpenAI API) · /api/ (Sessions/Runs API) — TLS"
+  9119/tcp: "Hermes Desktop remote backend — opt-in; trusted LAN/VPN/Tailscale only"
+options:
+  git_url: "https://github.com/NousResearch/hermes-agent.git"
+  git_ref: ""
+  git_token: ""
+  auto_update: false
+  hass_url: "http://homeassistant.local:8123"
+  homeassistant_token: ""
+  hermes_home: ".hermes"
+  profiles: []
+  profiles_base: ".hermes/profiles"
+  profile_env_vars: []
+  enable_dashboard: false
+  enable_terminal: false
+  enable_api: false
+  enable_desktop_backend: false
+  access_password: ""
+  env_vars:
+    - name: "OPENROUTER_API_KEY"
+      value: ""
+  use_ha_ssl_cert: false
+  ha_ssl_certfile: "fullchain.pem"
+  ha_ssl_keyfile: "privkey.pem"
+  auto_sync_ha_users: true
+  log_level: "info"
+  enable_periodic_backups: true
+  periodic_backup_interval_hours: 24
+  periodic_backup_keep_count: 7
+schema:
+  git_url: "url?"
+  git_ref: "str?"
+  git_token: "password?"
+  auto_update: "bool"
+  hass_url: "url?"
+  homeassistant_token: "password?"
+  hermes_home: "str?"
+  profiles:
+    - "str"
+  profiles_base: "str?"
+  profile_env_vars:
+    - profile: "str"
+      name: "match(^[A-Z_][A-Z0-9_]{0,254}$)"
+      value: "str"
+  enable_dashboard: "bool"
+  enable_terminal: "bool"
+  enable_api: "bool"
+  enable_desktop_backend: "bool"
+  access_password: "password?"
+  env_vars:
+    - name: "match(^[A-Z_][A-Z0-9_]{0,254}$)"
+      value: "str"
+  use_ha_ssl_cert: "bool"
+  ha_ssl_certfile: "str?"
+  ha_ssl_keyfile: "str?"
+  auto_sync_ha_users: "bool"
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)?"
+  enable_periodic_backups: "bool"
+  periodic_backup_interval_hours: "int(1,168)?"
+  periodic_backup_keep_count: "int(1,100)?"

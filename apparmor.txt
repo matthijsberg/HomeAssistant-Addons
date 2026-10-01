@@ -1,0 +1,9 @@
+#include <tunables/global>
+
+profile local_hermes_agent flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  file,
+  network,
+  capability,
+}
