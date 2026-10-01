@@ -1,5 +1,5 @@
-# HomeAssistant-Addons
-My take at building some HA addons that I miss. 
+# HomeAssistant-Apps
+My take at building some HA Apps that I miss or add some functionality. 
 
 Add this URL into HA as a custom repository: https://github.com/matthijsberg/HomeAssistant-Addons/
 
