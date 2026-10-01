@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Secrets and local runtime state (never commit)
+.env
+.env.*
+*.htpasswd
+*.key
+*.pem
+
+# Temp, backup and archive artifacts
+*.tmp
+*.bak
+*.orig
+*.rej
+*.swp
+*~
+*.tar.gz
+*.tgz
+*.zip
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
