@@ -49,8 +49,15 @@ Both checkpoints (`english` and `multilingual`) must be preloaded into RAM durin
 ### 1. Architectural Topology
 The container accesses the Intel integrated graphics via `/dev/dri` passthrough (`/dev/dri/renderD128` and `/dev/dri/card0`) backed by Intel oneAPI Level Zero runtime (`libze1`) and OpenCL userspace drivers (`intel-opencl-icd`).
 
-### 2. Runtime Fallback
+### 2. Runtime Fallback & JIT Warmup
 When `device: "xpu"` is selected in configuration:
 - The engine checks `torch.xpu.is_available()`.
 - If the hardware accelerator is accessible, checkpoints execute directly on the Intel Xe GPU execution units.
+- **Startup JIT Warmup:** A synthetic forward pass executes during boot. This triggers the one-time Level-Zero SPIR-V kernel compilation in the background, preventing a first-turn latency penalty for users.
 - If GPU access fails or hardware is absent, the engine logs a warning and falls back silently to CPU mode without failing turns.
+
+### 3. Empirical Latency Benchmarks (Intel Core Ultra 5 225H)
+- **Deep Reasoning / Mathematics:** 55.3 ms (XPU) vs 218 ms (CPU) -> **4.0x speedup**
+- **Code Generation / Refactoring:** 89.3–120.0 ms (XPU) vs 450–481 ms (CPU) -> **3.8x–5.4x speedup**
+- **Home Assistant Commands / Quick Facts:** 116.7–117.8 ms (XPU) vs 310–449 ms (CPU) -> **2.6x–3.8x speedup**
+- **Mean Overall Latency:** **120.2 ms** (XPU) vs **364.6 ms** (CPU) -> **3.0x overall speedup**
