@@ -1,0 +1,30 @@
+name: "Matrix Homeserver"
+description: "Ultra-lightweight, stable, and low-maintenance Matrix homeserver powered by Conduit (Rust)."
+version: "0.1.1"
+slug: "matrix"
+init: false
+arch:
+  - aarch64
+  - amd64
+ports:
+  6167/tcp: 6167
+ports_description:
+  6167/tcp: "Matrix Client-Server API"
+options:
+  server_name: "matrix.local"
+  allow_registration: false
+  port: 6167
+  log_level: "warn"
+  max_request_size: 20971520
+schema:
+  server_name: "str"
+  allow_registration: "bool"
+  port: "port"
+  log_level: "match(trace|debug|info|warn|error)"
+  max_request_size: "int"
+startup: services
+boot: auto
+map:
+  - config:rw
+  - data:rw
+  - ssl:ro
