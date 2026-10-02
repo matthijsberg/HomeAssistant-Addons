@@ -5,11 +5,11 @@ on:
     branches:
       - main
     paths:
-      - "hermes_agent/**"
+      - "apps/hermes-agent/**"
       - ".github/workflows/addon-hermes-agent.yml"
   pull_request:
     paths:
-      - "hermes_agent/**"
+      - "apps/hermes-agent/**"
       - ".github/workflows/addon-hermes-agent.yml"
   workflow_dispatch:
 
@@ -33,5 +33,5 @@ jobs:
 
       - name: Run quality gates
         run: |
-          cd hermes_agent
+          cd apps/hermes-agent
           ./scripts/setup.sh

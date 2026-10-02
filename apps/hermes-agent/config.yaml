@@ -2,7 +2,7 @@ name: Hermes Agent
 version: "2.5.0"
 slug: hermes_agent
 description: "The self-improving AI agent by Nous Research with multi-user HA auto-sync, smart profile routing, HA MCP tools, and status sensors. Built on top of the original App by Wolfram Ravenwolf."
-url: "https://github.com/matthijsberg/HomeAssistant-Addons/tree/main/hermes_agent"
+url: "https://github.com/matthijsberg/HomeAssistant-Apps/tree/main/apps/hermes-agent"
 # image: "ghcr.io/matthijsvandenberg/hermes_agent-{arch}"
 arch:
   - amd64
@@ -43,7 +43,7 @@ ports_description:
   8443/tcp: "HTTPS: /hermes/ (agent) · /dashboard/ (web UI) · /terminal/ (shell) · /v1/ (OpenAI API) · /api/ (Sessions/Runs API) — TLS"
   9119/tcp: "Hermes Desktop remote backend — opt-in; trusted LAN/VPN/Tailscale only"
 options:
-  git_url: "https://github.com/NousResearch/hermes-agent.git"
+  git_url: "https://github.com/matthijsberg/HomeAssistant-Apps/tree/main/apps/hermes-agent"
   git_ref: ""
   git_token: ""
   auto_update: false
@@ -69,11 +69,11 @@ options:
   periodic_backup_interval_hours: 24
   periodic_backup_keep_count: 7
 schema:
-  git_url: "url?"
+  git_url: "https://github.com/matthijsberg/HomeAssistant-Apps/tree/main/apps/hermes-agent"
   git_ref: "str?"
   git_token: "password?"
   auto_update: "bool"
-  hass_url: "url?"
+  hass_url: "https://github.com/matthijsberg/HomeAssistant-Apps/tree/main/apps/hermes-agent"
   homeassistant_token: "password?"
   hermes_home: "str?"
   profiles:

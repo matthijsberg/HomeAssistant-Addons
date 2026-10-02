@@ -1,19 +1,42 @@
-# HomeAssistant-Apps
-My take at building some HA Apps that I miss or add some functionality. 
+# Home Assistant Apps
 
-Add this URL into HA as a custom repository: https://github.com/matthijsberg/HomeAssistant-Addons/
+A curated collection of production-grade Home Assistant Apps (formerly add-ons) maintained by Matthijs van den Berg.
 
-## Available Add-ons
+## Adding this Repository to Home Assistant
 
-- **[Hermes Agent](hermes_agent/)** — Nous Research's self-improving AI agent with per-user Home Assistant profiles, HA MCP tools, status sensors and supervised gateways (fork of [hermes-ha-addon](https://github.com/WolframRavenwolf/hermes-ha-addon); architecture in [`hermes_agent/knowledge/`](hermes_agent/knowledge/index.md)).
-- **[Langfuse](langfuse/)** — Self-hosted LLM Observability & Prompt Management (Langfuse v4 full-stack with ClickHouse, PostgreSQL, Redis, and Ingress).
-- **[Matrix Synapse](matrix-synapse/)** — Matrix Homeserver with Sliding Sync and PostgreSQL.
-- **[Roon Server](RoonServer/)** — Roon Core server for music playback.
-- **[Roon Spotify](roon-spotify-addon/)** — Spotify Connect endpoint for Roon.
+In Home Assistant:
+1. Navigate to **Settings** ➔ **Apps** (or **Add-ons**) ➔ **App Store**.
+2. Click the three dots (top right) ➔ **Repositories**.
+3. Add: `https://github.com/matthijsberg/HomeAssistant-Apps`
 
-## Roon Server
-Based on the work of Steef; https://github.com/steefdebruijn/docker-roonserver
+---
 
-Roon server will be installed during container start since i'm officially not allowed to distribute the software. So a add-on rebuild will upgrade. Perhaps talk to Roon folks one day. 
+## 🚀 Active Apps (`apps/`)
 
-The Add-on maps /backup and /media into the container to use. 
+| App | Slug | Description |
+| :--- | :--- | :--- |
+| **[Open HEMS](apps/open-hems)** | `open_hems` | Intelligent Home Energy Management: heat pump optimization, solar forecasts, dynamic tariffs & battery dispatch. |
+| **[Hermes Agent](apps/hermes-agent)** | `hermes_agent` | Self-improving AI agent runtime with multi-user HA auto-sync, MCP server integration & status reporting. |
+| **[Laya Router](apps/laya)** | `laya` | Local sub-100ms System 1 router & decision engine across Gemini, LiteLLM, OpenRouter and custom gateways. |
+| **[Langfuse](apps/langfuse)** | `langfuse` | Self-hosted LLM observability, prompt management & evaluation (Langfuse v4 + ClickHouse). |
+| **[Mantis Security Agent](apps/mantis-security-agent)** | `mantis_security_agent` | Sandboxed AI code and configuration security auditing service with MCP interface. |
+| **[Ollama](apps/ollama)** | `ollama` | Local LLM inference engine with hardware acceleration. |
+
+---
+
+## 📦 Archived Apps (`apps-archive/`)
+
+These add-ons are kept for historical reference and code preservation, but are no longer actively maintained. Their configurations are disabled so they do not clutter the Home Assistant App Store:
+
+- `matrix-conduit` & `matrix-synapse` (Migrated to external / standalone infrastructure)
+- `moltbot-bridge`
+- `ollama-intel` & `ollama-universal-xpu`
+- `roon-server` & `roon-spotify`
+
+---
+
+## 🛠️ Development & Standards
+
+- **Folder layout:** Active apps reside in `apps/<slug>/`, archived in `apps-archive/<slug>/`.
+- **Naming:** Strict kebab-case directory names and slugs.
+- **Security:** Pre-commit secret scanning required on all commits.

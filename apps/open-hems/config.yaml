@@ -6,7 +6,7 @@ init: false
 arch:
   - aarch64
   - amd64
-url: "https://github.com/matthijsberg/ha-addon-open-hems"
+url: "https://github.com/matthijsberg/HomeAssistant-Apps/tree/main/apps/open-hems"
 panel_icon: "mdi:lightning-bolt"
 ingress: true
 ingress_port: 8099

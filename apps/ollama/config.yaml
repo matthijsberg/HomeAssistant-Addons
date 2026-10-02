@@ -2,7 +2,7 @@ name: "Ollama (Local LLM)"
 version: "0.2.213"
 slug: "ollama"
 description: "Run Ollama locally for private, high-performance AI. Includes hardware-aware model recommendations."
-url: "https://github.com/matthijsberg/HA-AI-Addons"
+url: "https://github.com/matthijsberg/HomeAssistant-Apps/tree/main/apps/ollama"
 startup: application
 boot: auto
 arch:

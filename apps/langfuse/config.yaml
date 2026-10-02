@@ -2,7 +2,7 @@ name: "Langfuse"
 description: "Self-hosted LLM observability & prompt management (Langfuse v4)"
 version: "4.0.0-12"
 slug: "langfuse"
-url: "https://github.com/matthijsberg/HomeAssistant-Addons/tree/main/langfuse"
+url: "https://github.com/matthijsberg/HomeAssistant-Apps/tree/main/apps/langfuse"
 init: false
 arch:
   - amd64
