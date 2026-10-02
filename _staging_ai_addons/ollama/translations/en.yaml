@@ -1,0 +1,13 @@
+configuration:
+  keep_alive:
+    name: Keep Alive Duration
+    description: "Time to keep the model loaded in memory. Set to '-1' to keep loaded indefinitely (improves performance), or use format like '5m', '1h'."
+  device_type:
+    name: Device Type
+    description: "Hardware accelerator to use. Supports Intel NPU, iGPU (Integrated Graphics), and Discrete GPU."
+  model:
+    name: Model
+    description: "Select the LLM model to run."
+  update_ollama:
+    name: Update Ollama
+    description: "Attempt to update Ollama to the latest official version on startup. WARNING: This might break Intel GPU acceleration if the official version doesn't support your hardware yet."

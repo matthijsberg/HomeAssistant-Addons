@@ -1,0 +1,47 @@
+name: "Ollama (Local LLM)"
+version: "0.2.213"
+slug: "ollama"
+description: "Run Ollama locally for private, high-performance AI. Includes hardware-aware model recommendations."
+url: "https://github.com/matthijsberg/HA-AI-Addons"
+startup: application
+boot: auto
+arch:
+  - aarch64
+  - amd64
+privileged:
+  - SYS_ADMIN
+  - SYS_RAWIO
+  - SYS_PTRACE
+full_access: true
+devices:
+  - /dev/dri:/dev/dri
+  - /dev/accel:/dev/accel
+  - /dev/accel/accel0:/dev/accel/accel0
+ports:
+  11434/tcp: 11434
+ingress: true
+ingress_port: 8099
+ingress_entry: /
+map:
+  - config:rw
+  - share:rw
+options:
+  model: "gemma2:2b"
+  custom_model: ""
+  device_type: "NPU"
+  keep_alive: "5m"
+  num_parallel: 1
+  max_loaded_models: 1
+  num_ctx: 2048
+  debug: false
+  update_ollama: false
+schema:
+  model: "list(alfred|all-minilm|athene-v2|aya|aya-expanse|bakllava|bespoke-minicheck|bge-large|bge-m3|codebooga|codegeex4|codegemma|codellama|codeqwen|codestral|codeup|cogito|cogito-2.1|command-a|command-r|command-r-plus|command-r7b|command-r7b-arabic|dbrx|deepcoder|deepscaler|deepseek-coder|deepseek-coder-v2|deepseek-llm|deepseek-ocr|deepseek-r1|deepseek-v2|deepseek-v2.5|deepseek-v3|deepseek-v3.1|deepseek-v3.2|devstral|devstral-2|devstral-small-2|dolphin-llama3|dolphin-mistral|dolphin-mixtral|dolphin-phi|dolphin3|dolphincoder|duckdb-nsql|embeddinggemma|everythinglm|exaone-deep|exaone3.5|falcon|falcon2|falcon3|firefunction-v2|functiongemma|gemini-3-flash-preview|gemini-3-pro-preview|gemma|gemma2:27b|gemma2:2b|gemma2:9b|gemma3:12b|gemma3:1b|gemma3:270m|gemma3:27b|gemma3:4b|gemma3:vision|gemma3n|glm-4.6|glm-4.7|glm-4.7-flash|glm4|goliath|gpt-oss|gpt-oss-safeguard|granite-code|granite-embedding|granite3-dense|granite3-guardian|granite3-moe|granite3.1-dense|granite3.1-moe|granite3.2|granite3.2-vision|granite3.3|granite4|hermes3|internlm2|kimi-k2|kimi-k2-thinking|kimi-k2.5|lfm2.5-thinking|llama-guard3|llama-pro|llama2|llama2-chinese|llama2-uncensored|llama3|llama3-chatqa|llama3-gradient|llama3-groq-tool-use|llama3.1:70b|llama3.1:8b|llama3.2-vision|llama3.2:1b|llama3.2:3b|llama3.3|llama4|llava|llava-llama3|llava-phi3|magicoder|magistral|marco-o1|mathstral|meditron|medllama2|megadolphin|minicpm-v|minimax-m2|minimax-m2.1|ministral-3|mistral-large|mistral-large-3|mistral-nemo|mistral-openorca|mistral-small|mistral-small3.1|mistral-small3.2|mistral:7b|mistrallite|mixtral|moondream|mxbai-embed-large|nemotron|nemotron-3-nano|nemotron-mini|neural-chat|nexusraven|nomic-embed-text|nomic-embed-text-v2-moe|notus|notux|nous-hermes|nous-hermes2|nous-hermes2-mixtral|nuextract|olmo-3|olmo-3.1|olmo2|open-orca-platypus2|openchat|opencoder|openhermes|openthinker|orca-mini|orca2|paraphrase-multilingual|phi|phi3|phi3.5:latest|phi4|phi4-mini|phi4-mini-reasoning|phi4-reasoning|phind-codellama|qwen|qwen2|qwen2-math|qwen2.5|qwen2.5-coder|qwen2.5vl|qwen3|qwen3-coder|qwen3-embedding|qwen3-next|qwen3-vl|qwq|r1-1776|reader-lm|reflection|rnj-1|sailor2|samantha-mistral|shieldgemma|smallthinker|smollm|smollm2|snowflake-arctic-embed|snowflake-arctic-embed2|solar|solar-pro|sqlcoder|stable-beluga|stable-code|stablelm-zephyr|stablelm2|starcoder|starcoder2|starling-lm|tinydolphin|tinyllama|translategemma|tulu3|vicuna|wizard-math|wizard-vicuna|wizard-vicuna-uncensored|wizardcoder|wizardlm|wizardlm-uncensored|wizardlm2|xwinlm|yarn-llama2|yarn-mistral|yi|yi-coder|zephyr)"
+  custom_model: "str?"
+  device_type: "list(NPU|GPU|iGPU|Arc|CPU)"
+  keep_alive: "str?"
+  num_parallel: "int?"
+  max_loaded_models: "int?"
+  num_ctx: "int?"
+  debug: "bool?"
+  update_ollama: "bool?"

@@ -1,0 +1,40 @@
+name: "Ollama (Universal XPU)"
+description: "Ollama LLM runner with Intel (SYCL/NPU), NVIDIA/AMD (Vulkan), and CPU support."
+url: "https://github.com/matthijsberg/HA-AI-Addons"
+version: "1.0.24"
+slug: "ollama_universal_xpu"
+full_access: true
+arch:
+  - amd64
+startup: "application"
+boot: "auto"
+ingress: true
+ingress_port: 11434
+# Flag: video maps all GPU devices (/dev/dri) into the container
+video: true
+devices:
+  # Flag: Explicitly map the Intel NPU node
+  - /dev/accel/accel0
+privileged:
+  - PERFMON # Required for VRAM telemetry
+  - SYS_ADMIN # Required for unified memory architectures
+  - SYS_RAWIO
+  - SYS_PTRACE
+map:
+  - share:rw
+  - addon_config:rw
+options:
+  # Selection: 'gpu' (Intel SYCL), 'npu' (Intel NPU), 'vulkan' (Generic AMD/Nvidia), 'cpu'
+  accelerator: "gpu"
+  gpu_index: 0
+  memory_limit: 8192
+  shm_size: 4096
+  keep_alive: "24h"
+  debug_mode: true
+schema:
+  accelerator: list(gpu|npu|vulkan|cpu)
+  gpu_index: int(0,4)           # Support for multi-GPU systems
+  memory_limit: int(1024,32768) # Hard container RAM limit
+  shm_size: int(512,16384)      # Shared memory size (50% of limit recommended)
+  keep_alive: str
+  debug_mode: bool
