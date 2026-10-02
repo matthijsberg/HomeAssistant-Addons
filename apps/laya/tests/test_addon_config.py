@@ -18,10 +18,11 @@ def test_config_yaml_manifest():
 
     assert cfg["name"] == "Laya Router"
     assert cfg["slug"] == "laya"
-    assert cfg["version"] == "0.6.0"
+    assert cfg["version"] == "2.0.0"
     assert cfg["arch"] == ["amd64"]
     assert cfg["startup"] == "services"
     assert cfg["boot"] == "auto"
+    assert cfg.get("homeassistant_api") is True
 
     # Ingress checks
     assert cfg.get("ingress") is True

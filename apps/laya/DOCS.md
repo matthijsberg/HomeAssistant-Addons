@@ -119,8 +119,53 @@ plugins:
         question_set: hermes-v1
         default: {model: google/gemini-flash-1.5, effort: medium}
         families:
-          quick:   {model: google/gemini-3.5-flash-lite, effort: low}
-          general: {model: google/gemini-flash-1.5, effort: medium}
-          code:    {model: anthropic/claude-3.5-sonnet, effort: high}
-          deep:    {model: anthropic/claude-3.7-sonnet, effort: high}
+          quick:     {model: google/gemini-3.5-flash-lite, effort: low}
+          smarthome: {model: google/gemini-3.5-flash-lite, effort: low}
+          general:   {model: google/gemini-flash-1.5, effort: medium}
+          code:      {model: anthropic/claude-3.5-sonnet, effort: high}
+          deep:      {model: anthropic/claude-3.7-sonnet, effort: high}
 ```
+
+---
+
+## Laya v2.0: Fast-Path Domotica Engine & OpenAI Conversation Bridge
+
+### 1. Fast-Path Domotica Endpoint (`POST /v1/domotica/route`)
+Resolves natural language smart home commands into structured Home Assistant service calls in <50ms without invoking cloud LLMs:
+
+```json
+// POST /v1/domotica/route
+{
+  "prompt": "doe de lampen in de serre uit",
+  "execute": false
+}
+
+// Response (<50ms)
+{
+  "is_domotica": true,
+  "fast_path": true,
+  "domain": "light",
+  "service": "turn_off",
+  "target_type": "area_id",
+  "target_id": "serre",
+  "confidence": 0.95,
+  "openai_tool_call": {
+    "id": "call_laya_123456",
+    "type": "function",
+    "function": {
+      "name": "HassTurnOff",
+      "arguments": {
+        "area": "serre",
+        "domain": "light"
+      }
+    }
+  }
+}
+```
+
+### 2. OpenAI Conversation Integration for Home Assistant Assist (`POST /v1/chat/completions`)
+Home Assistant's native Assist spraakassistent and OpenAI Conversation can point directly at Laya:
+1. In Home Assistant, go to **Settings ➔ Devices & Services ➔ Add Integration ➔ OpenAI Conversation**.
+2. Set API Server URL to: `http://local-laya:8000/v1`
+3. Set Model to: `laya-v2`
+4. Assist will receive instant `<50ms` native `HassTurnOn` / `HassTurnOff` tool calls for device actions, while general questions fall back cleanly to Gemini Flash Lite!

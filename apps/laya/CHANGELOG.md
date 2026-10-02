@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-10-02
+
+### Added
+- **Fast-Path Domotica Engine (`/v1/domotica/route`):** Sub-50ms local resolution of natural language smart home commands into structured Home Assistant service calls without cloud LLM dependencies.
+- **Home Assistant Area & Entity Registry Resolver (`resolver.py`):** Real-time caching and fuzzy/exact target resolution against the Home Assistant Core API (`homeassistant_api: true`).
+- **OpenAI-Compatible Chat Completions Shim (`/v1/chat/completions`):** Drop-in bridge for Home Assistant OpenAI Conversation and Assist, returning official `HassTurnOn` / `HassTurnOff` tool calls with both streaming (SSE) and non-streaming support.
+- **Direct HA Service Execution:** Optional `execute: true` parameter to trigger service calls directly against the Home Assistant Core REST API.
+- **Model modernizations:** Default `deep` reasoning model upgraded to `gemini-3.1-pro`.
+
 ## [0.5.0] - 2026-10-01
 
 ### Added

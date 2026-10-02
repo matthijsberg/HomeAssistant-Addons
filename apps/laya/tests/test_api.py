@@ -164,3 +164,45 @@ def test_systemone_passthrough():
     data = response.json()
     assert "answers" in data
     assert "routing" in data
+
+
+def test_domotica_route_endpoint():
+    payload = {"prompt": "doe de lampen in de serre uit", "execute": False}
+    response = client.post("/v1/domotica/route", json=payload, headers=AUTH_HEADER)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["is_domotica"] is True
+    assert data["domain"] == "light"
+    assert data["service"] == "turn_off"
+    assert data["fast_path"] is True
+    assert "openai_tool_call" in data
+
+
+def test_chat_completions_tool_call():
+    payload = {
+        "model": "laya-v2",
+        "messages": [{"role": "user", "content": "doe de lampen in de woonkamer uit"}],
+        "tools": [{"type": "function", "function": {"name": "HassTurnOff"}}],
+        "stream": False,
+    }
+    response = client.post("/v1/chat/completions", json=payload, headers=AUTH_HEADER)
+    assert response.status_code == 200
+    data = response.json()
+    assert "choices" in data
+    assert len(data["choices"]) > 0
+    msg = data["choices"][0]["message"]
+    assert "tool_calls" in msg
+    assert msg["tool_calls"][0]["function"]["name"] in ("HassTurnOff", "HassTurnOn")
+
+
+def test_chat_completions_streaming():
+    payload = {
+        "model": "laya-v2",
+        "messages": [{"role": "user", "content": "zet het licht aan"}],
+        "stream": True,
+    }
+    response = client.post("/v1/chat/completions", json=payload, headers=AUTH_HEADER)
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    assert "data: " in response.text
+    assert "[DONE]" in response.text

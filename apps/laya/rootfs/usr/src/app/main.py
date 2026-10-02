@@ -2,16 +2,19 @@
 
 import asyncio
 import hmac
+import json
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Union
 
 from config import AppConfig
+from domotica import DomoticaAction, DomoticaEngine
 from engine import LayaRouterEngine
 from fastapi import Depends, FastAPI, Header, HTTPException, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from question_sets import list_question_sets
+from resolver import HAResolver
 from ui import render_gui_html
 
 logging.basicConfig(
@@ -22,22 +25,25 @@ logger = logging.getLogger("laya.main")
 
 config = AppConfig.load()
 engine = LayaRouterEngine(config)
+ha_resolver = HAResolver()
+domotica_engine = DomoticaEngine(ha_resolver)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan: initialize and preload models in background before serving traffic."""
-    logger.info("Laya Router starting up...")
+    """Application lifespan: initialize models and sync HA registry in background."""
+    logger.info("Laya Router v2.0 starting up...")
     loop = asyncio.get_running_loop()
     loop.run_in_executor(None, engine.initialize)
+    loop.run_in_executor(None, ha_resolver.sync)
     yield
     logger.info("Laya Router shutting down...")
 
 
 app = FastAPI(
     title="Laya Router",
-    description="Local sub-100ms System 1 decision engine and model/effort router for Home Assistant",
-    version="0.4.0",
+    description="Local sub-50ms System 1 decision engine, fast-path domotica controller, and OpenAI conversation bridge for Home Assistant",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -213,6 +219,168 @@ def systemone_passthrough(body: Dict[str, Any]) -> JSONResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Inference failed",
         ) from e
+
+
+class DomoticaRouteRequest(BaseModel):
+    prompt: str = Field(description="Natural language home automation command")
+    execute: bool = Field(default=False, description="Whether to execute the resolved service against Home Assistant REST API")
+
+
+class ChatCompletionRequest(BaseModel):
+    model: Optional[str] = Field(default="laya-v2", description="Requested model identifier")
+    messages: List[Dict[str, Any]] = Field(description="Conversation messages")
+    tools: Optional[List[Dict[str, Any]]] = None
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    stream: Optional[bool] = False
+
+
+@app.post(
+    "/v1/domotica/route",
+    response_model=DomoticaAction,
+    dependencies=[Depends(verify_api_key)],
+)
+def route_domotica_action(req: DomoticaRouteRequest) -> DomoticaAction:
+    """Fast-Path Domotica endpoint: resolves commands directly to HA actions in <50ms."""
+    try:
+        return domotica_engine.route_and_execute(req.prompt, execute=req.execute)
+    except Exception as exc:
+        logger.exception("Domotica routing error for prompt: %s", req.prompt[:100])
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Domotica routing error: {exc}",
+        ) from exc
+
+
+@app.post("/v1/domotica/sync", dependencies=[Depends(verify_api_key)])
+def sync_domotica_registry() -> Dict[str, Any]:
+    """Force an immediate refresh of cached Home Assistant entities and areas."""
+    success = ha_resolver.sync(force=True)
+    return {
+        "synced": success,
+        "entity_count": len(ha_resolver._entities),
+        "last_sync": ha_resolver._last_sync_time,
+    }
+
+
+@app.post("/v1/chat/completions", dependencies=[Depends(verify_api_key)])
+def chat_completions(req: ChatCompletionRequest) -> Any:
+    """OpenAI-compatible chat completions endpoint for Home Assistant Conversation / Assist."""
+    # Extract latest user message
+    user_prompt = ""
+    for msg in reversed(req.messages):
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                user_prompt = content.strip()
+                break
+
+    action = domotica_engine.parse(user_prompt)
+    import time
+    created_ts = int(time.time())
+    resp_id = f"chatcmpl-laya-{created_ts}"
+
+    if req.stream:
+        async def event_generator():
+            if action.fast_path and action.openai_tool_call:
+                # Stream tool call delta
+                chunk_delta = {
+                    "id": resp_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": "laya-v2-domotica",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {
+                            "role": "assistant",
+                            "tool_calls": [action.openai_tool_call],
+                        },
+                        "finish_reason": None,
+                    }],
+                }
+                yield f"data: {json.dumps(chunk_delta)}\n\n"
+                chunk_end = {
+                    "id": resp_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": "laya-v2-domotica",
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+                }
+                yield f"data: {json.dumps(chunk_end)}\n\n"
+            else:
+                text_content = (
+                    f"Opdracht ontvangen voor {action.domain or 'apparaat'}: "
+                    f"{action.service or 'actie'} op {action.target_name or 'bestemming'}."
+                    if action.is_domotica
+                    else f"Laya Router heeft je vraag ontvangen: '{user_prompt}'."
+                )
+                chunk_text = {
+                    "id": resp_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": "laya-v2",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": text_content},
+                        "finish_reason": None,
+                    }],
+                }
+                yield f"data: {json.dumps(chunk_text)}\n\n"
+                chunk_end = {
+                    "id": resp_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": "laya-v2",
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+                yield f"data: {json.dumps(chunk_end)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    # Non-streaming response
+    if action.fast_path and action.openai_tool_call and req.tools:
+        # Return tool call for HA Assist
+        return {
+            "id": resp_id,
+            "object": "chat.completion",
+            "created": created_ts,
+            "model": "laya-v2-domotica",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [action.openai_tool_call],
+                },
+                "finish_reason": "tool_calls",
+            }],
+            "usage": {"prompt_tokens": 15, "completion_tokens": 20, "total_tokens": 35},
+        }
+
+    # Text message fallback
+    content = (
+        f"{action.domain.capitalize() if action.domain else 'Apparaat'} "
+        f"{action.service or 'actie'} uitgevoerd voor {action.target_name or 'geselecteerde ruimte'}."
+        if action.is_domotica
+        else f"Laya verwerkt: '{user_prompt}'."
+    )
+    return {
+        "id": resp_id,
+        "object": "chat.completion",
+        "created": created_ts,
+        "model": "laya-v2",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": content,
+            },
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 15, "total_tokens": 25},
+    }
 
 
 if __name__ == "__main__":

@@ -1,12 +1,13 @@
 name: "Laya Router"
-description: "Local sub-100ms System 1 decision engine for Home Assistant, routing LLM prompts and reasoning effort across Gemini, LiteLLM, OpenRouter, and custom gateways"
-version: "0.6.0"
+description: "Local sub-50ms System 1 decision engine, fast-path domotica controller, and OpenAI conversation bridge for Home Assistant"
+version: "2.0.0"
 slug: "laya"
 url: "https://github.com/matthijsberg/HomeAssistant-Apps/tree/main/apps/laya"
 arch:
   - amd64
 startup: services
 boot: auto
+homeassistant_api: true
 ingress: true
 ingress_port: 8000
 ingress_panel: true
