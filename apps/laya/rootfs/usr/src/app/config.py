@@ -89,7 +89,7 @@ DEFAULT_FAMILIES: Dict[str, FamilyConfig] = {
     "deep": FamilyConfig(
         name="deep",
         criteria="hard reasoning where a wrong answer is costly: maths, finance, planning, comparing complex options",
-        model="gemini-2.5-pro",
+        model="gemini-3.1-pro",
         effort="high",
         max_tokens=8192,
         temperature=0.2,

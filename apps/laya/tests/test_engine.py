@@ -140,7 +140,7 @@ def test_engine_family_parameters_and_defaults():
     # Deep prompt: hypotheek berekenen
     deep_res = eng.route(prompt="Bereken de annuïtaire hypotheek voor 450k", recent_turns=[])
     assert deep_res["family"] == "deep"
-    assert deep_res["model"] == "gemini-2.5-pro"
+    assert deep_res["model"] == "gemini-3.1-pro"
     assert deep_res["effort"] in ("light", "normal", "deep")
     assert deep_res["reasoning_effort"] == "high"
     assert deep_res["max_tokens"] == 8192
