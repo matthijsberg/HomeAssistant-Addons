@@ -1,0 +1,797 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Open HEMS API",
+    "version": "0.92.52",
+    "description": "RESTful API for Open HEMS \u2014 Home Energy Management System with Clean Architecture, physical thermodynamic modeling, and dynamic spot market arbitrage.",
+    "contact": {
+      "name": "Open HEMS Core Team",
+      "url": "https://github.com/matthijsberg/ha-addon-open-hems"
+    },
+    "license": {
+      "name": "MIT",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8099",
+      "description": "Local Add-on HTTP Daemon"
+    },
+    {
+      "url": "http://172.30.33.10:8099",
+      "description": "Internal Docker Network Endpoint"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Schedule & Dispatch",
+      "description": "Single Source of Truth 24h quarter-hourly dispatch timeline and mode assignments"
+    },
+    {
+      "name": "Models & Forecasts",
+      "description": "Physical thermal models (DHW 350L tank, 2R1C space heating, unallocated household baseline)"
+    },
+    {
+      "name": "Analytics & History",
+      "description": "Historical telemetry, energy flows, market prices, and decision audit logs"
+    },
+    {
+      "name": "Devices & Actuators",
+      "description": "Physical hardware topology, device capabilities, and Home Assistant / MQTT mappings"
+    },
+    {
+      "name": "Infrastructure & Providers",
+      "description": "External connectivity to Home Assistant Core, InfluxDB, MQTT broker, and weather services"
+    },
+    {
+      "name": "Tariffs & Policies",
+      "description": "Dynamic electricity pricing contracts, regulatory taxes, and automated policy archetypes"
+    },
+    {
+      "name": "System & Health",
+      "description": "Core daemon health, data pipeline accumulator, and consistency verification"
+    }
+  ],
+  "paths": {
+    "/api/system/push-sensors": {
+      "post": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Push 24h rolling forecast and dispatch sensors to Home Assistant Core",
+        "description": "Publishes 24h rolling energy cost, consumption, solar production, HEMS savings, heat pump dispatch, and boiler target sensors directly into Home Assistant.",
+        "responses": {
+          "200": {
+            "description": "Sensors successfully published",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "success"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "results": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Get daemon system status and uptime",
+        "description": "Returns runtime state, memory usage, git version, and core component status.",
+        "responses": {
+          "200": {
+            "description": "System status details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "running"
+                    },
+                    "version": {
+                      "type": "string",
+                      "example": "0.92.52"
+                    },
+                    "uptime_seconds": {
+                      "type": "integer",
+                      "example": 14205
+                    },
+                    "active_profile": {
+                      "type": "string",
+                      "example": "matthijs"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health/consistency": {
+      "get": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Verify Single Source of Truth architectural consistency",
+        "description": "Checks that all presentation views, actuators, and model forecasts derive from the canonical PlanStore without divergence.",
+        "responses": {
+          "200": {
+            "description": "Consistency check passed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "healthy"
+                    },
+                    "sot_compliant": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "plan_age_seconds": {
+                      "type": "number",
+                      "example": 45.2
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pipeline/status": {
+      "get": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Get 60s telemetry ingestion pipeline status",
+        "description": "Returns accumulator state, buffer capacity, and last database flush timestamp.",
+        "responses": {
+          "200": {
+            "description": "Pipeline telemetry status"
+          }
+        }
+      }
+    },
+    "/api/schedule/chart-data": {
+      "get": {
+        "tags": [
+          "Schedule & Dispatch"
+        ],
+        "summary": "Get 24h quarter-hourly dispatch plan and energy flows",
+        "description": "Returns the single source of truth dispatch schedule, operating modes (forced_off, normal, forced_on, max_on), dynamic EPEX prices, solar forecast, and estimated costs.",
+        "parameters": [
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Timeline resolution (15m or 1h)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h"
+              ],
+              "default": "15m"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Quarter-hourly schedule and flows dataset"
+          }
+        }
+      }
+    },
+    "/api/schedule/recalculate": {
+      "post": {
+        "tags": [
+          "Schedule & Dispatch"
+        ],
+        "summary": "Force immediate replanning cycle",
+        "description": "Triggers a full recalculation of Layer 2 models, Layer 3 CentralPlanner, and publishes an updated plan to PlanStore.",
+        "responses": {
+          "200": {
+            "description": "Replanning initiated successfully"
+          }
+        }
+      }
+    },
+    "/api/model/storage-valuation": {
+      "get": {
+        "tags": [
+          "Models & Forecasts"
+        ],
+        "summary": "Get stored energy valuation for DHW and home battery",
+        "description": "Calculates the buying value and actual market value (vs current EPEX electricity price) for energy stored in DHW boilervat (usable above setpoint - 10°C) and home battery (usable above minimum SoC).",
+        "responses": {
+          "200": {
+            "description": "Storage valuation successfully calculated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/model/battery-status": {
+      "get": {
+        "tags": [
+          "Models & Forecasts"
+        ],
+        "summary": "Get 15 kWh electrochemical battery storage 24h/48h dispatch plan",
+        "description": "Returns state of charge trajectory (SoC % and kWh), charging/discharging power (kW), overlay operation windows (CHARGE_SOLAR, CHARGE_GRID, DISCHARGE_PEAK, DISCHARGE_BUFFER, HOLD_RESERVE), and financial savings calculated using multi-pass dynamic shadow pricing.",
+        "parameters": [
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Aggregation resolution (15m or 1h)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h"
+              ],
+              "default": "15m"
+            }
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "description": "Planning horizon (24h or 48h)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "24h",
+                "48h"
+              ],
+              "default": "24h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Battery dispatch schedule and state-of-charge trajectory"
+          }
+        }
+      }
+    },
+    "/api/model/dhw-status": {
+      "get": {
+        "tags": [
+          "Models & Forecasts"
+        ],
+        "summary": "Get DHW 350L thermal trajectory and daytime arbitrage",
+        "description": "Returns live tank temperature, simulated heated vs unheated trajectories, calibrated empirical startup transient and ramp rates (3.75 min/°C to 50°C, 4.30 min/°C in SG4 boost to 60°C), thermal demand in kWh_th and V40 equivalent liters, and 24h economic arbitrage decisions.",
+        "parameters": [
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Aggregation resolution (15m or 1h)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h"
+              ],
+              "default": "15m"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DHW thermodynamic status and arbitrage details"
+          }
+        }
+      }
+    },
+    "/api/model/heating-forecast": {
+      "get": {
+        "tags": [
+          "Models & Forecasts"
+        ],
+        "summary": "Get CV space heating 2R1C thermal model forecast",
+        "description": "Returns indoor temperature forecast, heating power demand, heat loss curve, and night-valley pre-heat recommendations.",
+        "parameters": [
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Resolution (15m or 1h)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h"
+              ],
+              "default": "15m"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Space heating forecast dataset"
+          }
+        }
+      }
+    },
+    "/api/model/parameter-history": {
+      "get": {
+        "tags": [
+          "Models & Forecasts"
+        ],
+        "summary": "Get model parameter adjustment and calibration history",
+        "description": "Returns chronological adjustment history, drift evolution, and timeline points for learned model parameters across timeframes (quarter, 30d, 1y, all).",
+        "parameters": [
+          {
+            "name": "parameter_id",
+            "in": "query",
+            "description": "Identifier of the model parameter (e.g. building_ua, c_wind, c_solar, night_baseload, floor_capacity, pv_yield_ratio)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "building_ua"
+            }
+          },
+          {
+            "name": "timeframe",
+            "in": "query",
+            "description": "Timeframe filter: 'quarter' (default, 90d), '30d', '1y', or 'all'",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "30d",
+                "quarter",
+                "90d",
+                "1y",
+                "all"
+              ],
+              "default": "quarter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Parameter adjustment history dataset"
+          }
+        }
+      }
+    },
+    "/api/analytics/power_producers": {
+      "get": {
+        "tags": [
+          "Analytics & History"
+        ],
+        "summary": "Get historical electrical power and energy flows",
+        "description": "Queries InfluxDB openhems database for solar generation, heat pump electricity, household consumption, and grid import/export.",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "description": "Lookback timeframe",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1h",
+                "6h",
+                "24h",
+                "48h",
+                "7d"
+              ],
+              "default": "24h"
+            }
+          },
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Bucket size",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h"
+              ],
+              "default": "1h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Historical power time-series data"
+          }
+        }
+      }
+    },
+    "/api/analytics/dhw_history": {
+      "get": {
+        "tags": [
+          "Analytics & History"
+        ],
+        "summary": "Get historical DHW tank temperature and thermal demand",
+        "description": "Queries InfluxDB openhems database for real 350L tank sensor readings (\u00b0C) and thermal energy delivered (kWh_th).",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "description": "Lookback timeframe",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "24h",
+                "48h",
+                "7d"
+              ],
+              "default": "24h"
+            }
+          },
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Bucket resolution",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h"
+              ],
+              "default": "15m"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "DHW historical temperature and kWh_th time-series"
+          }
+        }
+      }
+    },
+    "/api/analytics/battery_history": {
+      "get": {
+        "tags": [
+          "Analytics & History"
+        ],
+        "summary": "Get historical battery trajectory, power flows, and tariffs",
+        "description": "Returns historical battery State of Charge (%), charging/discharging powers (kW), dynamic EPEX tariffs, and net cost impacts.",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "description": "Lookback timeframe",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "24h",
+                "48h",
+                "7d"
+              ],
+              "default": "24h"
+            }
+          },
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Bucket resolution",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h"
+              ],
+              "default": "1h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Battery historical trajectory and power time-series"
+          }
+        }
+      }
+    },
+    "/api/analytics/plan_vs_actual": {
+      "get": {
+        "tags": [
+          "Analytics & History"
+        ],
+        "summary": "Get aligned plan vs actual time-series for solar, heat pump, and DHW",
+        "description": "Returns aligned historical datasets comparing actual telemetry against planned dispatch schedules, solar forecasts, and boiler runs.",
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "description": "Historical timeframe window: '24h', '48h', or '7d'",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "24h",
+                "48h",
+                "7d"
+              ],
+              "default": "24h"
+            }
+          },
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Time resolution bucket: '15m' or '1h'",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "15m",
+                "1h"
+              ],
+              "default": "15m"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aligned plan vs actual historical dataset"
+          }
+        }
+      }
+    },
+    "/api/analytics/decisions": {
+      "get": {
+        "tags": [
+          "Analytics & History"
+        ],
+        "summary": "Get full audit trail of dispatch decisions",
+        "description": "Returns chronological records of all operating decisions with input telemetry, physical constraints, pricing, and financial rationale.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum records to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Record offset for pagination",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of decision audit records"
+          }
+        }
+      }
+    },
+    "/api/devices": {
+      "get": {
+        "tags": [
+          "Devices & Actuators"
+        ],
+        "summary": "List all configured devices and capabilities",
+        "description": "Returns device catalog including heat pumps, solar inverters, grid meters, and home batteries with capability flags.",
+        "responses": {
+          "200": {
+            "description": "List of configured devices"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Devices & Actuators"
+        ],
+        "summary": "Create or update device definition",
+        "description": "Registers or updates a device, its capabilities (can_delay, is_thermal, etc.), and integration mappings.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "device_id",
+                  "device_type"
+                ],
+                "properties": {
+                  "device_id": {
+                    "type": "string",
+                    "example": "heatpump_daikin"
+                  },
+                  "name": {
+                    "type": "string",
+                    "example": "Daikin Altherma 3 H HT"
+                  },
+                  "device_type": {
+                    "type": "string",
+                    "enum": [
+                      "heatpump",
+                      "solar",
+                      "battery",
+                      "ev_charger",
+                      "smart_load"
+                    ]
+                  },
+                  "capabilities": {
+                    "type": "object",
+                    "properties": {
+                      "can_delay": {
+                        "type": "boolean"
+                      },
+                      "can_modulate": {
+                        "type": "boolean"
+                      },
+                      "can_store": {
+                        "type": "boolean"
+                      },
+                      "is_thermal": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "parent_device_id": {
+                    "type": "string",
+                    "description": "Optional parent heat source or system controller ID (e.g. daikin_heat_pump)"
+                  },
+                  "subsystems": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "List of attached child subsystem device IDs (e.g. ['dhw_tank'])"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Device registered successfully"
+          }
+        }
+      }
+    },
+    "/api/providers": {
+      "get": {
+        "tags": [
+          "Infrastructure & Providers"
+        ],
+        "summary": "Get external provider connection statuses",
+        "description": "Returns status of Home Assistant, InfluxDB, MQTT brokers, weather APIs, and dynamic tariff providers.",
+        "responses": {
+          "200": {
+            "description": "Provider status details"
+          }
+        }
+      }
+    },
+    "/api/tariffs": {
+      "get": {
+        "tags": [
+          "Tariffs & Policies"
+        ],
+        "summary": "Get active energy contract and tariff parameters",
+        "description": "Returns supplier markup, energy tax, feed-in compensation, and fixed monthly charges.",
+        "responses": {
+          "200": {
+            "description": "Current tariff configuration"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Tariffs & Policies"
+        ],
+        "summary": "Update dynamic tariff contract parameters",
+        "description": "Saves updated supplier markup, tax, and feed-in compensation rates.",
+        "responses": {
+          "200": {
+            "description": "Tariff parameters updated"
+          }
+        }
+      }
+    },
+    "/api/policies": {
+      "get": {
+        "tags": [
+          "Tariffs & Policies"
+        ],
+        "summary": "List automated scheduling policies",
+        "description": "Returns active policy rules such as peak avoidance, solar self-consumption optimization, and comfort limits.",
+        "responses": {
+          "200": {
+            "description": "Active policies array"
+          }
+        }
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Get system settings including DHW comfort margin",
+        "description": "Returns active baseload, solar cost, and DHW optimizer comfort margin settings.",
+        "responses": {
+          "200": {
+            "description": "Active settings object"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Update system settings including DHW comfort margin",
+        "description": "Updates baseload, solar cost, or DHW optimizer comfort margin mode and parameters.",
+        "responses": {
+          "200": {
+            "description": "Updated settings object"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/openapi.json": {
+      "get": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Download OpenAPI 3.1.0 JSON specification",
+        "description": "Returns the full machine-readable OpenAPI specification for client generation, API testing, and tooling integration.",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1.0 document",
+            "content": {
+              "application/json": {}
+            }
+          }
+        }
+      }
+    }
+  }
+}

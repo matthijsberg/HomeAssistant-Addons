@@ -1,0 +1,80 @@
+{
+  "profile_id": "daikin_altherma_3h_ht_18kw",
+  "name": "Daikin Altherma 3 H HT (18 kW)",
+  "manufacturer": "Daikin",
+  "category": "heat_pump",
+  "capabilities": [
+    "can_modulate",
+    "can_delay",
+    "is_thermal",
+    "has_modulation_floor",
+    "has_hydraulic_interlock",
+    "autonomous_reheat"
+  ],
+  "physical_specs": {
+    "nominal_power_w": 2720,
+    "max_power_w": 3800,
+    "modulation_floor_w": 950,
+    "nominal_thermal_kw": 18.0,
+    "min_runtime_minutes": 20,
+    "min_dwell_minutes": 15
+  },
+  "subsystems": [
+    {
+      "id": "space_heating",
+      "name": "CV Vloerverwarming",
+      "type": "building_thermal_mass",
+      "parameters": {
+        "modulation_floor_w": 950,
+        "floor_lag_hours": 3.5,
+        "heating_curve_lwt_min_c": 33.0,
+        "heating_curve_lwt_max_c": 35.0
+      }
+    },
+    {
+      "id": "dhw_tank",
+      "name": "Warm Tapwatervat (OEG 350L SWW)",
+      "type": "thermal_storage",
+      "parameters": {
+        "volume_liters": 350,
+        "target_temp_c": 50.0,
+        "boost_temp_c": 60.0,
+        "emergency_reheat_c": 38.0,
+        "deadband_reheat_c": 40.0,
+        "reheat_mode": "daikin_system_setting"
+      }
+    }
+  ],
+  "control_interface": {
+    "type": "homeassistant",
+    "supported_modes": [
+      "normal",
+      "forced_off",
+      "advised_on",
+      "forced_on",
+      "max_on"
+    ],
+    "telemetry_mapping": {
+      "power_w": "sensor.warmtepomp_power",
+      "compressor_active": "binary_sensor.hc_mode_compressor",
+      "dhw_demand": "binary_sensor.hc_dhw_dhw_demand",
+      "dhw_tank_temp_c": "sensor.hc_dhw_temperature_r5t_dhw_tank"
+    },
+    "command_mapping": {
+      "sg_mode": "input_select.warmtepomp_smart_grid_modus",
+      "cv_master_switch": "switch.hc_mode_altherma_on",
+      "dhw_climate": "climate.hc_dhw_dhw_setpoint"
+    }
+  },
+  "quirks": {
+    "sg_ready_states": {
+      "SG1": "Spitsblok (s10=off, s11=on)",
+      "SG2": "Normaal (s10=off, s11=off)",
+      "SG3": "Pre-heat (s10=on, s11=off)",
+      "SG4": "DHW Boost (s10=on, s11=on)"
+    },
+    "reheat_mode_default": "daikin_system_setting",
+    "fieldsetting_hysteresis_c": 10.0,
+    "buh_electric_element_kw": 9.0
+  }
+}

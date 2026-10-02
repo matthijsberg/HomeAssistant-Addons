@@ -1,0 +1,42 @@
+{
+  "profile_id": "generic_ev_charger",
+  "name": "EV Laadpaal (OCPP / Easee / Alfen)",
+  "manufacturer": "Generic",
+  "category": "ev_charger",
+  "capabilities": [
+    "can_delay",
+    "can_modulate",
+    "has_deadline",
+    "has_minimum_activation_power"
+  ],
+  "physical_specs": {
+    "nominal_power_w": 11000,
+    "max_power_w": 11000,
+    "min_activation_power_w": 4140,
+    "min_activation_current_amps": 6.0,
+    "max_current_amps": 16.0,
+    "phases": 3
+  },
+  "control_interface": {
+    "type": "homeassistant",
+    "supported_modes": [
+      "solar_only",
+      "fast_charge",
+      "scheduled_departure",
+      "paused"
+    ],
+    "telemetry_mapping": {
+      "power_w": "sensor.ev_charger_power",
+      "energy_kwh": "sensor.ev_charger_energy",
+      "cable_connected": "binary_sensor.ev_cable_connected"
+    },
+    "command_mapping": {
+      "charge_current_limit": "number.ev_charger_current_limit",
+      "charge_enable": "switch.ev_charger_enabled"
+    }
+  },
+  "quirks": {
+    "iec_61851_min_amps": 6.0,
+    "pause_dwell_seconds": 60
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "profile_id": "solaredge_solar_inverter",
+  "name": "Zonnepanelen (SolarEdge / SunSpec Modbus)",
+  "manufacturer": "SolarEdge",
+  "category": "solar_inverter",
+  "capabilities": [
+    "can_export",
+    "can_curtail"
+  ],
+  "physical_specs": {
+    "nominal_power_w": 5500,
+    "max_power_w": 5500,
+    "roundtrip_efficiency": 0.97
+  },
+  "control_interface": {
+    "type": "mqtt",
+    "supported_modes": [
+      "maximum_generation",
+      "curtailed",
+      "zero_feedin"
+    ],
+    "telemetry_mapping": {
+      "power_w": "mbmd/inepro1-103/Power"
+    },
+    "command_mapping": {
+      "curtail_limit_w": "solaredge/control/max_power"
+    }
+  },
+  "quirks": {
+    "negative_price_curtailment_default": true,
+    "ramp_rate_limit_w_per_sec": 500
+  }
+}

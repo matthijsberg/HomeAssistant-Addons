@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "Open HEMS Canonical Color Theme",
+  "version": "1.0.0",
+  "description": "Centrale kleurendefinities voor alle energiestromen, meetboxen, grafieken en apparaattypen in Open HEMS.",
+  "metrics": {
+    "zonnepanelen": {
+      "id": "zonnepanelen",
+      "label": "Zonnepanelen",
+      "hex": "#EAB308",
+      "rgb": "234, 179, 8",
+      "tailwind_pill": "bg-yellow-500",
+      "tailwind_text": "text-yellow-400",
+      "tailwind_cost": "text-yellow-500/90",
+      "chart_fill": "rgba(234, 179, 8, 0.55)",
+      "chart_border": "#EAB308",
+      "polarity": "negative",
+      "description": "Zonneproductie onder de horizontale as (< 0 kW)"
+    },
+    "teruglevering": {
+      "id": "teruglevering",
+      "label": "Teruglevering",
+      "hex": "#10B981",
+      "rgb": "16, 185, 129",
+      "tailwind_pill": "bg-emerald-500",
+      "tailwind_text": "text-emerald-400",
+      "tailwind_cost": "text-emerald-500/90",
+      "chart_fill": "rgba(16, 185, 129, 0.45)",
+      "chart_border": "#10B981",
+      "polarity": "negative",
+      "description": "Nette levering aan het net (< 0 kW)"
+    },
+    "afname": {
+      "id": "afname",
+      "label": "Afname",
+      "hex": "#EF4444",
+      "rgb": "239, 68, 68",
+      "tailwind_pill": "bg-red-500",
+      "tailwind_text": "text-red-400",
+      "tailwind_cost": "text-red-500/90",
+      "chart_fill": "rgba(239, 68, 68, 0.45)",
+      "chart_border": "#EF4444",
+      "polarity": "positive",
+      "description": "Netafname van het net (> 0 kW)"
+    },
+    "totaal_opgewekt": {
+      "id": "totaal_opgewekt",
+      "label": "Totaal opgewekt",
+      "hex": "#84CC16",
+      "rgb": "132, 204, 22",
+      "tailwind_pill": "bg-lime-500",
+      "tailwind_text": "text-lime-400",
+      "tailwind_cost": "text-lime-500/90",
+      "chart_fill": "rgba(132, 204, 22, 0.45)",
+      "chart_border": "#84CC16",
+      "polarity": "negative",
+      "description": "Totale zonne- en hernieuwbare opwek"
+    },
+    "opgewekt_gebruikt": {
+      "id": "opgewekt_gebruikt",
+      "label": "Opgewekt Gebruikt",
+      "hex": "#06B6D4",
+      "rgb": "6, 182, 212",
+      "tailwind_pill": "bg-cyan-500",
+      "tailwind_text": "text-cyan-400",
+      "tailwind_cost": "text-cyan-500/90",
+      "chart_fill": "rgba(20, 184, 166, 0.25)",
+      "chart_border": "#14B8A6",
+      "polarity": "positive",
+      "description": "Direct eigenverbruik van zonnestroom"
+    },
+    "totaal_verbruik": {
+      "id": "totaal_verbruik",
+      "label": "Totaal Verbruik",
+      "hex": "#F97316",
+      "rgb": "249, 115, 22",
+      "tailwind_pill": "bg-orange-500",
+      "tailwind_text": "text-orange-400",
+      "tailwind_cost": "text-orange-500/90",
+      "chart_fill": "transparent",
+      "chart_border": "#F97316",
+      "polarity": "positive",
+      "description": "Werkelijk totaal huisverbruik (alle bronnen)"
+    }
+  },
+  "devices": {
+    "solar_pv": {
+      "name": "Zonnepanelen",
+      "hex": "#EAB308",
+      "chart_fill": "rgba(234, 179, 8, 0.55)",
+      "chart_border": "#EAB308",
+      "polarity": "negative"
+    },
+    "solar_inverter": {
+      "name": "Zonnepanelen (Omvormer)",
+      "hex": "#EAB308",
+      "chart_fill": "rgba(234, 179, 8, 0.55)",
+      "chart_border": "#EAB308",
+      "polarity": "negative"
+    },
+    "heat_pump": {
+      "name": "Daikin Warmtepomp",
+      "hex": "#3B82F6",
+      "chart_fill": "#3B82F6",
+      "chart_border": "#2563EB",
+      "polarity": "positive"
+    },
+    "space_heating": {
+      "name": "CV Verwarming",
+      "hex": "#6366F1",
+      "chart_fill": "#6366F1",
+      "chart_border": "#4F46E5",
+      "polarity": "positive"
+    },
+    "dhw_boiler": {
+      "name": "Warm Tapwatervat (SWW 350L)",
+      "hex": "#EC4899",
+      "chart_fill": "#EC4899",
+      "chart_border": "#DB2777",
+      "polarity": "positive"
+    },
+    "home_battery_charge": {
+      "name": "Thuisaccu (Laden)",
+      "hex": "#10B981",
+      "chart_fill": "#10B981",
+      "chart_border": "#059669",
+      "polarity": "positive"
+    },
+    "home_battery_discharge": {
+      "name": "Thuisaccu (Ontladen)",
+      "hex": "#14B8A6",
+      "chart_fill": "#14B8A6",
+      "chart_border": "#0D9488",
+      "polarity": "negative"
+    },
+    "unallocated": {
+      "name": "Ongedefinieerd Verbruik (7x24)",
+      "hex": "#3B82F6",
+      "chart_fill": "#3B82F6",
+      "chart_border": "#2563EB",
+      "polarity": "positive"
+    }
+  },
+  "overlays": {
+    "net_power": {
+      "name": "Verwacht Netto Verbruik",
+      "hex": "#EF4444",
+      "border_width": 3,
+      "point_color": "#EF4444"
+    },
+    "price": {
+      "name": "Stroomprijs (EPEX Spot)",
+      "hex": "#06B6D4",
+      "border_width": 1.5,
+      "border_dash": [4, 4]
+    }
+  }
+}

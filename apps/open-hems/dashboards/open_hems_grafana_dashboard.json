@@ -1,0 +1,252 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": "openhems",
+        "enable": true,
+        "hide": false,
+        "iconColor": "#A855F7",
+        "name": "Open HEMS Gebeurtenissen",
+        "query": "SELECT title, description, state_code FROM \"hems_annotations\" WHERE $timeFilter",
+        "tagsColumn": "state_code",
+        "textColumn": "description",
+        "titleColumn": "title"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "⚡ Real-Time Vermogensbalans & Energiestromen",
+      "type": "row"
+    },
+    {
+      "datasource": "openhems",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": true,
+            "axisColorMode": "text",
+            "axisLabel": "Vermogen (Watt)",
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "spanNulls": false
+          },
+          "unit": "watt"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Zonnepanelen (Opwek)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#F59E0B", "mode": "fixed" } },
+              { "id": "custom.fillOpacity", "value": 25 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Warmtepomp (Totaal)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#EC4899", "mode": "fixed" } },
+              { "id": "custom.fillOpacity", "value": 30 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Ongedefinieerd Verbruik" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#3B82F6", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Netto Afname (P1)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#EF4444", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 3 }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "last"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "groupBy": [{ "params": ["$__interval"], "type": "time" }, { "params": ["linear"], "type": "fill" }],
+          "measurement": "energy_telemetry",
+          "orderByTime": "ASC",
+          "policy": "default",
+          "query": "SELECT mean(\"solar_w\") AS \"Zonnepanelen (Opwek)\", mean(\"heatpump_w\") AS \"Warmtepomp (Totaal)\", mean(\"unallocated_w\") AS \"Ongedefinieerd Verbruik\", mean(\"p1_import_w\") - mean(\"p1_export_w\") AS \"Netto Afname (P1)\" FROM \"energy_telemetry\" WHERE \"source\" = 'canonical_accumulator' AND $timeFilter GROUP BY time($__interval) fill(linear)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Elektrische Balans (Zon, Warmtepomp, Huis & Netto P1)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "id": 101,
+      "title": "🚰 Thermische Opslag & Verwarming",
+      "type": "row"
+    },
+    {
+      "datasource": "openhems",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "Temperatuur (°C)",
+            "drawStyle": "line",
+            "lineWidth": 2.5,
+            "spanNulls": false
+          },
+          "unit": "celsius"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Boilervat 350L (Meting)" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#F59E0B", "mode": "fixed" } },
+              { "id": "custom.lineWidth", "value": 3 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Buitentemperatuur" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#38BDF8", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 7, "w": 16, "x": 0, "y": 10 },
+      "id": 2,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["min", "mean", "max", "last"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "query": "SELECT mean(\"temperature_c\") AS \"Boilervat 350L (Meting)\" FROM \"energy_telemetry\" WHERE \"device_id\" = 'dhw_tank' AND $timeFilter GROUP BY time($__interval) fill(linear); SELECT mean(\"temperature_c\") AS \"Buitentemperatuur\" FROM \"energy_telemetry\" WHERE \"device_id\" = 'outdoor_weather' AND $timeFilter GROUP BY time($__interval) fill(linear)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Boilervat & Omgevingstemperatuur",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "openhems",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "amber", "value": 40 },
+              { "color": "green", "value": 50 },
+              { "color": "purple", "value": 58 }
+            ]
+          },
+          "unit": "celsius"
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 10 },
+      "id": 3,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "query": "SELECT last(\"temperature_c\") AS \"Actuele Vattemperatuur\" FROM \"energy_telemetry\" WHERE \"device_id\" = 'dhw_tank' AND $timeFilter",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Actuele Boilertemperatuur",
+      "type": "gauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "id": 102,
+      "title": "💶 Dynamische Tarieven & Dispatch",
+      "type": "row"
+    },
+    {
+      "datasource": "openhems",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "Tarief (€/kWh)",
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2.5
+          },
+          "unit": "currencyEUR"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "EPEX All-in Tarief" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "#06B6D4", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 18 },
+      "id": 4,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["min", "mean", "max", "last"] },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "query": "SELECT mean(\"price_eur\") AS \"EPEX All-in Tarief\" FROM \"market_tariffs\" WHERE \"resolution\" = '15m' AND $timeFilter GROUP BY time($__interval) fill(previous)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "EPEX Dynamisch Elektriciteitstarief All-in (€/kWh)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["openhems", "energy", "heatpump", "daikin"],
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": { "refresh_intervals": ["10s", "30s", "1m", "5m"] },
+  "timezone": "Europe/Amsterdam",
+  "title": "Open HEMS — Energie & Warmtepomp Overzicht",
+  "version": 1
+}

@@ -1,0 +1,107 @@
+"""
+Layer 3: DHW Boiler & Heat Pump Specifications
+===============================================
+Encapsulates all physical properties of the domestic hot water (DHW) tank,
+heat capacity equations (C_vat = V * c_w / 3600), standby loss ratings,
+and compressor electrical/thermal operating capabilities.
+
+Guarantees full configurability: replacing the tank or heat pump model
+only requires updating config.json/heatpump_config.json without touching logic.
+"""
+
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
+from models.physics import calculate_dhw_cop, calculate_dhw_thermal_output_kw
+
+
+@dataclass
+class DhwTankSpec:
+    """
+    Physical and operational specifications for a DHW storage tank and heat pump.
+    """
+    volume_liters: float = 350.0
+    specific_heat_water: float = 4.184        # kJ / (kg * K)
+    standby_loss_50_kw: float = 0.0589         # kW standby heat loss at 50°C
+    standby_loss_60_kw: float = 0.0850         # kW standby heat loss at 60°C
+    heat_pump_electric_kw: float = 3.0         # Nominal compressor electrical power (3.0 kW)
+    solar_boost_electric_kw: float = 3.0       # Boost compressor electrical power (3.0 kW)
+    thermal_output_kw: float = 6.0             # Nominal thermal heat output (kW_th, 3.0 kW * 2.0 COP)
+    comfort_min_temp_c: float = 40.0           # Minimum acceptable shower temperature
+    target_setpoint_c: float = 50.0            # Nominal comfort target setpoint
+    boost_setpoint_c: float = 60.0             # Solar/economic buffer setpoint
+    auto_start_delta_c: float = 10.0           # Autonomous restart hysteresis below setpoint (setpoint - delta)
+    reheat_mode: str = "daikin_system_setting" # "daikin_system_setting" (autonomous) or "openhems_threshold"
+
+    @property
+    def thermal_capacity_kwh_per_k(self) -> float:
+        """
+        Thermodynamic heat capacity of the water mass in kWh_th per Kelvin:
+        C_tank = (Volume_liters * rho * c_w) / 3600  (with rho = 1.0 kg/L)
+        For 350L: (350 * 4.184) / 3600 = 0.40678 kWh/K
+        """
+        return round((self.volume_liters * self.specific_heat_water) / 3600.0, 4)
+
+    def get_cop(self, target_temp_c: float, outdoor_temp_c: Optional[float] = None, params: Optional[dict] = None) -> float:
+        """Returns empirical COP for given target temperature and optional outdoor temperature."""
+        return calculate_dhw_cop(target_temp_c, outdoor_temp_c=outdoor_temp_c, params=params)
+
+    def get_electric_power_kw(self, target_temp_c: float, outdoor_temp_c: Optional[float] = None, params: Optional[dict] = None) -> float:
+        """Returns dynamic compressor electrical draw (kW) as function of tank and outdoor temperature."""
+        from models.physics import dhw_electric_power_kw
+        return dhw_electric_power_kw(target_temp_c, t_outdoor_c=outdoor_temp_c, params=params)
+
+    def get_thermal_output_kw(self, target_temp_c: float, outdoor_temp_c: Optional[float] = None, params: Optional[dict] = None) -> float:
+        """
+        Thermodynamically consistent thermal output (kW_th): P_th = P_el * COP(target, outdoor_temp_c).
+        """
+        return calculate_dhw_thermal_output_kw(
+            target_temp_c,
+            heat_pump_electric_kw=self.heat_pump_electric_kw,
+            solar_boost_electric_kw=self.solar_boost_electric_kw,
+            outdoor_temp_c=outdoor_temp_c,
+            params=params,
+        )
+
+    @classmethod
+    def from_config(cls, cfg: Optional[Dict[str, Any]] = None, live_setpoint_c: Optional[float] = None) -> "DhwTankSpec":
+        """
+        Builds a DhwTankSpec directly from the loaded system configuration dictionary.
+        Priority: cfg['devices'] parameters -> legacy cfg['dhw_boiler'] -> defaults.
+        """
+        if not cfg:
+            return cls()
+
+        dev_params = {}
+        for d in cfg.get("devices", []):
+            if isinstance(d, dict) and (d.get("id") == "dhw_tank" or d.get("type") in ["dhw_boiler", "thermal_storage"]):
+                dev_params = d.get("parameters", {})
+                break
+
+        b_cfg = cfg.get("dhw_boiler", {})
+        vol = float(dev_params.get("volume_liters") or b_cfg.get("tank_volume_liters", 350.0))
+        sh = float(dev_params.get("specific_heat_water") or b_cfg.get("specific_heat_water", 4.184))
+        s50 = float(dev_params.get("standby_loss_50_kw") or b_cfg.get("standby_loss_50_kw", 0.0589))
+        s60 = float(dev_params.get("standby_loss_60_kw") or b_cfg.get("standby_loss_60_kw", 0.0850))
+        p_nom = float(dev_params.get("compressor_power_kw") or b_cfg.get("compressor_power_kw", 3.0))
+        p_boost = float(dev_params.get("solar_boost_power_kw") or b_cfg.get("solar_boost_power_kw", 3.0))
+        th_cap = float(dev_params.get("thermal_output_kw") or b_cfg.get("thermal_output_kw", 6.0))
+        t_comf = float(dev_params.get("comfort_min_temp_c") or b_cfg.get("min_comfort_temp_c", 40.0))
+        t_set = float(live_setpoint_c) if (live_setpoint_c is not None and 35.0 <= float(live_setpoint_c) <= 65.0) else float(dev_params.get("target_temp_c") or b_cfg.get("fallback_setpoint_temp", 50.0))
+        t_boost = float(dev_params.get("boost_temp_c") or b_cfg.get("boost_setpoint_temp", 60.0))
+        auto_delta = float(dev_params.get("auto_start_delta_c") or b_cfg.get("auto_start_delta_c", 10.0))
+        reheat_m = str(dev_params.get("reheat_mode") or b_cfg.get("reheat_mode", "daikin_system_setting"))
+
+        return cls(
+            volume_liters=vol,
+            specific_heat_water=sh,
+            standby_loss_50_kw=s50,
+            standby_loss_60_kw=s60,
+            heat_pump_electric_kw=p_nom,
+            solar_boost_electric_kw=p_boost,
+            thermal_output_kw=th_cap,
+            comfort_min_temp_c=t_comf,
+            target_setpoint_c=t_set,
+            boost_setpoint_c=t_boost,
+            auto_start_delta_c=auto_delta,
+            reheat_mode=reheat_m
+        )

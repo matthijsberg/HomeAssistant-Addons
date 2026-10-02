@@ -1,0 +1,82 @@
+{
+  "app": {
+    "title": "Open HEMS",
+    "subtitle": "Home Energy Management System",
+    "tagline": "Zelflerend, fysisch gekalibreerd energiemanagement"
+  },
+  "nav": {
+    "forecast": "Voorspelling",
+    "history": "Historie",
+    "models": "Modellen & Kalibratie",
+    "system": "Systeemstatus"
+  },
+  "common": {
+    "refresh": "Verversen",
+    "bars": "Staven",
+    "line": "Lijn",
+    "resolution_15m": "15 Min",
+    "resolution_1h": "1 Uur",
+    "cost": "Kosten",
+    "consumption": "Verbruik",
+    "solar": "Zon",
+    "battery": "Batterij",
+    "spits_block": "Piekblokkade",
+    "status": "Status",
+    "temperature": "Temperatuur",
+    "heating": "Verwarming",
+    "hot_water": "Warm Water",
+    "standby": "Standby",
+    "active": "Actief",
+    "savings": "Besparing"
+  },
+  "dhw": {
+    "box_title": "Buffer Efficiëntie: Optimale Boilertemperatuur & Horizon-Dekking",
+    "reasoning_title": "Dispatch-Redenering: Waarom & Tot Welke Temperatuur?",
+    "badge_night_planned": "Nachtlading Gepland ({start}–{end} tot {temp}°C)",
+    "badge_optimal_planned": "Optimale Lading ({temp}°C)",
+    "badge_solar_boost": "Zonnebuffer ({temp}°C)",
+    "badge_standby": "Afwachten (Vat dekt horizon)",
+    "night_reasoning_text": "Het vat is nu <strong>{current_temp}°C</strong>. Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat vanavond door de avondspits naar <strong>{evening_dip}°C</strong> (comfortabel gewaarborgd), maar koelt vannacht met ochtenddouches door naar <strong class='text-amber-300'>{morning_dip}°C</strong> (onder de 40°C comfortgrens).<br><br><strong>Besluit &amp; Doeltemperatuur:</strong> Om het ochtendcomfort te garanderen is een nachtlading naar <strong>{target_temp}°C</strong> gepland om <strong>{start}–{end}</strong> in het goedkoopste nachtdal (~€{cost} tegen daltarief, COP ~3.30). Overdag forceren naar 60°C is niet nodig en vermeden: dit bespaart stroom door de veel hogere COP en 55% minder stilstandsverlies.",
+    "day_reasoning_text": "Het vat is nu <strong>{current_temp}°C</strong>. Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) daalt het vat tijdens de avondspits naar <strong>{evening_dip}°C</strong> (richting de comfortdrempel).<br><br><strong>Besluit &amp; Doeltemperatuur:</strong> Een gerichte lading naar <strong>{target_temp}°C</strong> is gepland om <strong>{start}–{end}</strong> ({blend}). Deze berekende doeltemperatuur dekt de warmtevraag en stilstand ruim af tot het volgende laadvenster zonder nachtrun. Doortrekken naar 60°C is vermeden wegens lagere COP (2.05) en extra stilstandsverlies (besparing: ~€{savings}).",
+    "standby_reasoning_text": "Het vat is nu <strong>{current_temp}°C</strong>. Zonder bijwarmen (<span class='text-slate-400 font-mono'>grijze lijn</span>) blijft het vat tijdens zowel de avondspits ({evening_dip}°C) als morgenochtend ({morning_dip}°C) ruim boven de 40°C comfortgrens.<br><br><strong>Besluit &amp; Doeltemperatuur:</strong> Standby behouden (geen lading). Het vat dekt de volledige horizon tot het volgende goedkope laadvenster op eigen buffer.",
+    "bullet_vat_spits_night": "Vatverloop: Spitsdip {evening_dip}°C (veilig), ochtenddip zonder lading {morning_dip}°C (comfortrisico)",
+    "bullet_action_night": "Geplande actie: Nachtlading naar {target_temp}°C om {start}–{end} (~€{cost} op daltarief)",
+    "bullet_vat_spits_risk": "Vatverloop: Zonder lading daalt vat naar {evening_dip}°C in spits",
+    "bullet_action_day": "Geplande actie: Lading naar {target_temp}°C om {start}–{end} (bespaart ~€{savings} t.o.v. 60°C)",
+    "bullet_vat_safe": "Vatverloop: Spits {evening_dip}°C, ochtenddip {morning_dip}°C (comfort gegarandeerd)",
+    "bullet_action_standby": "Geplande actie: Standby (0 kWh verbruik, wachten op volgend venster)"
+  },
+  "charts": {
+    "expected_temp": "Verwacht (°C)",
+    "margin_p05_p95": "Marge (P05–P95)",
+    "unheated_temp": "Zonder Verwarming (°C)",
+    "comfort_threshold": "Comfort 40°C",
+    "target_temp": "Doel 50°C",
+    "heat_demand": "Warmtevraag (kWh)",
+    "unallocated_kw": "Onverdeeld Basisverbruik (kW)",
+    "boiler_kw": "Boiler Tapwater (kW)",
+    "heating_kw": "CV Ruimteverwarming (kW)",
+    "solar_kw": "Zonne-energie (kW)",
+    "net_power_kw": "Netto Vermogen (kW)",
+    "price_eur": "EPEX Inkoop (€/kWh)",
+    "export_price_eur": "EPEX Teruglevering (€/kWh)",
+    "tariffs_and_costs": "Tarieven & Kosten (€)"
+  },
+  "kpi": {
+    "costs_24h": "Kosten (24u)",
+    "solar_panels": "Zonnepanelen",
+    "hems_savings": "HEMS Besparing",
+    "heatpump": "Warmtepomp",
+    "costs_today": "Kosten Vandaag",
+    "solar_today": "Zonnepanelen Vandaag",
+    "savings_today": "Besparing Vandaag",
+    "heatpump_today": "Warmtepomp Vandaag",
+    "net": "netto",
+    "avg": "gem.",
+    "used": "benut",
+    "feedin": "retour",
+    "shifted": "verschoven naar dal/zon",
+    "avoided_peak": "uit spits gehouden",
+    "measured_scop": "Gemeten SCOP"
+  }
+}

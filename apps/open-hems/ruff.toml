@@ -1,0 +1,29 @@
+# Open HEMS - Ruff Configuration
+target-version = "py311"
+line-length = 140
+
+exclude = [
+    ".git",
+    ".pytest_cache",
+    "__pycache__",
+    "venv",
+    "web",
+]
+
+[lint]
+select = [
+    "F",   # Pyflakes (undefined names F821, unused imports F401, unbound locals F823)
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+]
+ignore = [
+    "E501", # Line too long (handled gracefully, line-length=140)
+    "E402", # Module level import not at top of file
+    "E701", # Multiple statements on one line (colon)
+    "E741", # Ambiguous variable name
+    "F841", # Local variable is assigned to but never used
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["F401", "F841", "F811"]
+"__init__.py" = ["F401"]
