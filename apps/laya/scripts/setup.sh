@@ -13,7 +13,7 @@ echo "   SCAFFOLDING & QUALITY VERIFICATION: ha-addon-laya            "
 echo "================================================================="
 
 echo -e "\n1. [Manifest Validation] Checking config.yaml, build.yaml, and translations..."
-python3 "${REPO_ROOT}/scripts/test_config.py"
+"${REPO_ROOT}/.venv/bin/python3" "${REPO_ROOT}/scripts/test_config.py"
 
 echo -e "\n2. [OKF v0.2 Validation] Checking Open Knowledge Format bundle..."
 bash "${REPO_ROOT}/scripts/validate_okf.sh"
@@ -30,7 +30,10 @@ done
 echo "✓ All bash scripts passed syntax checks!"
 
 echo -e "\n5. [Code Linting] Checking Python code style with ruff..."
-if command -v ruff &>/dev/null; then
+if [ -f "${REPO_ROOT}/.venv/bin/ruff" ]; then
+  "${REPO_ROOT}/.venv/bin/ruff" check "${REPO_ROOT}"
+  echo "✓ Ruff linting checks passed!"
+elif command -v ruff &>/dev/null; then
   ruff check "${REPO_ROOT}"
   echo "✓ Ruff linting checks passed!"
 else
@@ -39,7 +42,7 @@ fi
 
 echo -e "\n6. [Pytest Suite] Running automated unit & regression tests..."
 cd "${REPO_ROOT}"
-pytest tests/ -v
+"${REPO_ROOT}/.venv/bin/pytest" tests/ -v
 
 echo -e "\n================================================================="
 echo "✓ ALL QUALITY GATES PASSED! Scaffolding is verified."

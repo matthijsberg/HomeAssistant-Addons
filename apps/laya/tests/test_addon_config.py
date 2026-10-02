@@ -18,7 +18,7 @@ def test_config_yaml_manifest():
 
     assert cfg["name"] == "Laya Router"
     assert cfg["slug"] == "laya"
-    assert cfg["version"] == "0.5.0"
+    assert cfg["version"] == "0.6.0"
     assert cfg["arch"] == ["amd64"]
     assert cfg["startup"] == "services"
     assert cfg["boot"] == "auto"
@@ -50,6 +50,8 @@ def test_config_yaml_manifest():
     assert "families" in opts
     families_list = opts.get("families", [])
     assert any(f.get("name") == "quick" and f.get("model") == "gemini-3.5-flash-lite" for f in families_list)
+    assert any(f.get("name") == "smarthome" and f.get("needs_memory") is False for f in families_list)
+    assert any(f.get("name") == "quick" and f.get("allowed_tools") == [] for f in families_list)
     assert any(f.get("name") == "deep" and f.get("thinking_budget") is None for f in families_list)
 
     # Schema check

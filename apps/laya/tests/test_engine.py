@@ -105,8 +105,8 @@ def test_engine_family_parameters_and_defaults():
     eng = LayaRouterEngine(cfg)
     eng.initialize()
 
-    # Quick prompt: lampen uit
-    quick_res = eng.route(prompt="Zet de lampen in de woonkamer uit", recent_turns=[])
+    # Quick prompt: algemene vraag zonder tools
+    quick_res = eng.route(prompt="Wat is de hoofdstad van Australië", recent_turns=[])
     assert quick_res["family"] == "quick"
     assert quick_res["model"] == "gemini-3.5-flash-lite"
     assert quick_res["effort"] in ("light", "normal", "deep")
@@ -114,6 +114,17 @@ def test_engine_family_parameters_and_defaults():
     assert quick_res["max_tokens"] == 1024
     assert quick_res["temperature"] == 0.2
     assert quick_res["thinking_budget"] == 0
+    assert quick_res["needs_memory"] is False
+    assert quick_res["allowed_tools"] == []
+
+    # Smarthome prompt: lampen uit
+    sh_res = eng.route(prompt="Zet de lampen in de woonkamer uit", recent_turns=[])
+    assert sh_res["family"] == "smarthome"
+    assert sh_res["model"] == "gemini-3.5-flash-lite"
+    assert sh_res["effort"] in ("light", "normal", "deep")
+    assert sh_res["reasoning_effort"] == "low"
+    assert sh_res["needs_memory"] is False
+    assert "ha_call_service" in sh_res["allowed_tools"]
 
     # Code prompt: python script
     code_res = eng.route(prompt="Schrijf een Python script om data te filteren", recent_turns=[])

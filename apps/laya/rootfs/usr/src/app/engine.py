@@ -48,13 +48,16 @@ class MockRouter:
             criteria = q_spec.get("criteria", {})
 
             if q_id == "task_family":
-                if any(w in prompt_text for w in ["code", "script", "python", "bug", "docker", "yaml", "config", "test"]):
+                if any(w in prompt_text for w in ["lamp", "licht", "verwarming", "thermostaat", "schakel", "scene"]):
+                    chosen = "smarthome"
+                    conf = 0.92
+                elif any(w in prompt_text for w in ["code", "script", "python", "bug", "docker", "yaml", "config", "test"]):
                     chosen = "code"
                     conf = 0.88
                 elif any(w in prompt_text for w in ["math", "bereken", "finance", "plan", "hypotheek", "optie", "kosten", "invest"]):
                     chosen = "deep"
                     conf = 0.84
-                elif any(w in prompt_text for w in ["hallo", "hoi", "hey", "weer", "tijd", "lamp", "aan", "uit", "wat is 1+1"]):
+                elif any(w in prompt_text for w in ["hallo", "hoi", "hey", "weer", "tijd", "hoofdstad", "wat is"]):
                     chosen = "quick"
                     conf = 0.91
                 else:
@@ -77,17 +80,6 @@ class MockRouter:
                 answers[q_id] = {
                     "choice": chosen,
                     "answer_confidence": conf,
-                }
-            elif q_id == "task_family" and isinstance(criteria, dict):
-                choice = next(iter(criteria.keys())) if criteria else "general"
-                prompt_lower = prompt_text.lower()
-                for key, _desc in criteria.items():
-                    if key in prompt_lower or (key == "code" and any(w in prompt_lower for w in ["python", "script", "code"])) or (key == "deep" and any(w in prompt_lower for w in ["hypotheek", "rente", "math", "dcf", "npv"])) or (key == "quick" and any(w in prompt_lower for w in ["lamp", "licht", "weer", "tijd"])):
-                        choice = key
-                        break
-                answers[q_id] = {
-                    "choice": choice,
-                    "answer_confidence": 0.88,
                 }
             elif q_type == "choice":
                 default_choice = next(iter(criteria.keys())) if isinstance(criteria, dict) and criteria else "unknown"
@@ -305,6 +297,10 @@ class LayaRouterEngine:
             payload["temperature"] = fam_cfg.temperature
         if fam_cfg.thinking_budget is not None:
             payload["thinking_budget"] = fam_cfg.thinking_budget
+        if fam_cfg.needs_memory is not None:
+            payload["needs_memory"] = fam_cfg.needs_memory
+        if fam_cfg.allowed_tools is not None:
+            payload["allowed_tools"] = fam_cfg.allowed_tools
 
         return payload
 

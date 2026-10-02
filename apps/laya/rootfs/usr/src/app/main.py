@@ -112,6 +112,8 @@ class RouteResponse(BaseModel):
     max_tokens: Optional[int] = Field(default=None, description="Maximum output token budget for the model")
     temperature: Optional[float] = Field(default=None, description="Sampling temperature override")
     thinking_budget: Optional[int] = Field(default=None, description="Internal reasoning thinking token budget")
+    needs_memory: Optional[bool] = Field(default=None, description="Whether memory context lookup is required")
+    allowed_tools: Optional[List[str]] = Field(default=None, description="Whitelisted tool identifiers for this turn")
 
 
 @app.get("/health")

@@ -18,6 +18,8 @@ class FamilyConfig:
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
     thinking_budget: Optional[int] = None
+    needs_memory: Optional[bool] = None
+    allowed_tools: Optional[List[str]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize configuration excluding None values for sparse payload delivery."""
@@ -34,18 +36,35 @@ class FamilyConfig:
             res["temperature"] = self.temperature
         if self.thinking_budget is not None:
             res["thinking_budget"] = self.thinking_budget
+        if self.needs_memory is not None:
+            res["needs_memory"] = self.needs_memory
+        if self.allowed_tools is not None:
+            res["allowed_tools"] = self.allowed_tools
         return res
 
 
 DEFAULT_FAMILIES: Dict[str, FamilyConfig] = {
     "quick": FamilyConfig(
         name="quick",
-        criteria="small talk, greetings, simple facts, unit conversions, one-step home control commands",
+        criteria="small talk, greetings, simple facts, unit conversions, general knowledge questions without tools",
         model="gemini-3.5-flash-lite",
         effort="low",
         max_tokens=1024,
         temperature=0.2,
         thinking_budget=0,
+        needs_memory=False,
+        allowed_tools=[],
+    ),
+    "smarthome": FamilyConfig(
+        name="smarthome",
+        criteria="home automation control, turning lights on or off, thermostat temperature, switches, scenes, checking Home Assistant entities or sensor states",
+        model="gemini-3.5-flash-lite",
+        effort="low",
+        max_tokens=1024,
+        temperature=0.0,
+        thinking_budget=0,
+        needs_memory=False,
+        allowed_tools=["ha_list_entities", "ha_get_state", "ha_call_service", "ha_list_services", "homeassistant*"],
     ),
     "general": FamilyConfig(
         name="general",
@@ -55,6 +74,7 @@ DEFAULT_FAMILIES: Dict[str, FamilyConfig] = {
         max_tokens=4096,
         temperature=0.7,
         thinking_budget=None,
+        needs_memory=True,
     ),
     "code": FamilyConfig(
         name="code",
@@ -64,6 +84,7 @@ DEFAULT_FAMILIES: Dict[str, FamilyConfig] = {
         max_tokens=8192,
         temperature=0.1,
         thinking_budget=None,
+        needs_memory=True,
     ),
     "deep": FamilyConfig(
         name="deep",
@@ -73,6 +94,7 @@ DEFAULT_FAMILIES: Dict[str, FamilyConfig] = {
         max_tokens=8192,
         temperature=0.2,
         thinking_budget=None,
+        needs_memory=True,
     ),
 }
 
@@ -225,6 +247,17 @@ class AppConfig:
             for item in raw_families:
                 if isinstance(item, dict) and "name" in item:
                     name = str(item["name"]).strip().lower()
+                    tools_raw = item.get("allowed_tools")
+                    tools_list = None
+                    if isinstance(tools_raw, list):
+                        tools_list = [str(t).strip() for t in tools_raw]
+                    elif isinstance(tools_raw, str):
+                        tools_list = [t.strip() for t in tools_raw.split(",") if t.strip()]
+
+                    needs_mem = item.get("needs_memory")
+                    if isinstance(needs_mem, str):
+                        needs_mem = needs_mem.lower() in ("true", "1", "yes")
+
                     loaded_families[name] = FamilyConfig(
                         name=name,
                         criteria=str(item.get("criteria", "")).strip(),
@@ -233,11 +266,24 @@ class AppConfig:
                         max_tokens=int(item["max_tokens"]) if item.get("max_tokens") is not None else None,
                         temperature=float(item["temperature"]) if item.get("temperature") is not None else None,
                         thinking_budget=int(item["thinking_budget"]) if item.get("thinking_budget") is not None else None,
+                        needs_memory=needs_mem if needs_mem is not None else None,
+                        allowed_tools=tools_list,
                     )
         elif isinstance(raw_families, dict):
             for name, item in raw_families.items():
                 if isinstance(item, dict):
                     fam_name = str(name).strip().lower()
+                    tools_raw = item.get("allowed_tools")
+                    tools_list = None
+                    if isinstance(tools_raw, list):
+                        tools_list = [str(t).strip() for t in tools_raw]
+                    elif isinstance(tools_raw, str):
+                        tools_list = [t.strip() for t in tools_raw.split(",") if t.strip()]
+
+                    needs_mem = item.get("needs_memory")
+                    if isinstance(needs_mem, str):
+                        needs_mem = needs_mem.lower() in ("true", "1", "yes")
+
                     loaded_families[fam_name] = FamilyConfig(
                         name=fam_name,
                         criteria=str(item.get("criteria", "")).strip(),
@@ -246,6 +292,8 @@ class AppConfig:
                         max_tokens=int(item["max_tokens"]) if item.get("max_tokens") is not None else None,
                         temperature=float(item["temperature"]) if item.get("temperature") is not None else None,
                         thinking_budget=int(item["thinking_budget"]) if item.get("thinking_budget") is not None else None,
+                        needs_memory=needs_mem if needs_mem is not None else None,
+                        allowed_tools=tools_list,
                     )
 
         # Fallback to defaults or legacy model_* keys if no families provided
