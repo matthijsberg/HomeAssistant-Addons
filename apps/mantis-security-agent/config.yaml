@@ -1,0 +1,86 @@
+name: "Mantis Security Agent"
+description: "Sandboxed AI code & configuration security auditing service with MCP interface"
+version: "1.0.0-dev.1"
+slug: "mantis_security_agent"
+init: false
+arch:
+  - amd64
+url: "https://github.com/matthijsberg/mantis-security-agent"
+panel_icon: "mdi:shield-bug"
+panel_title: "Mantis Security"
+ingress: true
+ingress_port: 8000
+homeassistant_api: false
+host_network: false
+privileged: []
+environment:
+  TZ: "Europe/Amsterdam"
+  PYTHONUNBUFFERED: "1"
+startup: services
+boot: auto
+map:
+  - addons:ro
+  - homeassistant_config:ro
+  - all_addon_configs:ro
+  - share:ro
+options:
+  bearer_token: ""
+  providers:
+    gemini:
+      api_key: ""
+    anthropic:
+      api_key: ""
+    openai:
+      api_key: ""
+    ollama:
+      base_url: "http://172.30.32.1:11434"
+    openai_compatible:
+      base_url: ""
+      api_key: ""
+  defaults:
+    triage:
+      provider: "gemini"
+      model: "gemini-2.5-flash"
+    deep:
+      provider: "gemini"
+      model: "gemini-2.5-pro"
+  budgets:
+    max_tokens_per_job: 2000000
+    max_cost_eur_per_job: 5.0
+    max_cost_eur_per_day: 15.0
+  ha_external_url: "https://hass.b3rg.nl:8123"
+  confirm_wait_seconds: 60
+  allow_list:
+    - "/addons"
+    - "/homeassistant"
+    - "/addon_configs"
+    - "/share/projects"
+schema:
+  bearer_token: "str?"
+  providers:
+    gemini:
+      api_key: "password?"
+    anthropic:
+      api_key: "password?"
+    openai:
+      api_key: "password?"
+    ollama:
+      base_url: "str?"
+    openai_compatible:
+      base_url: "str?"
+      api_key: "password?"
+  defaults:
+    triage:
+      provider: "str"
+      model: "str"
+    deep:
+      provider: "str"
+      model: "str"
+  budgets:
+    max_tokens_per_job: "int"
+    max_cost_eur_per_job: "float"
+    max_cost_eur_per_day: "float"
+  ha_external_url: "str"
+  confirm_wait_seconds: "int"
+  allow_list:
+    - "str"

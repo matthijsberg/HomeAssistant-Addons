@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mantis Security Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #0B0F17; color: #E2E8F0; font-family: ui-sans-serif, system-ui, sans-serif; }
+    .glass-panel { background: rgba(17, 24, 39, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(55, 65, 81, 0.8); }
+    .badge-critical { background: rgba(239, 68, 68, 0.2); border: 1px solid #EF4444; color: #FCA5A5; }
+    .badge-high { background: rgba(249, 115, 22, 0.2); border: 1px solid #F97316; color: #FDBA74; }
+    .badge-medium { background: rgba(234, 179, 8, 0.2); border: 1px solid #EAB308; color: #FDE047; }
+    .badge-clean { background: rgba(34, 197, 94, 0.2); border: 1px solid #22C55E; color: #86EFAC; }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+  <div class="max-w-6xl mx-auto space-y-6">
+
+    <!-- Header -->
+    <header class="glass-panel rounded-2xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div class="flex items-center space-x-4">
+        <div class="w-12 h-12 rounded-xl bg-indigo-950 border border-indigo-500/50 flex items-center justify-center text-2xl">
+          🛡️
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-white tracking-wide flex items-center gap-2">
+            Mantis Security Agent
+            <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Active</span>
+          </h1>
+          <p class="text-xs text-slate-400">Sandboxed AI code & configuration security auditor with MCP</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <button onclick="refreshData()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 border border-slate-700 transition">
+          🔄 Verversen
+        </button>
+      </div>
+    </header>
+
+    <!-- Pending Approvals Section -->
+    <section class="glass-panel rounded-2xl p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-white flex items-center gap-2">
+          <span>⚠️ Egress Goedkeuringen (Wachtend)</span>
+          <span id="pending-count" class="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">0</span>
+        </h2>
+      </div>
+      <div id="pending-approvals-list" class="space-y-4">
+        <p class="text-sm text-slate-500 italic py-2">Geen openstaande goedkeuringsverzoeken.</p>
+      </div>
+    </section>
+
+    <!-- Recent Audits & Diff Reviews Section -->
+    <section class="glass-panel rounded-2xl p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-white">Recente Audits & Code Reviews</h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-slate-300">
+          <thead class="text-xs uppercase bg-slate-900/60 text-slate-400 border-b border-slate-800">
+            <tr>
+              <th class="py-3 px-4">Job ID</th>
+              <th class="py-3 px-4">Type</th>
+              <th class="py-3 px-4">Doel</th>
+              <th class="py-3 px-4">Status</th>
+              <th class="py-3 px-4">Bevindingen</th>
+              <th class="py-3 px-4">Kosten</th>
+              <th class="py-3 px-4">Tijdstip</th>
+              <th class="py-3 px-4 text-right">Actie</th>
+            </tr>
+          </thead>
+          <tbody id="jobs-table-body" class="divide-y divide-slate-800">
+            <tr><td colspan="8" class="py-4 text-center text-slate-500 italic">Laden...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Modal for Detailed Report -->
+    <div id="report-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+      <div class="glass-panel rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+        <div class="p-5 border-b border-slate-800 flex items-center justify-between">
+          <h3 id="modal-title" class="text-lg font-bold text-white">Veiligheidsrapport</h3>
+          <button onclick="closeModal()" class="text-slate-400 hover:text-white text-xl">✕</button>
+        </div>
+        <div id="modal-content" class="p-6 overflow-y-auto space-y-4 text-sm font-mono text-slate-200">
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    async function fetchJSON(url, options = {}) {
+      try {
+        const res = await fetch(url, options);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        console.error("Fetch error:", err);
+        return null;
+      }
+    }
+
+    async function refreshData() {
+      const data = await fetchJSON("./api/jobs");
+      if (!data) return;
+
+      const pendingList = document.getElementById("pending-approvals-list");
+      const pendingCount = document.getElementById("pending-count");
+      const tbody = document.getElementById("jobs-table-body");
+
+      const pendingJobs = data.filter(j => j.status === "waiting_confirmation");
+      pendingCount.textContent = pendingJobs.length;
+
+      if (pendingJobs.length === 0) {
+        pendingList.innerHTML = `<p class="text-sm text-slate-500 italic py-2">Geen openstaande goedkeuringsverzoeken.</p>`;
+      } else {
+        pendingList.innerHTML = pendingJobs.map(job => {
+          const m = job.egress_manifest || {};
+          const targets = (m.targets || []).join(", ") || "Onbekend";
+          return `
+            <div class="p-4 rounded-xl bg-slate-900/90 border border-amber-500/40 space-y-3">
+              <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                <div>
+                  <span class="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">${job.job_id}</span>
+                  <strong class="ml-2 text-white">${targets}</strong>
+                </div>
+                <div class="text-xs text-amber-400 font-mono">
+                  ${m.files_count || 0} bestanden (${Math.round((m.bytes_count || 0) / 1024)} KB) · Geschatte kosten: €${(m.estimated_cost_eur || 0).toFixed(2)}
+                </div>
+              </div>
+              <p class="text-xs text-slate-400">
+                Modellen: <span class="text-indigo-300 font-mono">${m.models?.triage?.model || 'triage'}</span> & <span class="text-indigo-300 font-mono">${m.models?.deep?.model || 'deep'}</span>.
+                ${m.redactions || 0} geheimen automatisch gemaskeerd.
+              </p>
+              <div class="flex gap-3 pt-1">
+                <button onclick="approveJob('${job.job_id}')" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white transition flex items-center gap-1.5">
+                  ✅ Goedkeuren & Egress Starten
+                </button>
+                <button onclick="rejectJob('${job.job_id}')" class="px-4 py-1.5 rounded-lg bg-rose-900/60 hover:bg-rose-800 text-xs font-semibold text-rose-300 transition">
+                  ❌ Afwijzen
+                </button>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+
+      if (data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="py-4 text-center text-slate-500 italic">Geen audits uitgevoerd.</td></tr>`;
+      } else {
+        tbody.innerHTML = data.map(j => {
+          const targets = Array.isArray(j.targets) ? j.targets.map(t => typeof t === 'object' ? t.target : t).join(", ") : j.targets;
+          let badgeClass = "badge-clean";
+          if (j.status === "waiting_confirmation") badgeClass = "badge-medium";
+          else if (j.status === "failed") badgeClass = "badge-critical";
+          else if (j.findings && j.findings.length > 0) badgeClass = "badge-high";
+
+          const cost = j.usage?.estimated_cost_eur ? `€${j.usage.estimated_cost_eur.toFixed(2)}` : "€0.00";
+          const findingsCount = j.findings ? j.findings.length : 0;
+          const timeStr = j.created_at ? new Date(j.created_at).toLocaleTimeString() : "-";
+
+          return `
+            <tr class="hover:bg-slate-900/40">
+              <td class="py-3 px-4 font-mono text-xs">${j.job_id}</td>
+              <td class="py-3 px-4 text-xs font-medium text-slate-300">${j.job_type}</td>
+              <td class="py-3 px-4 text-xs truncate max-w-[200px]" title="${targets}">${targets}</td>
+              <td class="py-3 px-4"><span class="text-xs px-2 py-0.5 rounded-full ${badgeClass}">${j.status}</span></td>
+              <td class="py-3 px-4 text-xs font-bold ${findingsCount > 0 ? 'text-amber-400' : 'text-emerald-400'}">${findingsCount}</td>
+              <td class="py-3 px-4 text-xs font-mono">${cost}</td>
+              <td class="py-3 px-4 text-xs text-slate-400">${timeStr}</td>
+              <td class="py-3 px-4 text-right">
+                <button onclick="viewReport('${j.job_id}')" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-medium text-indigo-300 transition">
+                  Bekijk
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      }
+    }
+
+    async function approveJob(jobId) {
+      const res = await fetchJSON(`./api/approve/${jobId}`, { method: "POST" });
+      if (res && res.status === "approved") {
+        refreshData();
+      } else {
+        alert("Goedkeuren mislukt: " + (res?.message || "onbekende fout"));
+      }
+    }
+
+    async function rejectJob(jobId) {
+      const res = await fetchJSON(`./api/reject/${jobId}`, { method: "POST" });
+      if (res && res.status === "rejected") {
+        refreshData();
+      }
+    }
+
+    async function viewReport(jobId) {
+      const job = await fetchJSON(`./api/jobs/${jobId}`);
+      if (!job) return;
+
+      document.getElementById("modal-title").textContent = `Audit Rapport: ${job.job_id} (${job.status})`;
+      const content = document.getElementById("modal-content");
+
+      let html = "";
+      if (job.markdown_report) {
+        html += `<pre class="whitespace-pre-wrap text-slate-300 bg-slate-950 p-4 rounded-xl border border-slate-800">${job.markdown_report}</pre>`;
+      } else if (job.findings && job.findings.length > 0) {
+        html += `<div class="space-y-4">` + job.findings.map(f => `
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-amber-400">${f.cwe || 'CWE'} - ${f.title || 'Vulnerability'}</span>
+              <span class="text-xs px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800">${f.severity || 'HIGH'}</span>
+            </div>
+            <p class="text-xs text-slate-400">${f.rationale || f.message || ''}</p>
+            <div class="text-xs text-slate-500 font-mono">Locatie: ${f.file || 'onbekend'}:${f.start_line || 0}</div>
+            ${f.suggested_patch ? `
+              <div class="mt-2 text-xs font-mono bg-slate-950 p-2.5 rounded border border-slate-800 text-emerald-400 overflow-x-auto">
+                <pre>${f.suggested_patch}</pre>
+              </div>
+            ` : ''}
+          </div>
+        `).join("") + `</div>`;
+      } else {
+        html = `<p class="text-slate-400 italic">Geen kwetsbaarheden gevonden. De code is schoon.</p>`;
+      }
+
+      content.innerHTML = html;
+      document.getElementById("report-modal").classList.remove("hidden");
+    }
+
+    function closeModal() {
+      document.getElementById("report-modal").classList.add("hidden");
+    }
+
+    // Auto-refresh every 5 seconds
+    setInterval(refreshData, 5000);
+    refreshData();
+  </script>
+</body>
+</html>
