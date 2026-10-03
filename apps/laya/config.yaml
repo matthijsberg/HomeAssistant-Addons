@@ -39,7 +39,7 @@ options:
       temperature: 0.2
       thinking_budget: 0
       needs_memory: false
-      allowed_tools: []
+      allowed_tools: ""
     - name: "smarthome"
       criteria: "home automation control, turning lights on or off, thermostat temperature, switches, scenes, checking Home Assistant entities or sensor states"
       model: "gemini-3.5-flash-lite"
@@ -48,12 +48,7 @@ options:
       temperature: 0.0
       thinking_budget: 0
       needs_memory: false
-      allowed_tools:
-        - "ha_list_entities"
-        - "ha_get_state"
-        - "ha_call_service"
-        - "ha_list_services"
-        - "homeassistant*"
+      allowed_tools: "ha_list_entities, ha_get_state, ha_call_service, ha_list_services, homeassistant*"
     - name: "general"
       criteria: "everyday writing, explaining, summarising, translating, ordinary questions that need a few tool calls"
       model: "gemini-flash-latest"
@@ -98,5 +93,4 @@ schema:
       temperature: "float?"
       thinking_budget: "int?"
       needs_memory: "bool?"
-      allowed_tools:
-        - "str"
+      allowed_tools: "str?"

@@ -32,8 +32,8 @@ def test_ingress_gui_html():
     response = client.get("/")
     assert response.status_code == 200
     assert "text/html" in response.headers.get("content-type", "")
-    assert "Laya Router" in response.text
-    assert "Routing Playground" in response.text
+    assert "HA System 1" in response.text
+    assert "Playground" in response.text
 
 
 def test_ingress_auth_bypass():

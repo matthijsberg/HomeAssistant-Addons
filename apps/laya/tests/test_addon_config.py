@@ -52,7 +52,7 @@ def test_config_yaml_manifest():
     families_list = opts.get("families", [])
     assert any(f.get("name") == "quick" and f.get("model") == "gemini-3.5-flash-lite" for f in families_list)
     assert any(f.get("name") == "smarthome" and f.get("needs_memory") is False for f in families_list)
-    assert any(f.get("name") == "quick" and f.get("allowed_tools") == [] for f in families_list)
+    assert any(f.get("name") == "quick" and f.get("allowed_tools") in ("", []) for f in families_list)
     assert any(f.get("name") == "deep" and f.get("thinking_budget") is None for f in families_list)
 
     # Schema check
