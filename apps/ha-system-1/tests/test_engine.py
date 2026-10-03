@@ -44,6 +44,17 @@ def test_format_state_large_prompt_truncation():
     assert "[truncated for routing]" in state["request"]
 
 
+def test_format_state_standalone_ignores_context():
+    turns = [
+        {"role": "user", "content": "Previous complex coding turn"},
+        {"role": "assistant", "content": "Here is the implementation details..."},
+    ]
+    # Standalone prompt (>6 words, no reference marker)
+    state = LayaRouterEngine.format_state("Could you please explain how quantum computers work?", turns)
+    assert "context" not in state
+    assert state["request"] == "Could you please explain how quantum computers work?"
+
+
 def test_hermes_v1_wording_rules():
     qset = get_question_set("hermes-v1")
     questions = qset["questions"]

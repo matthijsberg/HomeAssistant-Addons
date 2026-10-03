@@ -6,8 +6,9 @@ and single-forward-pass predictions.
 
 import logging
 import os
+import re
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
 
 from config import AppConfig
 from question_sets import get_question_set
@@ -107,6 +108,29 @@ class MockRouter:
         }
 
 
+FOLLOWUP_MARKERS: Set[str] = {
+    # Dutch reference markers (RT-04)
+    "hem", "haar", "die", "dat", "deze", "ook", "nog", "hetzelfde", "ja", "nee",
+    "doe maar", "ga door", "waarom", "welke", "hoezo",
+    # English reference markers (RT-04)
+    "it", "that", "this", "same", "also", "yes", "no", "go on", "why", "which",
+}
+
+
+def is_followup_turn(prompt: str, max_words: int = 6) -> bool:
+    """Determine deterministically whether a prompt is a follow-up needing prior context (RT-04)."""
+    if not prompt or not prompt.strip():
+        return False
+    clean = prompt.strip().lower()
+    words = clean.split()
+    if len(words) <= max_words:
+        return True
+    for marker in FOLLOWUP_MARKERS:
+        if re.search(r"\b" + re.escape(marker) + r"\b", clean):
+            return True
+    return False
+
+
 class LayaRouterEngine:
     """Production decision engine wrapping Laya Router."""
 
@@ -196,40 +220,41 @@ class LayaRouterEngine:
 
     @staticmethod
     def format_state(prompt: str, recent_turns: Optional[List[Any]] = None) -> Dict[str, Any]:
-        """Format request and context window (max 2 previous turns, truncated to fit ~1024 tokens)."""
+        """Format request and context window (max 2 previous turns, RT-04/RT-05)."""
         clean_prompt = prompt.strip()
         # Cap request prompt to fit within Laya's ~1024 token context window without tokenizer lag
         if len(clean_prompt) > 6000:
             clean_prompt = clean_prompt[:5000] + "\n...[truncated for routing]...\n" + clean_prompt[-1000:]
 
-        turns = recent_turns or []
-        # Strictly truncate to at most the previous 2 turns
-        window = turns[-2:] if len(turns) > 2 else turns
-
-        context_lines: List[str] = []
-        for turn in window:
-            if isinstance(turn, str):
-                t_str = turn.strip()
-            elif isinstance(turn, dict):
-                role = turn.get("role", "turn")
-                content = turn.get("content", "")
-                t_str = f"{role}: {content}".strip()
-            elif hasattr(turn, "content"):
-                role = getattr(turn, "role", "turn") or "turn"
-                content = getattr(turn, "content", "")
-                t_str = f"{role}: {content}".strip()
-            else:
-                t_str = str(turn).strip()
-
-            if len(t_str) > 1500:
-                t_str = t_str[:1500] + "..."
-            if t_str:
-                context_lines.append(t_str)
-
-        context_str = "\n".join([line for line in context_lines if line])
         state: Dict[str, Any] = {"request": clean_prompt}
-        if context_str:
-            state["context"] = context_str
+
+        # RT-04 / RT-05: Laya receives context ONLY when the turn is a follow-up
+        if recent_turns and is_followup_turn(clean_prompt, max_words=6):
+            window = recent_turns[-2:] if len(recent_turns) > 2 else recent_turns
+            context_lines: List[str] = []
+            for turn in window:
+                if isinstance(turn, str):
+                    t_str = turn.strip()
+                elif isinstance(turn, dict):
+                    role = turn.get("role", "turn")
+                    content = turn.get("content", "")
+                    t_str = f"{role}: {content}".strip()
+                elif hasattr(turn, "content"):
+                    role = getattr(turn, "role", "turn") or "turn"
+                    content = getattr(turn, "content", "")
+                    t_str = f"{role}: {content}".strip()
+                else:
+                    t_str = str(turn).strip()
+
+                if len(t_str) > 1500:
+                    t_str = t_str[:1500] + "..."
+                if t_str:
+                    context_lines.append(t_str)
+
+            context_str = "\n".join([line for line in context_lines if line])
+            if context_str:
+                state["context"] = context_str
+
         return state
 
     def route(
