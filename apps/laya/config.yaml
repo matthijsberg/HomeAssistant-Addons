@@ -1,7 +1,7 @@
 name: "Laya Router"
 description: "Local sub-50ms System 1 decision engine, fast-path domotica controller, and OpenAI conversation bridge for Home Assistant"
 version: "2.0.0"
-slug: "local_laya"
+slug: "laya"
 url: "https://github.com/matthijsberg/HomeAssistant-Apps/tree/main/apps/laya"
 arch:
   - amd64
@@ -15,7 +15,7 @@ panel_icon: "mdi:router-network"
 panel_title: "Laya Router"
 video: true
 devices:
-  - /dev/dri:/dev/dri
+  - /dev/dri
 ports:
   8000/tcp: null
 ports_description:
@@ -98,4 +98,5 @@ schema:
       temperature: "float?"
       thinking_budget: "int?"
       needs_memory: "bool?"
-      allowed_tools: "[str]?"
+      allowed_tools:
+        - "str"

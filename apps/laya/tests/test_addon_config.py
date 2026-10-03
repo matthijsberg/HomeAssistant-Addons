@@ -17,7 +17,7 @@ def test_config_yaml_manifest():
         cfg = yaml.safe_load(f)
 
     assert cfg["name"] == "Laya Router"
-    assert cfg["slug"] == "local_laya"
+    assert cfg["slug"] == "laya"
     assert cfg["version"] == "2.0.0"
     assert cfg["arch"] == ["amd64"]
     assert cfg["startup"] == "services"
@@ -32,7 +32,7 @@ def test_config_yaml_manifest():
 
     # Hardware devices check: /dev/dri passthrough for Intel iGPU
     assert "devices" in cfg
-    assert "/dev/dri:/dev/dri" in cfg["devices"]
+    assert "/dev/dri" in cfg["devices"]
 
     # Ports check: null by default for optional LAN mapping
     assert "ports" in cfg
