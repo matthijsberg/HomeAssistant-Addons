@@ -1,8 +1,14 @@
-"""Home Assistant Entity, Area, and Service Resolver for Laya v2.0.
+"""Home Assistant Entity, Area, and Service Resolver for HA System 1 (PRD v0.4.0 M2).
 
 Synchronizes and caches Home Assistant entities and areas via the Supervisor/Core REST API,
 enabling sub-millisecond local resolution of natural language targets into exact entity_ids,
 area_ids, and service calls without cloud LLM dependencies.
+
+Implements M2 requirements:
+- RG-01: In-memory registry mirror (entities, states, attributes, aliases, exposure)
+- RG-03: Resync control, staleness monitoring (disabled if stale > 60m)
+- RG-04: Full diacritics folding (e.g. jaloezieën -> jaloezieen) and alias mapping
+- RG-05: Sub-20ms resolution p95
 """
 
 import json
@@ -10,11 +16,21 @@ import logging
 import os
 import re
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-logger = logging.getLogger("laya.resolver")
+logger = logging.getLogger("ha_system_1.resolver")
+
+
+def fold_diacritics(text: str) -> str:
+    """Normalize and fold diacritics to ASCII base: jaloezieën -> jaloezieen, crème -> creme (RG-04)."""
+    if not text:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
+
 
 DEFAULT_AREAS: Set[str] = {
     "woonkamer", "eetkamer", "keuken", "serre", "bijkeuken", "gang", "hal",
@@ -32,23 +48,32 @@ class HAResolver:
         supervisor_token: Optional[str] = None,
         ha_url: Optional[str] = None,
         cache_ttl_s: float = 300.0,
+        max_staleness_minutes: float = 60.0,
     ) -> None:
         self.supervisor_token = supervisor_token or os.environ.get("SUPERVISOR_TOKEN") or ""
         self.ha_url = (ha_url or os.environ.get("HA_URL") or "http://supervisor/core/api").rstrip("/")
         self.cache_ttl_s = cache_ttl_s
+        self.max_staleness_minutes = max_staleness_minutes
         self._last_sync_time: float = 0.0
         self._entities: Dict[str, Dict[str, Any]] = {}
         self._areas: Dict[str, Dict[str, Any]] = {}
         self._friendly_name_map: Dict[str, str] = {}
-        self._area_name_map: Dict[str, str] = {a: a.replace(" ", "_") for a in DEFAULT_AREAS}
+        self._area_name_map: Dict[str, str] = {fold_diacritics(a): a.replace(" ", "_") for a in DEFAULT_AREAS}
 
     @property
     def is_configured(self) -> bool:
         """Check if Home Assistant connection token and URL are available."""
         return bool(self.supervisor_token and self.ha_url)
 
+    @property
+    def is_stale(self) -> bool:
+        """Check if registry mirror has exceeded max staleness threshold (RG-03)."""
+        if self._last_sync_time == 0.0:
+            return False  # Test/standalone mode with preloaded data
+        return (time.time() - self._last_sync_time) > (self.max_staleness_minutes * 60.0)
+
     def sync(self, force: bool = False) -> bool:
-        """Fetch and cache entity and area registries from Home Assistant."""
+        """Fetch and cache entity and area registries from Home Assistant (RG-01, RG-03)."""
         if not self.is_configured:
             logger.debug("HAResolver not configured with SUPERVISOR_TOKEN or HA_URL; skipping sync.")
             return False
@@ -78,16 +103,31 @@ class HAResolver:
                             continue
                         eid = item.get("entity_id", "")
                         attrs = item.get("attributes", {})
-                        fn = str(attrs.get("friendly_name") or eid).strip().lower()
+                        fn_raw = str(attrs.get("friendly_name") or eid)
+                        fn_folded = fold_diacritics(fn_raw).strip()
+
+                        # Determine Assist exposure
+                        is_exposed = attrs.get("conversation_agent", True)
+
                         new_entities[eid] = {
                             "entity_id": eid,
                             "domain": eid.split(".")[0] if "." in eid else "",
                             "friendly_name": attrs.get("friendly_name", eid),
                             "state": item.get("state"),
                             "attributes": attrs,
+                            "is_exposed": is_exposed,
                         }
-                        if fn:
-                            new_fn_map[fn] = eid
+                        if fn_folded:
+                            new_fn_map[fn_folded] = eid
+
+                        # RG-04: Process aliases if present in entity attributes
+                        aliases = attrs.get("aliases", [])
+                        if isinstance(aliases, list):
+                            for alias in aliases:
+                                alias_folded = fold_diacritics(str(alias)).strip()
+                                if alias_folded:
+                                    new_fn_map[alias_folded] = eid
+
                     self._entities = new_entities
                     self._friendly_name_map = new_fn_map
 
@@ -108,9 +148,15 @@ class HAResolver:
         self._entities = dict(entities_dict)
         self._friendly_name_map = {}
         for eid, item in self._entities.items():
-            fn = str(item.get("friendly_name") or eid).strip().lower()
+            fn = fold_diacritics(str(item.get("friendly_name") or eid)).strip()
             if fn:
                 self._friendly_name_map[fn] = eid
+            aliases = item.get("attributes", {}).get("aliases", [])
+            if isinstance(aliases, list):
+                for alias in aliases:
+                    alias_folded = fold_diacritics(str(alias)).strip()
+                    if alias_folded:
+                        self._friendly_name_map[alias_folded] = eid
         self._last_sync_time = time.time()
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
@@ -126,7 +172,7 @@ class HAResolver:
         domain: str,
         target_name: str,
     ) -> Tuple[Optional[str], Optional[str], float]:
-        """Resolve a natural language room or entity name to (target_type, target_id, confidence).
+        """Resolve a natural language room or entity name to (target_type, target_id, confidence) (RG-04, RG-05).
 
         Target types:
           - 'entity_id': exact or fuzzy matched specific entity (e.g. 'light.serre_spots_dimmer')
@@ -140,12 +186,13 @@ class HAResolver:
                 return "entity_id", "climate.thermostat", 0.85
             return None, None, 0.0
 
-        clean_target = target_name.strip().lower()
-        # Remove common stop-words
+        # Fold diacritics and strip punctuation (RG-04)
+        clean_target = fold_diacritics(target_name).strip()
+        clean_target = re.sub(r"[^\w\s]", " ", clean_target)
         clean_target = re.sub(r"\b(in|op|bij|van|de|het|een|kamer|hoek)\b", " ", clean_target).strip()
         clean_target = re.sub(r"\s+", " ", clean_target)
 
-        # 1. Exact friendly_name match
+        # 1. Exact friendly_name or alias match (RG-04)
         if clean_target in self._friendly_name_map:
             eid = self._friendly_name_map[clean_target]
             if not domain or eid.startswith(f"{domain}."):
@@ -159,7 +206,7 @@ class HAResolver:
         candidates = self.list_entities_for_domain(domain) if domain else list(self._entities.values())
         for cand in candidates:
             eid = cand["entity_id"]
-            fn = str(cand.get("friendly_name") or "").lower()
+            fn = fold_diacritics(str(cand.get("friendly_name") or "")).lower()
             cand_words = set(re.findall(r"\w+", f"{eid} {fn}"))
 
             # Calculate word overlap

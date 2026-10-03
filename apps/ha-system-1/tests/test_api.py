@@ -178,6 +178,14 @@ def test_domotica_route_endpoint():
     assert "openai_tool_call" in data
 
 
+def test_domotica_sync_endpoint():
+    response = client.post("/v1/domotica/sync", headers=AUTH_HEADER)
+    assert response.status_code == 200
+    data = response.json()
+    assert "synced" in data
+    assert "entity_count" in data
+
+
 def test_chat_completions_tool_call():
     payload = {
         "model": "laya-v2",

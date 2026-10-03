@@ -180,6 +180,16 @@ class DomoticaEngine:
                 rejected_reason="sensitive_target",
             )
 
+        # RG-03: If mirror is older than max_staleness_minutes, disable fast path
+        if self.resolver.is_stale:
+            return DomoticaAction(
+                is_domotica=True,
+                fast_path=False,
+                domain=detected_domain,
+                service=detected_action,
+                rejected_reason="mirror_stale",
+            )
+
         # Normalize cover actions to standard cover domain services
         if detected_domain == "cover":
             if detected_action in ("turn_on", "open_cover"):
