@@ -1,7 +1,7 @@
 name: "Laya Router"
 description: "Local sub-50ms System 1 decision engine, fast-path domotica controller, and OpenAI conversation bridge for Home Assistant"
 version: "2.0.0"
-slug: "laya"
+slug: "local_laya"
 url: "https://github.com/matthijsberg/HomeAssistant-Apps/tree/main/apps/laya"
 arch:
   - amd64

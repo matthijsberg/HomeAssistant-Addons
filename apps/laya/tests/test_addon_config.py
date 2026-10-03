@@ -17,7 +17,7 @@ def test_config_yaml_manifest():
         cfg = yaml.safe_load(f)
 
     assert cfg["name"] == "Laya Router"
-    assert cfg["slug"] == "laya"
+    assert cfg["slug"] == "local_laya"
     assert cfg["version"] == "2.0.0"
     assert cfg["arch"] == ["amd64"]
     assert cfg["startup"] == "services"
