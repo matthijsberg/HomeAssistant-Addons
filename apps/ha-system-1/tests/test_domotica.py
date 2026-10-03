@@ -33,6 +33,32 @@ def test_domotica_parsing_lights():
     assert action2.openai_tool_call["function"]["name"] == "HassTurnOn"
     assert action2.speech is not None and "aangezet" in action2.speech
 
+    # 3. Specific subtype in room ("spots in de serre") targets the specific spots, not entire area!
+    resolver.load_cached_entities({
+        "light.serre_spots_dimmer": {
+            "entity_id": "light.serre_spots_dimmer",
+            "domain": "light",
+            "friendly_name": "Serre Spots Dimmer",
+            "state": "on",
+            "attributes": {},
+        },
+        "light.serre_gordijnen_licht": {
+            "entity_id": "light.serre_gordijnen_licht",
+            "domain": "light",
+            "friendly_name": "Serre Gordijnen Licht",
+            "state": "on",
+            "attributes": {},
+        },
+    })
+    action3 = engine.parse("doe de spots in de serre uit")
+    assert action3.is_domotica is True
+    assert action3.domain == "light"
+    assert action3.service == "turn_off"
+    assert action3.target_type == "entity_id"
+    assert action3.target_id == "light.serre_spots_dimmer"
+    assert action3.openai_tool_call is not None
+    assert action3.openai_tool_call["function"]["arguments"]["name"] == "light.serre_spots_dimmer"
+
 
 def test_domotica_parsing_climate():
     resolver = HAResolver()

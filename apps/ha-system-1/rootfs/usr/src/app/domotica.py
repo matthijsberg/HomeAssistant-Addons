@@ -16,12 +16,23 @@ safety gates (FP-01..FP-18):
 import logging
 import re
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 from pydantic import BaseModel, Field
 from resolver import HAResolver
 
 logger = logging.getLogger("ha_system_1.domotica")
+
+
+# Generic domain nouns representing broad categories (stripped when extracting specific device names)
+GENERIC_DOMAIN_NOUNS: Dict[str, Set[str]] = {
+    "light": {"lamp", "lampen", "licht", "lichten", "verlichting"},
+    "climate": {"thermostaat", "temperatuur", "klimaat"},
+    "cover": {"zonwering"},
+    "switch": {"schakelaar", "switch"},
+    "fan": {"ventilator", "ventilatie"},
+    "media_player": {"muziek", "audio", "geluid"},
+}
 
 
 # Canonical device domain triggers (FP-01 whole-token matching)
@@ -206,15 +217,16 @@ class DomoticaEngine:
         skip_words = {
             "doe", "zet", "schakel", "maak", "de", "het", "een", "in", "op",
             "bij", "van", "naar", "alsjeblieft", "graag", "even", "alle",
+            "allemaal", "al", "mijn", "onze",
         }
-        domain_kw_set = set(DOMAIN_KEYWORDS[detected_domain])
+        generic_nouns = GENERIC_DOMAIN_NOUNS.get(detected_domain, set())
         action_kw_set = {k for keywords in ACTION_KEYWORDS.values() for k in keywords}
 
         for w in tokens:
             w_clean = re.sub(r"[^\w]", "", w)
             if not w_clean or any(c.isdigit() for c in w_clean):
                 continue
-            if w_clean in skip_words or w_clean in domain_kw_set or w_clean in action_kw_set:
+            if w_clean in skip_words or w_clean in generic_nouns or w_clean in action_kw_set:
                 continue
             target_tokens.append(w_clean)
 
