@@ -8,17 +8,20 @@ def test_domotica_parsing_lights():
     resolver = HAResolver()
     engine = DomoticaEngine(resolver)
 
-    # 1. Turn off lights in room
+    # 1. Turn off lights in room (Area Precedence - Optie 1 + Optie 3)
     action = engine.parse("doe de lampen in de serre uit")
     assert action.is_domotica is True
     assert action.domain == "light"
     assert action.service == "turn_off"
-    assert "serre" in (action.target_name or "")
+    assert action.target_type == "area_id"
+    assert action.target_id == "serre"
     assert action.fast_path is True
     assert action.openai_tool_call is not None
     assert action.openai_tool_call["function"]["name"] == "HassTurnOff"
+    assert action.openai_tool_call["function"]["arguments"]["area"] == "serre"
+    assert action.openai_tool_call["function"]["arguments"]["domain"] == "light"
     assert action.speech is not None
-    assert "uitgeschakeld" in action.speech
+    assert "alle lampen in de serre zijn uitgeschakeld" in action.speech
 
     # 2. Turn on lights
     action2 = engine.parse("zet het licht in de woonkamer aan")

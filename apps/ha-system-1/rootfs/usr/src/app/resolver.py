@@ -40,6 +40,30 @@ DEFAULT_AREAS: Set[str] = {
 }
 
 
+def is_valid_target_entity(eid: str, item: Dict[str, Any]) -> bool:
+    """Filter out non-actionable sub-devices, ghost entities, and diagnostic LEDs (RG-01)."""
+    state = str(item.get("state", "")).lower()
+    attrs = item.get("attributes", {})
+
+    # 1. Skip restored / ghost entities that are unavailable
+    if attrs.get("restored") is True and state in ("unavailable", "unknown"):
+        return False
+
+    # 2. Skip Z-Wave redundant Basic Command Class endpoints (_basic, _basic_2)
+    if re.search(r"_basic(_\d+)?$", eid):
+        return False
+
+    # 3. Skip infrastructure / Access Point indicator status LEDs
+    if eid.startswith("light.ap_") or re.search(r"\b(indicator|status_led|nightlight)\b", eid):
+        return False
+
+    # 4. Skip configuration or diagnostic entities
+    if attrs.get("entity_category") in ("config", "diagnostic"):
+        return False
+
+    return True
+
+
 class HAResolver:
     """In-memory cache and entity/area resolver for Home Assistant."""
 
@@ -102,6 +126,8 @@ class HAResolver:
                         if not isinstance(item, dict):
                             continue
                         eid = item.get("entity_id", "")
+                        if not eid or not is_valid_target_entity(eid, item):
+                            continue
                         attrs = item.get("attributes", {})
                         fn_raw = str(attrs.get("friendly_name") or eid)
                         fn_folded = fold_diacritics(fn_raw).strip()
@@ -192,13 +218,25 @@ class HAResolver:
         clean_target = re.sub(r"\b(in|op|bij|van|de|het|een|kamer|hoek)\b", " ", clean_target).strip()
         clean_target = re.sub(r"\s+", " ", clean_target)
 
-        # 1. Exact friendly_name or alias match (RG-04)
+        # 1. Area Precedence (Optie 1 + Optie 3):
+        # If target matches an area (e.g. "serre", "woonkamer"), prioritize the entire area
+        # rather than shadowing the room with a single device that happens to have the room name.
+        if clean_target in self._area_name_map:
+            return "area_id", self._area_name_map[clean_target], 0.95
+
+        for area, area_slug in self._area_name_map.items():
+            if re.search(r"\b" + re.escape(area) + r"\b", clean_target):
+                remaining = re.sub(r"\b" + re.escape(area) + r"\b", "", clean_target).strip()
+                if not remaining:
+                    return "area_id", area_slug, 0.95
+
+        # 2. Exact friendly_name or alias match (RG-04)
         if clean_target in self._friendly_name_map:
             eid = self._friendly_name_map[clean_target]
             if not domain or eid.startswith(f"{domain}."):
                 return "entity_id", eid, 0.99
 
-        # 2. Check entities within domain matching target words
+        # 3. Check entities within domain matching target words
         target_words = set(clean_target.split())
         best_eid = None
         best_score = 0.0
@@ -220,14 +258,10 @@ class HAResolver:
         if best_eid and best_score >= 0.80:
             return "entity_id", best_eid, min(0.95, 0.70 + best_score * 0.25)
 
-        # 3. Area match against registered areas
-        if clean_target in self._area_name_map:
-            return "area_id", self._area_name_map[clean_target], 0.90
-
-        # Also check if any known area is in clean_target
+        # 4. Partial area fallback if words contain area
         for area, area_slug in self._area_name_map.items():
             if re.search(r"\b" + re.escape(area) + r"\b", clean_target):
-                return "area_id", area_slug, 0.90
+                return "area_id", area_slug, 0.85
 
         # FP-09: Targets are NEVER invented. If text does not resolve to an existing object, return None!
         return None, None, 0.0

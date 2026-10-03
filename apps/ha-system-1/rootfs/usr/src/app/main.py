@@ -178,6 +178,17 @@ def route_turn(req: RouteRequest) -> RouteResponse:
 
     Categorizes task_family and reasoning effort using local System 1 weights.
     """
+    # Exact overrides take precedence and are available instantly (<0.5ms)
+    norm_p = req.prompt.strip().lower()
+    if norm_p in engine.overrides:
+        decision = engine.route(
+            prompt=req.prompt,
+            recent_turns=req.recent_turns,
+            question_set=req.question_set,
+            session_id=req.session_id,
+        )
+        return RouteResponse(**decision)
+
     if not engine.ready:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

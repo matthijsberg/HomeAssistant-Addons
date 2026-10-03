@@ -301,11 +301,17 @@ class DomoticaEngine:
         }
 
         # 7. Localized Natural Speech Confirmation Template (FP-16)
-        display_target = extracted_target or detected_domain
+        if target_type == "area_id":
+            display_target = f"alle lampen in de {target_id}" if detected_domain == "light" else f"{detected_domain} in {target_id}"
+            verb_state = "zijn" if detected_domain == "light" else "is"
+        else:
+            display_target = extracted_target or detected_domain
+            verb_state = "is"
+
         if detected_action == "turn_off":
-            speech = f"Oké, {display_target} is uitgeschakeld."
+            speech = f"Oké, {display_target} {verb_state} uitgeschakeld."
         elif detected_action == "turn_on":
-            speech = f"Oké, {display_target} is aangezet."
+            speech = f"Oké, {display_target} {verb_state} aangezet."
         elif detected_action == "set_temperature":
             speech = f"Oké, de temperatuur is ingesteld op {service_data.get('temperature', '')} graden."
         elif detected_action in ("open_cover", "close_cover"):
