@@ -129,8 +129,39 @@ class DomoticaAction(BaseModel):
 class DomoticaEngine:
     """Fast-Path rule and semantic engine for resolving domotica intents with strict safety gates."""
 
-    def __init__(self, resolver: Optional[HAResolver] = None) -> None:
+    def __init__(
+        self,
+        resolver: Optional[HAResolver] = None,
+        router_engine: Optional[Any] = None,
+    ) -> None:
         self.resolver = resolver or HAResolver()
+        self.router_engine = router_engine
+
+    def classify_semantic_slots(self, prompt: str) -> Optional[Dict[str, Any]]:
+        """Run Laya System 1 single-forward-pass semantic slot extraction on Intel Arc XPU."""
+        if not self.router_engine or not getattr(self.router_engine, "ready", False):
+            return None
+        router = getattr(self.router_engine, "router", None)
+        if not router:
+            return None
+        try:
+            from question_sets import get_question_set
+            q_spec = get_question_set("domotica-v1")
+            questions = q_spec["questions"]
+            state = {"request": prompt.strip()}
+            res = router.predict(state, questions)
+            answers = res.get("answers", {})
+            return {
+                "scope": answers.get("target_scope", {}).get("choice"),
+                "scope_conf": float(answers.get("target_scope", {}).get("answer_confidence", 0.0)),
+                "device_type": answers.get("device_type", {}).get("choice"),
+                "device_type_conf": float(answers.get("device_type", {}).get("answer_confidence", 0.0)),
+                "room": answers.get("room", {}).get("choice"),
+                "room_conf": float(answers.get("room", {}).get("answer_confidence", 0.0)),
+            }
+        except Exception as exc:
+            logger.debug("Laya semantic slot extraction skipped: %s", exc)
+            return None
 
     def parse(self, prompt: str) -> DomoticaAction:
         """Parse natural language prompt into a structured DomoticaAction enforcing FP-01..FP-18."""
@@ -268,11 +299,46 @@ class DomoticaEngine:
                 except ValueError:
                     pass
 
-        # 5. Resolve against Home Assistant Entity / Area Registry (FP-07, FP-08, FP-09)
-        target_type, target_id, res_conf = self.resolver.resolve_target(
-            domain=detected_domain,
-            target_name=extracted_target,
-        )
+        # 5. Semantic Slot Disambiguation via Laya (Intel Arc XPU)
+        slots = self.classify_semantic_slots(prompt)
+        target_type = None
+        target_id = None
+        overall_conf = 0.95
+
+        if slots and slots.get("room") and slots["room"] != "unspecified":
+            s_room = slots["room"]
+            s_scope = slots.get("scope")
+            s_dev = slots.get("device_type")
+
+            if s_scope == "entire_area":
+                target_type = "area_id"
+                target_id = self.resolver._area_name_map.get(s_room, s_room)
+                overall_conf = max(overall_conf, slots.get("scope_conf", 0.95))
+            elif s_scope == "specific_device" and s_dev and s_dev != "general_light":
+                dev_kw = {
+                    "led_strip": ("gordijnen", "led", "strip", "ledstrip"),
+                    "spots": ("spots", "spot", "dimmer"),
+                    "cover": ("jaloezie", "gordijn", "rolluik", "shutter"),
+                }.get(s_dev, (s_dev,))
+
+                candidates = self.resolver.list_entities_for_domain(detected_domain)
+                for cand in candidates:
+                    eid = cand["entity_id"].lower()
+                    fn = str(cand.get("friendly_name") or "").lower()
+                    if s_room in eid or s_room in fn:
+                        if any(kw in eid or kw in fn for kw in dev_kw):
+                            target_type = "entity_id"
+                            target_id = cand["entity_id"]
+                            extracted_target = f"{s_dev} {s_room}"
+                            overall_conf = max(overall_conf, slots.get("device_type_conf", 0.95))
+                            break
+
+        # Fallback to rule-based entity resolver if slots didn't pinpoint entity
+        if not target_id:
+            target_type, target_id, res_conf = self.resolver.resolve_target(
+                domain=detected_domain,
+                target_name=extracted_target,
+            )
 
         if not target_id:
             # FP-09: Targets are NEVER invented. Route to LLM if target is unknown.
@@ -285,8 +351,6 @@ class DomoticaEngine:
                 service_data=service_data,
                 rejected_reason="unknown_target",
             )
-
-        overall_conf = 0.95
 
         # 6. Format Standard OpenAI Tool Call for Home Assistant Assist (FP-13)
         ha_fn_name = "HassTurnOn" if detected_action in ("turn_on", "open_cover") else "HassTurnOff"

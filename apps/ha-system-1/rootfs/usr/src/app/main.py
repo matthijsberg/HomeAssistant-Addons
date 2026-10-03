@@ -26,7 +26,7 @@ logger = logging.getLogger("laya.main")
 config = AppConfig.load()
 engine = LayaRouterEngine(config)
 ha_resolver = HAResolver()
-domotica_engine = DomoticaEngine(ha_resolver)
+domotica_engine = DomoticaEngine(ha_resolver, router_engine=engine)
 
 
 @asynccontextmanager

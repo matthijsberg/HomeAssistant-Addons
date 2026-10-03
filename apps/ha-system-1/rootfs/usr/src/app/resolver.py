@@ -154,6 +154,16 @@ class HAResolver:
                                 if alias_folded:
                                     new_fn_map[alias_folded] = eid
 
+                        # Extract semantic device hints from HA MDI icons (e.g. mdi:led-strip)
+                        icon = str(attrs.get("icon") or "").lower()
+                        if "led-strip" in icon:
+                            for area in self._area_name_map:
+                                if area in fn_folded or area in eid:
+                                    new_fn_map[f"{area} led strip"] = eid
+                                    new_fn_map[f"{area} ledstrip"] = eid
+                                    new_fn_map[f"led strip {area}"] = eid
+                                    new_fn_map[f"ledstrip {area}"] = eid
+
                     self._entities = new_entities
                     self._friendly_name_map = new_fn_map
 
@@ -183,6 +193,15 @@ class HAResolver:
                     alias_folded = fold_diacritics(str(alias)).strip()
                     if alias_folded:
                         self._friendly_name_map[alias_folded] = eid
+
+            icon = str(item.get("attributes", {}).get("icon") or "").lower()
+            if "led-strip" in icon:
+                for area in self._area_name_map:
+                    if area in fn or area in eid:
+                        self._friendly_name_map[f"{area} led strip"] = eid
+                        self._friendly_name_map[f"{area} ledstrip"] = eid
+                        self._friendly_name_map[f"led strip {area}"] = eid
+                        self._friendly_name_map[f"ledstrip {area}"] = eid
         self._last_sync_time = time.time()
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:

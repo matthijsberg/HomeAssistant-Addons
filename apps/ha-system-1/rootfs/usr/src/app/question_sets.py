@@ -30,7 +30,49 @@ QUESTION_SETS: Dict[str, Dict[str, Any]] = {
                 },
             },
         },
-    }
+    },
+    "domotica-v1": {
+        "version": "1.0",
+        "description": "Semantic slot extraction for Home Assistant domotica actions",
+        "questions": {
+            "target_scope": {
+                "type": "choice",
+                "instructions": "Is the target the entire room or a specific device?",
+                "criteria": {
+                    "entire_area": "the entire room, all lights in the area, alle lampen, het licht in de ruimte, alles in de kamer",
+                    "specific_device": "a specific device subtype such as spots, led strip, curtains, desk lamp, specific lamp",
+                },
+            },
+            "device_type": {
+                "type": "choice",
+                "instructions": "What type of device is specified?",
+                "criteria": {
+                    "general_light": "general lights or ceiling lamp, lampen, verlichting",
+                    "spots": "spotlights, ceiling spots, inbouwspots, spots, spot",
+                    "led_strip": "LED strip, leds, strip, accent lighting, curtain light, gordijnen licht, ledstrip",
+                    "cover": "curtains, blinds, shutters, rolluik, gordijnen, jaloezieën",
+                    "climate": "thermostat, heating, temperature, airco, verwarming, graden",
+                    "switch": "plug, socket, switch, relay, stekker, stopcontact",
+                },
+            },
+            "room": {
+                "type": "choice",
+                "instructions": "In which room or area is the device located?",
+                "criteria": {
+                    "serre": "serre, sunroom, conservatory",
+                    "woonkamer": "woonkamer, living room, lounge",
+                    "keuken": "keuken, kitchen",
+                    "eetkamer": "eetkamer, dining room",
+                    "gang": "gang, hal, hallway",
+                    "slaapkamer": "slaapkamer, bedroom",
+                    "badkamer": "badkamer, bathroom",
+                    "kantoor": "kantoor, werkkamer, office",
+                    "tuin": "tuin, veranda, garden",
+                    "unspecified": "no specific room mentioned",
+                },
+            },
+        },
+    },
 }
 
 
