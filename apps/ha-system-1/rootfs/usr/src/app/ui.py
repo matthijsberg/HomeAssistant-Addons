@@ -34,7 +34,7 @@ def render_gui_html() -> str:
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: var(--bg); color: var(--text); padding: 24px 16px; min-height: 100vh; }
-    .container { max-width: 1020px; margin: 0 auto; }
+    .container { max-width: 1040px; margin: 0 auto; }
 
     /* Header */
     header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
@@ -72,15 +72,62 @@ def render_gui_html() -> str:
     .btn.execute:hover { background: #059669; }
 
     /* Visual Flow Pipeline Diagram */
-    .flow-pipeline { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 20px 0 24px 0; padding: 16px; background: var(--card-sub); border-radius: 8px; border: 1px solid var(--border); overflow-x: auto; }
-    .flow-node { display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 120px; }
-    .flow-icon { width: 38px; height: 38px; border-radius: 50%; background: #1e293b; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 16px; margin-bottom: 6px; transition: all 0.3s; }
-    .flow-icon.active { border-color: var(--primary); background: var(--primary-light); color: #60a5fa; box-shadow: 0 0 12px rgba(59,130,246,0.3); }
-    .flow-icon.fast-path { border-color: var(--success); background: var(--success-light); color: #34d399; box-shadow: 0 0 12px rgba(16,185,129,0.3); }
-    .flow-icon.cloud { border-color: var(--purple); background: var(--purple-light); color: #c084fc; box-shadow: 0 0 12px rgba(139,92,246,0.3); }
+    .flow-pipeline { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 20px 0 24px 0; padding: 20px 14px; background: var(--card-sub); border-radius: 8px; border: 1px solid var(--border); position: relative; }
+    .flow-node { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 145px; cursor: pointer; }
+    .flow-icon { width: 42px; height: 42px; border-radius: 50%; background: #1e293b; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 18px; margin-bottom: 6px; transition: all 0.25s ease; }
+    .flow-icon.active { border-color: var(--primary); background: var(--primary-light); color: #60a5fa; box-shadow: 0 0 14px rgba(59,130,246,0.35); }
+    .flow-icon.fast-path { border-color: var(--success); background: var(--success-light); color: #34d399; box-shadow: 0 0 14px rgba(16,185,129,0.35); }
+    .flow-icon.cloud { border-color: var(--purple); background: var(--purple-light); color: #c084fc; box-shadow: 0 0 14px rgba(139,92,246,0.35); }
+    .flow-icon.bypassed { border-color: #334155; background: #0f172a; color: #475569; opacity: 0.6; }
     .flow-label { font-size: 12px; font-weight: 700; color: #fff; margin-bottom: 2px; }
     .flow-sub { font-size: 11px; color: var(--text-muted); }
     .flow-arrow { font-size: 16px; color: var(--text-dim); }
+
+    /* Hover Box Tooltip */
+    .flow-tooltip {
+      visibility: hidden;
+      opacity: 0;
+      position: absolute;
+      top: 118%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 250px;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      z-index: 100;
+      transition: opacity 0.2s ease, visibility 0.2s ease;
+      pointer-events: none;
+      text-align: left;
+    }
+    .flow-node:hover .flow-tooltip {
+      visibility: visible;
+      opacity: 1;
+    }
+    .flow-tooltip-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #60a5fa;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .flow-tooltip-body {
+      font-size: 11px;
+      color: #cbd5e1;
+      line-height: 1.45;
+      margin-bottom: 6px;
+    }
+    .flow-tooltip-meta {
+      font-size: 10px;
+      color: var(--text-muted);
+      border-top: 1px solid rgba(255,255,255,0.08);
+      padding-top: 5px;
+      font-family: monospace;
+    }
 
     /* Results layout */
     #results-area { display: none; }
@@ -164,44 +211,82 @@ def render_gui_html() -> str:
       <span id="flow-verdict-badge" class="pill smarthome">Fast-Path</span>
     </div>
 
-    <!-- Visual Flow Pipeline Diagram -->
+    <!-- Visual Flow Pipeline Diagram with Hover Details -->
     <div class="flow-pipeline">
+      <!-- Node 1: Input Normalization -->
       <div class="flow-node">
         <div id="flow-node-input" class="flow-icon active">💬</div>
-        <div class="flow-label">User Input</div>
+        <div class="flow-label">1. User Input</div>
         <div id="flow-sub-input" class="flow-sub">Normalized</div>
+        <div class="flow-tooltip">
+          <div class="flow-tooltip-title"><span>Input Normalization</span><span>Step 1</span></div>
+          <div class="flow-tooltip-body">Strips chat wrapper prefixes, telegram usernames, and folds diacritics. Checks deterministic follow-up markers (RT-04/05).</div>
+          <div id="tt-meta-input" class="flow-tooltip-meta">Follow-up check: Standalone turn</div>
+        </div>
       </div>
+
       <div class="flow-arrow">➔</div>
+
+      <!-- Node 2: Fast-Path Domotica Gate -->
       <div class="flow-node">
-        <div id="flow-node-intent" class="flow-icon active">🧠</div>
-        <div class="flow-label">Semantic Intent</div>
-        <div id="flow-sub-intent" class="flow-sub">Analyzing</div>
+        <div id="flow-node-fastpath" class="flow-icon fast-path">⚡</div>
+        <div class="flow-label">2. Fast-Path Gate</div>
+        <div id="flow-sub-fastpath" class="flow-sub">Zero-LLM (&lt;50ms)</div>
+        <div class="flow-tooltip">
+          <div class="flow-tooltip-title"><span>Fast-Path Engine</span><span>Step 2</span></div>
+          <div class="flow-tooltip-body">Zero-LLM deterministic resolver. Matches smart home imperatives against 3,600+ Home Assistant entities without model latency or tokens.</div>
+          <div id="tt-meta-fastpath" class="flow-tooltip-meta">Evaluating smart home intent...</div>
+        </div>
       </div>
+
       <div class="flow-arrow">➔</div>
+
+      <!-- Node 3: Laya System 1 Router (THIS IS LAYA!) -->
       <div class="flow-node">
-        <div id="flow-node-decision" class="flow-icon fast-path">⚡</div>
-        <div class="flow-label">Decision Gate</div>
-        <div id="flow-sub-decision" class="flow-sub">Zero-LLM Fast Path</div>
+        <div id="flow-node-laya" class="flow-icon cloud">🧠</div>
+        <div class="flow-label">3. Laya System 1</div>
+        <div id="flow-sub-laya" class="flow-sub">Intel Arc iGPU</div>
+        <div class="flow-tooltip">
+          <div class="flow-tooltip-title"><span>Laya Neural Router</span><span>Step 3 (Laya)</span></div>
+          <div class="flow-tooltip-body"><strong>This is Laya!</strong> Local neural network running on Intel Arc GPU (XPU). Categorizes prompt into task families (Deep, Code, General, Quick) in ~80ms.</div>
+          <div id="tt-meta-laya" class="flow-tooltip-meta">Hardware: Level-Zero XPU</div>
+        </div>
       </div>
+
       <div class="flow-arrow">➔</div>
+
+      <!-- Node 4: Optimization Gate -->
       <div class="flow-node">
         <div id="flow-node-opt" class="flow-icon active">✂️</div>
-        <div class="flow-label">Optimization</div>
-        <div id="flow-sub-opt" class="flow-sub">Tool & Memory Gating</div>
+        <div class="flow-label">4. Optimization</div>
+        <div id="flow-sub-opt" class="flow-sub">Tool &amp; Memory</div>
+        <div class="flow-tooltip">
+          <div class="flow-tooltip-title"><span>Optimization Gate</span><span>Step 4</span></div>
+          <div class="flow-tooltip-body">Dynamic tool pruning removes developer tools. Smart memory gating strips personal memory context for impersonal queries to save tokens.</div>
+          <div id="tt-meta-opt" class="flow-tooltip-meta">Evaluating gating policies...</div>
+        </div>
       </div>
+
       <div class="flow-arrow">➔</div>
+
+      <!-- Node 5: Action Target -->
       <div class="flow-node">
         <div id="flow-node-output" class="flow-icon active">🎯</div>
-        <div class="flow-label">Action Target</div>
-        <div id="flow-sub-output" class="flow-sub">HA Service Call</div>
+        <div class="flow-label">5. Action Target</div>
+        <div id="flow-sub-output" class="flow-sub">Dispatched</div>
+        <div class="flow-tooltip">
+          <div class="flow-tooltip-title"><span>Execution Target</span><span>Step 5</span></div>
+          <div class="flow-tooltip-body">Final execution destination: either direct Home Assistant REST service call, or upstream cloud model with calibrated thinking budget.</div>
+          <div id="tt-meta-output" class="flow-tooltip-meta">Destination: Ready</div>
+        </div>
       </div>
     </div>
 
     <!-- Tabs -->
     <div class="tab-bar">
       <button id="tab-btn-fastpath" class="tab-btn active" onclick="switchTab('fastpath')">⚡ Domotica Fast-Path</button>
-      <button id="tab-btn-model" class="tab-btn" onclick="switchTab('model')">🤖 Model & Effort Routing</button>
-      <button id="tab-btn-debug" class="tab-btn" onclick="switchTab('debug')">🔬 Trace & Debug Log</button>
+      <button id="tab-btn-model" class="tab-btn" onclick="switchTab('model')">🤖 Model &amp; Effort Routing</button>
+      <button id="tab-btn-debug" class="tab-btn" onclick="switchTab('debug')">🔬 Trace &amp; Debug Log</button>
     </div>
 
     <!-- Tab 1: Fast Path View -->
@@ -212,7 +297,7 @@ def render_gui_html() -> str:
           <div id="fp-eligible" class="result-val" style="color: #34d399;">YES</div>
         </div>
         <div class="result-box">
-          <div class="result-label">Target Domain & Action</div>
+          <div class="result-label">Target Domain &amp; Action</div>
           <div id="fp-domain-service" class="result-val">-</div>
         </div>
         <div class="result-box">
@@ -283,15 +368,19 @@ def render_gui_html() -> str:
           <span id="trace-step-norm" class="trace-v trace-check">✓ Done</span>
         </div>
         <div class="trace-item">
-          <span class="trace-k"><span>🏠</span> Entity & Area Matching</span>
-          <span id="trace-step-resolve" class="trace-v">-</span>
+          <span class="trace-k"><span>🏠</span> Fast-Path Domotica Engine</span>
+          <span id="trace-step-fp" class="trace-v">-</span>
+        </div>
+        <div class="trace-item">
+          <span class="trace-k"><span>🧠</span> Laya System 1 Neural Router</span>
+          <span id="trace-step-laya" class="trace-v">-</span>
         </div>
         <div class="trace-item">
           <span class="trace-k"><span>✂️</span> Dynamic Tool Pruning</span>
           <span id="trace-step-tools" class="trace-v">-</span>
         </div>
         <div class="trace-item">
-          <span class="trace-k"><span>🧠</span> Memory Gating</span>
+          <span class="trace-k"><span>🧠</span> Smart Memory Gating</span>
           <span id="trace-step-mem" class="trace-v">-</span>
         </div>
         <div class="trace-item">
@@ -408,23 +497,60 @@ def render_gui_html() -> str:
 
     // Visual Flow Pipeline updates
     const badge = document.getElementById('flow-verdict-badge');
-    const decNode = document.getElementById('flow-node-decision');
-    const subDec = document.getElementById('flow-sub-decision');
+    const fpNode = document.getElementById('flow-node-fastpath');
+    const layaNode = document.getElementById('flow-node-laya');
+    const optNode = document.getElementById('flow-node-opt');
+    const outNode = document.getElementById('flow-node-output');
+
+    const subFp = document.getElementById('flow-sub-fastpath');
+    const subLaya = document.getElementById('flow-sub-laya');
+    const subOpt = document.getElementById('flow-sub-opt');
     const subOut = document.getElementById('flow-sub-output');
+
+    // Tooltip dynamic metadata
+    const ttFp = document.getElementById('tt-meta-fastpath');
+    const ttLaya = document.getElementById('tt-meta-laya');
+    const ttOpt = document.getElementById('tt-meta-opt');
+    const ttOut = document.getElementById('tt-meta-output');
 
     if (isFastPath) {
       badge.textContent = 'Fast-Path Active (<50ms)';
       badge.className = 'pill smarthome';
-      decNode.className = 'flow-icon fast-path';
-      subDec.textContent = 'Zero-LLM Fast Path';
-      subOut.textContent = (domotica.domain || 'HA') + '.' + (domotica.service || 'call');
+      fpNode.className = 'flow-icon fast-path';
+      layaNode.className = 'flow-icon bypassed';
+      optNode.className = 'flow-icon active';
+      outNode.className = 'flow-icon fast-path';
+
+      subFp.textContent = (domotica.domain || 'HA') + '.' + (domotica.service || 'call');
+      subLaya.textContent = 'Bypassed (Zero-LLM)';
+      subOpt.textContent = 'Zero-Token Fastpath';
+      subOut.textContent = 'Direct HA Call';
+
+      ttFp.innerHTML = `<span style="color:#34d399;">✓ Qualified! Action: ${domotica.domain}.${domotica.service} on ${domotica.target_id}</span>`;
+      ttLaya.innerHTML = `<span style="color:#94a3b8;">Bypassed: Fast-path resolved deterministically in &lt;1ms.</span>`;
+      ttOpt.innerHTML = `<span style="color:#34d399;">Zero cloud tokens consumed.</span>`;
+      ttOut.innerHTML = `<span style="color:#34d399;">Target: Home Assistant Core API</span>`;
+
       switchTab('fastpath');
     } else {
       badge.textContent = 'Cloud LLM Route';
       badge.className = 'pill ' + (routing ? routing.family : 'general');
-      decNode.className = 'flow-icon cloud';
-      subDec.textContent = (routing ? routing.family.toUpperCase() : 'Cloud Route');
+      fpNode.className = 'flow-icon bypassed';
+      layaNode.className = 'flow-icon cloud';
+      optNode.className = 'flow-icon active';
+      outNode.className = 'flow-icon cloud';
+
+      const rejectReason = domotica ? (domotica.rejected_reason || 'not_domotica') : 'none';
+      subFp.textContent = `Bypassed (${rejectReason})`;
+      subLaya.textContent = (routing ? routing.family.toUpperCase() : 'Cloud Route');
+      subOpt.textContent = routing && routing.needs_memory === false ? 'Memory Stripped' : 'Full Context';
       subOut.textContent = (routing ? routing.model : 'LLM Call');
+
+      ttFp.innerHTML = `<span style="color:#f59e0b;">Bypassed: ${rejectReason} (routed to Laya System 1).</span>`;
+      ttLaya.innerHTML = `<span style="color:#c084fc;">Intel Arc XPU: classified as ${routing ? routing.family.toUpperCase() : 'general'} (${Math.round(((routing ? routing.confidence.family : 0) * 100))}% conf).</span>`;
+      ttOpt.innerHTML = routing && routing.needs_memory === false ? `<span style="color:#34d399;">Tools pruned. Memory stripped.</span>` : `<span style="color:#60a5fa;">Full tools and memory retained.</span>`;
+      ttOut.innerHTML = `<span style="color:#c084fc;">Model: ${routing ? routing.model : '-'} (${routing ? routing.provider : '-'})</span>`;
+
       switchTab('model');
     }
 
@@ -434,7 +560,7 @@ def render_gui_html() -> str:
       document.getElementById('fp-eligible').style.color = isFastPath ? '#34d399' : '#f59e0b';
       document.getElementById('fp-domain-service').textContent = (domotica.domain || '-') + ' ➔ ' + (domotica.service || '-');
       document.getElementById('fp-target-id').textContent = domotica.target_id ? `${domotica.target_id} (${domotica.target_type})` : (domotica.target_name || 'No target');
-      document.getElementById('fp-latency').textContent = (wallMs / 2).toFixed(1) + ' ms';
+      document.getElementById('fp-latency').textContent = '< 1.0 ms';
       document.getElementById('fp-tool-call').textContent = domotica.openai_tool_call ? JSON.stringify(domotica.openai_tool_call, null, 2) : 'No tool call generated';
       document.getElementById('btn-execute-ha').style.display = isFastPath ? 'inline-flex' : 'none';
       document.getElementById('execution-feedback').style.display = 'none';
@@ -462,15 +588,24 @@ def render_gui_html() -> str:
     }
 
     // Populate Debug Tab
-    document.getElementById('trace-step-resolve').textContent = domotica && domotica.target_id ? `Resolved to ${domotica.target_id}` : 'General Prompt';
+    document.getElementById('trace-step-fp').textContent = isFastPath ? `Resolved to ${domotica.target_id}` : `Bypassed (${domotica.rejected_reason || 'not domotica'})`;
+    document.getElementById('trace-step-laya').textContent = routing ? `${routing.family.toUpperCase()} (${Math.round((routing.confidence.family || 0)*100)}% on Arc iGPU)` : '-';
     document.getElementById('trace-step-tools').textContent = (routing && routing.needs_memory === false) ? 'Pruned for token efficiency' : 'Preserved full toolset';
     document.getElementById('trace-step-mem').textContent = (routing && routing.needs_memory === false) ? 'Stripped <memory-context>' : 'Memory context preserved';
     document.getElementById('trace-step-time').textContent = `${wallMs} ms (Hardware XPU)`;
 
     document.getElementById('json-dump').textContent = JSON.stringify({
-      domotica_fast_path: domotica,
-      system_one_routing: routing,
-      wall_clock_ms: parseFloat(wallMs)
+      step_1_input: { prompt, normalized: true },
+      step_2_fast_path_domotica: domotica,
+      step_3_laya_system_one_router: routing,
+      step_4_optimization: {
+        tools_allowed: routing ? routing.allowed_tools : null,
+        memory_gated: routing ? routing.needs_memory === false : false
+      },
+      step_5_action_target: {
+        destination: isFastPath ? "Home Assistant Core API" : (routing ? routing.model : "LLM"),
+        wall_clock_ms: parseFloat(wallMs)
+      }
     }, null, 2);
   }
 

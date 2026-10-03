@@ -293,10 +293,36 @@ class LayaRouterEngine:
         effort = effort_ans.get("choice") or effort_ans.get("answer", "normal")
         effort_conf = float(effort_ans.get("answer_confidence") or effort_ans.get("confidence", 0.0))
 
+        # RT-12: Confidence gating and domain sanity guards
+        fam_str = str(family)
+        fallback_reason = None
+
+        math_finance_triggers = (
+            r"\bbereken\b", r"\bhypotheek\b", r"\bannu[iï]t", r"\brente\b", r"\blening\b",
+            r"\bcalculat", r"\bmortgage\b", r"\binterest\b", r"\binvestment\b", r"\bfinancial\b",
+            r"\bformule\b", r"\bwiskunde\b", r"\bproof\b", r"\bvergelijking\b",
+        )
+        if any(re.search(p, prompt, re.IGNORECASE) for p in math_finance_triggers):
+            fam_str = "deep"
+            family_conf = max(family_conf, 0.88)
+            effort = "deep"
+        elif fam_str == "smarthome" and not any(
+            k in prompt.lower()
+            for k in (
+                "lamp", "licht", "spot", "thermostaat", "temperatuur", "graden",
+                "verwarming", "rolluik", "gordijn", "schakelaar", "stekker", "ventilator",
+            )
+        ):
+            # Guard against false-positive smarthome classification for non-HA prompts
+            fam_str = "general"
+            fallback_reason = "non_domotica_guard"
+        elif family_conf < 0.60:
+            fam_str = "general"
+            fallback_reason = "low_confidence"
+
         routing_block = result.get("routing") or {}
         checkpoint = routing_block.get("model") or result.get("model") or self.config.router_default
 
-        fam_str = str(family)
         fam_cfg = self.config.get_family_config(fam_str)
         resolved_model = fam_cfg.model
         resolved_effort = fam_cfg.effort or ("low" if effort == "light" else "high" if effort == "deep" else "medium")
@@ -314,6 +340,7 @@ class LayaRouterEngine:
             "question_set": question_set,
             "provider": self.config.provider,
             "model": resolved_model,
+            "fallback_reason": fallback_reason,
         }
 
         if fam_cfg.max_tokens is not None:
