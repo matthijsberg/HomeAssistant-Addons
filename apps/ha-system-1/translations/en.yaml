@@ -1,0 +1,43 @@
+configuration:
+  device:
+    name: "Inference Device"
+    description: "Hardware compute device for Laya model execution (select 'xpu' for Intel Arc / Arrow Lake iGPU hardware acceleration, or 'cpu' for CPU inference)."
+  threads:
+    name: "Torch Intra-op Threads"
+    description: "Number of PyTorch CPU inference threads. Tune to physical cores (6 recommended) to leave headroom for other services."
+  checkpoints:
+    name: "Checkpoints to Preload"
+    description: "Comma-separated list of checkpoints to keep resident in memory (english,multilingual)."
+  router_default:
+    name: "Default Routing Fallback"
+    description: "Fallback checkpoint to route short, ambiguous prompts with no detected script."
+  laya_revision:
+    name: "Model Weights Revision"
+    description: "Pinned Git commit hash or branch for Hugging Face weights to ensure reproducible decisions."
+  api_key:
+    name: "API Bearer Token"
+    description: "Secret token required in Authorization header (Bearer <token>) for /v1/route and /v1/systemone."
+  log_level:
+    name: "Log Level"
+    description: "Logging verbosity for Uvicorn and the Laya server process."
+  provider:
+    name: "Upstream Model Provider"
+    description: "Target LLM provider (gemini, litellm, openrouter, or custom). Note: multi-provider setups require a gateway (LiteLLM/OpenRouter) because LLM clients cannot switch provider credentials dynamically mid-session."
+  model_quick:
+    name: "Quick Tasks Model"
+    description: "Model mapped to 'quick' family (e.g. gemini-2.5-flash-lite, google/gemini-2.5-flash-lite)."
+  model_general:
+    name: "General Tasks Model"
+    description: "Model mapped to 'general' family (e.g. gemini-flash-latest, google/gemini-flash-1.5)."
+  model_code:
+    name: "Code Tasks Model"
+    description: "Model mapped to 'code' family (e.g. gemini-flash-latest, anthropic/claude-3.5-sonnet)."
+  model_deep:
+    name: "Deep Reasoning Model"
+    description: "Model mapped to 'deep' family (e.g. gemini-2.5-pro, anthropic/claude-3.7-sonnet)."
+  gateway_url:
+    name: "Gateway Base URL"
+    description: "Optional proxy/gateway base URL when using LiteLLM, OpenRouter, or a custom gateway."
+  families:
+    name: "Task Families & Routing Profiles"
+    description: "Configured task families with semantic criteria for Laya System 1 routing, target models, effort levels, token caps, temperatures, and thinking budgets."

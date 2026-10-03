@@ -1,0 +1,96 @@
+name: "HA System 1"
+description: "Local sub-50ms System 1 cognitive reflex layer, fast-path domotica controller, and OpenAI conversation bridge for Home Assistant"
+version: "0.1.0"
+slug: "ha_system_1"
+url: "https://github.com/matthijsberg/HomeAssistant-Apps/tree/main/apps/ha-system-1"
+arch:
+  - amd64
+startup: services
+boot: auto
+homeassistant_api: true
+ingress: true
+ingress_port: 8000
+ingress_panel: true
+panel_icon: "mdi:brain"
+panel_title: "HA System 1"
+video: true
+devices:
+  - /dev/dri
+ports:
+  8000/tcp: null
+ports_description:
+  8000/tcp: "Laya HTTP API port (null by default; internally accessible via container network)"
+options:
+  device: "xpu"
+  threads: 6
+  checkpoints: "english,multilingual"
+  router_default: "multilingual"
+  laya_revision: "main"
+  api_key: ""
+  log_level: "info"
+  provider: "gemini"
+  gateway_url: ""
+  families:
+    - name: "quick"
+      criteria: "small talk, greetings, simple facts, unit conversions, general knowledge questions without tools"
+      model: "gemini-3.5-flash-lite"
+      effort: "low"
+      max_tokens: 1024
+      temperature: 0.2
+      thinking_budget: 0
+      needs_memory: false
+      allowed_tools: ""
+    - name: "smarthome"
+      criteria: "home automation control, turning lights on or off, thermostat temperature, switches, scenes, checking Home Assistant entities or sensor states"
+      model: "gemini-3.5-flash-lite"
+      effort: "low"
+      max_tokens: 1024
+      temperature: 0.0
+      thinking_budget: 0
+      needs_memory: false
+      allowed_tools: "ha_list_entities, ha_get_state, ha_call_service, ha_list_services, homeassistant*"
+    - name: "general"
+      criteria: "everyday writing, explaining, summarising, translating, ordinary questions that need a few tool calls"
+      model: "gemini-flash-latest"
+      effort: "medium"
+      max_tokens: 4096
+      temperature: 0.7
+      needs_memory: true
+    - name: "code"
+      criteria: "writing or debugging code or configuration files, multi-step tool or agent work"
+      model: "gemini-flash-latest"
+      effort: "high"
+      max_tokens: 8192
+      temperature: 0.1
+      needs_memory: true
+    - name: "deep"
+      criteria: "hard reasoning where a wrong answer is costly: maths, finance, planning, comparing complex options"
+      model: "gemini-3.1-pro"
+      effort: "high"
+      max_tokens: 8192
+      temperature: 0.2
+      needs_memory: true
+schema:
+  device: "list(xpu|cpu)"
+  threads: "int(1,64)"
+  checkpoints: "str"
+  router_default: "list(multilingual|english)"
+  laya_revision: "str"
+  api_key: "password"
+  log_level: "list(debug|info|warn|warning|error)"
+  provider: "list(gemini|litellm|openrouter|custom)"
+  gateway_url: "str?"
+  model_quick: "str?"
+  model_general: "str?"
+  model_code: "str?"
+  model_deep: "str?"
+  families:
+    - name: "str"
+      criteria: "str"
+      model: "str"
+      effort: "list(low|medium|high)?"
+      max_tokens: "int?"
+      temperature: "float?"
+      thinking_budget: "int?"
+      needs_memory: "bool?"
+      allowed_tools: "str?"

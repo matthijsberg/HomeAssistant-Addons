@@ -1,0 +1,4 @@
+build_from:
+  amd64: "ubuntu:24.04"
+args:
+  LAYA_VERSION: "0.3.21"
