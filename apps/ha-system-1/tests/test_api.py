@@ -186,6 +186,35 @@ def test_domotica_sync_endpoint():
     assert "entity_count" in data
 
 
+def test_corrections_api_flow():
+    # 1. Add override
+    req_body = {
+        "prompt": "test custom mortgage calculation",
+        "family": "deep",
+        "effort": "high",
+        "author": "tester",
+    }
+    response = client.post("/v1/corrections", json=req_body, headers=AUTH_HEADER)
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["success"] is True
+    assert res_data["override"]["family"] == "deep"
+
+    # 2. List overrides
+    list_resp = client.get("/v1/corrections", headers=AUTH_HEADER)
+    assert list_resp.status_code == 200
+    list_data = list_resp.json()
+    assert list_data["total_count"] >= 1
+
+    # 3. Route matches exact override (<0.5ms)
+    route_resp = client.post("/v1/route", json={"prompt": "test custom mortgage calculation"}, headers=AUTH_HEADER)
+    assert route_resp.status_code == 200
+    route_data = route_resp.json()
+    assert route_data["family"] == "deep"
+    assert route_data.get("override_applied") is True
+    assert route_data["confidence"]["family"] == 1.0
+
+
 def test_chat_completions_tool_call():
     payload = {
         "model": "laya-v2",

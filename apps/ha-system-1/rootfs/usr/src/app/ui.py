@@ -358,6 +358,25 @@ def render_gui_html() -> str:
           <div id="res-conf" class="result-val" style="font-size: 16px; color: #60a5fa;">-</div>
         </div>
       </div>
+
+      <!-- Interactive Sticky Override Correction Bar (EV-03, OB-03) -->
+      <div class="trace-card" style="margin-top: 14px; border-color: rgba(59, 130, 246, 0.4);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-size: 13px; font-weight: 700; color: #93c5fd;">🎯 Correct this Routing (Exact Sticky Override)</span>
+          <span id="override-status-badge" style="font-size: 11px; color: var(--text-muted);">Stored in corrections.yaml</span>
+        </div>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+          Was this prompt misrouted? Select the true family below to activate an exact normalized override (&lt;0.5ms) and queue it for review:
+        </p>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+          <button class="chip" onclick="submitCorrection('quick')">⚡ Quick</button>
+          <button class="chip" onclick="submitCorrection('smarthome')">🏠 Smarthome</button>
+          <button class="chip" onclick="submitCorrection('general')">💬 General</button>
+          <button class="chip" onclick="submitCorrection('code')">🐍 Code</button>
+          <button class="chip" onclick="submitCorrection('deep')">🧠 Deep</button>
+        </div>
+        <div id="correction-feedback" style="display: none; font-size: 12px; padding: 8px 12px; border-radius: 6px; background: rgba(16, 185, 129, 0.15); color: #34d399; font-weight: 600;"></div>
+      </div>
     </div>
 
     <!-- Tab 3: Debug Log View -->
@@ -636,6 +655,44 @@ def render_gui_html() -> str:
       fb.innerHTML = '<span style="color: #ef4444;">Error calling HA: ' + e + '</span>';
     } finally {
       btn.disabled = false;
+    }
+  }
+
+  async function submitCorrection(family) {
+    const prompt = document.getElementById('prompt-input').value.trim();
+    if (!prompt) return;
+    const fb = document.getElementById('correction-feedback');
+    fb.style.display = 'block';
+    fb.style.color = '#60a5fa';
+    fb.style.background = 'rgba(59, 130, 246, 0.15)';
+    fb.textContent = 'Saving override for "' + prompt + '" to ' + family.toUpperCase() + '...';
+
+    try {
+      const res = await fetch('./v1/corrections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: prompt,
+          family: family,
+          effort: (family === 'code' || family === 'deep') ? 'high' : 'normal',
+          author: 'ingress_ui'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        fb.style.color = '#34d399';
+        fb.style.background = 'rgba(16, 185, 129, 0.15)';
+        fb.textContent = '✓ Override active! Saved to corrections.yaml and queued in candidates.jsonl.';
+        setTimeout(() => evaluateTurn(), 400);
+      } else {
+        fb.style.color = '#ef4444';
+        fb.style.background = 'rgba(239, 68, 68, 0.15)';
+        fb.textContent = 'Failed saving correction: ' + (data.detail || 'unknown error');
+      }
+    } catch (e) {
+      fb.style.color = '#ef4444';
+      fb.style.background = 'rgba(239, 68, 68, 0.15)';
+      fb.textContent = 'Error: ' + e;
     }
   }
 

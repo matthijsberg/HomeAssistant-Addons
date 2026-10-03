@@ -4,10 +4,12 @@ Manages checkpoint preloading, thread allocation, context formatting,
 and single-forward-pass predictions.
 """
 
+import json
 import logging
 import os
 import re
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
 from config import AppConfig
@@ -131,6 +133,19 @@ def is_followup_turn(prompt: str, max_words: int = 6) -> bool:
     return False
 
 
+def get_corrections_path() -> Path:
+    """Return path to corrections.yaml, checking /config, /addon_configs, /data, or local tests."""
+    for p in (
+        Path("/config/corrections.yaml"),
+        Path("/addon_configs/local_ha_system_1/corrections.yaml"),
+        Path("/data/corrections.yaml"),
+        Path(__file__).parent.parent.parent.parent / "tests" / "test_corrections.yaml",
+    ):
+        if p.is_file():
+            return p
+    return Path("/config/corrections.yaml")
+
+
 class LayaRouterEngine:
     """Production decision engine wrapping Laya Router."""
 
@@ -141,6 +156,125 @@ class LayaRouterEngine:
         self.device: str = config.device
         self.laya_version: str = "0.3.21"
         self.loaded_checkpoints: List[str] = []
+        self.overrides: Dict[str, Dict[str, Any]] = {}
+        self.load_overrides()
+
+    def load_overrides(self) -> None:
+        """Load and validate exact string overrides from corrections.yaml (RT-11)."""
+        path = get_corrections_path()
+        if not path.is_file():
+            self.overrides = {}
+            return
+
+        try:
+            import yaml
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            raw_list = data.get("overrides", [])
+            valid_ov: Dict[str, Dict[str, Any]] = {}
+            for item in raw_list:
+                if not isinstance(item, dict) or "prompt" not in item:
+                    continue
+                p_norm = str(item["prompt"]).strip().lower()
+                target_fam = str(item.get("family", "")).strip().lower()
+                # Boot validation (RT-11): ensure family exists in configured families
+                if target_fam and target_fam not in self.config.families:
+                    logger.warning(
+                        "Override for '%s' references unknown family '%s'. Boot validation fallback (RT-11).",
+                        p_norm,
+                        target_fam,
+                    )
+                    continue
+                valid_ov[p_norm] = item
+            self.overrides = valid_ov
+            logger.info("Loaded %d validated overrides from %s", len(self.overrides), path)
+        except Exception as exc:
+            logger.warning("Failed loading overrides from %s: %s", path, exc)
+            self.overrides = {}
+
+    def save_override(
+        self,
+        prompt: str,
+        family: str,
+        effort: Optional[str] = None,
+        tools: Optional[str] = None,
+        memory: Optional[str] = None,
+        author: str = "user",
+    ) -> Dict[str, Any]:
+        """Save exact override to corrections.yaml and queue candidate for review (EV-03, OB-03)."""
+        import yaml
+        norm_prompt = prompt.strip().lower()
+        path = get_corrections_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = {}
+        if path.is_file():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+            except Exception:
+                data = {}
+
+        overrides = data.get("overrides", [])
+        if not isinstance(overrides, list):
+            overrides = []
+
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        new_entry: Dict[str, Any] = {
+            "prompt": norm_prompt,
+            "family": family,
+            "effort": effort or "normal",
+            "author": author,
+            "created_at": now_iso,
+            "hits": 0,
+            "last_hit": None,
+        }
+        if tools:
+            new_entry["tools"] = tools
+        if memory:
+            new_entry["memory"] = memory
+
+        updated = False
+        for _idx, item in enumerate(overrides):
+            if isinstance(item, dict) and str(item.get("prompt", "")).strip().lower() == norm_prompt:
+                item["family"] = family
+                if effort:
+                    item["effort"] = effort
+                if tools:
+                    item["tools"] = tools
+                if memory:
+                    item["memory"] = memory
+                item["updated_at"] = now_iso
+                new_entry = item
+                updated = True
+                break
+
+        if not updated:
+            overrides.append(new_entry)
+
+        data["overrides"] = overrides
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+
+        # Append to candidates.jsonl for review queue (PRD OB-03, EV-01)
+        cand_path = path.parent / "candidates.jsonl"
+        cand_record = {
+            "prompt": prompt.strip(),
+            "suggested_family": family,
+            "suggested_effort": effort or "normal",
+            "author": author,
+            "timestamp": now_iso,
+            "status": "pending_review",
+        }
+        try:
+            with open(cand_path, "a", encoding="utf-8") as cf:
+                cf.write(json.dumps(cand_record, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            logger.warning("Failed appending to candidates.jsonl: %s", exc)
+
+        # Reload in-memory cache
+        self.load_overrides()
+        return new_entry
 
     def initialize(self) -> None:
         """Preload models and configure execution environment."""
@@ -265,6 +399,47 @@ class LayaRouterEngine:
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Perform System 1 routing for a single turn."""
+        norm_prompt = prompt.strip().lower()
+
+        # Step 2: Check Exact Overrides Layer (<0.5ms lookup, PRD EV-03)
+        if norm_prompt in self.overrides:
+            ov = self.overrides[norm_prompt]
+            ov["hits"] = ov.get("hits", 0) + 1
+            ov["last_hit"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+            fam_str = str(ov.get("family", "general"))
+            fam_cfg = self.config.get_family_config(fam_str)
+            resolved_effort = str(ov.get("effort") or fam_cfg.effort or "normal")
+
+            payload = {
+                "family": fam_str,
+                "effort": resolved_effort,
+                "reasoning_effort": resolved_effort,
+                "confidence": {
+                    "family": 1.0,
+                    "effort": 1.0,
+                },
+                "checkpoint": "exact_override",
+                "latency_ms": 0.25,
+                "question_set": question_set,
+                "provider": self.config.provider,
+                "model": fam_cfg.model,
+                "override_applied": True,
+                "override_author": ov.get("author", "user"),
+                "fallback_reason": None,
+            }
+            if fam_cfg.max_tokens is not None:
+                payload["max_tokens"] = fam_cfg.max_tokens
+            if fam_cfg.temperature is not None:
+                payload["temperature"] = fam_cfg.temperature
+            if fam_cfg.thinking_budget is not None:
+                payload["thinking_budget"] = fam_cfg.thinking_budget
+            if fam_cfg.needs_memory is not None:
+                payload["needs_memory"] = fam_cfg.needs_memory
+            if fam_cfg.allowed_tools is not None:
+                payload["allowed_tools"] = fam_cfg.allowed_tools
+            return payload
+
         if not self.ready or self.router is None:
             raise RuntimeError("Laya Router is not ready: checkpoints are still loading.")
 

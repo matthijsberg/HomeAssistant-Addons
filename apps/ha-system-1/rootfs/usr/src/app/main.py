@@ -120,6 +120,9 @@ class RouteResponse(BaseModel):
     thinking_budget: Optional[int] = Field(default=None, description="Internal reasoning thinking token budget")
     needs_memory: Optional[bool] = Field(default=None, description="Whether memory context lookup is required")
     allowed_tools: Optional[List[str]] = Field(default=None, description="Whitelisted tool identifiers for this turn")
+    override_applied: Optional[bool] = Field(default=None, description="Whether this decision was served via an exact sticky override")
+    override_author: Optional[str] = Field(default=None, description="Author of the sticky override")
+    fallback_reason: Optional[str] = Field(default=None, description="Reason for fallback or confidence gating")
 
 
 @app.get("/health")
@@ -261,6 +264,44 @@ def sync_domotica_registry() -> Dict[str, Any]:
         "synced": success,
         "entity_count": len(ha_resolver._entities),
         "last_sync": ha_resolver._last_sync_time,
+    }
+
+
+class CorrectionRequest(BaseModel):
+    prompt: str = Field(description="Exact prompt to override")
+    family: str = Field(description="Target task family: quick, smarthome, general, code, deep")
+    effort: Optional[str] = Field(default=None, description="Reasoning effort: light, normal, deep, high")
+    tools: Optional[str] = Field(default=None, description="Tool policy: none, all, ha_only")
+    memory: Optional[str] = Field(default=None, description="Memory policy: none, full, gated")
+    author: Optional[str] = Field(default="user", description="Author identifier")
+
+
+@app.post("/v1/corrections", dependencies=[Depends(verify_api_key)])
+def add_correction(req: CorrectionRequest) -> Dict[str, Any]:
+    """Register an exact normalized prompt override and queue candidate for review (EV-03, OB-03)."""
+    target_family = req.family.strip().lower()
+    if target_family not in config.families:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown family '{req.family}'. Available families: {list(config.families.keys())}",
+        )
+    entry = engine.save_override(
+        prompt=req.prompt,
+        family=target_family,
+        effort=req.effort,
+        tools=req.tools,
+        memory=req.memory,
+        author=req.author or "user",
+    )
+    return {"success": True, "override": entry, "active_count": len(engine.overrides)}
+
+
+@app.get("/v1/corrections", dependencies=[Depends(verify_api_key)])
+def list_corrections() -> Dict[str, Any]:
+    """List all registered overrides with hit stats."""
+    return {
+        "overrides": list(engine.overrides.values()),
+        "total_count": len(engine.overrides),
     }
 
 
