@@ -1,0 +1,35 @@
+{"prompt": "Goedemorgen, hoe gaat het met je?", "expected_family": "quick", "expected_effort": "light", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Hello there, hope you are having a nice day!", "expected_family": "quick", "expected_effort": "light", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Wat is de hoofdstad van Australië?", "expected_family": "quick", "expected_effort": "light", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "How many ounces are in a pound?", "expected_family": "quick", "expected_effort": "light", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Bedankt voor je hulp zojuist!", "expected_family": "quick", "expected_effort": "light", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Hoeveel kilometer is 10 mijl?", "expected_family": "quick", "expected_effort": "light", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "What is the speed of light in vacuum?", "expected_family": "quick", "expected_effort": "light", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Wat betekent de afkorting BSN?", "expected_family": "quick", "expected_effort": "light", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "doe de lampen in de serre uit", "expected_family": "smarthome", "expected_effort": "light", "data_need": "live_or_external", "personal_context": "impersonal"}
+{"prompt": "zet het licht in de woonkamer aan", "expected_family": "smarthome", "expected_effort": "light", "data_need": "live_or_external", "personal_context": "impersonal"}
+{"prompt": "zet de thermostaat op 20.5 graden", "expected_family": "smarthome", "expected_effort": "light", "data_need": "live_or_external", "personal_context": "impersonal"}
+{"prompt": "sluit de rolluiken op de slaapkamer", "expected_family": "smarthome", "expected_effort": "light", "data_need": "live_or_external", "personal_context": "impersonal"}
+{"prompt": "staat de lamp in de hal nog aan?", "expected_family": "smarthome", "expected_effort": "normal", "data_need": "live_or_external", "personal_context": "impersonal"}
+{"prompt": "wat is de huidige binnentemperatuur volgens de sensor?", "expected_family": "smarthome", "expected_effort": "normal", "data_need": "live_or_external", "personal_context": "impersonal"}
+{"prompt": "turn off all the spots in the kitchen", "expected_family": "smarthome", "expected_effort": "light", "data_need": "live_or_external", "personal_context": "impersonal"}
+{"prompt": "dim the living room ceiling lights to 40 percent", "expected_family": "smarthome", "expected_effort": "light", "data_need": "live_or_external", "personal_context": "impersonal"}
+{"prompt": "schakel de stekker van het koffiezetapparaat in", "expected_family": "smarthome", "expected_effort": "light", "data_need": "live_or_external", "personal_context": "impersonal"}
+{"prompt": "Schrijf een vriendelijke bedankbrief naar de buren voor het water geven van de planten tijdens onze vakantie", "expected_family": "general", "expected_effort": "normal", "data_need": "general_knowledge", "personal_context": "about_the_user"}
+{"prompt": "Vertaal deze alinea naar formeel Duits voor een zakelijke e-mail", "expected_family": "general", "expected_effort": "normal", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Kun je een samenvatting maken van de belangrijkste gebeurtenissen tijdens de Franse Revolutie?", "expected_family": "general", "expected_effort": "normal", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Explain the difference between photosynthesis and cellular respiration in plain language", "expected_family": "general", "expected_effort": "normal", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Geef me vijf gezonde recepten voor doordeweekse avonden zonder varkensvlees", "expected_family": "general", "expected_effort": "normal", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Schrijf een korte blogpost over de voordelen van wandelen in de ochtend", "expected_family": "general", "expected_effort": "normal", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Schrijf een Python script om een CSV-bestand in te lezen en ontbrekende waarden op te vullen met het gemiddelde", "expected_family": "code", "expected_effort": "high", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Waarom gooit deze async FastAPI handler een RuntimeWarning: coroutine was never awaited?", "expected_family": "code", "expected_effort": "high", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Schrijf een Dockerfile voor een multi-stage Go applicatie met een alpine runtime image", "expected_family": "code", "expected_effort": "high", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Write a regular expression that validates European IBAN bank accounts", "expected_family": "code", "expected_effort": "normal", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Refactor this SQL query to use window functions instead of a self-join", "expected_family": "code", "expected_effort": "high", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Hoe los ik dit Git merge conflict op in rebase mode?", "expected_family": "code", "expected_effort": "normal", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Bereken de annuïtaire hypotheeklasten voor 450k tegen 4% rente over 30 jaar", "expected_family": "deep", "expected_effort": "deep", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Bereken het effectieve rendement en netto contante waarde (NCW) van deze twee concurrerende investeringsvoorstellen over 10 jaar", "expected_family": "deep", "expected_effort": "deep", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Wat is het verschil in totale rentekosten tussen een lineaire en een annuïtaire aflossing bij 350.000 euro?", "expected_family": "deep", "expected_effort": "deep", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Calculate the compound interest and future value of a 50,000 euro portfolio after 25 years at 7 percent annual return with 200 euro monthly deposits", "expected_family": "deep", "expected_effort": "deep", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Vergelijk de risico's, fiscaliteit in Box 3 en liquiditeit tussen dividendbeleggen en vastgoedfondsen", "expected_family": "deep", "expected_effort": "deep", "data_need": "general_knowledge", "personal_context": "impersonal"}
+{"prompt": "Los dit wiskundige optimalisatieprobleem op met de Lagrange vermenigvuldiger methode", "expected_family": "deep", "expected_effort": "deep", "data_need": "general_knowledge", "personal_context": "impersonal"}

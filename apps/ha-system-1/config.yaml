@@ -16,6 +16,9 @@ panel_title: "HA System 1"
 video: true
 devices:
   - /dev/dri
+map:
+  - addon_config:rw
+  - share:rw
 ports:
   8000/tcp: null
 ports_description:
